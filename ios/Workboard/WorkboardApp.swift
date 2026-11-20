@@ -135,6 +135,10 @@ final class Nav {
     /// Asking before leaving a signed-in server for an invite link.
     var confirmSwitch: InviteLink?
     var confirmSignOut: InviteLink?
+    /// A sign-in was sent (a code from the computer, its QR code, or a
+    /// form): show a spinner instead of the setup form until the workspace
+    /// arrives or the server turns the sign-in down.
+    var openingWorkspace = false
     /// A doc made with the New button, to open in edit mode.
     var newDoc: UInt64?
 

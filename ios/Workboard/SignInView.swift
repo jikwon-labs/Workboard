@@ -323,6 +323,7 @@ struct SignInView: View {
     func send(_ r: SignInRequest) {
         attemptMode = mode
         localError = client.signIn(r)
+        if localError == nil { nav.openingWorkspace = true }
     }
 
     func signIn() {

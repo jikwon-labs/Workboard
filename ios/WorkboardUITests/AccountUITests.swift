@@ -2,11 +2,13 @@
 // invite code with a new password, email and password on another device,
 // a wrong password, "Forgot password?" with a reset code, setting a password
 // from settings, invite links (workboard://join?...), and the code a computer
-// shows to sign a phone in (typed, or its workboard://link?... QR code).
+// shows to sign a phone in (typed, or its workboard://link?... QR code,
+// with a spinner until the workspace opens).
 // Needs: swift run wb-fake-server --port 18788 --sign-in --admin-http --livekit-dev
 // (from ios/WorkboardKit). The server keeps accounts between tests, so each
 // test starts by joining with a fresh invite code, which replaces the account.
 
+import Network
 import XCTest
 
 final class AccountUITests: WorkboardUITestCase {
@@ -153,6 +155,23 @@ final class AccountUITests: WorkboardUITestCase {
         XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "the link set the server and signed in with no form")
     }
 
+    func testComputerLinkShowsASpinnerUntilTheServerAnswers() throws {
+        // a server that takes the connection and never answers, so the
+        // spinner stays up long enough to see
+        let silent = try SilentServer()
+        let a = launchApp(["-wbReset", "YES"])
+        XCTAssertTrue(a.buttons["setupScanButton"].waitForExistence(timeout: 10))
+        a.open(URL(string: "workboard://link?server=ws%3A%2F%2F127.0.0.1%3A\(silent.port)&code=ABCDEF")!)
+        let spinner = a.descendants(matching: .any)["openingWorkspace"]
+        XCTAssertTrue(spinner.waitForExistence(timeout: 5), "a spinner while the sign-in goes out")
+        waitLabel(spinner, contains: "Signing in")
+        XCTAssertFalse(a.buttons["setupScanButton"].exists, "not the setup form standing still")
+        // no answer: once the connection gives up, the sign-in screen says why
+        XCTAssertTrue(a.textFields["linkCodeField"].waitForExistence(timeout: 40), "back to the code form")
+        XCTAssertTrue(a.staticTexts["signInError"].waitForExistence(timeout: 5))
+        XCTAssertFalse(spinner.exists)
+    }
+
     func testPastedInviteEmailFillsTheForm() {
         let code = admin("invite?member=2")["code"] as! String
         let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
@@ -173,4 +192,23 @@ final class AccountUITests: WorkboardUITestCase {
         XCTAssertEqual(filled, .completed, "code taken out of the pasted text, got \(field.value ?? "nil")")
         XCTAssertEqual(a.textFields["inviteEmailField"].value as? String, "alex@example.test")
     }
+}
+
+/// Accepts connections on a free local port and never says anything back.
+final class SilentServer {
+    private let listener: NWListener
+    let port: UInt16
+
+    init() throws {
+        listener = try NWListener(using: .tcp, on: .any)
+        let ready = DispatchSemaphore(value: 0)
+        // started and left alone: the app waits for an answer that never comes
+        listener.newConnectionHandler = { $0.start(queue: .global()) }
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+        listener.start(queue: .global())
+        _ = ready.wait(timeout: .now() + 5)
+        port = listener.port?.rawValue ?? 0
+    }
+
+    deinit { listener.cancel() }
 }

@@ -14,7 +14,7 @@ struct RootView: View {
             if client.needsSignIn {
                 SignInView()
             } else if client.data == nil {
-                SetupView()
+                if nav.openingWorkspace { OpeningWorkspaceView() } else { SetupView() }
             } else if client.me == nil || client.view.member(client.me!) == nil {
                 ChooseMemberView(isFirstRun: true)
             } else {
@@ -27,6 +27,11 @@ struct RootView: View {
         .onAppear { if let l = nav.openedLink { nav.openedLink = nil; open(l) } }
         // a sign-in code that worked needs no sign-in screen
         .onChange(of: client.state.isConnected) { if client.state.isConnected, nav.invite?.fromComputer == true { nav.invite = nil } }
+        // the spinner after a sign-in lasts until the workspace is here, or
+        // the sign-in screen comes back to say why it didn't work
+        // (a copy kept on this iPhone opens at once)
+        .onChange(of: !client.needsSignIn && client.data != nil) { _, open in if open { nav.openingWorkspace = false } }
+        .onChange(of: client.signInReason) { if client.signInReason == .failed { nav.openingWorkspace = false } }
         .alert("Switch servers?", isPresented: Binding(isPresent: $nav.confirmSwitch), presenting: nav.confirmSwitch) { link in
             Button("Switch") { use(link, fresh: true) }
                 .accessibilityIdentifier("confirmSwitchButton")
@@ -42,7 +47,7 @@ struct RootView: View {
             Button("Sign out and use it", role: .destructive) {
                 client.signOut()
                 nav.invite = link
-                if link.fromComputer { client.signIn(.link(code: link.code)) }
+                if link.fromComputer { signIn(link) }
             }
             Button("Keep me signed in", role: .cancel) {}
         } message: { link in
@@ -76,7 +81,11 @@ struct RootView: View {
         } else if client.state == .idle, !link.fromComputer {
             client.connect()
         }
-        if link.fromComputer { client.signIn(.link(code: link.code)) }
+        if link.fromComputer { signIn(link) }
+    }
+
+    func signIn(_ link: InviteLink) {
+        if client.signIn(.link(code: link.code)) == nil { nav.openingWorkspace = true }
     }
 }
 
@@ -202,6 +211,32 @@ struct ConnectionBanner: View {
         .overlay(alignment: .bottom) { Divider() }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("offlineBanner")
+    }
+}
+
+/// Right after a sign-in (most often the QR code from the computer): a
+/// spinner while it connects and the workspace comes down, so the screen
+/// doesn't sit still on the setup form.
+struct OpeningWorkspaceView: View {
+    @Environment(SyncClient.self) private var client
+
+    var body: some View {
+        VStack(spacing: 16) {
+            WMark().frame(width: 64, height: 64)
+            ProgressView().controlSize(.large)
+            Text(L(client.state.isConnected ? "Opening your workspace…" : "Signing in…"))
+                .font(.headline)
+            if case .waiting = client.state {
+                Text(L(client.lastError ?? "Can't reach the server. Retrying…"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("openingWorkspace")
     }
 }
 

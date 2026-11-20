@@ -332,6 +332,96 @@ fn clicking_the_direct_messages_heading_folds_them_and_shows_the_count_on_it() {
 }
 
 #[test]
+fn every_sidebar_section_folds_from_its_heading() {
+    let mut h = Ui1::new();
+    let fav = h.app.data.location_name(h.app.data.favorites[0]);
+    // a new message in #general, so Channels has a count to carry
+    let me = h.app.data.me;
+    let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().id;
+    let gid = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Channel && c.name == "general")
+        .unwrap()
+        .id;
+    h.app.mark_read(gid);
+    let id = h.app.data.new_id();
+    let m: Message = serde_json::from_value(serde_json::json!(
+        {"id": id, "author": other, "text": "hi", "ts": now_ts() + 5}
+    ))
+    .unwrap();
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == gid)
+        .unwrap();
+    ch.messages.push(m);
+    h.settle();
+
+    // the favorite also shows under its Space; folding Favorites takes one away
+    let before = h.count_named(&fav);
+    h.scroll_into_view("Favorites");
+    h.click("Favorites");
+    h.settle();
+    assert_eq!(h.count_named(&fav), before - 1, "Favorites folds");
+
+    // each heading with a row only it shows
+    for (heading, row) in [
+        ("AI Chats", "Ask, Build, Create"),
+        ("Spaces", "All Tasks"),
+        ("Channels", "general"),
+    ] {
+        h.scroll_into_view(heading);
+        assert!(h.has(row), "{} open", heading);
+        h.click(heading);
+        h.settle();
+        assert!(!h.has(row), "{} folds away {}", heading, row);
+    }
+    let total: usize = h
+        .app
+        .data
+        .channels
+        .iter()
+        .filter(|c| c.kind == ChannelKind::Channel && h.app.listed(c) && !h.app.quiet_channel(c))
+        .map(|c| h.app.unread_count(c))
+        .sum();
+    assert!(total >= 1);
+    assert_eq!(
+        red_badge_in(&h, "Channels"),
+        Some(total.to_string()),
+        "folded Channels carries the count"
+    );
+
+    // a sidebar search still looks inside folded sections
+    h.app.side.search = Some("general".into());
+    h.settle();
+    assert!(h.has("general"), "found while folded");
+    h.app.side.search = None;
+    h.settle();
+
+    // and each opens again
+    for (heading, row) in [
+        ("AI Chats", "Ask, Build, Create"),
+        ("Spaces", "All Tasks"),
+        ("Channels", "general"),
+    ] {
+        h.scroll_into_view(heading);
+        h.click(heading);
+        h.settle();
+        assert!(h.has(row), "{} open again", heading);
+    }
+    h.scroll_into_view("Favorites");
+    h.click("Favorites");
+    h.settle();
+    assert_eq!(h.count_named(&fav), before);
+    assert!(h.app.data.extra.folded_nav.is_empty());
+}
+
+#[test]
 fn messages_in_an_open_conversation_stay_unread_while_the_window_is_behind() {
     let mut h = Ui1::new();
     let name = two_unread_dms(&mut h);

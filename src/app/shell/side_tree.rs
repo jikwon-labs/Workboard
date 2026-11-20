@@ -134,20 +134,12 @@ impl App {
         .on_hover_cursor(egui::CursorIcon::PointingHand)
     }
 
-    pub(super) fn side_header(
-        &self,
-        ui: &mut Ui,
-        title: &str,
-        icons: &[(&str, &str)],
-    ) -> Vec<Response> {
-        self.side_header_ex(ui, title, icons, None).1
-    }
-
-    /// A section heading that folds its rows away when clicked (the arrow
-    /// beside the title shows which way). Folded, the section's unread count
+    /// A section heading with its icon buttons (a "+" at the end is boxed).
+    /// Clicking the rest of it folds the section's rows away (the arrow
+    /// beside the title shows which way); folded, the section's unread count
     /// sits on the heading instead. Gives whether the section is folded now,
-    /// and the icon buttons as `side_header` does.
-    pub(super) fn side_header_folding(
+    /// and the icon buttons' responses.
+    pub(super) fn side_header(
         &mut self,
         ui: &mut Ui,
         title: &str,
@@ -155,8 +147,8 @@ impl App {
         unread: usize,
     ) -> (bool, Vec<Response>) {
         let folded = self.folded(title);
-        let (head, out) = self.side_header_ex(ui, title, icons, Some((folded, unread)));
-        if head.is_some_and(|h| h.clicked()) {
+        let (head, out) = self.side_header_ex(ui, title, icons, folded, unread);
+        if head.clicked() {
             let f = &mut self.data.extra.folded_nav;
             if folded {
                 f.retain(|x| x != title);
@@ -173,13 +165,20 @@ impl App {
         self.data.extra.folded_nav.iter().any(|x| x == title)
     }
 
+    /// Whether a section's rows show: unfolded, or a sidebar search or
+    /// filter is looking through it.
+    pub(super) fn fold_shows(&self, folded: bool, filter: &str) -> bool {
+        !folded || !filter.is_empty() || self.side_searching()
+    }
+
     fn side_header_ex(
         &self,
         ui: &mut Ui,
         title: &str,
         icons: &[(&str, &str)],
-        fold: Option<(bool, usize)>,
-    ) -> (Option<Response>, Vec<Response>) {
+        folded: bool,
+        unread: usize,
+    ) -> (Response, Vec<Response>) {
         let t = self.t();
         ui.add_space(10.0);
         let w = ui.available_width();
@@ -194,32 +193,29 @@ impl App {
         let hovered = hresp.hovered() || ui.rect_contains_pointer(r);
         // the whole heading folds the section; the icon buttons, made after
         // it, sit on top and keep their own clicks
-        let head = fold.map(|(folded, unread)| {
-            let resp = ui
-                .interact(r, ui.id().with(("shdr_fold", title)), Sense::click())
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-            name_it(&resp, title);
-            if hovered || folded {
-                crate::widgets::paint_triangle(
-                    ui.painter(),
-                    pos2(tr_rect.right() + 9.0, r.center().y),
-                    !folded,
-                    t.text3,
-                );
-            }
-            if folded && unread > 0 {
-                // just left of the icon buttons
-                let x = r.right() - 13.0 - 26.0 * icons.len() as f32 + 8.0;
-                super::paint_unread_badge(
-                    ui.painter(),
-                    t.danger,
-                    pos2(x, r.center().y),
-                    Align2::RIGHT_CENTER,
-                    unread,
-                );
-            }
-            resp
-        });
+        let head = ui
+            .interact(r, ui.id().with(("shdr_fold", title)), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        name_it(&head, title);
+        if hovered || folded {
+            crate::widgets::paint_triangle(
+                ui.painter(),
+                pos2(tr_rect.right() + 9.0, r.center().y),
+                !folded,
+                t.text3,
+            );
+        }
+        if folded && unread > 0 {
+            // just left of the icon buttons
+            let x = r.right() - 13.0 - 26.0 * icons.len() as f32 + 8.0;
+            super::paint_unread_badge(
+                ui.painter(),
+                t.danger,
+                pos2(x, r.center().y),
+                Align2::RIGHT_CENTER,
+                unread,
+            );
+        }
         let mut out = vec![];
         let mut x = r.right() - 13.0;
         for (i, (glyph, tip)) in icons.iter().enumerate().rev() {

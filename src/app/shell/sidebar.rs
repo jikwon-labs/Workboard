@@ -66,12 +66,16 @@ impl App {
                         );
 
                         if !self.hidden("AI Chats") {
-                            let hs =
-                                self.side_header(ui, "AI Chats", &[("\u{22EF}", "More actions")]);
+                            let (folded, hs) = self.side_header(
+                                ui,
+                                "AI Chats",
+                                &[("\u{22EF}", "More actions")],
+                                0,
+                            );
                             if hs[0].clicked() {
                                 self.section = Section::Ai;
                             }
-                            if self.add_row(ui, "Ask, Build, Create").clicked() {
+                            if !folded && self.add_row(ui, "Ask, Build, Create").clicked() {
                                 self.section = Section::Ai;
                             }
                         }
@@ -508,7 +512,10 @@ impl App {
             .any(|f| self.matches_search(&self.data.location_name(*f)))
             || fav_tasks.iter().any(|(_, n)| self.matches_search(n));
         if fav_match && !self.hidden("Favorites") {
-            self.side_header(ui, "Favorites", &[]);
+            let (folded, _) = self.side_header(ui, "Favorites", &[], 0);
+            if !self.fold_shows(folded, "") {
+                return;
+            }
             for f in favs {
                 let name = self.data.location_name(f);
                 if !self.matches_search(&name) {
@@ -584,10 +591,11 @@ impl App {
     /// New Space.
     fn sidebar_spaces(&mut self, ui: &mut Ui, tc: Color32, filter: &str, ws: &str) {
         if filter.is_empty() || filter == "space" {
-            let hs = self.side_header(
+            let (folded, hs) = self.side_header(
                 ui,
                 "Spaces",
                 &[("\u{22EF}", "Spaces settings"), ("+", "Create Space")],
+                0,
             );
             popup(ui, &hs[0], ui.id().with("spaces_settings"), 200.0, |ui| {
                 if ui.button(tr("Create Space")).clicked() {
@@ -617,6 +625,9 @@ impl App {
                     name: String::new(),
                     color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
                 });
+            }
+            if !self.fold_shows(folded, filter) {
+                return;
             }
             let sub = format!("- {}", ws);
             if self.matches_search("All Tasks") {
@@ -684,7 +695,25 @@ impl App {
         ws: &str,
     ) {
         if (filter.is_empty() || filter == "unread") && !self.hidden("Channels") {
-            let hs = self.side_header(
+            // the Unread filter uses the real count; muting only hides the badge
+            let chans: Vec<(u64, String, usize)> = self
+                .data
+                .channels
+                .iter()
+                .filter(|c| c.kind == ChannelKind::Channel && self.listed(c))
+                .map(|c| (c.id, c.name.clone(), self.unread_count(c)))
+                .collect();
+            // folded, the heading counts what the rows would: not muted, not quiet
+            let total = if muted {
+                0
+            } else {
+                chans
+                    .iter()
+                    .filter(|c| self.data.extra.notify.channel_mode(c.0) != "nothing")
+                    .map(|c| c.2)
+                    .sum()
+            };
+            let (folded, hs) = self.side_header(
                 ui,
                 "Channels",
                 &[
@@ -692,6 +721,7 @@ impl App {
                     ("clock", "Scheduled messages"),
                     ("bookmark", "Saved messages"),
                 ],
+                total,
             );
             name_it(&hs[0], "Drafts");
             if hs[0].clicked() {
@@ -708,14 +738,9 @@ impl App {
             if hs[2].clicked() {
                 self.modal = Some(Modal::SavedMessages);
             }
-            // the Unread filter uses the real count; muting only hides the badge
-            let chans: Vec<(u64, String, usize)> = self
-                .data
-                .channels
-                .iter()
-                .filter(|c| c.kind == ChannelKind::Channel && self.listed(c))
-                .map(|c| (c.id, c.name.clone(), self.unread_count(c)))
-                .collect();
+            if !self.fold_shows(folded, filter) {
+                return;
+            }
             for (id, name, real_unread) in chans {
                 if (filter == "unread" && real_unread == 0) || !self.matches_search(&name) {
                     continue;
@@ -872,9 +897,8 @@ impl App {
             };
             // "New message" is the row at the end, not a "+" on the heading
             // too (two buttons for the same thing)
-            let (folded, _) = self.side_header_folding(ui, "Direct Messages", &[], total);
-            // a search or a filter still shows what's in a folded section
-            if folded && filter.is_empty() && !self.side_searching() {
+            let (folded, _) = self.side_header(ui, "Direct Messages", &[], total);
+            if !self.fold_shows(folded, filter) {
                 return;
             }
             for (id, other, real_unread) in dms {

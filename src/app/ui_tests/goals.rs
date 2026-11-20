@@ -278,3 +278,15 @@ fn a_goals_settings_change_its_name_owner_and_colour() {
         Some(Modal::ConfirmRemove { kind: "goal", .. })
     ));
 }
+
+#[test]
+fn goal_milestone_and_risk_notices_can_be_turned_off() {
+    let mut h = Ui1::new();
+    h.click("Inbox");
+    h.click("Notification settings");
+    assert!(h.app.data.extra.notify.goal_milestones && h.app.data.extra.notify.goal_risk);
+    h.click("Goal milestones");
+    h.click("Goals falling behind");
+    assert!(!h.app.data.extra.notify.goal_milestones);
+    assert!(!h.app.data.extra.notify.goal_risk);
+}

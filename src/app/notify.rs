@@ -2,7 +2,8 @@
 // what is new for me (messages, mentions, replies, huddles, reactions,
 // assignments, comments and changes on my tasks, new teammates, form
 // answers), and `notify_clock` watches the clock (tasks due today, meetings
-// about to start, goals coming due, the server connection). Each thing has a
+// about to start, goals coming due, passing milestones or falling far
+// behind, the server connection). Each thing has a
 // key, and a key is announced once.
 //
 // How it is announced (`deliver`): nothing when I'm already looking at it; a
@@ -833,6 +834,71 @@ impl App {
                     body,
                     target: format!("goal:{}", g.id),
                 });
+            }
+        }
+        // ---- my goals passing a milestone (one I didn't record myself:
+        // those show on the goal's page), and falling far behind
+        if n.goal_milestones || (n.goal_risk && after_due_time) {
+            let goals: Vec<Goal> = self
+                .data
+                .extra
+                .goals
+                .iter()
+                .filter(|g| g.owner == me)
+                .cloned()
+                .collect();
+            for g in goals {
+                let p = self.goal_progress(&g);
+                let pct = (p * 100.0).round() as i64;
+                if n.goal_milestones {
+                    for e in &g.log {
+                        let GoalChange::Milestone(m) = e.what else {
+                            continue;
+                        };
+                        // news, not history: a day old at most
+                        if e.who == me || now - e.ts > 86_400 {
+                            continue;
+                        }
+                        let key = format!("goalm:{}:{}", g.id, m);
+                        if self.fired(&key) {
+                            continue;
+                        }
+                        self.mark_fired(key.clone());
+                        let (title, body) = if m >= 100 {
+                            (
+                                trf!("Goal achieved: {}", g.name),
+                                tr("All targets met").to_string(),
+                            )
+                        } else {
+                            (trf!("{} reached {}%", g.name, m), trf!("{}% done", pct))
+                        };
+                        self.deliver(Note {
+                            key,
+                            kind: Kind::Goal,
+                            title,
+                            body,
+                            target: format!("goal:{}", g.id),
+                        });
+                    }
+                }
+                if n.goal_risk && after_due_time && g.pace(p, day) == Some(Pace::AtRisk) {
+                    let Some(due) = g.due else {
+                        continue;
+                    };
+                    let key = format!("goalrisk:{}:{}", g.id, due);
+                    if self.fired(&key) {
+                        continue;
+                    }
+                    self.mark_fired(key.clone());
+                    let left = (due - day).num_days().max(0);
+                    self.deliver(Note {
+                        key,
+                        kind: Kind::Goal,
+                        title: trf!("Goal at risk: {}", g.name),
+                        body: trf!("{}% done, {} days left", pct, left),
+                        target: format!("goal:{}", g.id),
+                    });
+                }
             }
         }
     }

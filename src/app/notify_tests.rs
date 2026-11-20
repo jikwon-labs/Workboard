@@ -809,3 +809,104 @@ fn keywords_notify_like_a_mention_but_not_in_quiet_channels() {
     a.notify_scan();
     assert_eq!(a.notify_rt.sent.len(), 3);
 }
+
+#[test]
+fn my_goals_passing_a_milestone_are_announced_once() {
+    let mut a = app();
+    let day = today();
+    a.data.extra.goals.clear();
+    a.data.extra.notify.due = false;
+    let id = a.data.new_id();
+    let me = a.data.me;
+    a.data.extra.goals.push(Goal {
+        id,
+        name: "Launch".into(),
+        owner: me,
+        targets: vec![GoalTarget {
+            name: "Users".into(),
+            kind: TargetKind::Number {
+                start: 0.0,
+                target: 10.0,
+                current: 2.0,
+                unit: String::new(),
+            },
+        }],
+        ..Default::default()
+    });
+    // first seen: its history starts quietly
+    a.notify_clock(at(day, 10, 0));
+    assert!(a.notify_rt.sent.is_empty(), "{:?}", a.notify_rt.sent);
+    // a teammate's change (or a task closed elsewhere) moves it past 50%
+    if let TargetKind::Number { current, .. } = &mut a.data.extra.goals[0].targets[0].kind {
+        *current = 6.0;
+    }
+    a.notify_clock(at(day, 10, 5));
+    assert_eq!(kinds(&a), vec![Kind::Goal]);
+    assert_eq!(a.notify_rt.sent[0].title, "Launch reached 50%");
+    assert_eq!(a.notify_rt.sent[0].target, format!("goal:{}", id));
+    a.notify_clock(at(day, 10, 10));
+    assert_eq!(a.notify_rt.sent.len(), 1, "once");
+    // turned off in Notifications: nothing
+    a.data.extra.notify.goal_milestones = false;
+    if let TargetKind::Number { current, .. } = &mut a.data.extra.goals[0].targets[0].kind {
+        *current = 10.0;
+    }
+    a.notify_clock(at(day, 10, 15));
+    assert_eq!(a.notify_rt.sent.len(), 1);
+}
+
+#[test]
+fn a_milestone_i_recorded_myself_is_not_announced() {
+    let mut a = app();
+    let day = today();
+    a.data.extra.goals.clear();
+    a.data.extra.notify.due = false;
+    let id = a.data.new_id();
+    let me = a.data.me;
+    a.data.extra.goals.push(Goal {
+        id,
+        name: "Launch".into(),
+        owner: me,
+        targets: vec![GoalTarget {
+            name: "Ship".into(),
+            kind: TargetKind::TrueFalse { done: false },
+        }],
+        ..Default::default()
+    });
+    a.notify_clock(at(day, 10, 0));
+    a.goal_edit(id, None, |g| {
+        g.targets[0].kind = TargetKind::TrueFalse { done: true };
+    });
+    a.notify_clock(at(day, 10, 5));
+    assert!(a.notify_rt.sent.is_empty(), "the page already showed it");
+}
+
+#[test]
+fn a_goal_far_behind_is_announced_once_after_the_morning_time() {
+    let mut a = app();
+    let day = today();
+    a.data.extra.goals.clear();
+    a.data.extra.notify.due = false;
+    let id = a.data.new_id();
+    let me = a.data.me;
+    a.data.extra.goals.push(Goal {
+        id,
+        name: "Docs".into(),
+        owner: me,
+        start: Some(day - Duration::days(30)),
+        due: Some(day + Duration::days(7)),
+        targets: vec![GoalTarget {
+            name: "Write".into(),
+            kind: TargetKind::TrueFalse { done: false },
+        }],
+        ..Default::default()
+    });
+    a.notify_clock(at(day, 8, 0));
+    assert!(a.notify_rt.sent.is_empty(), "not before 9:00");
+    a.notify_clock(at(day, 9, 30));
+    assert_eq!(kinds(&a), vec![Kind::Goal]);
+    assert_eq!(a.notify_rt.sent[0].title, "Goal at risk: Docs");
+    assert_eq!(a.notify_rt.sent[0].body, "0% done, 7 days left");
+    a.notify_clock(at(day, 15, 0));
+    assert_eq!(a.notify_rt.sent.len(), 1, "once per due date");
+}

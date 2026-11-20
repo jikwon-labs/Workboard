@@ -256,6 +256,34 @@ impl App {
                 ui,
                 t,
                 &tn,
+                "flag",
+                "Goal milestones",
+                &mut n.goal_milestones,
+                true,
+                RowOpts {
+                    desc: Some("When my goals pass 25, 50, 75 and 100%"),
+                    ..Default::default()
+                },
+                |_, _| false,
+            );
+            ch |= setting_row(
+                ui,
+                t,
+                &tn,
+                "warning",
+                "Goals falling behind",
+                &mut n.goal_risk,
+                true,
+                RowOpts {
+                    desc: Some("Once, when a goal is far behind its time"),
+                    ..Default::default()
+                },
+                |_, _| false,
+            );
+            ch |= setting_row(
+                ui,
+                t,
+                &tn,
                 "forms",
                 "Answers to my forms",
                 &mut n.forms,

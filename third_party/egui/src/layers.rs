@@ -193,6 +193,12 @@ impl PaintList {
     pub fn all_entries(&self) -> impl ExactSizeIterator<Item = &ClippedShape> {
         self.0.iter()
     }
+
+    /// Workboard patch: the held shapes, to rewrite them in place (color
+    /// emoji are drawn over text this way just before the pass ends).
+    pub fn shapes_mut(&mut self) -> &mut Vec<ClippedShape> {
+        &mut self.0
+    }
 }
 
 /// This is where painted [`Shape`]s end up during a frame.
@@ -210,6 +216,12 @@ impl GraphicLayers {
     /// Get the [`PaintList`] for the given [`LayerId`].
     pub fn get(&self, layer_id: LayerId) -> Option<&PaintList> {
         self.0[layer_id.order as usize].get(&layer_id.id)
+    }
+
+    /// Workboard patch: every layer's [`PaintList`], to rewrite shapes in
+    /// every layer at once.
+    pub fn all_lists_mut(&mut self) -> impl Iterator<Item = &mut PaintList> {
+        self.0.iter_mut().flat_map(|m| m.values_mut())
     }
 
     /// Get the [`PaintList`] for the given [`LayerId`].

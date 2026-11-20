@@ -6045,6 +6045,20 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
             break;
         }
     }
+    // the characters that only join or change an emoji (U+FE0F, skin tones,
+    // the zero width joiner) take no room, ahead of egui's emoji font, which
+    // gave each one a full emoji-wide box (scripts/make-emoji-joiners-font.py)
+    fonts.font_data.insert(
+        "emoji-joiners".into(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "../Resources/EmojiJoiners.ttf"
+        ))),
+    );
+    for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        // after the first font, which sets the line height
+        let list = fonts.families.entry(fam).or_default();
+        list.insert(1.min(list.len()), "emoji-joiners".into());
+    }
     let candidates = [
         "/System/Library/Fonts/AppleSDGothicNeo.ttc",
         "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
@@ -6102,6 +6116,8 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
     }
     line_up_baselines(&mut fonts);
     ctx.set_fonts(fonts);
+    // egui draws glyphs in one color; emoji get color pictures over them
+    crate::emoji::install(ctx);
 }
 
 /// The share of a font's line that sits above its baseline, as egui lays

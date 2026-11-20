@@ -1565,6 +1565,94 @@ fn mentioned_ids_take_the_longest_name_and_honour_picks() {
     );
 }
 
+/// The color pictures (meshes with a texture other than the font's) a pass
+/// that shows `texts` as labels draws.
+fn emoji_pictures(texts: &[&str]) -> usize {
+    let ctx = egui::Context::default();
+    setup_fonts(&ctx);
+    let out = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            for t in texts {
+                ui.label(*t);
+            }
+        });
+    });
+    fn count(s: &egui::Shape) -> usize {
+        match s {
+            egui::Shape::Vec(v) => v.iter().map(count).sum(),
+            egui::Shape::Mesh(m) => (m.texture_id != egui::TextureId::default()) as usize,
+            _ => 0,
+        }
+    }
+    out.shapes.iter().map(|c| count(&c.shape)).sum()
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the color pictures come from the macOS emoji font"
+)]
+fn emoji_are_drawn_in_color_and_symbols_stay_text() {
+    // every offered emoji, except the heavy check: its color picture is dark
+    // gray and would vanish on the dark theme, so it stays a white glyph
+    let lists = [
+        &super::super::chat::EMOJIS[..],
+        &super::super::chat::QUICK_REACTIONS[..],
+        &super::super::comments::REACTIONS[..],
+    ];
+    for e in lists.into_iter().flatten() {
+        let want = (*e != "\u{2714}") as usize;
+        assert_eq!(emoji_pictures(&[e]), want, "{:?}", e);
+    }
+    // in the middle of a sentence, with a skin tone, a family and a flag
+    assert_eq!(
+        emoji_pictures(&["Almost done \u{1F389} thanks \u{1F44D}\u{1F3FD}"]),
+        2
+    );
+    assert_eq!(
+        emoji_pictures(&["\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{1F1F0}\u{1F1F7}"]),
+        2
+    );
+    // the symbols screens draw as text stay text
+    assert_eq!(
+        emoji_pictures(&["\u{2605} \u{2606} \u{2193} \u{2022} \u{25BE} \u{2611} \u{2318}J"]),
+        0
+    );
+    assert_eq!(emoji_pictures(&["Hello \u{D55C}\u{AE00}"]), 0);
+}
+
+#[test]
+fn emoji_joiners_take_no_room() {
+    // U+FE0F and skin tones only change the emoji before them; egui's emoji
+    // font gave each a box of its own, so a red heart took two emoji of room
+    let ctx = egui::Context::default();
+    setup_fonts(&ctx);
+    let _ = ctx.run(Default::default(), |_| {});
+    let width = |s: &str| {
+        ctx.fonts(|f| {
+            f.layout_no_wrap(s.into(), egui::FontId::proportional(14.0), Color32::WHITE)
+                .size()
+                .x
+        })
+    };
+    let same = |a: &str, b: &str| {
+        let (x, y) = (width(a), width(b));
+        assert!((x - y).abs() < 0.5, "{a:?} is {x} wide, {b:?} {y}");
+    };
+    same("\u{2764}\u{FE0F}", "\u{2764}");
+    same("\u{1F44D}\u{1F3FD}", "\u{1F44D}");
+    same("\u{1F468}\u{200D}\u{1F469}", "\u{1F468}\u{1F469}");
+    // and the line is as tall as before
+    let height = |s: &str| {
+        ctx.fonts(|f| {
+            f.layout_no_wrap(s.into(), egui::FontId::proportional(14.0), Color32::WHITE)
+                .size()
+                .y
+        })
+    };
+    assert_eq!(height("a \u{2764}\u{FE0F}"), height("a"));
+}
+
 #[test]
 fn every_offered_emoji_has_a_glyph_in_the_built_in_fonts() {
     // the system fonts the app adds have no emoji, so egui's built-in emoji

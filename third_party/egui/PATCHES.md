@@ -20,6 +20,10 @@ the egui contributors) so text boxes edit like the Mac. Used through
   - Ctrl+Backspace on the Mac deletes one letter (not a word); Ctrl+D deletes
     the next letter.
 
+- `src/layers.rs`: `GraphicLayers::all_lists_mut` and
+  `PaintList::shapes_mut`, so `src/emoji.rs` can draw color emoji over the
+  black-and-white emoji glyphs in every layer just before the pass ends.
+
 - `src/lib.rs`: `#![allow(warnings)]`, so the old code does not fill every
   build with warnings.
 

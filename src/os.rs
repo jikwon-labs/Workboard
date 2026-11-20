@@ -283,6 +283,180 @@ pub fn route_quit_menu(ctx: &egui::Context) {
 #[cfg(any(not(target_os = "macos"), test))]
 pub fn route_quit_menu(_ctx: &egui::Context) {}
 
+/// A color picture of one emoji (`text` is one emoji, perhaps several
+/// characters), about `px` pixels tall, cut to what it covers. Drawn by the
+/// system's emoji font, so it looks like emoji elsewhere on the computer.
+/// `None` where the system gives no color emoji (only macOS does for now).
+pub fn render_emoji(text: &str, px: u32) -> Option<egui::ColorImage> {
+    #[cfg(target_os = "macos")]
+    {
+        mac_emoji::render(text, px)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (text, px);
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod mac_emoji {
+    use std::ffi::c_void;
+
+    type Ref = *const c_void;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        static kCFTypeDictionaryKeyCallBacks: u8;
+        static kCFTypeDictionaryValueCallBacks: u8;
+        fn CFStringCreateWithBytes(
+            alloc: Ref,
+            bytes: *const u8,
+            len: isize,
+            encoding: u32,
+            external: u8,
+        ) -> Ref;
+        fn CFDictionaryCreate(
+            alloc: Ref,
+            keys: *const Ref,
+            values: *const Ref,
+            n: isize,
+            key_cb: *const u8,
+            value_cb: *const u8,
+        ) -> Ref;
+        fn CFAttributedStringCreate(alloc: Ref, s: Ref, attrs: Ref) -> Ref;
+        fn CFRelease(r: Ref);
+    }
+
+    #[link(name = "CoreText", kind = "framework")]
+    unsafe extern "C" {
+        static kCTFontAttributeName: Ref;
+        fn CTFontCreateWithName(name: Ref, size: f64, matrix: *const c_void) -> Ref;
+        fn CTLineCreateWithAttributedString(s: Ref) -> Ref;
+        fn CTLineGetTypographicBounds(
+            line: Ref,
+            ascent: *mut f64,
+            descent: *mut f64,
+            leading: *mut f64,
+        ) -> f64;
+        fn CTLineDraw(line: Ref, ctx: Ref);
+    }
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGColorSpaceCreateDeviceRGB() -> Ref;
+        fn CGColorSpaceRelease(cs: Ref);
+        fn CGBitmapContextCreate(
+            data: *mut c_void,
+            w: usize,
+            h: usize,
+            bits: usize,
+            row_bytes: usize,
+            cs: Ref,
+            info: u32,
+        ) -> Ref;
+        fn CGContextRelease(c: Ref);
+        fn CGContextSetTextPosition(c: Ref, x: f64, y: f64);
+    }
+
+    fn cf_string(s: &str) -> Ref {
+        const UTF8: u32 = 0x0800_0100;
+        unsafe { CFStringCreateWithBytes(std::ptr::null(), s.as_ptr(), s.len() as isize, UTF8, 0) }
+    }
+
+    pub(super) fn render(text: &str, px: u32) -> Option<egui::ColorImage> {
+        if text.is_empty() || px == 0 || px > 512 {
+            return None;
+        }
+        unsafe {
+            let name = cf_string("AppleColorEmoji");
+            let font = CTFontCreateWithName(name, px as f64, std::ptr::null());
+            CFRelease(name);
+            if font.is_null() {
+                return None;
+            }
+            let keys = [kCTFontAttributeName];
+            let values = [font];
+            let attrs = CFDictionaryCreate(
+                std::ptr::null(),
+                keys.as_ptr(),
+                values.as_ptr(),
+                1,
+                &kCFTypeDictionaryKeyCallBacks,
+                &kCFTypeDictionaryValueCallBacks,
+            );
+            let s = cf_string(text);
+            let astr = CFAttributedStringCreate(std::ptr::null(), s, attrs);
+            CFRelease(s);
+            CFRelease(attrs);
+            CFRelease(font);
+            let line = CTLineCreateWithAttributedString(astr);
+            CFRelease(astr);
+            if line.is_null() {
+                return None;
+            }
+            let (mut ascent, mut descent, mut leading) = (0.0, 0.0, 0.0);
+            let width = CTLineGetTypographicBounds(line, &mut ascent, &mut descent, &mut leading);
+            // room around the line, then cut to what the emoji covers
+            let pad = (px / 4).max(2) as usize;
+            let w = width.ceil() as usize + pad * 2;
+            let h = (ascent + descent).ceil() as usize + pad * 2;
+            if w == 0 || h == 0 || w > 4096 || h > 4096 {
+                CFRelease(line);
+                return None;
+            }
+            let mut buf = vec![0u8; w * h * 4];
+            let cs = CGColorSpaceCreateDeviceRGB();
+            const PREMULTIPLIED_LAST: u32 = 1;
+            let cg = CGBitmapContextCreate(
+                buf.as_mut_ptr() as *mut c_void,
+                w,
+                h,
+                8,
+                w * 4,
+                cs,
+                PREMULTIPLIED_LAST,
+            );
+            CGColorSpaceRelease(cs);
+            if cg.is_null() {
+                CFRelease(line);
+                return None;
+            }
+            CGContextSetTextPosition(cg, pad as f64, pad as f64 + descent);
+            CTLineDraw(line, cg);
+            CGContextRelease(cg);
+            CFRelease(line);
+            crop(&buf, w, h)
+        }
+    }
+
+    /// The part of an RGBA picture (rows from the top) that is not see-through.
+    fn crop(buf: &[u8], w: usize, h: usize) -> Option<egui::ColorImage> {
+        let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+        for y in 0..h {
+            for x in 0..w {
+                if buf[(y * w + x) * 4 + 3] > 0 {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x + 1);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y + 1);
+                }
+            }
+        }
+        if x1 <= x0 || y1 <= y0 {
+            return None;
+        }
+        let mut out = Vec::with_capacity((x1 - x0) * (y1 - y0) * 4);
+        for y in y0..y1 {
+            out.extend_from_slice(&buf[(y * w + x0) * 4..(y * w + x1) * 4]);
+        }
+        Some(egui::ColorImage::from_rgba_premultiplied(
+            [x1 - x0, y1 - y0],
+            &out,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,6 +3,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod emoji;
 mod filters;
 mod i18n;
 mod linkpreview;

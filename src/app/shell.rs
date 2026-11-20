@@ -44,6 +44,23 @@ pub(super) fn paint_unread_badge(
     r
 }
 
+/// The red count on a rail icon: smaller than the sidebar's, with a ring in
+/// the rail's color so it reads as cut out of the icon's background instead
+/// of sitting on top of it.
+fn paint_rail_badge(p: &egui::Painter, danger: Color32, rail: Color32, icon: Pos2, n: usize) {
+    let label = if n > 99 {
+        "99+".to_string()
+    } else {
+        n.to_string()
+    };
+    let g = p.layout_no_wrap(label, FontId::proportional(10.0), Color32::WHITE);
+    let h = 14.0;
+    let r = Rect::from_min_size(icon + vec2(6.0, -16.0), vec2((g.size().x + 8.0).max(h), h));
+    p.rect_filled(r.expand(2.0), h / 2.0 + 2.0, rail);
+    p.rect_filled(r, h / 2.0, danger);
+    p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
+}
+
 /// The keys that open the rail's items, top to bottom.
 const RAIL_KEYS: [egui::Key; 9] = [
     egui::Key::Num1,
@@ -651,13 +668,7 @@ impl App {
                         _ => 0,
                     };
                     if unread > 0 {
-                        paint_unread_badge(
-                            &p,
-                            t.danger,
-                            ibox.center() + vec2(4.0, -16.0),
-                            Align2::LEFT_TOP,
-                            unread,
-                        );
+                        paint_rail_badge(&p, t.danger, t.rail_top, ibox.center(), unread);
                     }
                     if resp.on_hover_text(tr(label)).clicked() || pressed {
                         self.open_app(label);

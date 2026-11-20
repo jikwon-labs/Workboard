@@ -1044,6 +1044,19 @@ impl App {
                 // the window: the line goes above the first of them
                 if line.is_none() && (!self.chat.at_bottom || self.notify_rt.away) {
                     self.chat.read_line = Some((cid, first_unread));
+                } else if line.is_some()
+                    && self.chat.at_bottom
+                    && !self.notify_rt.away
+                    && self.chat.keep_unread != Some(cid)
+                    && self
+                        .chat
+                        .bottom_seen
+                        .is_some_and(|(c, ts)| c == cid && newest > ts)
+                {
+                    // a message comes in while I'm reading along at the
+                    // bottom: I've caught up, and a line left above the
+                    // earlier ones would make them look still unread
+                    self.chat.read_line = Some((cid, None));
                 }
             }
             _ => {

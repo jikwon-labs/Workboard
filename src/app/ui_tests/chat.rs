@@ -2910,3 +2910,39 @@ fn a_post_shows_its_icon_in_the_box_and_then_goes_back_to_messages() {
     let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
     assert!(ch.messages.last().unwrap().post_title.is_none());
 }
+
+#[test]
+fn a_message_that_comes_in_while_reading_at_the_bottom_takes_the_red_line_away() {
+    let mut h = Ui1::new();
+    let cid = general_id(&h);
+    h.app.mark_read(cid);
+    h.click("general");
+    h.settle();
+    // two come in while the window is behind another app
+    h.focused = false;
+    h.settle();
+    for i in 1..=2 {
+        messages_from_others(&mut h, cid, &[format!("while away {}", i)], i);
+        h.settle();
+    }
+    h.focused = true;
+    h.settle();
+    assert!(
+        h.has("Read up to here"),
+        "back: the line shows where they start"
+    );
+    // a third while I'm reading at the bottom: all three are read, so the
+    // line doesn't stay above the first two as if they weren't
+    messages_from_others(&mut h, cid, &["while here".to_string()], 3);
+    h.settle();
+    assert!(!h.has("Read up to here"));
+    let c = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .clone();
+    assert_eq!(h.app.unread(&c), 0);
+}

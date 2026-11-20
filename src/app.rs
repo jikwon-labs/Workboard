@@ -667,7 +667,8 @@ struct ChatUi {
     /// Where I'd read up to in the open conversation: the red "New" line
     /// sits above this message (conversation, message) until I leave it.
     /// Set on opening it with unread messages, and when messages come in
-    /// while I'm scrolled up or away from the window.
+    /// while I'm scrolled up or away from the window. Gone when one comes in
+    /// while I'm reading at the bottom.
     read_line: Option<(u64, Option<u64>)>,
     /// The newest message in the open conversation the last time its list
     /// was down at the bottom (conversation, time): anything from others

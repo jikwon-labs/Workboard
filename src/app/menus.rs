@@ -3,7 +3,7 @@
 // menu, team invite, people and roles, settings, themes, notifications,
 // shortcuts, custom fields, automations, tag manager, templates, CSV import
 // and export, channel settings, share, trash, reminders and the notepad.
-// Online-only features (AI, Clips, Talk to Text, huddles) open a dialog that
+// Online-only features (AI, Clips, huddles) open a dialog that
 // says they come with the shared server. The bigger dialogs' bodies live in
 // menus/ (workspace, prefs, fields, items); modal_body picks one.
 
@@ -216,20 +216,18 @@ pub const ROLES: [(&str, &str); 4] = [
     ("Owner", "Owns the Workspace."),
 ];
 
-/// Personal tools as listed in the original's profile menu.
-pub const TOOLS: [(&str, &str, &str); 12] = [
+/// Personal tools in the profile menu. Tools that only showed a "needs an
+/// online service" note (clips, talk to text, AI notetaker) and ones the
+/// sidebar already reaches (My Work, People) are left out to keep it short;
+/// a pin saved for one of them is kept in the file but draws nothing.
+pub const TOOLS: [(&str, &str, &str); 7] = [
     ("create_task", "Create task", "check_plus"),
-    ("my_work", "My Work", "briefcase"),
     ("track_time", "Track Time", "clock"),
     ("notepad", "Notepad", "edit"),
-    ("clip", "Record a Clip", "video"),
-    ("stt", "Talk to Text", "mic"),
     ("reminder", "Create Reminder", "alarm"),
     ("doc", "Create Doc", "docs"),
     ("whiteboard", "Create Whiteboard", "whiteboards"),
-    ("people", "View People", "teams"),
     ("dashboard", "Create Dashboard", "dashboards"),
-    ("notetaker", "AI Notetaker", "notebook"),
 ];
 
 pub fn unavailable(what: &str) -> Modal {
@@ -627,7 +625,8 @@ impl App {
         ui.set_width(270.0);
         let me = self.data.me;
         if let Some(m) = self.data.member(me).cloned() {
-            ui.horizontal(|ui| {
+            // the name at the top opens Edit profile (it has no row of its own)
+            let head = ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(38.0, 38.0), Sense::hover());
                 paint_avatar(ui.painter(), r.center(), 16.0, &m, t.card);
                 ui.vertical(|ui| {
@@ -652,6 +651,15 @@ impl App {
                     }
                 });
             });
+            let head = head.response.interact(Sense::click());
+            name_it(&head, "Edit profile");
+            if head.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if head.on_hover_text(tr("Edit profile")).clicked() {
+                self.open_profile();
+                close_popup(ui);
+            }
         }
         // a button, drawn like the other framed buttons (in grey text it read
         // as an empty text field)
@@ -675,10 +683,6 @@ impl App {
                 .map(|m| m.status_text.clone())
                 .unwrap_or_default();
             self.modal = Some(Modal::SetStatus { text: cur });
-            close_popup(ui);
-        }
-        if menu_item(ui, &t, "person", tr("Edit profile"), "").clicked() {
-            self.open_profile();
             close_popup(ui);
         }
         // a flyout beside the row (egui's sub menu drew over this menu): to the
@@ -752,13 +756,11 @@ impl App {
         });
         ui.data_mut(|d| d.insert_temp(fly, mr.hovered() || over || (keep && gap)));
         ui.separator();
-        let rows: [(&str, &str); 8] = [
+        // notifications, themes, keyboard shortcuts and the profile are
+        // sections of Settings, so they aren't rows of their own here
+        let rows: [(&str, &str); 4] = [
             ("settings", "Settings"),
-            ("bell", "Notifications"),
-            ("palette", "Themes"),
             ("sparkle", "Labs"),
-            ("keyboard", "Keyboard shortcuts"),
-            ("download", "Download app"),
             ("refresh", "Check for updates"),
             ("help", "Help"),
         ];
@@ -794,18 +796,7 @@ impl App {
                     continue;
                 }
                 self.modal = Some(match label {
-                    "Settings" => {
-                        let m = self.data.member(me).cloned().unwrap_or_default();
-                        Modal::profile(&m)
-                    }
-                    "Notifications" => Modal::Notifications,
-                    "Themes" => Modal::Themes,
                     "Labs" => Modal::Labs,
-                    "Keyboard shortcuts" => Modal::Shortcuts,
-                    "Download app" => Modal::Unavailable {
-                        title: "Download".into(),
-                        body: tr("You're already using the desktop app on this computer.").into(),
-                    },
                     _ => Modal::Help,
                 });
                 close_popup(ui);
@@ -899,7 +890,6 @@ impl App {
     pub(super) fn run_tool(&mut self, id: &str) {
         match id {
             "create_task" => self.open_quick_add(None),
-            "my_work" => self.actions.push(Action::Go(Location::Home)),
             "track_time" => {
                 let first = self
                     .data
@@ -912,18 +902,15 @@ impl App {
                 self.modal = Some(Modal::TrackTime { task: first });
             }
             "notepad" => self.notepad_open = !self.notepad_open,
-            "clip" => self.modal = Some(unavailable("Record a Clip")),
-            "stt" => self.modal = Some(unavailable("Talk to Text")),
             "reminder" => self.modal = Some(Modal::reminder(String::new(), today())),
             "doc" => self.new_doc(None),
             "whiteboard" => self.new_whiteboard(),
-            "people" => self.section = Section::People,
             "dashboard" => {
                 self.modal = Some(Modal::NewDashboard {
                     name: tr("New Dashboard").into(),
                 })
             }
-            _ => self.modal = Some(unavailable("AI Notetaker")),
+            _ => {}
         }
     }
 

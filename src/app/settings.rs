@@ -42,6 +42,8 @@ impl App {
         };
         self.settings_tab = SETTINGS.iter().position(|s| s.1 == label).unwrap_or(0) as u8;
         self.settings_state = None;
+        // a photo picked last time and not saved doesn't come back
+        self.profile_photo = None;
         self.section = Section::Settings;
     }
 

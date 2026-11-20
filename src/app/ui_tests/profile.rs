@@ -26,6 +26,7 @@ fn frames_until(h: &mut Ui1, what: &str, done: impl Fn(&Ui1) -> bool) {
     }
 }
 
+/// The name at the top of the profile menu opens it (there is no row for it).
 fn open_edit_profile(h: &mut Ui1) {
     h.click("Profile menu");
     h.settle();

@@ -27,8 +27,8 @@ fn click_workspace_menu_people_and_profile_themes() {
     h.click("People");
     assert_eq!(h.app.section, Section::People);
     h.click("Profile menu");
-    h.click("Themes");
-    assert!(matches!(h.app.modal, Some(Modal::Themes)));
+    h.click("Settings");
+    h.click("Settings Themes");
     h.click("Dark");
     assert!(h.app.data.dark, "dark theme switched on");
 }
@@ -51,10 +51,11 @@ fn click_hide_recent_tasks_row_and_turn_it_back_on_in_themes() {
     h.settle();
     assert!(!h.has("Hide recent tasks"), "the bottom row is gone");
     h.click("Profile menu");
-    h.click("Themes");
+    h.click("Settings");
+    h.click("Settings Themes");
     h.click("Show recently opened tasks at the bottom");
     assert!(!h.app.data.extra.hide_tray);
-    h.key(egui::Key::Escape);
+    h.click("\u{2190}  Back to Workspace");
     h.settle();
     assert!(h.has("Hide recent tasks"), "the bottom row is back");
 }
@@ -118,18 +119,57 @@ fn click_settings_dialogs_open_and_close() {
         h.key(egui::Key::Escape);
         assert!(h.app.modal.is_none(), "Esc closes {}", item);
     }
-    for item in [
-        "Notifications",
-        "Themes",
-        "Labs",
-        "Keyboard shortcuts",
-        "Help",
-    ] {
+    for item in ["Labs", "Help"] {
         h.click("Profile menu");
         h.click(item);
         assert!(h.app.modal.is_some(), "{} opens a dialog", item);
         h.key(egui::Key::Escape);
         assert!(h.app.modal.is_none(), "Esc closes {}", item);
+    }
+}
+
+#[test]
+fn the_profile_menu_leaves_out_rows_settings_already_has_and_tools_that_cannot_run() {
+    let mut h = Ui1::new();
+    // a pin saved before these tools left the menu draws nothing
+    h.app.data.extra.pinned_tools = vec!["create_task".into(), "clip".into(), "people".into()];
+    h.settle();
+    assert!(!h.has("Record a Clip") && !h.has("View People"));
+    h.click("Profile menu");
+    for gone in [
+        "Notifications",
+        "Themes",
+        "Keyboard shortcuts",
+        "Download app",
+        "My Work",
+        "Record a Clip",
+        "Talk to Text",
+        "View People",
+        "AI Notetaker",
+    ] {
+        assert!(!h.has(gone), "{} is not in the menu", gone);
+    }
+    for kept in [
+        "Set status",
+        "Settings",
+        "Labs",
+        "Check for updates",
+        "Help",
+        "Create Doc",
+    ] {
+        assert!(h.has(kept), "{} is still in the menu", kept);
+    }
+    // what left the menu is a section of Settings
+    h.click("Settings");
+    assert_eq!(h.app.section, Section::Settings);
+    for section in ["Notifications", "Themes", "Keyboard shortcuts"] {
+        h.click(&format!("Settings {}", section));
+        assert_eq!(
+            super::super::settings::SETTINGS[h.app.settings_tab as usize].1,
+            section,
+            "{} opens in Settings",
+            section
+        );
     }
 }
 
@@ -482,15 +522,15 @@ fn on_windows_check_for_updates_says_when_the_server_has_no_windows_build() {
 #[test]
 fn an_online_only_tool_says_workboard_has_no_such_service() {
     let mut h = Ui1::new();
-    h.click("Profile menu");
-    h.click("Talk to Text");
+    h.click("Rail More");
+    h.click("Clips");
     // the team server exists now, so the note must not promise that setting
     // one up makes AI, video or voice processing work
     match &h.app.modal {
         Some(Modal::Unavailable { title, body }) => {
-            assert_eq!(title, "Talk to Text");
+            assert_eq!(title, "Clips");
             assert!(
-                body.starts_with("Talk to Text needs an online service"),
+                body.starts_with("Clips needs an online service"),
                 "{}",
                 body
             );
@@ -1097,8 +1137,8 @@ fn a_link_from_macos_opens_in_the_frame_it_arrives() {
 #[test]
 fn click_notification_settings_turn_kinds_off_and_set_channels() {
     let mut h = Ui1::new();
-    h.click("Profile menu");
-    h.click("Notifications");
+    h.click("Inbox");
+    h.click("Notification settings");
     assert!(matches!(h.app.modal, Some(Modal::Notifications)));
     assert!(h.app.data.extra.notify.direct);
     h.click("Direct messages");

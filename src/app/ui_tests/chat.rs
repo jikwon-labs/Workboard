@@ -2058,8 +2058,8 @@ fn a_channel_set_to_nothing_shows_no_unread_count() {
 #[test]
 fn notification_keywords_are_typed_in_settings() {
     let mut h = Ui1::new();
-    h.click("Profile menu");
-    h.click("Notifications");
+    h.click("Inbox");
+    h.click("Notification settings");
     // the dialog scrolls: wheel down over it to reach the keywords
     let over = h.find("Direct messages").unwrap();
     for _ in 0..10 {

@@ -53,7 +53,6 @@ pub const T: &[(&str, &str)] = &[
     ("Join", "참가"),
     ("Leave", "나가기"),
     ("Invite", "초대"),
-    ("Download", "다운로드"),
     // things
     ("Task", "작업"),
     ("Tasks", "작업"),

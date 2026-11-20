@@ -1165,10 +1165,6 @@ impl App {
                         line_icon(ui.painter(), "lock", r.center(), t.text2);
                     }
                     ui.label(RichText::new(title).size(15.5).color(t.text));
-                    // in a direct message the other person typing shows as moving dots by their name
-                    if channel.kind == ChannelKind::Direct {
-                        self.typing_dots(ui, &channel);
-                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if channel.kind == ChannelKind::Channel {
                             // how this channel notifies me (notify.rs)

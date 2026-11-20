@@ -914,6 +914,18 @@ impl App {
                     None,
                     false,
                 );
+                // the other person writing: moving dots right after their name
+                if let Some(c) = self.data.channels.iter().find(|c| c.id == id) {
+                    let name_w = ui
+                        .painter()
+                        .layout_no_wrap(name.clone(), FontId::proportional(14.0), t.text)
+                        .size()
+                        .x;
+                    let left = (r.rect.left() + 34.0 + name_w).min(r.rect.right() - 54.0);
+                    let dots =
+                        Rect::from_min_size(pos2(left, r.rect.center().y - 8.0), vec2(26.0, 16.0));
+                    self.typing_dots(ui, c, dots);
+                }
                 self.unread_pill(ui, r.rect, unread);
                 if unread > 0 {
                     self.side.unread_rows.push(r.rect);

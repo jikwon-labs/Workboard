@@ -1951,7 +1951,7 @@ fn who_else_is_typing_shows_under_the_message_box_for_a_moment() {
 }
 
 #[test]
-fn in_a_direct_message_the_other_person_typing_shows_as_dots_by_their_name() {
+fn in_a_direct_message_the_other_person_typing_shows_as_dots_by_their_name_in_the_sidebar() {
     let mut h = Ui1::new();
     let dm = h
         .app
@@ -1966,8 +1966,14 @@ fn in_a_direct_message_the_other_person_typing_shows_as_dots_by_their_name() {
     h.settle();
     let name = h.app.data.member(2).unwrap().shown().to_string();
     let line = format!("{} is typing...", name);
-    let title = h.rect(&name);
     let box_at = h.rect("Message composer");
+    // their row in the sidebar's Direct Messages (left of the conversation)
+    let row = h
+        .tree
+        .iter()
+        .find(|(n, r)| n == &name && r.right() < box_at.left())
+        .map(|(_, r)| *r)
+        .expect("their sidebar row");
     assert!(!h.has(&line));
 
     h.app.take_net_events(vec![wb_net::Event::Typing {
@@ -1978,13 +1984,13 @@ fn in_a_direct_message_the_other_person_typing_shows_as_dots_by_their_name() {
     h.settle();
     let dots = h.rect(&line);
     assert!(
-        dots.top() < box_at.top() && dots.left() >= title.right(),
-        "the dots sit right after their name at the top, not under the message box"
+        row.contains_rect(dots) && dots.left() > row.left() + 30.0,
+        "the dots sit after their name in the sidebar, not at the top of the conversation"
     );
     assert_eq!(
         h.tree.iter().filter(|(n, _)| n == &line).count(),
         1,
-        "only by the name"
+        "only in the sidebar"
     );
     assert_eq!(h.rect("Message composer"), box_at);
 

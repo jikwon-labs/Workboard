@@ -1,7 +1,8 @@
 // "Someone is typing..." in a conversation on a team server: the app tells
 // the server every few seconds while its person writes in the message box,
 // and shows, under the box, who else the server says is writing there (in a
-// direct message, moving dots by the other person's name at the top instead).
+// direct message, moving dots by the other person's name in the sidebar
+// instead).
 // Typing in a thread's reply box shows only under that thread's box.
 // Nothing is saved; it lasts a few seconds after the last word from the
 // server, or until that person's message arrives.
@@ -142,15 +143,16 @@ impl App {
         }
     }
 
-    /// Three dots going up and down after the other person's name at the top
-    /// of a direct message while they write. The line under the message box
-    /// stays empty there: whose conversation it is says who is typing.
-    pub(super) fn typing_dots(&self, ui: &mut Ui, c: &Channel) {
+    /// Three dots going up and down in `r` while the other person of the
+    /// direct message `c` writes: drawn after their name in the sidebar's
+    /// Direct Messages. The line under the message box stays empty there:
+    /// whose conversation it is says who is typing.
+    pub(super) fn typing_dots(&self, ui: &mut Ui, c: &Channel, r: Rect) {
         let Some(line) = self.typing_line(c) else {
             return;
         };
         let t = self.t();
-        let (r, resp) = ui.allocate_exact_size(vec2(26.0, 16.0), Sense::hover());
+        let resp = ui.interact(r, ui.id().with(("typing_dots", c.id)), Sense::hover());
         let time = ui.input(|i| i.time) as f32;
         for k in 0..3 {
             let phase = time * 6.0 - k as f32 * 0.9;
@@ -166,7 +168,7 @@ impl App {
     /// Draw the typing line (a row kept the same height whether or not
     /// someone is typing, so the message box doesn't jump), and redraw once
     /// it should go away. Under a thread's reply box (`thread`) it shows in
-    /// a direct message too: the dots at the top are for the conversation.
+    /// a direct message too: the dots in the sidebar are for the conversation.
     pub(super) fn typing_row(&mut self, ui: &mut Ui, c: &Channel, thread: Option<u64>) {
         let t = self.t();
         let line = self

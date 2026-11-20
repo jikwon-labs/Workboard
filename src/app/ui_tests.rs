@@ -12,6 +12,7 @@ mod chat;
 mod comments;
 mod docs;
 mod empty_states;
+mod forms;
 mod harness;
 mod huddle;
 mod i18n_tests;

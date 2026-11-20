@@ -1066,11 +1066,12 @@ fn form_questions_reorder_require_and_block_bad_submit() {
             .cloned()
             .unwrap()
     };
+    h.click("Question 2 menu");
     h.click("Move question 2 up");
     assert_eq!(form(&h).fields[0].label, "Details");
     h.click("Required 1");
     assert!(form(&h).fields[0].required);
-    h.app.form_mode_fill = true;
+    h.app.form_tab = super::more::FormTab::Fill;
     h.settle();
     let n = h.app.data.tasks.len();
     h.click("Submit");

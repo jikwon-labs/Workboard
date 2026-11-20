@@ -1,6 +1,6 @@
 // App "hubs" as the person's ClickUp shows them: each app (Docs, Dashboards,
-// Whiteboards, Forms, Teams) has its own sidebar (All / My / Shared / Private,
-// Favorites) and a template gallery; Goals has a start page; Timesheets has
+// Whiteboards, Teams) has its own sidebar (All / My / Shared / Private,
+// Favorites) and a template gallery (Forms has its own, in more/forms); Goals has a start page; Timesheets has
 // tabs (My timesheet, All timesheets) and editable hours.
 
 use super::icons::{icon_button, icon_button_ex, line_icon, line_icon_scaled};
@@ -306,7 +306,6 @@ impl App {
                 let prefix = match id {
                     "docs" => "doc:",
                     "wb" => "wb:",
-                    "forms" => "form:",
                     "dash" => "dash:",
                     _ => "",
                 };
@@ -322,7 +321,6 @@ impl App {
                     let text = match id {
                         "docs" => tr("Star a Doc to see it here"),
                         "wb" => tr("Star a Whiteboard to see it here"),
-                        "forms" => tr("Star a Form to see it here"),
                         _ => tr("Star a Dashboard to see it here"),
                     };
                     if id != "teams" {
@@ -345,13 +343,6 @@ impl App {
                                 .iter()
                                 .find(|d| d.id == oid)
                                 .map(|d| d.name.clone()),
-                            "forms" => self
-                                .data
-                                .extra
-                                .forms
-                                .iter()
-                                .find(|d| d.id == oid)
-                                .map(|d| d.name.clone()),
                             _ => self
                                 .data
                                 .extra
@@ -368,7 +359,6 @@ impl App {
                                 match id {
                                     "docs" => self.doc_open = Some(oid),
                                     "wb" => self.wb_open = Some(oid),
-                                    "forms" => self.form_open = Some(oid),
                                     _ => self.dash_open = Some(oid),
                                 }
                             }
@@ -1268,75 +1258,6 @@ impl App {
                     self.wb_library(ui);
                 }
             });
-    }
-
-    // ---------------------------------------------------------------- forms
-
-    pub(super) fn forms_hub(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        let items: [(&str, &str, Option<usize>); 2] =
-            [("forms", "All Forms", None), ("@me", "My Forms", None)];
-        let sel = if self.form_open.is_some() {
-            99
-        } else {
-            self.hub_filter.min(1)
-        };
-        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, HubNew::Create);
-        if let Some(i) = clicked {
-            self.hub_filter = i;
-            self.form_open = None;
-        }
-        if plus {
-            self.new_form();
-        }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
-            if self.form_open.is_some() {
-                self.form_detail(ui);
-                return;
-            }
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                if !self.data.extra.forms.is_empty() {
-                    egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                        ui.label(RichText::new(tr("Your Forms")).size(15.0));
-                        let me = self.data.me;
-                        let mine_only = self.hub_filter.min(1) == 1;
-                        // My: the ones I made (older ones without a maker show in both)
-                        for f in self.data.extra.forms.clone().into_iter().filter(|f| self.form_shown(f)).collect::<Vec<_>>().into_iter().filter(|f| !mine_only || f.owner == me || f.owner == 0) {
-                            ui.horizontal(|ui| {
-                                self.star_toggle(ui, format!("form:{}", f.id));
-                                if icon_button_ex(ui, &t, "forms", &f.name, &f.name, false, 0.0, t.text, t.text2).clicked() {
-                                    self.form_open = Some(f.id);
-                                }
-                            });
-                        }
-                    });
-                }
-                let choice = self.gallery(ui, tr("Choose a Form template"), tr("Create forms to kick off projects, collect feedback, and supercharge\nyour productivity."), &[
-                    ([0x0f, 0x9d, 0x9f], "smile", "Feedback Form", "Survey and collect feedback", false),
-                    ([0xee, 0x5e, 0x99], "forms", "Project Intake", "Streamline new project requests", false),
-                    ([0x5f, 0x55, 0xee], "briefcase", "Order Form", "Capture and process client orders", false),
-                    ([0xe1, 0x6b, 0x16], "person", "Job Application", "Accept and review applications for open roles", false),
-                    ([0x44, 0x66, 0xff], "settings", "IT Requests", "Triage and prioritize IT service requests", false),
-                ]);
-                if let Some(name) = choice {
-                    self.new_form();
-                    let fields: Vec<(&str, &str)> = match name.as_str() {
-                        "Feedback Form" => vec![("Your name", "name"), ("How was your experience?", "text"), ("Comments", "description")],
-                        "Project Intake" => vec![("Project name", "name"), ("Goal", "description"), ("Deadline", "due"), ("Priority", "priority")],
-                        "Order Form" => vec![("Customer", "name"), ("Items", "description"), ("Quantity", "text"), ("Needed by", "due")],
-                        "Job Application" => vec![("Full name", "name"), ("Role", "text"), ("Experience", "description"), ("Links", "text")],
-                        "IT Requests" => vec![("Issue", "name"), ("Urgency", "priority"), ("Details", "description")],
-                        _ => vec![],
-                    };
-                    if let Some(f) = self.form_open.and_then(|id| self.data.extra.forms.iter_mut().find(|f| f.id == id)) {
-                        if name != "Start from scratch" {
-                            f.name = tr(&name).to_string();
-                            f.fields = fields.into_iter().map(|(l, m)| FormField { label: form_question(l).to_string(), map: m.to_string(), ..Default::default() }).collect();
-                        }
-                    }
-                }
-            });
-        });
     }
 
     // ---------------------------------------------------------------- goals
@@ -2497,29 +2418,4 @@ impl App {
 /// How a week is stored with a timesheet row: its first day, counted in days.
 fn sheet_week_key(ws: NaiveDate) -> u64 {
     ws.num_days_from_ce().max(0) as u64
-}
-
-/// A form template's question in the interface language: it is saved as the
-/// question's text, so a Korean screen starts with Korean questions. Some
-/// read differently in a form than elsewhere ("Comments" is 의견 here, not 댓글).
-fn form_question(label: &str) -> &str {
-    match label {
-        "Your name" => crate::i18n::tr_ctx("Your name (form question)", label),
-        "Comments" => crate::i18n::tr_ctx("Comments (form question)", label),
-        "Goal" => crate::i18n::tr_ctx("Goal (form question)", label),
-        "Role" => crate::i18n::tr_ctx("Role (form question)", label),
-        "Full name" => crate::i18n::tr_ctx("Full name (form question)", label),
-        "How was your experience?" => tr("How was your experience?"),
-        "Project name" => tr("Project name"),
-        "Deadline" => tr("Deadline"),
-        "Customer" => tr("Customer"),
-        "Items" => tr("Items"),
-        "Quantity" => tr("Quantity"),
-        "Needed by" => tr("Needed by"),
-        "Experience" => tr("Experience"),
-        "Links" => tr("Links"),
-        "Issue" => tr("Issue"),
-        "Urgency" => tr("Urgency"),
-        _ => tr(label),
-    }
 }

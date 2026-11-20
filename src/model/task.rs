@@ -224,6 +224,11 @@ pub struct Task {
     /// Pictures and videos attached to the task (see Attachment on ids).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
+    /// The form whose answer made the task (its Answers tab lists it). Set
+    /// once, by the person who submitted, and never cleared, so the team
+    /// merge needs no default rule for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<u64>,
 }
 
 /// `Data::fix_activity_ids` for one task.

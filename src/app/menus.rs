@@ -970,30 +970,7 @@ impl App {
     }
 
     pub(super) fn new_form(&mut self) {
-        let id = self.data.new_id();
-        let list = self.default_list().unwrap_or(0);
-        self.data.extra.forms.push(Form {
-            id,
-            name: tr("New Form").into(),
-            list_id: list,
-            description: tr("Fill out this form to create a task.").into(),
-            fields: vec![
-                FormField {
-                    label: tr("Title").into(),
-                    map: "name".into(),
-                    ..Default::default()
-                },
-                FormField {
-                    label: tr("Details").into(),
-                    map: "description".into(),
-                    ..Default::default()
-                },
-            ],
-            owner: self.data.me,
-        });
-        self.form_open = Some(id);
-        self.section = Section::Forms;
-        self.dirty = true;
+        self.new_form_from(None);
     }
 
     /// The sidebar "+ Create" menu, in the original's order.

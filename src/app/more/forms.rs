@@ -1,6 +1,51 @@
-// Forms: the field kinds, collecting the answers, and the form page.
+// Forms: questions whose answers each make a task in the form's List.
+// Here: the question kinds, checking answers, the templates, making a form,
+// and the open form's header with its tabs. In forms/: the look the pages
+// share (look.rs), the hub with its sidebar list, table and templates
+// (home.rs), the question editor (editor.rs), filling a form out (fill.rs)
+// and the Answers tab (answers.rs).
 
 use super::*;
+
+mod answers;
+mod editor;
+mod fill;
+mod home;
+mod look;
+
+use look::*;
+
+/// The open form's tab.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum FormTab {
+    #[default]
+    Edit,
+    Fill,
+    Answers,
+}
+
+/// Screen state of the form pages (not saved).
+#[derive(Default)]
+pub struct FormsUi {
+    /// Forms made this session: "New" beside them in the list.
+    pub made: Vec<u64>,
+    /// The sidebar's search, which also narrows the table.
+    pub search: String,
+    /// The table in name order instead of last edited first.
+    pub by_name: bool,
+    /// The question whose answer stopped the last submit.
+    pub error_at: Option<usize>,
+    /// A choice being typed into a dropdown question: (question, text, problem).
+    pub choice: Option<(usize, String, Option<String>)>,
+    /// The question last clicked in the editor (outlined).
+    pub picked: Option<usize>,
+    /// The question whose handle is being dragged.
+    pub drag: Option<usize>,
+    /// The Answers tab's filter: 0 all, 1 not done, 2 done.
+    pub answers_filter: u8,
+    /// Answers per form, and the workspace state they were counted for.
+    answers: (u64, usize, usize, HashMap<u64, Vec<u64>>),
+}
 
 /// Question kinds of a form: what the answer fills in.
 pub const FORM_KINDS: [(&str, &str); 10] = [
@@ -24,6 +69,49 @@ fn form_kind_label(k: &str) -> &'static str {
         .unwrap_or("Short text")
 }
 
+/// The line icon of a question kind.
+fn kind_icon(k: &str) -> &'static str {
+    match k {
+        "name" => "task",
+        "description" => "notebook",
+        "priority" => "flag",
+        "due" => "calendar",
+        "assignee" => "person",
+        "dropdown" => "list",
+        "number" => "hash",
+        "email" => "send",
+        "checkbox" => "check",
+        _ => "pen",
+    }
+}
+
+/// Kinds whose answer fills a field of the task; the others are added to
+/// its description.
+fn fills_task_field(k: &str) -> bool {
+    matches!(k, "name" | "description" | "priority" | "due" | "assignee")
+}
+
+/// Kinds a form has at most one of: a second one's answer would replace the
+/// first's.
+fn one_per_form(k: &str) -> bool {
+    matches!(k, "name" | "priority" | "due")
+}
+
+/// Where a question's answer goes, as the editor says under it.
+fn kind_hint(fld: &FormField) -> String {
+    match fld.map.as_str() {
+        "name" => tr("Saved as the task name").into(),
+        "description" => tr("Saved in the task description").into(),
+        "priority" => tr("Saved as the priority: Urgent, High, Normal or Low").into(),
+        "due" => tr("Saved as the due date").into(),
+        "assignee" => tr("Saved as an assignee").into(),
+        _ => trf!(
+            "Added to the task description as \"{}: answer\"",
+            fld.label.trim()
+        ),
+    }
+}
+
 /// What a filled-in form makes: the new task's fields.
 #[derive(Debug, Default)]
 pub struct FormAnswers {
@@ -34,8 +122,9 @@ pub struct FormAnswers {
     pub assignees: Vec<u64>,
 }
 
-/// Checks the answers (required, number, email) and turns them into task fields.
-pub fn form_answers(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, String> {
+/// Checks the answers (required, number, email) and turns them into task
+/// fields; a problem comes with the question it is about.
+fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (usize, String)> {
     let mut a = FormAnswers::default();
     for (i, fld) in f.fields.iter().enumerate() {
         let v = fill
@@ -44,7 +133,7 @@ pub fn form_answers(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswe
             .unwrap_or_default();
         if v.is_empty() {
             if fld.required {
-                return Err(trf!("Please answer \"{}\".", fld.label));
+                return Err((i, trf!("Please answer \"{}\".", fld.label)));
             }
             continue;
         }
@@ -57,19 +146,19 @@ pub fn form_answers(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswe
             "due" => match NaiveDate::parse_from_str(&v, "%Y-%m-%d") {
                 Ok(d) => a.due = Some(d),
                 Err(_) => {
-                    return Err(trf!(
-                        "\"{}\" isn't a date. Write it as YYYY-MM-DD.",
-                        fld.label
+                    return Err((
+                        i,
+                        trf!("\"{}\" isn't a date. Write it as YYYY-MM-DD.", fld.label),
                     ))
                 }
             },
             "assignee" => a.assignees.extend(v.parse::<u64>().ok()),
             k => {
                 if k == "number" && v.parse::<f64>().is_err() {
-                    return Err(trf!("\"{}\" needs a number.", fld.label));
+                    return Err((i, trf!("\"{}\" needs a number.", fld.label)));
                 }
                 if k == "email" && !(v.contains('@') && v.contains('.')) {
-                    return Err(trf!("\"{}\" needs an email address.", fld.label));
+                    return Err((i, trf!("\"{}\" needs an email address.", fld.label)));
                 }
                 a.description.push_str(&format!("\n{}: {}", fld.label, v));
             }
@@ -78,222 +167,385 @@ pub fn form_answers(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswe
     Ok(a)
 }
 
-// ---------------------------------------------------------------- forms
+/// Checks the answers (required, number, email) and turns them into task fields.
+#[cfg(test)]
+pub fn form_answers(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, String> {
+    form_check(f, fill).map_err(|(_, e)| e)
+}
+
+/// The templates on the Forms page: name, tile icon and colour, and the
+/// questions as (text, kind).
+type FormTemplate = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+const FORM_TEMPLATES: [FormTemplate; 5] = [
+    (
+        "Feedback Form",
+        "smile",
+        "teal",
+        &[
+            ("Your name", "name"),
+            ("How was your experience?", "text"),
+            ("Comments", "description"),
+        ],
+    ),
+    (
+        "Project Intake",
+        "forms",
+        "pink",
+        &[
+            ("Project name", "name"),
+            ("Goal", "description"),
+            ("Deadline", "due"),
+            ("Priority", "priority"),
+        ],
+    ),
+    (
+        "Order Form",
+        "briefcase",
+        "purple",
+        &[
+            ("Customer", "name"),
+            ("Items", "description"),
+            ("Quantity", "text"),
+            ("Needed by", "due"),
+        ],
+    ),
+    (
+        "Job Application",
+        "person",
+        "orange",
+        &[
+            ("Full name", "name"),
+            ("Role", "text"),
+            ("Experience", "description"),
+            ("Links", "text"),
+        ],
+    ),
+    (
+        "IT Requests",
+        "settings",
+        "blue",
+        &[
+            ("Issue", "name"),
+            ("Urgency", "priority"),
+            ("Details", "description"),
+        ],
+    ),
+];
+
+/// A form template's question in the interface language: it is saved as the
+/// question's text, so a Korean screen starts with Korean questions. Some
+/// read differently in a form than elsewhere ("Comments" is 의견 here, not 댓글).
+fn form_question(label: &str) -> &str {
+    match label {
+        "Your name" => crate::i18n::tr_ctx("Your name (form question)", label),
+        "Comments" => crate::i18n::tr_ctx("Comments (form question)", label),
+        "Goal" => crate::i18n::tr_ctx("Goal (form question)", label),
+        "Role" => crate::i18n::tr_ctx("Role (form question)", label),
+        "Full name" => crate::i18n::tr_ctx("Full name (form question)", label),
+        "How was your experience?" => tr("How was your experience?"),
+        "Project name" => tr("Project name"),
+        "Deadline" => tr("Deadline"),
+        "Customer" => tr("Customer"),
+        "Items" => tr("Items"),
+        "Quantity" => tr("Quantity"),
+        "Needed by" => tr("Needed by"),
+        "Experience" => tr("Experience"),
+        "Links" => tr("Links"),
+        "Issue" => tr("Issue"),
+        "Urgency" => tr("Urgency"),
+        _ => tr(label),
+    }
+}
 
 impl App {
+    /// Makes a form, from template `tpl` (a place in `FORM_TEMPLATES`) or a
+    /// blank one, opens it on its Edit tab and says where it went.
+    pub(crate) fn new_form_from(&mut self, tpl: Option<usize>) {
+        let id = self.data.new_id();
+        let list = self.default_list().unwrap_or(0);
+        // made in the language of the person making it, like a new task's name
+        let (name, icon, color, fields) = match tpl.and_then(|i| FORM_TEMPLATES.get(i)) {
+            Some((n, icon, color, qs)) => (
+                tr(n).to_string(),
+                icon.to_string(),
+                color.to_string(),
+                qs.iter()
+                    .map(|(l, m)| FormField {
+                        label: form_question(l).to_string(),
+                        map: m.to_string(),
+                        ..Default::default()
+                    })
+                    .collect(),
+            ),
+            None => (
+                tr("New Form").to_string(),
+                "forms".to_string(),
+                FORM_COLORS[(id % FORM_COLORS.len() as u64) as usize]
+                    .0
+                    .to_string(),
+                vec![
+                    FormField {
+                        label: tr("Title").into(),
+                        map: "name".into(),
+                        ..Default::default()
+                    },
+                    FormField {
+                        label: tr("Details").into(),
+                        map: "description".into(),
+                        ..Default::default()
+                    },
+                ],
+            ),
+        };
+        self.data.extra.forms.push(Form {
+            id,
+            name: name.clone(),
+            list_id: list,
+            description: tr("Fill out this form to create a task.").into(),
+            fields,
+            owner: self.data.me,
+            icon,
+            color,
+            updated: now_ts(),
+        });
+        self.form_open = Some(id);
+        self.form_tab = FormTab::Edit;
+        self.sweep.forms.made.push(id);
+        self.section = Section::Forms;
+        self.dirty = true;
+        self.toast(trf!(
+            "Made the form \"{}\". It's in the list on the left.",
+            name
+        ));
+    }
+
+    /// For screenshots (`--form home|edit|fill|answers`): an IT Requests
+    /// form with a dropdown question and two answers, a feedback form and
+    /// one with no List, and that page shown.
+    pub(crate) fn screenshot_forms(&mut self, tab: &str) {
+        self.new_form_from(Some(2));
+        self.new_form_from(Some(0));
+        if let Some(f) = self.data.extra.forms.last_mut() {
+            f.list_id = 0;
+            f.name = tr("Bug report").into();
+            f.icon = "flag".into();
+            f.color = "orange".into();
+        }
+        self.new_form_from(Some(4));
+        let fi = self.data.extra.forms.len() - 1;
+        let fid = self.data.extra.forms[fi].id;
+        let list = self.data.extra.forms[fi].list_id;
+        self.data.extra.forms[fi].fields.push(FormField {
+            label: tr("Device").into(),
+            map: "dropdown".into(),
+            options: vec!["MacBook".into(), "Windows PC".into(), "iPhone".into()],
+            ..Default::default()
+        });
+        for (name, pr) in [
+            ("Meeting room screen shows no signal", 2u8),
+            ("VPN keeps dropping", 1),
+        ] {
+            self.pending.form = Some(fid);
+            self.pending.log = Some(format!(
+                "submitted the form {}",
+                self.data.extra.forms[fi].name
+            ));
+            self.apply(Action::Add {
+                list,
+                name: name.into(),
+                status: None,
+                priority: pr,
+                assignees: vec![],
+                due: None,
+                parent: None,
+                open: false,
+            });
+        }
+        self.section = Section::Forms;
+        self.form_open = Some(fid);
+        self.form_tab = match tab {
+            "fill" => FormTab::Fill,
+            "answers" => FormTab::Answers,
+            _ => FormTab::Edit,
+        };
+        if tab == "home" {
+            self.form_open = None;
+        }
+    }
+
+    /// Opens a form on one of its tabs.
+    fn open_form(&mut self, id: u64, tab: FormTab) {
+        self.form_open = Some(id);
+        self.form_tab = tab;
+    }
+
+    /// The tasks each form's answers made, newest first: those that say so
+    /// (`Task::form`), and for answers from before that was kept, tasks whose
+    /// history says "submitted the form <name>" (when only one form has that
+    /// name). Counted again when the workspace changes.
+    fn form_answer_ids(&mut self) -> HashMap<u64, Vec<u64>> {
+        let key = (
+            self.data_gen.get(),
+            self.data.tasks.len(),
+            self.data.extra.forms.len(),
+        );
+        let c = &self.sweep.forms.answers;
+        // (built fresh while a change waits to be taken in, like the Inbox rows)
+        if !self.dirty && (c.0, c.1, c.2) == key {
+            return c.3.clone();
+        }
+        let mut by_name: HashMap<&str, Option<u64>> = HashMap::new();
+        for f in &self.data.extra.forms {
+            by_name
+                .entry(f.name.as_str())
+                .and_modify(|v| *v = None)
+                .or_insert(Some(f.id));
+        }
+        let mut tasks: Vec<&Task> = self.data.tasks.iter().filter(|t| !t.archived).collect();
+        tasks.sort_by(|a, b| b.created.cmp(&a.created));
+        let mut out: HashMap<u64, Vec<u64>> = HashMap::new();
+        for t in tasks {
+            let form = t.form.or_else(|| {
+                t.activity
+                    .iter()
+                    .filter(|a| !a.comment)
+                    .find_map(|a| a.text.strip_prefix("submitted the form "))
+                    .and_then(|n| by_name.get(n).copied().flatten())
+            });
+            if let Some(f) = form {
+                out.entry(f).or_default().push(t.id);
+            }
+        }
+        self.sweep.forms.answers = (key.0, key.1, key.2, out.clone());
+        out
+    }
+
+    /// The open form: its header with the tabs, then the tab.
     pub(crate) fn form_detail(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        // a message about one form doesn't stay on another
+        let Some(fi) = self
+            .form_open
+            .and_then(|id| self.data.extra.forms.iter().position(|f| f.id == id))
+        else {
+            // deleted meanwhile (here or by a teammate): back to the list
+            self.form_open = None;
+            self.forms_home(ui);
+            return;
+        };
+        // what was typed or flagged on one form doesn't stay on another
         if self.sweep.form_for != self.form_open {
             self.sweep.form_error = None;
             self.sweep.form_for = self.form_open;
+            self.sweep.forms.error_at = None;
+            self.sweep.forms.choice = None;
+            self.sweep.forms.picked = None;
+            self.sweep.forms.drag = None;
+            self.form_fill.clear();
         }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::symmetric(32, 20))).show_inside(ui, |ui| {
-            let Some(fi) = self.form_open.and_then(|id| self.data.extra.forms.iter().position(|f| f.id == id)) else {
-                ui.label(RichText::new(tr("Create a form to collect requests; each answer becomes a task.")).color(t.text2));
-                return;
-            };
-            // Lists answers can go to (not archived); an archived one already
-            // picked stays, marked, so the form says where answers go now
-            let mut lists: Vec<(u64, String)> = self.all_list_paths();
-            let picked = self.data.extra.forms[fi].list_id;
-            if self.data.list_archived(picked) && self.data.space_of_list(picked).is_some() {
-                lists.push((picked, trf!("{} (archived)", self.data.list_name(picked))));
-            }
-            let members: Vec<(u64, String)> = self.data.members.iter().map(|m| (m.id, m.shown().to_string())).collect();
-            // answers typed into one form don't carry over to another
-            let fid = self.data.extra.forms[fi].id;
-            let for_id = egui::Id::new("form_fill_for");
-            if ui.data(|d| d.get_temp::<u64>(for_id)) != Some(fid) {
-                self.form_fill.clear();
-                ui.data_mut(|d| d.insert_temp(for_id, fid));
-            }
-            ui.horizontal(|ui| {
-                // the mode shown is outlined
-                for (fill, kind, label) in [(false, "edit", "Edit"), (true, "eye", "Fill out")] {
-                    let sel = self.form_mode_fill == fill;
-                    if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, if sel { t.text } else { t.text2 }, t.text2).clicked() {
-                        self.form_mode_fill = fill;
-                    }
+        self.form_header(ui, fi);
+        match self.form_tab {
+            FormTab::Edit => self.form_editor(ui, fi),
+            FormTab::Fill => self.form_fill_page(ui, fi),
+            FormTab::Answers => self.form_answers_page(ui, fi),
+        }
+    }
+
+    /// The bar over an open form: back to the list and the form's name on the
+    /// left, the tabs in the middle, saving and the star on the right.
+    fn form_header(&mut self, ui: &mut Ui, fi: usize) {
+        let t = self.t();
+        let f = self.data.extra.forms[fi].clone();
+        let answers = self.form_answer_ids().get(&f.id).map_or(0, |v| v.len());
+        egui::TopBottomPanel::top("form_head")
+            .frame(
+                egui::Frame::new()
+                    .fill(t.bg)
+                    .inner_margin(egui::Margin::symmetric(12, 8)),
+            )
+            .show_inside(ui, |ui| {
+                let row = ui.available_rect_before_wrap();
+                let row = Rect::from_min_size(row.min, vec2(row.width(), CONTROL_H + 4.0));
+                ui.allocate_rect(row, Sense::hover());
+                // left: back, "All forms", the form
+                let mut left = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(row)
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+                left.spacing_mut().item_spacing.x = 4.0;
+                if icon_button(
+                    &mut left,
+                    &t,
+                    "chevron_left",
+                    "",
+                    "Back to all forms",
+                    false,
+                )
+                .on_hover_text(tr("All forms"))
+                .clicked()
+                {
+                    self.form_open = None;
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.star_toggle(ui, format!("form:{}", fid)));
+                let crumb = left.add(ghost(egui::Button::new(
+                    RichText::new(tr("All forms")).size(13.0).color(t.text2),
+                )));
+                name_it(&crumb, "Forms crumb");
+                if crumb.clicked() {
+                    self.form_open = None;
+                }
+                left.label(RichText::new("/").color(t.text3));
+                let (tile, _) = left.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
+                paint_tile(left.painter(), tile, form_look(&f, &t));
+                left.add_space(2.0);
+                let room = (row.width() * 0.3).max(80.0);
+                let shown = fit_text(left.painter(), &f.name, &FontId::proportional(14.0), room);
+                left.label(RichText::new(shown).size(14.0).color(t.text));
+                let left_end = left.min_rect().right();
+                // the tabs, in the middle when there is room
+                let items: [SegItem; 3] = [
+                    ("edit", tr("Edit").into(), None, "Edit"),
+                    ("eye", tr("Fill out").into(), None, "Fill out"),
+                    ("inbox", tr("Answers").into(), Some(answers), "Answers"),
+                ];
+                let sel = match self.form_tab {
+                    FormTab::Edit => 0,
+                    FormTab::Fill => 1,
+                    FormTab::Answers => 2,
+                };
+                let seg_w = 330.0;
+                let x = (row.center().x - seg_w / 2.0).max(left_end + 16.0);
+                let mut mid = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(Rect::from_min_max(pos2(x, row.top()), row.max))
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+                if let Some(i) = seg(&mut mid, &t, &items, sel) {
+                    self.form_tab = [FormTab::Edit, FormTab::Fill, FormTab::Answers][i];
+                }
+                let mid_end = mid.min_rect().right();
+                // right: the star, and "Saved automatically" when it fits
+                let mut right = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(row)
+                        .layout(Layout::right_to_left(Align::Center)),
+                );
+                self.star_toggle(&mut right, format!("form:{}", f.id));
+                let saved = tr("Saved automatically");
+                let w = right
+                    .painter()
+                    .layout_no_wrap(saved.to_string(), FontId::proportional(12.0), t.text3)
+                    .size()
+                    .x;
+                if right.min_rect().left() - w - 40.0 > mid_end {
+                    right.add_space(8.0);
+                    right.label(RichText::new(saved).size(12.0).color(t.text3));
+                    let (r, _) = right.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                    line_icon_scaled(right.painter(), "check", r.center(), t.text3, 0.8);
+                }
             });
-            ui.separator();
-            if !self.form_mode_fill {
-                let mut delete = false;
-                let f = &mut self.data.extra.forms[fi];
-                let mut ch = false;
-                ch |= ui.add(egui::TextEdit::singleline(&mut f.name).font(FontId::proportional(24.0)).frame(false).desired_width(f32::INFINITY)).changed();
-                ch |= ui.add(field_multi(&mut f.description).desired_rows(2).desired_width(f32::INFINITY)).changed();
-                ui.horizontal(|ui| {
-                    ui.label(tr("Answers create tasks in"));
-                    let cur = lists.iter().find(|l| l.0 == f.list_id).map(|l| l.1.clone()).unwrap_or_else(|| tr("choose a list").into());
-                    egui::ComboBox::from_id_salt("form_list_sel").selected_text(cur).show_ui(ui, |ui| {
-                        for (id, n) in &lists {
-                            ch |= ui.selectable_value(&mut f.list_id, *id, n).changed();
-                        }
-                    });
-                });
-                ui.add_space(8.0);
-                ui.label(RichText::new(tr("Questions")).strong());
-                let mut remove = None;
-                let mut swap = None;
-                let count = f.fields.len();
-                for (i, fld) in f.fields.iter_mut().enumerate() {
-                    ui.horizontal(|ui| {
-                        ch |= ui.add(field(&mut fld.label).desired_width(220.0)).changed();
-                        egui::ComboBox::from_id_salt(("map", i)).selected_text(tr(form_kind_label(&fld.map))).show_ui(ui, |ui| {
-                            for (k, n) in FORM_KINDS {
-                                ch |= ui.selectable_value(&mut fld.map, k.to_string(), tr(n)).changed();
-                            }
-                        });
-                        let rq = check(ui, &mut fld.required, tr("Required"));
-                        name_it(&rq, &format!("Required {}", i + 1));
-                        ch |= rq.changed();
-                        let up = ui.add_enabled(i > 0, ghost(egui::Button::new("\u{2191}").min_size(vec2(CONTROL_H, CONTROL_H))));
-                        name_it(&up, &format!("Move question {} up", i + 1));
-                        if up.clicked() {
-                            swap = Some((i, i - 1));
-                        }
-                        let down = ui.add_enabled(i + 1 < count, ghost(egui::Button::new("\u{2193}").min_size(vec2(CONTROL_H, CONTROL_H))));
-                        name_it(&down, &format!("Move question {} down", i + 1));
-                        if down.clicked() {
-                            swap = Some((i, i + 1));
-                        }
-                        if ui.add(ghost(egui::Button::new(RichText::new("\u{00D7}").color(t.text3)))).clicked() {
-                            remove = Some(i);
-                        }
-                    });
-                    if fld.map == "dropdown" {
-                        ui.horizontal(|ui| {
-                            ui.add_space(12.0);
-                            ui.label(RichText::new(tr("Choices")).small().color(t.text2));
-                            // empty pieces are kept while typing so "a, " can grow into "a, b"
-                            let mut text = fld.options.join(", ");
-                            let r = ui.add(field(&mut text).hint_text(tr("Red, Green, Blue")).desired_width(300.0));
-                            name_it(&r, &format!("Choices {}", i + 1));
-                            if r.changed() {
-                                fld.options = text.split(',').map(|x| x.trim().to_string()).collect();
-                                ch = true;
-                            }
-                        });
-                    }
-                }
-                if let Some(i) = remove {
-                    f.fields.remove(i);
-                    ch = true;
-                }
-                if let Some((a, b)) = swap {
-                    f.fields.swap(a, b);
-                    ch = true;
-                }
-                ui.horizontal(|ui| {
-                    if ui.button(tr("+ Add question")).clicked() {
-                        f.fields.push(FormField { label: tr("Question").into(), map: "text".into(), ..Default::default() });
-                        ch = true;
-                    }
-                    if ui.add(ghost(egui::Button::new(RichText::new(tr("Delete form")).color(t.danger)))).clicked() {
-                        delete = true;
-                    }
-                });
-                if ch {
-                    self.dirty = true;
-                }
-                if delete {
-                    let f = &self.data.extra.forms[fi];
-                    self.modal = Some(Modal::ConfirmRemove { kind: "form", id: f.id, name: f.name.clone() });
-                }
-            } else {
-                let f = self.data.extra.forms[fi].clone();
-                egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(12).inner_margin(egui::Margin::same(20)).show(ui, |ui| {
-                    ui.set_width(ui.available_width().min(640.0));
-                    ui.label(RichText::new(&f.name).size(22.0));
-                    ui.label(RichText::new(&f.description).color(t.text2));
-                    ui.add_space(10.0);
-                    for (i, fld) in f.fields.iter().enumerate() {
-                        ui.label(RichText::new(if fld.required { format!("{} *", fld.label) } else { fld.label.clone() }).strong());
-                        let v = self.form_fill.entry(i).or_default();
-                        match fld.map.as_str() {
-                            "priority" => {
-                                egui::ComboBox::from_id_salt(("fp", i)).selected_text(if v.is_empty() { tr("Choose").to_string() } else { tr(v).to_string() }).show_ui(ui, |ui| {
-                                    for p in ["Urgent", "High", "Normal", "Low"] {
-                                        ui.selectable_value(v, p.to_string(), tr(p));
-                                    }
-                                });
-                            }
-                            "due" => {
-                                let mut d = NaiveDate::parse_from_str(v, "%Y-%m-%d").ok();
-                                let b = icon_button(ui, &t, "calendar", &d.map(fmt_date).unwrap_or_else(|| tr("Pick a date").into()), "", true);
-                                name_it(&b, &format!("Answer {}", i + 1));
-                                if let Some(true) = popup(ui, &b, ui.id().with(("form_due", fid, i)), 380.0, |ui| date_menu(ui, &t, ui.id().with(("form_due_cal", fid, i)), &mut d)) {
-                                    *v = d.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
-                                }
-                            }
-                            "dropdown" => {
-                                egui::ComboBox::from_id_salt(("fd", i)).selected_text(if v.is_empty() { tr("Choose").to_string() } else { v.clone() }).show_ui(ui, |ui| {
-                                    for o in fld.options.iter().filter(|o| !o.is_empty()) {
-                                        ui.selectable_value(v, o.clone(), o);
-                                    }
-                                });
-                            }
-                            "assignee" => {
-                                let cur = v.parse::<u64>().ok().and_then(|id| members.iter().find(|m| m.0 == id)).map(|m| m.1.clone()).unwrap_or_else(|| tr("Choose someone").into());
-                                egui::ComboBox::from_id_salt(("fa", i)).selected_text(cur).show_ui(ui, |ui| {
-                                    for (id, n) in &members {
-                                        ui.selectable_value(v, id.to_string(), n);
-                                    }
-                                });
-                            }
-                            "checkbox" => {
-                                let mut on = v == "Yes";
-                                let cb = check(ui, &mut on, tr("Yes"));
-                                name_it(&cb, &format!("Answer {}", i + 1));
-                                if cb.changed() {
-                                    *v = if on { "Yes".into() } else { String::new() };
-                                }
-                            }
-                            "description" | "text" => {
-                                let r = ui.add(field_multi(v).desired_rows(3).desired_width(f32::INFINITY));
-                                name_it(&r, &format!("Answer {}", i + 1));
-                            }
-                            k => {
-                                let hint = match k {
-                                    "number" => "0",
-                                    "email" => "name@example.com",
-                                    _ => "",
-                                };
-                                let r = ui.add(field(v).hint_text(hint).desired_width(f32::INFINITY));
-                                name_it(&r, &format!("Answer {}", i + 1));
-                            }
-                        }
-                        ui.add_space(6.0);
-                    }
-                    if let Some(e) = &self.sweep.form_error {
-                        ui.label(RichText::new(tr(e)).color(t.danger));
-                    }
-                    if primary_button(ui, &t, tr("Submit")).clicked() {
-                        match form_answers(&f, &self.form_fill) {
-                            Err(e) => self.sweep.form_error = Some(e),
-                            Ok(_) if self.data.space_of_list(f.list_id).is_none() => {
-                                // the List was never chosen or has been deleted
-                                self.toast(tr("This form has no List for its answers. Choose one under Edit."));
-                                self.sweep.form_error = None;
-                                self.form_mode_fill = false;
-                            }
-                            Ok(a) => {
-                                let name = if a.name.trim().is_empty() { format!("{} submission", f.name) } else { a.name };
-                                self.actions.push(Action::Add { list: f.list_id, name, status: None, priority: a.priority, assignees: a.assignees, due: a.due, parent: None, open: false });
-                                self.pending.description = Some(a.description.trim().to_string());
-                                // tells the form's owner (notify.rs); shared history, so in English
-                                self.pending.log = Some(format!("submitted the form {}", f.name));
-                                self.form_fill.clear();
-                                self.sweep.form_error = None;
-                                self.toast(trf!("Submitted. A task was created in {}", self.data.list_name(f.list_id)));
-                            }
-                        }
-                    }
-                });
-            }
-        });
     }
 }

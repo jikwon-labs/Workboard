@@ -663,6 +663,7 @@ fn search_leaves_out_other_peoples_private_dashboards_and_personal_forms() {
         description: String::new(),
         fields: vec![],
         owner: me + 100,
+        ..Default::default()
     });
     assert!(hits(&a, "salary").contains(&Hit::Dashboard(did)));
     assert!(hits(&a, "secret survey").contains(&Hit::Form(777_001)));

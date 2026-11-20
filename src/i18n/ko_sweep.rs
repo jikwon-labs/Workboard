@@ -187,7 +187,6 @@ pub const T: &[(&str, &str)] = &[
     // forms
     ("Required", "필수"),
     ("Choices", "선택지"),
-    ("Red, Green, Blue", "빨강, 초록, 파랑"),
     ("Short text", "짧은 텍스트"),
     ("Choose someone", "사람 선택"),
     ("Pick a date", "날짜 선택"),

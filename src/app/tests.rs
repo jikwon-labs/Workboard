@@ -1342,6 +1342,7 @@ fn form_answers_check_required_number_and_email() {
             },
         ],
         owner: 1,
+        ..Default::default()
     };
     let mut fill: HashMap<usize, String> = HashMap::new();
     assert!(form_answers(&f, &fill).unwrap_err().contains("Title"));

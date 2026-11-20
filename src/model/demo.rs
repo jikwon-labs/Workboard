@@ -460,6 +460,7 @@ impl Data {
                 waiting_on: vec![],
                 linked: vec![],
                 attachments: vec![],
+                form: None,
             });
         }
         // Subtasks and a checklist on the first task.
@@ -507,6 +508,7 @@ impl Data {
                 waiting_on: vec![],
                 linked: vec![],
                 attachments: vec![],
+                form: None,
             });
         }
         d.tasks[0].description =

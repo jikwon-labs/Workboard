@@ -526,7 +526,8 @@ pub struct App {
     wb_color: [u8; 3],
     form_open: Option<u64>,
     form_fill: HashMap<usize, String>,
-    form_mode_fill: bool,
+    /// The open form's tab: Edit, Fill out or Answers.
+    form_tab: more::FormTab,
     dash_open: Option<u64>,
     meeting_open: Option<u64>,
     goal_open: Option<u64>,
@@ -756,6 +757,8 @@ struct PendingTask {
     description: Option<String>,
     /// A history line for the next task added (a form answer says which form).
     log: Option<String>,
+    /// The form whose answer the next task added is (`Task::form`).
+    form: Option<u64>,
     /// Tags for the next task created from the Create Task window.
     tags: Vec<String>,
 }
@@ -1016,7 +1019,7 @@ impl App {
             wb_color: [32, 32, 32],
             form_open: None,
             form_fill: HashMap::new(),
-            form_mode_fill: false,
+            form_tab: more::FormTab::Edit,
             dash_open: None,
             meeting_open: None,
             goal_open: None,
@@ -1113,6 +1116,11 @@ impl App {
                 app.wb_open = None;
                 app.sweep.wb_new = None;
             }
+        }
+        // --form home / edit / fill / answers: the Forms pages with forms in
+        // them, for screenshots
+        if let Some(tab) = arg("--form") {
+            app.screenshot_forms(&tab);
         }
         app
     }
@@ -2009,6 +2017,7 @@ impl App {
                     waiting_on: vec![],
                     linked: vec![],
                     attachments: vec![],
+                    form: self.pending.form.take(),
                 });
                 if let Some(tp) = self.pending.template.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {

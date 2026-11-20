@@ -680,6 +680,7 @@ fn fields_added_later_read_the_same_to_sync_when_left_unset() {
         description: String::new(),
         fields: vec![],
         owner: 0,
+        ..Default::default()
     };
     let wb = Whiteboard {
         id: 4,

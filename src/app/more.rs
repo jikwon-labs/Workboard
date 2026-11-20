@@ -19,6 +19,7 @@ mod whiteboard;
 // for tests that name them `more::form_answers` and `more::Hit`
 #[cfg(test)]
 pub use forms::form_answers;
+pub use forms::FormTab;
 #[cfg(test)]
 pub use search::Hit;
 pub use whiteboard::{WbNew, WbUndo, WbView};
@@ -55,6 +56,8 @@ pub struct SweepUi {
     /// The form `form_fill` holds answers for.
     pub form_for: Option<u64>,
     pub form_error: Option<String>,
+    /// The rest of the form pages' screen state.
+    pub forms: forms::FormsUi,
     /// Dashboard card being renamed: (index, text).
     pub card_rename: Option<(usize, String)>,
     /// Time entry being changed.

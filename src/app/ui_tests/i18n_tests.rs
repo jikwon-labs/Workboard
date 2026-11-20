@@ -414,6 +414,26 @@ fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
         }),
     ));
     v.push(("form".into(), Box::new(move |a: &mut App| a.new_form())));
+    // the form's other tabs, and the hub's table with a form in it
+    for (name, tab) in [
+        ("form fill out", super::more::FormTab::Fill),
+        ("form answers", super::more::FormTab::Answers),
+    ] {
+        v.push((
+            name.into(),
+            Box::new(move |a: &mut App| {
+                a.new_form();
+                a.form_tab = tab;
+            }),
+        ));
+    }
+    v.push((
+        "forms table".into(),
+        Box::new(move |a: &mut App| {
+            a.new_form();
+            a.form_open = None;
+        }),
+    ));
     v.push((
         "dashboard".into(),
         Box::new(move |a: &mut App| {

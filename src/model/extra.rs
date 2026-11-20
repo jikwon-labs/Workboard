@@ -67,7 +67,7 @@ pub struct FormField {
     pub options: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Form {
     pub id: u64,
     pub name: String,
@@ -78,6 +78,24 @@ pub struct Form {
     /// the file then, like the other fields added later).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub owner: u64,
+    /// The line icon on the form's tile ("settings", "smile"); empty on
+    /// forms from before tiles had icons, which show the forms icon. Once
+    /// set it is only ever changed to another icon, never emptied, so the
+    /// team merge needs no default rule for it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub icon: String,
+    /// The tile's colour by name ("blue", "teal", see `FORM_COLORS` in the
+    /// app); empty on older forms, which take one from their id. Like `icon`
+    /// it never goes back to empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub color: String,
+    /// When the form was last changed (seconds); 0 on older forms.
+    #[serde(default, skip_serializing_if = "is_zero_ts")]
+    pub updated: i64,
+}
+
+fn is_zero_ts(n: &i64) -> bool {
+    *n == 0
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

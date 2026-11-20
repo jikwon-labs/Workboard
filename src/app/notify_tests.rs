@@ -467,6 +467,7 @@ fn a_form_answer_is_logged_and_tells_the_forms_owner() {
         description: String::new(),
         fields: vec![],
         owner: 1,
+        ..Default::default()
     });
     // the submit button leaves this line on the new task
     a.pending.log = Some("submitted the form Bug report".into());

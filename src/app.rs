@@ -423,6 +423,9 @@ pub struct App {
     /// A popup or menu was open when this pass began (egui closes them on
     /// Escape partway through the pass, so later checks see them gone).
     menu_was_open: bool,
+    /// Quit was confirmed: the next close request goes through
+    /// (`ask_before_quit`).
+    quit_ok: bool,
     /// A text field had keyboard focus at the end of the previous pass.
     typing_was_on: bool,
     /// What had keyboard focus at the end of the previous pass.
@@ -1028,6 +1031,7 @@ impl App {
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,
+            quit_ok: false,
             typing_was_on: false,
             focus_was: None,
             previews: Default::default(),
@@ -5362,6 +5366,7 @@ impl App {
         theme::apply(ctx, &t);
         // shortcuts (none on the sign-in screen)
         let signing_in = self.login.is_some();
+        self.ask_before_quit(ctx, signing_in);
         if !signing_in
             && ctx.input(|i| {
                 i.modifiers.command && (i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::J))
@@ -5571,6 +5576,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         #[cfg(target_os = "macos")]
         place_traffic_lights(frame);
+        crate::os::route_quit_menu(ctx);
         #[cfg(not(target_os = "macos"))]
         let _ = frame;
         crate::updater::tick(ctx);
@@ -5588,6 +5594,56 @@ impl eframe::App for App {
         }
         // after saving: a Windows update waits for this to start the new version
         crate::updater::relaunch_if_updated();
+    }
+}
+
+impl App {
+    /// Closing the main window (its close button, Alt+F4) or Cmd+Q asks
+    /// first. It closes at once on the sign-in screen, after Quit in the
+    /// dialog, and when the app closes itself (a screenshot run, a Windows
+    /// update restarting).
+    fn ask_before_quit(&mut self, ctx: &egui::Context, signing_in: bool) {
+        let closing = ctx.input(|i| i.viewport().close_requested());
+        let menu = crate::os::take_quit_request();
+        if !closing && !menu {
+            return;
+        }
+        if signing_in || self.quit_ok || self.screenshot.is_some() || crate::updater::own::closing()
+        {
+            if menu {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return;
+        }
+        if closing {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+        self.modal = Some(Modal::Quit);
+        ctx.request_repaint();
+    }
+
+    /// The Quit dialog. Returns true when it should close.
+    pub(super) fn quit_body(&mut self, ui: &mut Ui, t: &Theme) -> bool {
+        let mut close = false;
+        ui.label(
+            RichText::new(tr(
+                "Quit Workboard? Messages and notifications stop coming to this computer until you open it again.",
+            ))
+            .color(t.text),
+        );
+        ui.add_space(10.0);
+        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.horizontal(|ui| {
+            if primary_button(ui, t, tr("Quit")).clicked() || enter {
+                self.quit_ok = true;
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                close = true;
+            }
+            if secondary_button(ui, tr("Cancel")).clicked() {
+                close = true;
+            }
+        });
+        close
     }
 }
 

@@ -383,6 +383,12 @@ pub mod own {
         });
     }
 
+    /// The app is closing to start an installed update (it doesn't ask
+    /// before quitting then).
+    pub fn closing() -> bool {
+        OWN.with(|o| o.closing.get())
+    }
+
     pub fn tick(ctx: &egui::Context) {
         OWN.with(|o| {
             if !o.cleaned.get() {

@@ -37,6 +37,12 @@ pub const T: &[(&str, &str)] = &[
     ("Unpin from the top bar", "상단 막대에서 고정 해제"),
     ("Pin to the top bar", "상단 막대에 고정"),
     ("Log out", "로그아웃"),
+    ("Quit Workboard", "Workboard 종료"),
+    ("Quit", "종료"),
+    (
+        "Quit Workboard? Messages and notifications stop coming to this computer until you open it again.",
+        "Workboard를 종료할까요? 다시 열 때까지 이 컴퓨터로 메시지와 알림이 오지 않습니다.",
+    ),
     ("Switch to another person on this computer", "이 컴퓨터의 다른 사람으로 전환"),
     // create menu
     ("Describe anything to create", "만들 내용을 설명하세요"),

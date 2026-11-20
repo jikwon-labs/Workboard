@@ -197,6 +197,92 @@ pub fn pointer_on_screen(_ppp: f32, _zoom: f32) -> Option<(f32, f32)> {
     None
 }
 
+/// Cmd+Q (Workboard > Quit) was chosen and the app hasn't asked about it yet.
+static QUIT_ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True once after Cmd+Q: the app asks before quitting (`ask_before_quit`).
+pub fn take_quit_request() -> bool {
+    QUIT_ASKED.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Point the Mac's Quit menu item (Cmd+Q) at the app, so it can ask first;
+/// it quits at once otherwise, without a window close the app could stop.
+/// Called every frame; done once, after winit has made the menu. A quit from
+/// the Dock, logging out or an update (Sparkle) still quits at once.
+#[cfg(all(target_os = "macos", not(test)))]
+pub fn route_quit_menu(ctx: &egui::Context) {
+    use objc::declare::ClassDecl;
+    use objc::runtime::{Class, Object, Sel};
+    use objc::{class, msg_send, sel, sel_impl};
+    use std::sync::OnceLock;
+
+    static WAKE: OnceLock<egui::Context> = OnceLock::new();
+    thread_local! {
+        static DONE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if DONE.with(|d| d.get()) {
+        return;
+    }
+
+    extern "C" fn quit(_this: &Object, _cmd: Sel, _sender: *mut Object) {
+        QUIT_ASKED.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(ctx) = WAKE.get() {
+            ctx.request_repaint();
+        }
+    }
+
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let menu: *mut Object = msg_send![app, mainMenu];
+        if menu.is_null() {
+            return;
+        }
+        let app_item: *mut Object = msg_send![menu, itemAtIndex: 0isize];
+        if app_item.is_null() {
+            return;
+        }
+        let sub: *mut Object = msg_send![app_item, submenu];
+        if sub.is_null() {
+            return;
+        }
+        let n: isize = msg_send![sub, numberOfItems];
+        let mut quit_item: *mut Object = std::ptr::null_mut();
+        for i in 0..n {
+            let item: *mut Object = msg_send![sub, itemAtIndex: i];
+            let action: Sel = msg_send![item, action];
+            if action == sel!(terminate:) {
+                quit_item = item;
+                break;
+            }
+        }
+        if quit_item.is_null() {
+            return;
+        }
+        let cls = match Class::get("WorkboardQuitTarget") {
+            Some(c) => c,
+            None => {
+                let Some(mut decl) = ClassDecl::new("WorkboardQuitTarget", class!(NSObject)) else {
+                    return;
+                };
+                decl.add_method(
+                    sel!(askToQuit:),
+                    quit as extern "C" fn(&Object, Sel, *mut Object),
+                );
+                decl.register()
+            }
+        };
+        let _ = WAKE.set(ctx.clone());
+        // kept for good: a menu item doesn't keep its target alive
+        let target: *mut Object = msg_send![cls, new];
+        let _: () = msg_send![quit_item, setTarget: target];
+        let _: () = msg_send![quit_item, setAction: sel!(askToQuit:)];
+    }
+    DONE.with(|d| d.set(true));
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+pub fn route_quit_menu(_ctx: &egui::Context) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

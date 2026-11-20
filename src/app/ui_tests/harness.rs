@@ -23,6 +23,11 @@ pub(super) struct Ui1 {
     pub(super) cursor: egui::CursorIcon,
     /// whether the window is in front (false: another app is)
     pub(super) focused: bool,
+    /// what the frames since the last `close_window` asked of the main
+    /// window (Close, CancelClose...)
+    pub(super) commands: Vec<egui::ViewportCommand>,
+    /// the window's close button is pressed in the next frame
+    pub(super) close_next: bool,
 }
 
 impl Ui1 {
@@ -45,6 +50,8 @@ impl Ui1 {
             hovering: vec![],
             cursor: egui::CursorIcon::Default,
             focused: true,
+            commands: vec![],
+            close_next: false,
         };
         // no notices on the wall clock: after 09:00 the seed's tasks due
         // today put a toast over the bottom of the window, so a test would
@@ -72,12 +79,23 @@ impl Ui1 {
             .entry(egui::ViewportId::ROOT)
             .or_default()
             .focused = Some(self.focused);
+        if std::mem::take(&mut self.close_next) {
+            input
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .events
+                .push(egui::ViewportEvent::Close);
+        }
         // as eframe's raw_input_hook does
         self.app.fix_input(&self.ctx, &mut input);
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.ui_frame(ctx));
         self.shapes = out.shapes;
         self.cursor = out.platform_output.cursor_icon;
+        if let Some(v) = out.viewport_output.get(&egui::ViewportId::ROOT) {
+            self.commands.extend(v.commands.iter().cloned());
+        }
         if let Some(update) = out.platform_output.accesskit_update {
             self.tree.clear();
             for (_, node) in update.nodes {
@@ -94,6 +112,13 @@ impl Ui1 {
                 }
             }
         }
+    }
+
+    /// Press the main window's close button (Alt+F4, Cmd+W): one frame.
+    pub(super) fn close_window(&mut self) {
+        self.commands.clear();
+        self.close_next = true;
+        self.frame(vec![]);
     }
 
     pub(super) fn settle(&mut self) {

@@ -21,6 +21,7 @@ mod media;
 mod navigation;
 mod people;
 mod profile;
+mod quit;
 mod sign_in;
 mod slack;
 mod tasks;

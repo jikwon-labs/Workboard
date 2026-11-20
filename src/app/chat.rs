@@ -1958,33 +1958,6 @@ impl App {
                         }
                     });
                     format_buttons(ui, &t, id, text, "reply ");
-                    // the hint takes what Send leaves and is cut short with "…"
-                    // in a narrow box, instead of running under the button
-                    let send_w = ui
-                        .painter()
-                        .layout_no_wrap(
-                            tr("Send").to_string(),
-                            egui::TextStyle::Button.resolve(ui.style()),
-                            t.text,
-                        )
-                        .size()
-                        .x
-                        + 2.0 * ui.spacing().button_padding.x
-                        + ui.spacing().item_spacing.x;
-                    let room = ui.available_width() - send_w;
-                    if room > 24.0 {
-                        ui.scope(|ui| {
-                            ui.set_max_width(room);
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(tr("Enter to send, Shift+Enter for a new line"))
-                                        .small()
-                                        .color(t.text3),
-                                )
-                                .truncate(),
-                            );
-                        });
-                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let ready = files_ok && (!text.trim().is_empty() || !files.is_empty());
                         if (primary_button(ui, &t, tr("Send")).clicked() || enter) && ready {

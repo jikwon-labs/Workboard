@@ -2683,29 +2683,19 @@ fn thread_summary_avatars_sit_on_the_text_line_and_count_people_once() {
 }
 
 #[test]
-fn reply_box_hint_stops_before_send() {
+fn reply_box_shows_no_enter_hint() {
+    // the "Enter to send" line was cut short in a narrow thread, so it is gone;
+    // Shift+Enter is still listed under Keyboard shortcuts
     let mut h = Ui1::new();
     h.click("general");
     h.click("1 reply");
-    let send = h.rect_in(
-        tr("Send"),
-        h.rect("Reply composer").expand2(vec2(40.0, 80.0)),
-    );
-    let start: String = tr("Enter to send, Shift+Enter for a new line")
-        .chars()
-        .take(5)
-        .collect();
-    let mut hint = None;
+    let _ = h.rect("Reply composer");
+    let mut found = false;
     each_text(&h.shapes, |ts, _| {
-        if ts.galley.text().starts_with(&start) && ts.pos.y > send.top() - 20.0 {
-            hint = Some(Rect::from_min_size(ts.pos, ts.galley.size()));
+        let s = ts.galley.text();
+        if s.starts_with("Enter to send") || s.starts_with("Enter로 보내기") {
+            found = true;
         }
     });
-    let hint = hint.expect("the hint shows");
-    assert!(
-        hint.right() <= send.left(),
-        "hint {:?} runs under Send {:?}",
-        hint,
-        send
-    );
+    assert!(!found, "the reply box has no Enter hint");
 }

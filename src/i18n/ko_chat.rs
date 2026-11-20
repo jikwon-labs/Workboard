@@ -58,7 +58,6 @@ pub const T: &[(&str, &str)] = &[
     ("Emoji", "이모지"),
     ("Create task", "작업 만들기"),
     ("No one else here yet", "아직 다른 사람이 없습니다"),
-    ("Enter to send, Shift+Enter for a new line", "Enter로 보내기, Shift+Enter로 줄바꿈"),
     // messages
     ("(edited)", "(편집됨)"),
     ("Pinned", "고정됨"),

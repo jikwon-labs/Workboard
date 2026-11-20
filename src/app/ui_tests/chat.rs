@@ -715,10 +715,33 @@ fn emptying_a_message_and_saving_deletes_it() {
         "the box says what Save will do"
     );
     h.click("Delete message");
+    assert!(
+        general_msg(&h, cid, "wrong words").is_some(),
+        "the first Save only asks"
+    );
+    assert!(h.has("Press Enter again to delete, Esc to cancel"));
+    // Escape backs out and leaves the message alone
+    h.click("Edit message");
+    h.key(egui::Key::Escape);
+    assert!(h.app.chat.edit.is_none());
+    assert!(general_msg(&h, cid, "wrong words").is_some());
+    // again, with Enter twice
+    let p = h.find("wrong words").unwrap();
+    h.hover(p);
+    h.click("More actions");
+    h.click("Edit message");
+    h.click("Edit message");
+    for _ in 0.."wrong words".len() {
+        h.key(egui::Key::Backspace);
+    }
+    assert!(!h.has("Press Enter again to delete, Esc to cancel"));
+    h.key(egui::Key::Enter);
+    assert!(general_msg(&h, cid, "wrong words").is_some());
+    h.key(egui::Key::Enter);
     assert!(h.app.chat.edit.is_none());
     assert!(
         general_msg(&h, cid, "wrong words").is_none(),
-        "the emptied message is gone, not left as it was"
+        "the second Enter deletes it"
     );
 }
 

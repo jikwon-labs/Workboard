@@ -91,6 +91,10 @@ pub const T: &[(&str, &str)] = &[
     ("Delete message", "메시지 삭제"),
     ("Enter to save, Esc to cancel", "Enter로 저장, Esc로 취소"),
     ("Empty: saving deletes the message", "비우고 저장하면 메시지가 삭제됩니다"),
+    (
+        "Press Enter again to delete, Esc to cancel",
+        "한 번 더 Enter를 누르면 삭제, Esc로 취소",
+    ),
     // toasts
     ("Reminder created", "리마인더를 만들었습니다"),
     // the text of a reminder about a message

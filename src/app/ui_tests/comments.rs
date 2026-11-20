@@ -102,6 +102,8 @@ fn emptying_a_comment_and_saving_deletes_it() {
     }
     assert!(h.has("Delete comment"), "Save turns into Delete");
     h.click("Delete comment");
+    assert_eq!(h.comments(id).len(), 1, "the first click only asks");
+    h.click("Click again to delete");
     assert!(
         h.comments(id).is_empty(),
         "the emptied comment is gone, not left as it was"

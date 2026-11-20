@@ -2921,9 +2921,16 @@ impl App {
         let mut save = enter;
         let mut cancel = esc;
         let deletes = text.trim().is_empty() && !stands;
+        // emptied: the first Save only asks, a second one deletes
+        if !deletes && self.chat.delete == Some(mid) {
+            self.chat.delete = None;
+        }
+        let armed = deletes && self.chat.delete == Some(mid);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(tr(if deletes {
+                RichText::new(tr(if armed {
+                    "Press Enter again to delete, Esc to cancel"
+                } else if deletes {
                     "Empty: saving deletes the message"
                 } else {
                     "Enter to save, Esc to cancel"
@@ -2934,13 +2941,21 @@ impl App {
             if ui.button(tr("Cancel")).clicked() {
                 cancel = true;
             }
-            let label = if deletes { "Delete message" } else { "Save" };
+            let label = if armed {
+                "Click again to delete"
+            } else if deletes {
+                "Delete message"
+            } else {
+                "Save"
+            };
             if primary_button(ui, &t, tr(label)).clicked() {
                 save = true;
             }
         });
-        if save && deletes {
+        if save && armed {
             acts.push(ChatAction::Delete { ch: cid, msg: mid });
+        } else if save && deletes {
+            self.chat.delete = Some(mid);
         } else if save {
             acts.push(ChatAction::SaveEdit {
                 ch: cid,
@@ -3560,7 +3575,10 @@ impl App {
                         self.fetch_preview(ch, msg, &text);
                     }
                 }
-                ChatAction::CancelEdit => self.chat.edit = None,
+                ChatAction::CancelEdit => {
+                    self.chat.edit = None;
+                    self.chat.delete = None;
+                }
                 ChatAction::Delete { ch, msg } => {
                     self.chat.delete = None;
                     if self.chat.edit.as_ref().is_some_and(|e| e.1 == msg) {

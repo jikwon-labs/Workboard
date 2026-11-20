@@ -514,24 +514,38 @@ impl App {
                         );
                         name_field(&r, "Edit comment box");
                         focus_once(ui, &r);
-                        // emptied: saving deletes the comment instead of doing nothing
+                        // emptied: saving deletes the comment instead of doing
+                        // nothing; the first Save only asks, a second one deletes
                         let deletes = text.trim().is_empty();
+                        let arm_id = ui.id().with(("comment_empty_delete", a.id));
+                        let armed = deletes && ui.data(|d| d.get_temp(arm_id)).unwrap_or(false);
+                        if !deletes {
+                            ui.data_mut(|d| d.remove::<bool>(arm_id));
+                        }
                         ui.horizontal(|ui| {
-                            let save = if deletes {
-                                primary_button(ui, t, tr("Delete comment"))
+                            let name = if armed {
+                                "Click again to delete"
+                            } else if deletes {
+                                "Delete comment"
                             } else {
-                                primary_button(ui, t, tr("Save"))
+                                "Save"
                             };
+                            let save = primary_button(ui, t, tr(name));
                             name_it(
                                 &save,
-                                if deletes {
+                                if armed {
+                                    "Click again to delete"
+                                } else if deletes {
                                     "Delete comment"
                                 } else {
                                     "Save comment"
                                 },
                             );
-                            if (save.clicked() || save_key) && deletes {
+                            if (save.clicked() || save_key) && armed {
+                                ui.data_mut(|d| d.remove::<bool>(arm_id));
                                 acts.push(Act::Delete(a.id));
+                            } else if (save.clicked() || save_key) && deletes {
+                                ui.data_mut(|d| d.insert_temp(arm_id, true));
                             } else if save.clicked() || save_key {
                                 acts.push(Act::SaveEdit {
                                     id: a.id,
@@ -539,6 +553,7 @@ impl App {
                                 });
                             }
                             if ui.button(tr("Cancel")).clicked() {
+                                ui.data_mut(|d| d.remove::<bool>(arm_id));
                                 acts.push(Act::CancelEdit);
                             }
                         });

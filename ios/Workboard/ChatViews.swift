@@ -732,6 +732,7 @@ struct EditMessageSheet: View {
     let channelId: UInt64
     @Binding var draft: String
     @Binding var editing: Bool
+    @State private var confirmDelete = false
 
     var body: some View {
         NavigationStack {
@@ -750,11 +751,8 @@ struct EditMessageSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     // emptied: saving deletes it (a message with pictures just loses its text)
                     if draft.isBlank && !message.standsWithoutText {
-                        Button("Delete", role: .destructive) {
-                            client.edit { d, me in Edits.deleteMessage(&d, channel: channelId, message: message.id, me: me) }
-                            editing = false
-                        }
-                        .accessibilityIdentifier("saveEditButton")
+                        Button("Delete", role: .destructive) { confirmDelete = true }
+                            .accessibilityIdentifier("saveEditButton")
                     } else {
                         Button("Save") {
                             let had = message.preview?.url
@@ -767,6 +765,15 @@ struct EditMessageSheet: View {
                     }
                 }
             }
+        }
+        .confirmationDialog("Delete this message?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                client.edit { d, me in Edits.deleteMessage(&d, channel: channelId, message: message.id, me: me) }
+                editing = false
+            }
+            .accessibilityIdentifier("confirmDeleteMessage")
+        } message: {
+            Text(message.replies.isEmpty ? "It's removed for everyone." : "It's removed for everyone, with its replies.")
         }
         .presentationDetents([.medium])
     }

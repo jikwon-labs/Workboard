@@ -94,7 +94,14 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 iPhone 에 설치하는 길은 TestFlight 하나로 둔다. App Store Connect 의 앱 이름은 `Workboard Team` 이다(`Workboard` 는 다른 개발자가 이미 쓰고 있었다). 홈 화면에는 `CFBundleDisplayName` 대로 `Workboard` 로 나온다. 2026-11-17 에 0.1.0 첫 빌드를 올렸다.
 
 ```sh
-# 저장소 루트에서. 산출물은 레포 밖(예: /tmp/wb-ios)에 둔다
+ios/scripts/testflight.sh             # 빌드·업로드 후 Team 그룹 배포까지
+ios/scripts/testflight.sh distribute  # 이미 올린 이 버전의 최신 빌드만 Team 에 배포
+ios/scripts/testflight.sh check       # API 키가 되는지 확인
+```
+
+`testflight.sh` 는 아래 두 명령으로 archive 와 업로드를 하고(산출물은 레포 밖 `/tmp/wb-ios`, `WB_IOS_OUT` 으로 바꿈), 이어서 `ios/scripts/asc.swift` 로 App Store Connect API 를 부른다.
+
+```sh
 xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard -configuration Release \
   -destination 'generic/platform=iOS' -archivePath /tmp/wb-ios/Workboard.xcarchive \
   -allowProvisioningUpdates archive
@@ -103,10 +110,26 @@ xcodebuild -exportArchive -archivePath /tmp/wb-ios/Workboard.xcarchive \
   -allowProvisioningUpdates
 ```
 
+업로드 뒤 자동으로 하는 일(외부 그룹은 Internal 과 달리 자동 배포가 없어서 필요하다):
+
+1. 이번에 올린 빌드가 처리 완료(`VALID`)될 때까지 30초마다 확인한다(보통 10~30분, 최대 90분).
+2. "What to Test" 를 채운다. 지난 iPhone 버전 올리기 커밋 이후 `ios/` 를 바꾼 커밋 제목으로 만든다. `WHAT_TO_TEST="..."` 로 직접 줄 수 있다.
+3. 외부 그룹 `Team` 에 빌드를 넣는다. 공개 링크 https://testflight.apple.com/join/swQZyCTa 로 들어온 사람은 이 그룹의 빌드를 받는다.
+4. 베타 심사에 제출한다. 승인되면 Team 테스터에게 간다.
+
+API 키는 레포 밖에 둔다. App Store Connect > 사용자 및 액세스 > 통합 > App Store Connect API 에서 **팀 키**를 "앱 관리" 역할로 만들고, 한 번만 받을 수 있는 `.p8` 을 `~/.appstoreconnect/private_keys/AuthKey_<키 ID>.p8` 에 둔다. 그리고 `~/.appstoreconnect/workboard.env` 에 적는다:
+
+```sh
+ASC_KEY_ID=<키 ID>
+ASC_ISSUER_ID=<발급자 ID, 같은 화면 위쪽>
+```
+
+키 파일이 다른 곳에 있으면 `ASC_KEY_PATH` 를 더한다. `asc.swift` 는 CryptoKit 으로 토큰을 만들어 따로 설치할 것이 없다.
+
 - Xcode > Settings > Accounts 에 팀 `K6599UJ4KM` 계정이 들어 있어야 한다. 배포 인증서와 프로필은 자동 서명이 만든다.
 - 빌드 번호는 App Store Connect 가 다음 번호를 정한다(`ExportOptions.plist` 의 `manageAppVersionAndBuildNumber`). 사용자에게 보이는 버전을 올릴 때만 `MARKETING_VERSION` 을 바꾼다.
 - `ITSAppUsesNonExemptEncryption = NO` 를 Info.plist 에 넣었다. 앱의 암호화는 HTTPS·WSS 같은 표준 TLS 뿐이라 면제 대상이고, 이게 있으면 빌드마다 수출 규정 질문에 답하지 않아도 된다.
-- 올린 뒤 10~30분 처리되면 App Store Connect 의 TestFlight 탭에 빌드가 보인다. 내부 테스터(팀 계정 사용자)를 넣으면 iPhone 의 TestFlight 앱에서 설치할 수 있다. 외부 테스터는 베타 심사를 거친다.
+- 내부 그룹 `Internal` 은 자동 배포가 켜져 있어 처리가 끝나면 심사 없이 바로 받는다. 외부 그룹 `Team` 은 위 스크립트가 넣고 베타 심사를 거친다.
 - TestFlight 빌드는 푸시가 `production` 으로 간다(위 "알림").
 
 ## 데이터 다루는 방식

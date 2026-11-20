@@ -50,6 +50,16 @@ release 빌드 캐시와 Sparkle 을 main 체크아웃에서 복제해 온다(�
 
 Mac mini 계정은 `seojigwon` 이다(`jikwon` 아님).
 
+## 4b. iPhone (TestFlight)
+
+iPhone 도 같은 버전으로 낼 때(`ios/` 의 `MARKETING_VERSION` 을 올린 커밋이 push 된 뒤):
+
+    ios/scripts/testflight.sh
+
+- 빌드·업로드 후 처리 완료까지 기다렸다가 "What to Test" 를 채우고, 외부 그룹 `Team`(공개 링크)에 넣고 베타 심사에 낸다. 30분 넘게 걸릴 수 있으니 백그라운드로 돌린다. 자세한 건 `docs/ios-design.md` "TestFlight".
+- 키가 없다는 오류(`ASC_KEY_ID ...`)면 업로드 전에 멈춘 것이다. 키 만들기는 `docs/macbook/README.md` 할 일을 사용자에게 안내한다.
+- 업로드는 됐는데 배포 단계만 실패했으면 `ios/scripts/testflight.sh distribute` 로 그 부분만 다시 한다.
+
 ## 5. 확인
 
     curl -s https://wb.wlrnjs.xyz/updates/appcast.xml | grep -c '<버전>'

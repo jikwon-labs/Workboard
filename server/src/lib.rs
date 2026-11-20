@@ -143,6 +143,9 @@ struct Inner {
     canon: Option<Value>,
     saved: Saved,
     dirty: bool,
+    /// Only someone's own reading state changed (mine.rs): server.json is
+    /// written on the next save tick, the team's copy keeps its own pace.
+    mine_dirty: bool,
     /// The team's copy changed and isn't on disk yet: when the first and the
     /// latest of those changes were made (see `Hub::save`).
     canon_due: Option<(std::time::Instant, std::time::Instant)>,
@@ -454,6 +457,7 @@ impl Hub {
                 canon,
                 saved,
                 dirty: false,
+                mine_dirty: false,
                 canon_due: None,
                 resets: Default::default(),
                 mailed: Default::default(),
@@ -559,14 +563,20 @@ impl Hub {
             let settled = g.canon_due.is_some_and(|(first, last)| {
                 now || first_copy || last.elapsed() >= SAVE_QUIET || first.elapsed() >= SAVE_AT_MOST
             });
-            if !g.dirty && !settled {
+            if !g.dirty && !settled && !g.mine_dirty {
                 return;
             }
+            // only someone's reading state: server.json alone
+            let canon_too = g.dirty || settled;
             g.dirty = false;
-            g.canon_due = None;
+            g.mine_dirty = false;
+            if canon_too {
+                g.canon_due = None;
+            }
             (
                 g.canon
                     .as_ref()
+                    .filter(|_| canon_too)
                     .map(|c| serde_json::to_string(c).unwrap_or_default()),
                 serde_json::to_string_pretty(&g.saved).unwrap_or_default(),
             )

@@ -18,29 +18,54 @@ final class MineTests: FakeServerTestCase {
         v.inboxLater = ["b"]
         v.repliesRead = ["r"]
         v.settings["muted_until"] = 9
-        var got = Mine.collect(v, known: [:], now: 1000)
+        var got = Mine.collect(v, known: ["replies_seen": 0], now: 1000)
         XCTAssertEqual(got, [
-            "read": ["10": 500],
+            "read": ["10": ["ts": 500, "at": 1000]],
             "replies_seen": 7,
             "inbox": ["a": ["tab": "cleared", "at": 1000], "b": ["tab": "later", "at": 1000]],
             "replies_read": ["r": ["on": true, "at": 1000]],
             "set": ["muted_until": ["value": 9, "at": 1000]],
         ])
-        Mine.merge(&got, ["inbox": ["a": ["tab": "", "at": 2000]], "read": ["10": 400, "11": 3]])
+        Mine.merge(&got, ["inbox": ["a": ["tab": "", "at": 2000]], "read": ["10": ["ts": 400, "at": 900], "11": ["ts": 3, "at": 900]]])
         let r = Mine.resolve(got)
         XCTAssertEqual(r.inboxCleared, [])
         XCTAssertEqual(r.inboxLater, ["b"])
         XCTAssertEqual(r.read, [10: 500, 11: 3])
         // nothing new: the same state goes nowhere
         XCTAssertEqual(Mine.collect(r, known: got, now: 5000), got)
+        // nothing agreed yet: stamped 0
+        XCTAssertEqual(Mine.collect(v, known: [:], now: 1000).at("set.muted_until.at"), 0)
+    }
+
+    func testMarkUnreadHoldsAndNewerPartsPassAlong() {
+        var mac = MineView(); mac.read[10] = 900
+        let known = Mine.collect(mac, known: ["replies_seen": 0], now: 1000)
+        var server: JSON = [:]
+        Mine.merge(&server, known)
+        mac.read[10] = 700
+        Mine.merge(&server, Mine.collect(mac, known: known, now: 2000))
+        var phone = MineView(); phone.read[10] = 900
+        Mine.merge(&server, Mine.collect(phone, known: known, now: 3000))
+        XCTAssertEqual(Mine.resolve(server).read[10], 700, "marked unread later: it holds")
+        var d = SampleWorkspace.make()
+        Edits.markRead(&d, channel: 301, ts: 5000)
+        Mine.apply(Mine.resolve(server).withRead(301, 10), to: &d)
+        XCTAssertEqual(WorkspaceView(d).channels.first { $0.id == 301 }?.lastRead, 10, "lower positions are taken too")
+        // a part from a newer app goes round once and stops
+        var s2: JSON = [:]
+        Mine.merge(&s2, ["read": [:], "pins": ["a": 1]])
+        XCTAssertEqual(s2["pins"], ["a": 1])
+        let back = Mine.collect(Mine.resolve(s2), known: s2, now: 9000)
+        XCTAssertEqual(back, s2)
+        XCTAssertFalse(Mine.merge(&s2, back))
     }
 
     func testChangesOnBothDevicesBothStayAndTiesKeepTheFirst() {
         var a = MineView(); a.inboxCleared = ["x"]; a.settings["muted_until"] = 0
         var b = MineView(); b.inboxLater = ["y"]; b.settings["muted_until"] = 99
         var server: JSON = [:]
-        Mine.merge(&server, Mine.collect(a, known: [:], now: 1000))
-        Mine.merge(&server, Mine.collect(b, known: [:], now: 1000))
+        Mine.merge(&server, Mine.collect(a, known: ["replies_seen": 0], now: 1000))
+        Mine.merge(&server, Mine.collect(b, known: ["replies_seen": 0], now: 1000))
         let r = Mine.resolve(server)
         XCTAssertEqual(r.inboxCleared, ["x"])
         XCTAssertEqual(r.inboxLater, ["y"])
@@ -120,4 +145,8 @@ final class MineTests: FakeServerTestCase {
         XCTAssertFalse(Sync.shared.contains("extra.mine_sync"))
         XCTAssertNil(Sync.outgoing(phone.data!).at("extra.mine_sync"))
     }
+}
+
+extension MineView {
+    func withRead(_ channel: UInt64, _ ts: Int64) -> MineView { var v = self; v.read[channel] = ts; return v }
 }

@@ -3,14 +3,16 @@
 // crates/wb-sync/src/mine.rs, which explains the rules. Same shapes, same
 // results:
 //
-//   read          {"<channel>": last_read}            the later one wins
+//   read          {"<channel>": {ts, at}}             newest change (a tie: the later ts)
 //   replies_seen  seconds                              the later one wins
 //   inbox         {"<row key>": {tab, at}}             newest change per row
 //   replies_read  {"<row key>": {on, at}}              newest change per row
 //   set           {"notify" | "muted_until": {value, at}}   newest change
 //
 // `extra.mine_sync` (never shared) is what this iPhone and the server last
-// agreed on, so a change made here is told from one made elsewhere.
+// agreed on, so a change made here is told from one made elsewhere. Before
+// anything is agreed, what this iPhone has is stamped 0 (it never undoes a
+// change made elsewhere since). Parts a newer app adds pass along untouched.
 
 import Foundation
 
@@ -58,6 +60,9 @@ public enum Mine {
     }
 
     static func at(_ e: JSON?) -> Int64 { e?["at"]?.int ?? 0 }
+    static func ts(_ e: JSON?) -> Int64 { e?["ts"]?.int ?? 0 }
+    /// The parts this version knows; others (from a newer app) pass along.
+    static let parts: Set<String> = ["read", "replies_seen", "inbox", "replies_read", "set"]
 
     static func tab(_ v: MineView, _ key: String) -> String {
         v.inboxCleared.contains(key) ? "cleared" : v.inboxLater.contains(key) ? "later" : ""
@@ -65,9 +70,10 @@ public enum Mine {
 
     /// The state to send: `known` with what differs in `view` stamped `now`
     /// (milliseconds). Nothing this device lacks counts as a change.
-    public static func collect(_ view: MineView, known: JSON, now: Int64) -> JSON {
+    public static func collect(_ view: MineView, known: JSON, now nowIn: Int64) -> JSON {
+        let now = (known.object ?? [:]).isEmpty ? 0 : nowIn
         var read = known["read"]?.object ?? [:]
-        for (id, ts) in view.read where ts > (read[String(id)]?.int ?? 0) { read[String(id)] = .int(ts) }
+        for (id, t) in view.read where read[String(id)].map(ts) != t { read[String(id)] = ["ts": .int(t), "at": .int(now)] }
         let seen = max(known["replies_seen"]?.int ?? 0, view.repliesSeen)
 
         let knownInbox = known["inbox"]?.object ?? [:]
@@ -84,7 +90,13 @@ public enum Mine {
         }
         var set = known["set"]?.object ?? [:]
         for (k, v) in view.settings where set[k]?["value"] != v { set[k] = ["value": v, "at": .int(now)] }
-        return ["read": .object(read), "replies_seen": .int(seen), "inbox": .object(inbox), "replies_read": .object(rr), "set": .object(set)]
+        var out = known.object ?? [:]
+        out["read"] = .object(read)
+        out["replies_seen"] = .int(seen)
+        out["inbox"] = .object(inbox)
+        out["replies_read"] = .object(rr)
+        out["set"] = .object(set)
+        return .object(out)
     }
 
     /// Put `other` into `base`; on a tie `base` keeps its own. True when it changed.
@@ -93,11 +105,11 @@ public enum Mine {
         let before = base
         var b = base.object ?? [:]
         var read = b["read"]?.object ?? [:]
-        for (k, v) in other["read"]?.object ?? [:] {
-            let theirs = v.int ?? 0
-            if theirs > (read[k]?.int ?? 0) { read[k] = .int(theirs) }
+        for (k, v) in other["read"]?.object ?? [:] where v.object != nil {
+            if read[k] == nil || (at(v), ts(v)) > (at(read[k]), ts(read[k])) { read[k] = v }
         }
         b["read"] = .object(read)
+        for (k, v) in other.object ?? [:] where !parts.contains(k) && b[k] == nil { b[k] = v }
         b["replies_seen"] = .int(max(b["replies_seen"]?.int ?? 0, other["replies_seen"]?.int ?? 0))
         for part in ["inbox", "replies_read", "set"] {
             var mine = b[part]?.object ?? [:]
@@ -114,7 +126,7 @@ public enum Mine {
     public static func resolve(_ mine: JSON) -> MineView {
         var v = MineView()
         for (k, r) in mine["read"]?.object ?? [:] {
-            if let id = UInt64(k), let ts = r.int { v.read[id] = ts }
+            if let id = UInt64(k) { v.read[id] = ts(r) }
         }
         v.repliesSeen = mine["replies_seen"]?.int ?? 0
         for (k, e) in mine["inbox"]?.object ?? [:] {
@@ -147,7 +159,8 @@ public enum Mine {
         let before = data
         if case .array(var chans) = data["channels"] ?? .null {
             for i in chans.indices {
-                guard let id = chans[i]["id"]?.uint, let r = v.read[id], r > (chans[i]["last_read"]?.int ?? 0) else { continue }
+                // the newest change: lower too ("Mark unread" elsewhere)
+                guard let id = chans[i]["id"]?.uint, let r = v.read[id], r != (chans[i]["last_read"]?.int ?? 0) else { continue }
                 chans[i]["last_read"] = .int(r)
             }
             data["channels"] = .array(chans)
@@ -200,6 +213,9 @@ extension SyncClient {
         // read or cleared elsewhere: the icon's number and the choices follow
         if changed { onUpdate() }
     }
+
+    /// The server keeps my state for my other devices (said on this connection).
+    public var keepsMine: Bool { mineOK }
 
     /// My notification choices as kept with the workspace, which my other
     /// devices share; nil until one of them set them.

@@ -96,16 +96,18 @@ impl App {
             let Some(&read) = v.read.get(&c.id) else {
                 continue;
             };
-            if read <= c.last_read {
+            if read == c.last_read {
                 continue;
             }
+            let lower = read < c.last_read;
             c.last_read = read;
-            // read on another device: what's up to there is seen here too
+            // read on another device: what's up to there is seen here too;
+            // marked unread there: what's after it is new here again
             if let Some(seen) = self.data.extra.chat_seen.get(&c.id) {
                 let now_seen = SeenIds::of(
                     c.messages
                         .iter()
-                        .filter(|m| m.ts <= read || seen.has(m.id))
+                        .filter(|m| m.ts <= read || (!lower && seen.has(m.id)))
                         .map(|m| (m.id, m.ts)),
                 );
                 self.data.extra.chat_seen.insert(c.id, now_seen);

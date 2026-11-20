@@ -11,14 +11,20 @@
 // state of each member and sends it to their other devices (`mine` messages).
 //
 // How two changes are put together:
-// - read positions (`read`, per conversation) and `replies_seen`: the later one;
+// - read positions (`read`, per conversation): the newest change wins, so
+//   "Mark unread" (a lower position) holds; at the same moment the later
+//   position;
+// - `replies_seen`: the later one;
 // - Inbox rows (`inbox`) and replies marked read (`replies_read`): row by row,
 //   the newest change wins, so clearing one row on the Mac and another on the
 //   iPhone keeps both;
 // - settings (`set`, each whole): the newest change wins.
 // A tie goes to the side that already had it (the server's copy on the
 // server, the server's copy in the app), so the first device to bring a
-// value keeps it.
+// value keeps it. What a device has before it ever agreed with the server
+// (`known` empty: just updated, or just joined) is stamped 0, so it never
+// undoes a change made on another device since. Parts a newer app adds are
+// passed along untouched.
 //
 // The iPhone app has the same in Swift (WorkboardKit/Mine.swift).
 
@@ -105,6 +111,18 @@ fn at(e: &Value) -> i64 {
     e.get("at").and_then(|a| a.as_i64()).unwrap_or(0)
 }
 
+fn ts(e: &Value) -> i64 {
+    e.get("ts").and_then(|a| a.as_i64()).unwrap_or(0)
+}
+
+/// The parts this version knows; others (from a newer app) pass along.
+const PARTS: &[&str] = &["read", "replies_seen", "inbox", "replies_read", "set"];
+
+/// Nothing agreed with the server yet.
+fn fresh(known: &Value) -> bool {
+    known.as_object().is_none_or(|o| o.is_empty())
+}
+
 fn obj<'a>(v: &'a Value, k: &str) -> Option<&'a Map<String, Value>> {
     v.get(k).and_then(|o| o.as_object())
 }
@@ -121,18 +139,16 @@ fn tab_in(view: &MineView, key: &str) -> &'static str {
 }
 
 /// The state to send: `known` (the last state agreed with the server, `{}`
-/// at first) with what differs in `view` stamped `now` (milliseconds).
-/// Nothing this device lacks is taken as a change.
+/// at first) with what differs in `view` stamped `now` (milliseconds; 0
+/// while nothing is agreed yet). Nothing this device lacks is taken as a
+/// change.
 pub fn collect(view: &MineView, known: &Value, now: i64) -> Value {
-    let mut read = Map::new();
-    if let Some(k) = obj(known, "read") {
-        read = k.clone();
-    }
-    for (id, ts) in &view.read {
+    let now = if fresh(known) { 0 } else { now };
+    let mut read = obj(known, "read").cloned().unwrap_or_default();
+    for (id, t) in &view.read {
         let key = id.to_string();
-        let was = read.get(&key).and_then(|r| r.as_i64()).unwrap_or(0);
-        if *ts > was {
-            read.insert(key, json!(ts));
+        if read.get(&key).map(ts) != Some(*t) {
+            read.insert(key, json!({"ts": t, "at": now}));
         }
     }
     let replies_seen = known
@@ -188,13 +204,13 @@ pub fn collect(view: &MineView, known: &Value, now: i64) -> Value {
         }
     }
 
-    json!({
-        "read": read,
-        "replies_seen": replies_seen,
-        "inbox": inbox,
-        "replies_read": replies_read,
-        "set": set,
-    })
+    let mut out = known.as_object().cloned().unwrap_or_default();
+    out.insert("read".into(), Value::Object(read));
+    out.insert("replies_seen".into(), json!(replies_seen));
+    out.insert("inbox".into(), Value::Object(inbox));
+    out.insert("replies_read".into(), Value::Object(replies_read));
+    out.insert("set".into(), Value::Object(set));
+    Value::Object(out)
 }
 
 /// Put `other` into `base`. On a tie `base` keeps its own. True when
@@ -205,17 +221,25 @@ pub fn merge(base: &mut Value, other: &Value) -> bool {
         *base = json!({});
     }
     let b = base.as_object_mut().expect("made an object above");
-    // later read positions
+    // read positions: the newest change, at the same moment the later one
     {
         let read = b.entry("read").or_insert_with(|| json!({})).as_object_mut();
         if let (Some(read), Some(o)) = (read, obj(other, "read")) {
             for (k, v) in o {
-                let theirs = v.as_i64().unwrap_or(0);
-                let mine = read.get(k).and_then(|r| r.as_i64()).unwrap_or(0);
-                if theirs > mine {
-                    read.insert(k.clone(), json!(theirs));
+                if !v.is_object() {
+                    continue;
+                }
+                let wins = read.get(k).is_none_or(|m| (at(v), ts(v)) > (at(m), ts(m)));
+                if wins {
+                    read.insert(k.clone(), v.clone());
                 }
             }
+        }
+    }
+    // parts from a newer app pass along
+    for (k, v) in other.as_object().into_iter().flatten() {
+        if !PARTS.contains(&k.as_str()) && !b.contains_key(k) {
+            b.insert(k.clone(), v.clone());
         }
     }
     let seen = b
@@ -251,8 +275,8 @@ pub fn merge(base: &mut Value, other: &Value) -> bool {
 pub fn resolve(mine: &Value) -> MineView {
     let mut v = MineView::default();
     for (k, r) in obj(mine, "read").into_iter().flatten() {
-        if let (Ok(id), Some(ts)) = (k.parse::<u64>(), r.as_i64()) {
-            v.read.insert(id, ts);
+        if let Ok(id) = k.parse::<u64>() {
+            v.read.insert(id, ts(r));
         }
     }
     v.replies_seen = mine
@@ -306,13 +330,20 @@ mod tests {
         MineView::default()
     }
 
+    /// A device that already agreed with the server once (its changes are
+    /// stamped with their time).
+    fn agreed() -> Value {
+        json!({"replies_seen": 0})
+    }
+
     #[test]
     fn a_change_here_is_stamped_and_reaches_the_other_device() {
         // the Mac clears a row and reads #general
         let mut mac = view();
         mac.inbox_cleared.insert("1:100:2".into());
         mac.read.insert(10, 500);
-        let sent = collect(&mac, &json!({}), 1000);
+        let sent = collect(&mac, &agreed(), 1000);
+        assert_eq!(sent["inbox"]["1:100:2"]["at"], json!(1000));
         let mut server = json!({});
         assert!(merge(&mut server, &sent));
         // the iPhone, which had nothing, takes it
@@ -328,7 +359,7 @@ mod tests {
     fn moving_a_row_back_is_a_change_too() {
         let mut mac = view();
         mac.inbox_cleared.insert("k".into());
-        let known = collect(&mac, &json!({}), 1000);
+        let known = collect(&mac, &agreed(), 1000);
         mac.inbox_cleared.clear();
         let sent = collect(&mac, &known, 2000);
         let mut server = known.clone();
@@ -344,8 +375,8 @@ mod tests {
         let mut phone = view();
         phone.inbox_later.insert("b".into());
         let mut server = json!({});
-        merge(&mut server, &collect(&mac, &json!({}), 1000));
-        merge(&mut server, &collect(&phone, &json!({}), 1001));
+        merge(&mut server, &collect(&mac, &agreed(), 1000));
+        merge(&mut server, &collect(&phone, &agreed(), 1001));
         let got = resolve(&server);
         assert!(got.inbox_cleared.contains("a"));
         assert!(got.inbox_later.contains("b"));
@@ -358,29 +389,37 @@ mod tests {
         a.inbox_cleared.insert("k".into());
         let mut b = view();
         b.inbox_later.insert("k".into());
-        merge(&mut server, &collect(&b, &json!({}), 2000));
-        merge(&mut server, &collect(&a, &json!({}), 1000));
+        merge(&mut server, &collect(&b, &agreed(), 2000));
+        merge(&mut server, &collect(&a, &agreed(), 1000));
         assert!(resolve(&server).inbox_later.contains("k"));
         assert!(!resolve(&server).inbox_cleared.contains("k"));
     }
 
     #[test]
-    fn read_positions_take_the_later_one() {
-        let mut a = view();
-        a.read.insert(10, 900);
-        a.replies_seen = 50;
-        let mut b = view();
-        b.read.insert(10, 700);
-        b.read.insert(11, 300);
-        b.replies_seen = 80;
+    fn read_positions_go_by_the_newest_change_so_mark_unread_holds() {
+        let mut mac = view();
+        mac.read.insert(10, 900);
         let mut server = json!({});
-        // the later read position wins even when sent first
-        merge(&mut server, &collect(&a, &json!({}), 1000));
-        merge(&mut server, &collect(&b, &json!({}), 2000));
-        let got = resolve(&server);
-        assert_eq!(got.read.get(&10), Some(&900));
-        assert_eq!(got.read.get(&11), Some(&300));
-        assert_eq!(got.replies_seen, 80);
+        let known = collect(&mac, &agreed(), 1000);
+        merge(&mut server, &known);
+        // "Mark unread" on the Mac: a lower position, changed later
+        mac.read.insert(10, 700);
+        merge(&mut server, &collect(&mac, &known, 2000));
+        assert_eq!(resolve(&server).read.get(&10), Some(&700));
+        // the phone, which still has the old position, doesn't undo it
+        let mut phone = view();
+        phone.read.insert(10, 900);
+        let phone_known = known.clone();
+        merge(&mut server, &collect(&phone, &phone_known, 3000));
+        assert_eq!(resolve(&server).read.get(&10), Some(&700));
+        // at the same moment the later position wins, whichever came first
+        let mut a = json!({"read": {"11": {"ts": 5, "at": 0}}});
+        merge(&mut a, &json!({"read": {"11": {"ts": 8, "at": 0}}}));
+        assert_eq!(resolve(&a).read.get(&11), Some(&8));
+        // replies_seen: the later one
+        let mut s = json!({"replies_seen": 80});
+        merge(&mut s, &json!({"replies_seen": 50}));
+        assert_eq!(resolve(&s).replies_seen, 80);
     }
 
     #[test]
@@ -390,14 +429,40 @@ mod tests {
         let mut b = view();
         b.settings.insert("muted_until".into(), json!(99));
         let mut server = json!({});
-        merge(&mut server, &collect(&a, &json!({}), 1000));
-        merge(&mut server, &collect(&b, &json!({}), 2000));
+        merge(&mut server, &collect(&a, &agreed(), 1000));
+        merge(&mut server, &collect(&b, &agreed(), 2000));
         assert_eq!(resolve(&server).settings["muted_until"], json!(99));
         // the same moment: the one already there stays
         let mut tie = json!({});
-        merge(&mut tie, &collect(&a, &json!({}), 1000));
-        merge(&mut tie, &collect(&b, &json!({}), 1000));
+        merge(&mut tie, &collect(&a, &agreed(), 1000));
+        merge(&mut tie, &collect(&b, &agreed(), 1000));
         assert_eq!(resolve(&tie).settings["muted_until"], json!(0));
+    }
+
+    #[test]
+    fn what_a_device_had_before_it_ever_agreed_never_undoes_a_change() {
+        // the phone mutes on Tuesday
+        let mut phone = view();
+        phone.settings.insert("muted_until".into(), json!(99));
+        let mut server = json!({});
+        merge(&mut server, &collect(&phone, &agreed(), 1000));
+        // the Mac is updated on Wednesday: what it has counts as old
+        let mut mac = view();
+        mac.settings.insert("muted_until".into(), json!(0));
+        mac.inbox_cleared.insert("x".into());
+        let first = collect(&mac, &json!({}), 5000);
+        assert_eq!(first["set"]["muted_until"]["at"], json!(0));
+        merge(&mut server, &first);
+        let got = resolve(&server);
+        assert_eq!(
+            got.settings["muted_until"],
+            json!(99),
+            "the phone's change stays"
+        );
+        assert!(
+            got.inbox_cleared.contains("x"),
+            "what only the Mac had comes along"
+        );
     }
 
     #[test]
@@ -405,7 +470,7 @@ mod tests {
         let mut mac = view();
         mac.settings
             .insert("notify".into(), json!({"direct": false}));
-        let server = collect(&mac, &json!({}), 1000);
+        let server = collect(&mac, &agreed(), 1000);
         // the iPhone never had notify: it doesn't send one
         let phone = view();
         let sent = collect(&phone, &server, 2000);
@@ -419,9 +484,21 @@ mod tests {
         v.inbox_cleared.insert("x".into());
         v.replies_read.insert("chat:1:2".into());
         v.settings.insert("notify".into(), json!({"direct": true}));
-        let known = collect(&v, &json!({}), 1000);
+        let known = collect(&v, &agreed(), 1000);
         assert_eq!(collect(&resolve(&known), &known, 5000), known);
         assert_eq!(collect(&v, &known, 5000), known);
+    }
+
+    #[test]
+    fn parts_from_a_newer_app_pass_along() {
+        let newer = json!({"read": {}, "pins": {"a": 1}});
+        let mut server = json!({});
+        merge(&mut server, &newer);
+        assert_eq!(server["pins"], json!({"a": 1}));
+        // an older app sends them back as they came, so nothing goes round
+        let back = collect(&resolve(&server), &server, 9000);
+        assert_eq!(back, server);
+        assert!(!merge(&mut server, &back));
     }
 
     #[test]
@@ -443,11 +520,11 @@ mod tests {
         v.inbox_later.insert("b".into());
         v.replies_read.insert("r".into());
         v.settings.insert("muted_until".into(), json!(9));
-        let mut got = collect(&v, &json!({}), 1000);
+        let mut got = collect(&v, &agreed(), 1000);
         assert_eq!(
             got,
             json!({
-                "read": {"10": 500},
+                "read": {"10": {"ts": 500, "at": 1000}},
                 "replies_seen": 7,
                 "inbox": {"a": {"tab": "cleared", "at": 1000}, "b": {"tab": "later", "at": 1000}},
                 "replies_read": {"r": {"on": true, "at": 1000}},
@@ -456,13 +533,18 @@ mod tests {
         );
         merge(
             &mut got,
-            &json!({"inbox": {"a": {"tab": "", "at": 2000}}, "read": {"10": 400, "11": 3}}),
+            &json!({"inbox": {"a": {"tab": "", "at": 2000}}, "read": {"10": {"ts": 400, "at": 900}, "11": {"ts": 3, "at": 900}}}),
         );
         let r = resolve(&got);
         assert!(r.inbox_cleared.is_empty());
         assert_eq!(r.inbox_later.iter().collect::<Vec<_>>(), ["b"]);
         assert_eq!(r.read.get(&10), Some(&500));
         assert_eq!(r.read.get(&11), Some(&3));
+        // nothing agreed yet: stamped 0
+        assert_eq!(
+            collect(&v, &json!({}), 1000)["set"]["muted_until"]["at"],
+            json!(0)
+        );
     }
 
     #[test]

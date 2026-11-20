@@ -148,10 +148,16 @@ final class Notifier {
     func scan(client: SyncClient, nav: Nav) {
         self.client = client
         // choices made on my other devices (my Mac) come with the workspace
-        if let synced = client.syncedNotifyPrefs, synced != prefs {
-            adopting = true
-            prefs = synced
-            adopting = false
+        if let synced = client.syncedNotifyPrefs {
+            if synced != prefs {
+                adopting = true
+                prefs = synced
+                adopting = false
+            }
+        } else if client.keepsMine, prefs != NotifyPrefs() {
+            // choices made here before they were kept in step, and no other
+            // device of mine has any yet: they go to my other devices
+            client.setNotifyPrefs(prefs)
         }
         client.setPushPrefs(prefs.forServer)
         guard let data = client.data, let me = client.me else { return }

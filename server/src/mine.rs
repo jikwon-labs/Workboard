@@ -33,7 +33,7 @@ impl Hub {
                 return (kept != data).then(|| Msg::Mine { data: kept.clone() }.to_json());
             }
             let merged = Arc::new(kept.clone());
-            g.dirty = true;
+            g.mine_dirty = true;
             merged
         };
         // nobody listening is fine

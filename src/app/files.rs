@@ -2059,9 +2059,6 @@ impl App {
                         painter.galley(r.min + vec2(4.0, 2.0), g, Color32::WHITE);
                     }
                 }
-                if resp.hovered() {
-                    painter.rect_filled(rect, 8.0, Color32::from_white_alpha(16));
-                }
                 if resp.clicked() {
                     clicked = Some(i);
                 }

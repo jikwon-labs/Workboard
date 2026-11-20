@@ -463,3 +463,73 @@ fn a_screenshot_pastes_into_the_message_box_without_clicking_it_first() {
         "nothing added from the search box"
     );
 }
+
+/// The filled rectangles painted inside `area`, in paint order.
+fn fills_inside(h: &Ui1, area: Rect) -> Vec<(Rect, egui::Color32)> {
+    h.shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Rect(r) if area.expand(0.5).contains_rect(r.rect) => {
+                Some((r.rect, r.fill))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn pictures_look_the_same_under_the_pointer() {
+    // a picture in a chat message: nothing is laid over it on hover
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let mut m =
+        crate::app::slack::new_message(h.app.data.new_id(), h.app.data.me, String::new(), now_ts());
+    m.attachments.push(Attachment {
+        file: "no-such-file".into(),
+        name: "sky.png".into(),
+        kind: MediaKind::Image,
+        bytes: 10,
+        w: 400,
+        h: 300,
+        secs: 0.0,
+        thumb: None,
+    });
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .push(m);
+    h.settle();
+    let tile = h.rect("Picture sky.png");
+    // beside the picture on the same message, so the row looks hovered both times
+    h.hover(pos2(tile.right() + 40.0, tile.center().y));
+    let off = fills_inside(&h, tile);
+    h.hover(tile.center());
+    assert_eq!(h.cursor, egui::CursorIcon::PointingHand, "still clickable");
+    assert_eq!(fills_inside(&h, tile), off, "no hover layer on the picture");
+
+    // a picture attached to a task: no hover fill either
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    t.attachments.push(Attachment {
+        file: "no-such-file".into(),
+        name: "plan.png".into(),
+        kind: MediaKind::Image,
+        bytes: 10,
+        w: 400,
+        h: 300,
+        secs: 0.0,
+        thumb: None,
+    });
+    h.settle();
+    h.scroll_into_view("Attachment plan.png");
+    let tile = h.rect("Attachment plan.png");
+    let pic = pos2(tile.center().x, tile.top() + 45.0);
+    h.hover(pic);
+    assert!(!h.hover_fill_at(pic), "no hover fill on the picture");
+}

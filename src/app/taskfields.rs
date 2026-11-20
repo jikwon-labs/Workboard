@@ -1161,7 +1161,10 @@ impl App {
                             );
                         }
                     }
-                    hover_bg(ui, &resp, pic, 8.0);
+                    // a picture or video stays as it is under the pointer
+                    if a.kind == MediaKind::File {
+                        hover_bg(ui, &resp, pic, 8.0);
+                    }
                     ui.painter().with_clip_rect(rect).text(
                         pos2(rect.left(), pic.bottom() + 9.0),
                         Align2::LEFT_CENTER,

@@ -88,6 +88,27 @@ fn open_toolbar_search_does_not_steal_the_comment_box() {
 }
 
 #[test]
+fn emptying_a_comment_and_saving_deletes_it() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    h.click("Comment box");
+    h.type_text("typo");
+    h.cmd_enter();
+    assert_eq!(h.comments(id).len(), 1);
+    h.click("Comment actions");
+    h.click("Edit");
+    for _ in 0.."typo".len() {
+        h.key(egui::Key::Backspace);
+    }
+    assert!(h.has("Delete comment"), "Save turns into Delete");
+    h.click("Delete comment");
+    assert!(
+        h.comments(id).is_empty(),
+        "the emptied comment is gone, not left as it was"
+    );
+}
+
+#[test]
 fn comment_send_with_cmd_enter_then_react_edit_reply_delete() {
     let mut h = Ui1::new();
     let id = h.open_clean_task();

@@ -216,6 +216,22 @@ final class EditTests: XCTestCase {
         XCTAssertNil(WorkspaceView(d).channels.first { $0.id == 301 }!.messages.first { $0.id == 9100 })
     }
 
+    func testEmptyingAPictureMessageKeepsThePicture() {
+        var d = SampleWorkspace.make()
+        Edits.sendMessage(&d, channel: 301, text: "look", me: 1, id: 9150, ts: 80)
+        XCTAssertFalse(Edits.standsWithoutText(d["channels"]![0]!["messages"]!.array!.last!))
+        XCTAssertFalse(Edits.editMessage(&d, channel: 301, message: 9150, text: "", me: 1, ts: 81), "plain text: emptying deletes instead")
+        d.updateItem(at: "channels", id: 301) { c in
+            c.updateItem(at: "messages", id: 9150) { m in m["attachments"] = .array([["file": "abc", "name": "sky.png"]]) }
+        }
+        let m = WorkspaceView(d).channels.first { $0.id == 301 }!.messages.first { $0.id == 9150 }!
+        XCTAssertTrue(m.standsWithoutText)
+        XCTAssertTrue(Edits.editMessage(&d, channel: 301, message: 9150, text: "  ", me: 1, ts: 82))
+        let after = WorkspaceView(d).channels.first { $0.id == 301 }!.messages.first { $0.id == 9150 }!
+        XCTAssertEqual(after.text, "")
+        XCTAssertEqual(after.attachments.count, 1, "the picture stays")
+    }
+
     func testDeletedMessageStaysDeletedAfterMerge() {
         var phone = SampleWorkspace.make()
         Edits.sendMessage(&phone, channel: 301, text: "oops", me: 1, id: 9200, ts: 100)

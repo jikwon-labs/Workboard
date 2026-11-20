@@ -507,17 +507,26 @@ public enum Edits {
 
     // MARK: message actions (src/app/chat.rs)
 
+    /// A message that still says something with its text taken away
+    /// (pictures, a forwarded message, a post title): its text may be emptied.
+    /// Emptying any other message deletes it instead (stands_without_text).
+    public static func standsWithoutText(_ m: JSON) -> Bool {
+        !(m["attachments"]?.array ?? []).isEmpty
+            || (m["forwarded"].map { $0 != .null } ?? false)
+            || !(m["post_title"]?.string?.trimmed ?? "").isEmpty
+    }
+
     /// Changes one of my messages or replies (ChatAction::SaveEdit), with
     /// its `mentions` worked out again from the new text.
     @discardableResult
     public static func editMessage(_ data: inout JSON, channel: UInt64, message: UInt64, text: String, me: UInt64, ts: Int64) -> Bool {
         let text = text.trimmed
-        guard !text.isEmpty else { return false }
         let snapshot = data
         var done = false
         func change(_ m: inout JSON) {
             // a huddle or call card isn't edited (the Mac app offers no Edit for it)
             guard m["author"]?.uint == me, m["text"]?.string != text, m["call"]?.string == nil else { return }
+            guard !text.isEmpty || standsWithoutText(m) else { return }
             let picked = (m["mentions"]?.array ?? []).compactMap(\.uint)
             Mentions.put(Mentions.chatIDs(in: text, data: snapshot, channel: channel, online: Set(picked), author: me, picked: picked), on: &m)
             m["text"] = .string(text)

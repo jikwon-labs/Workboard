@@ -2333,6 +2333,16 @@
         }
       }
     },
+    "Empty: saving deletes the message": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "비우고 저장하면 메시지가 삭제됩니다"
+          }
+        }
+      }
+    },
     "Eraser": {
       "extractionState": "manual",
       "localizations": {

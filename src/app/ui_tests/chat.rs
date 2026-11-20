@@ -639,6 +639,79 @@ fn click_more_actions_edit_my_message() {
 }
 
 #[test]
+fn emptying_a_message_and_saving_deletes_it() {
+    let (mut h, cid) = general_with_my_message("wrong words");
+    h.click("More actions");
+    h.click("Edit message");
+    h.click("Edit message");
+    for _ in 0.."wrong words".len() {
+        h.key(egui::Key::Backspace);
+    }
+    assert!(
+        h.has("Empty: saving deletes the message"),
+        "the box says what Save will do"
+    );
+    h.click("Delete message");
+    assert!(h.app.chat.edit.is_none());
+    assert!(
+        general_msg(&h, cid, "wrong words").is_none(),
+        "the emptied message is gone, not left as it was"
+    );
+}
+
+#[test]
+fn emptying_a_picture_message_keeps_the_picture() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let mut m = crate::app::slack::new_message(
+        h.app.data.new_id(),
+        h.app.data.me,
+        "look at this".into(),
+        now_ts(),
+    );
+    m.attachments.push(Attachment {
+        file: "no-such-file".into(),
+        name: "sky.png".into(),
+        kind: MediaKind::Image,
+        bytes: 10,
+        w: 400,
+        h: 300,
+        secs: 0.0,
+        thumb: None,
+    });
+    let mid = m.id;
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .push(m);
+    h.settle();
+    let p = h.find("look at this").unwrap();
+    h.hover(p);
+    h.click("More actions");
+    h.click("Edit message");
+    h.click("Edit message");
+    for _ in 0.."look at this".len() {
+        h.key(egui::Key::Backspace);
+    }
+    assert!(!h.has("Empty: saving deletes the message"));
+    h.key(egui::Key::Enter);
+    let c = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    let m = c
+        .messages
+        .iter()
+        .find(|m| m.id == mid)
+        .expect("still there");
+    assert_eq!(m.text, "", "the text is emptied");
+    assert_eq!(m.attachments.len(), 1, "the picture stays");
+    assert!(m.edited.is_some());
+}
+
+#[test]
 fn escape_cancels_an_edit_and_up_arrow_starts_one() {
     let (mut h, cid) = general_with_my_message("keep me");
     h.click("Message composer");

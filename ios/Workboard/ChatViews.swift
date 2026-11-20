@@ -739,21 +739,32 @@ struct EditMessageSheet: View {
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...10)
                     .accessibilityIdentifier("editMessageField")
+                if draft.isBlank && !message.standsWithoutText {
+                    Text("Empty: saving deletes the message").font(.footnote).foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("Edit message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 CancelButton { editing = false }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        let had = message.preview?.url
-                        client.edit { d, me in Edits.editMessage(&d, channel: channelId, message: message.id, text: draft, me: me, ts: nowTs()) }
-                        // another address: its preview comes
-                        if ChatFormat.firstURL(draft) != had { fetchPreview(client, channel: channelId, message: message.id, text: draft) }
-                        editing = false
+                    // emptied: saving deletes it (a message with pictures just loses its text)
+                    if draft.isBlank && !message.standsWithoutText {
+                        Button("Delete", role: .destructive) {
+                            client.edit { d, me in Edits.deleteMessage(&d, channel: channelId, message: message.id, me: me) }
+                            editing = false
+                        }
+                        .accessibilityIdentifier("saveEditButton")
+                    } else {
+                        Button("Save") {
+                            let had = message.preview?.url
+                            client.edit { d, me in Edits.editMessage(&d, channel: channelId, message: message.id, text: draft, me: me, ts: nowTs()) }
+                            // another address: its preview comes
+                            if ChatFormat.firstURL(draft) != had { fetchPreview(client, channel: channelId, message: message.id, text: draft) }
+                            editing = false
+                        }
+                        .accessibilityIdentifier("saveEditButton")
                     }
-                    .disabled(draft.isBlank)
-                    .accessibilityIdentifier("saveEditButton")
                 }
             }
         }

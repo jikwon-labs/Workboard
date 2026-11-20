@@ -474,6 +474,15 @@ fn group_mention_rows(ui: &mut Ui, t: &Theme, teams: &[String]) -> Option<String
     out
 }
 
+/// A message that still says something with its text taken away: pictures,
+/// a forwarded message or a post title. Emptying the text of any other
+/// message deletes it (as Slack does).
+fn stands_without_text(m: &Message) -> bool {
+    !m.attachments.is_empty()
+        || m.forwarded.is_some()
+        || m.post_title.as_ref().is_some_and(|t| !t.trim().is_empty())
+}
+
 fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
     for m in msgs.iter_mut() {
         if m.id == id {
@@ -2846,8 +2855,23 @@ impl App {
     }
 
     /// Changing one of my messages in place: Enter saves, Escape cancels.
+    /// Emptying the text deletes the message, unless it has pictures or
+    /// another part that still says something.
     fn edit_box(&mut self, ui: &mut Ui, cid: u64, mid: u64, acts: &mut Vec<ChatAction>) {
         let t = self.t();
+        let home = self.msg_home(cid, mid);
+        let stands = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == home)
+            .and_then(|c| {
+                c.messages
+                    .iter()
+                    .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
+                    .find(|m| m.id == mid)
+            })
+            .is_some_and(stands_without_text);
         let Some((_, _, text)) = self.chat.edit.as_mut() else {
             return;
         };
@@ -2876,20 +2900,28 @@ impl App {
             (r.has_focus() || r.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Escape));
         let mut save = enter;
         let mut cancel = esc;
+        let deletes = text.trim().is_empty() && !stands;
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(tr("Enter to save, Esc to cancel"))
-                    .small()
-                    .color(t.text3),
+                RichText::new(tr(if deletes {
+                    "Empty: saving deletes the message"
+                } else {
+                    "Enter to save, Esc to cancel"
+                }))
+                .small()
+                .color(t.text3),
             );
             if ui.button(tr("Cancel")).clicked() {
                 cancel = true;
             }
-            if primary_button(ui, &t, tr("Save")).clicked() {
+            let label = if deletes { "Delete message" } else { "Save" };
+            if primary_button(ui, &t, tr(label)).clicked() {
                 save = true;
             }
         });
-        if save {
+        if save && deletes {
+            acts.push(ChatAction::Delete { ch: cid, msg: mid });
+        } else if save {
             acts.push(ChatAction::SaveEdit {
                 ch: cid,
                 msg: mid,
@@ -3454,7 +3486,19 @@ impl App {
                 }
                 ChatAction::SaveEdit { ch, msg, text } => {
                     self.chat.edit = None;
-                    if text.is_empty() {
+                    let found = self
+                        .data
+                        .channels
+                        .iter()
+                        .find(|c| c.id == ch)
+                        .and_then(|c| {
+                            c.messages
+                                .iter()
+                                .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
+                                .find(|m| m.id == msg)
+                        });
+                    // no text left: only a message with pictures (or the like) keeps going
+                    if text.is_empty() && !found.is_some_and(stands_without_text) {
                         continue;
                     }
                     let before = self

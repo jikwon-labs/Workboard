@@ -399,6 +399,11 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     /// place of the person who set it up.
     public let bot: String?
 
+    /// Still says something with its text taken away (Edits.standsWithoutText).
+    public var standsWithoutText: Bool {
+        !attachments.isEmpty || forwarded != nil || !(postTitle?.trimmed ?? "").isEmpty
+    }
+
     /// Message::imported: set once by the import and never cleared; the
     /// field itself stays in the JSON as it came.
     static func isImported(_ j: JSON) -> Bool { j["imported"]?.string != nil }

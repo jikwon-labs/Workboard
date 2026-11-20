@@ -514,10 +514,25 @@ impl App {
                         );
                         name_field(&r, "Edit comment box");
                         focus_once(ui, &r);
+                        // emptied: saving deletes the comment instead of doing nothing
+                        let deletes = text.trim().is_empty();
                         ui.horizontal(|ui| {
-                            let save = primary_button(ui, t, tr("Save"));
-                            name_it(&save, "Save comment");
-                            if (save.clicked() || save_key) && !text.trim().is_empty() {
+                            let save = if deletes {
+                                primary_button(ui, t, tr("Delete comment"))
+                            } else {
+                                primary_button(ui, t, tr("Save"))
+                            };
+                            name_it(
+                                &save,
+                                if deletes {
+                                    "Delete comment"
+                                } else {
+                                    "Save comment"
+                                },
+                            );
+                            if (save.clicked() || save_key) && deletes {
+                                acts.push(Act::Delete(a.id));
+                            } else if save.clicked() || save_key {
                                 acts.push(Act::SaveEdit {
                                     id: a.id,
                                     text: text.trim().to_string(),

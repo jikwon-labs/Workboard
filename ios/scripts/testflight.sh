@@ -34,8 +34,10 @@ write_notes() {
 		return
 	fi
 	local prev changes
+	# awk reads to the end: leaving early would kill git log with SIGPIPE,
+	# and pipefail would then stop the script with exit 141
 	prev=$(git log --format='%H %s' --grep='^Bump the iPhone app to' |
-		awk -v v="$version" '$NF != v { print $1; exit }')
+		awk -v v="$version" '!p && $NF != v { print $1; p = 1 }')
 	changes=$(git log --no-merges --format='- %s' ${prev:+"$prev"..}HEAD -- ios/ |
 		grep -v '^- Bump the iPhone app' | head -30 || true)
 	{

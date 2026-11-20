@@ -62,6 +62,8 @@ struct App {
     updates: Vec<Value>,
     /// roles (from Access) and copies, in the order they came
     heard: Vec<String>,
+    /// my own reading state, from the last `mine` message
+    mine: Option<Value>,
 }
 
 impl App {
@@ -151,6 +153,7 @@ impl App {
             mailed: vec![],
             updates: vec![],
             heard: vec![],
+            mine: None,
         }
     }
 
@@ -309,6 +312,7 @@ impl App {
                     thread: Some(t),
                 } => self.thread_typing.push((channel, member, t)),
                 Event::Scheduled(items) => self.scheduled = Some(items),
+                Event::Mine(m) => self.mine = Some(m),
                 Event::Integrations { hooks, commands } => {
                     self.integrations = Some((hooks, commands))
                 }
@@ -398,6 +402,123 @@ fn two_apps(port: u16) -> (App, App) {
     });
     assert_eq!(b.member, Some(2), "the code signs B in as member 2");
     (a, b)
+}
+
+/// Another device of `a`'s person, signed in with a code `a` shows (the
+/// phone link), holding the team's copy.
+fn second_device(port: u16, a: &mut App) -> App {
+    a.client.send(Msg::CreateLinkCode);
+    a.until("a link code", |a| {
+        a.heard.iter().any(|h| h.starts_with("link code "))
+    });
+    let code = a
+        .heard
+        .iter()
+        .find_map(|h| h.strip_prefix("link code "))
+        .unwrap()
+        .to_string();
+    let mut phone = App::start(
+        port,
+        Value::Null,
+        SignIn {
+            link_code: Some(code),
+            ..Default::default()
+        },
+    );
+    phone.wait("the second device gets the copy", |_| true);
+    assert_eq!(phone.member, a.member, "the same person");
+    phone
+}
+
+/// A person's reading state and notification choices go to their other
+/// devices, never to anyone else, and stay on the server over a restart.
+#[test]
+fn my_reading_state_reaches_my_other_devices_only() {
+    use wb_sync::mine::{collect, resolve, MineView};
+    let home = temp_home("mine");
+    let server = Server::start_at(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let mut phone = second_device(server.port, &mut a);
+    // every connection hears what the server keeps right after welcome
+    a.until("A's state", |a| a.mine.is_some());
+    phone.until("the phone's state", |p| p.mine.is_some());
+    b.until("B's state", |b| b.mine.is_some());
+    assert!(resolve(phone.mine.as_ref().unwrap())
+        .inbox_cleared
+        .is_empty());
+
+    // the Mac clears an Inbox row, reads #general and mutes notifications
+    let mut mac = MineView::default();
+    mac.inbox_cleared.insert("100:5:2".into());
+    mac.read.insert(10, 1);
+    mac.settings
+        .insert("muted_until".into(), json!(4_000_000_000i64));
+    let sent = collect(&mac, &json!({}), now());
+    a.client.send(Msg::Mine { data: sent.clone() });
+    phone.until("the phone gets the Mac's state", |p| {
+        let v = resolve(p.mine.as_ref().unwrap());
+        v.inbox_cleared.contains("100:5:2")
+            && v.read.get(&10) == Some(&1)
+            && v.settings.get("muted_until") == Some(&json!(4_000_000_000i64))
+    });
+
+    // the phone puts the row back and marks a reply read
+    let mut on_phone = resolve(phone.mine.as_ref().unwrap());
+    on_phone.inbox_cleared.clear();
+    on_phone.replies_read.insert("chat:10:11".into());
+    let known = phone.mine.clone().unwrap();
+    phone.client.send(Msg::Mine {
+        data: collect(&on_phone, &known, now() + 1),
+    });
+    a.until("the Mac gets the phone's change", |a| {
+        let v = resolve(a.mine.as_ref().unwrap());
+        v.inbox_cleared.is_empty() && v.replies_read.contains("chat:10:11")
+    });
+
+    // someone else never hears any of it
+    b.change(say_as("ping", 3100, 2));
+    a.wait("B's message at A", |d| {
+        texts(d).contains(&"ping".to_string())
+    });
+    b.pump();
+    assert_eq!(
+        resolve(b.mine.as_ref().unwrap()),
+        MineView::default(),
+        "B's own state stays empty"
+    );
+
+    // a device that is behind is told what it lacks
+    let stale = collect(&MineView::default(), &json!({}), 1);
+    a.mine = None;
+    a.client.send(Msg::Mine { data: stale });
+    a.until("the server answers with what it keeps", |a| {
+        a.mine
+            .as_ref()
+            .is_some_and(|m| resolve(m).replies_read.contains("chat:10:11"))
+    });
+
+    let (token, device) = (phone.token.clone(), phone.device.clone());
+    drop(a);
+    drop(b);
+    drop(phone);
+    server.stop();
+    let server = Server::start_at(&home, 0);
+    let mut again = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            token,
+            device,
+            ..Default::default()
+        },
+    );
+    again.until("kept over a restart", |p| {
+        p.mine
+            .as_ref()
+            .is_some_and(|m| resolve(m).replies_read.contains("chat:10:11"))
+    });
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// A scheduled message waits on the server, then goes out as its writer's

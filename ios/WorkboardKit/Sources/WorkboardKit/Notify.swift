@@ -3,8 +3,8 @@
 // channels set to everything, huddles, reactions to my messages, and the
 // Inbox's mentions, thread replies, assignments, comments and changes on my
 // tasks, plus answers to my forms and people joining (for owners and
-// admins). The choices are each person's own and stay on the device, like
-// the Mac's.
+// admins). The choices are each person's own: kept with the workspace in
+// the Mac's shape (`extra.notify`), the same on all their devices (Mine.swift).
 
 import Foundation
 
@@ -63,6 +63,47 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
     }
 
     public func muted(now: Int64) -> Bool { mutedUntil > now }
+
+    /// The choices kept with the workspace in the Mac's shape
+    /// (NotifySettings in src/model/extra.rs, `extra.notify`) and
+    /// `extra.muted_until`, which my devices keep in step (Mine.swift).
+    public init(mac n: JSON, mutedUntil m: Int64?) {
+        self.init()
+        func b(_ k: String, _ d: Bool) -> Bool { n[k]?.bool ?? d }
+        direct = b("direct", direct); mentions = b("mentions", mentions); replies = b("replies", replies)
+        huddles = b("huddles", huddles); reactions = b("reactions", reactions); assigned = b("assigned", assigned)
+        comments = b("comments", comments); taskChanges = b("task_changes", taskChanges); due = b("due", due)
+        dueTime = n["due_time"]?.string ?? dueTime
+        meetings = b("meetings", meetings)
+        meetingMinutes = n["meeting_minutes"]?.int.map { Int($0) } ?? meetingMinutes
+        goals = b("goals", goals); forms = b("forms", forms); team = b("team", team); sound = b("sound", sound)
+        badge = b("dock_badge", badge)
+        channelDefault = n["channel_default"]?.string ?? channelDefault
+        if let modes = n["channel_modes"]?.array {
+            channelModes = [:]
+            for pair in modes {
+                if let id = pair[0]?.uint, let mode = pair[1]?.string { channelModes[id] = mode }
+            }
+        }
+        keywords = n["keywords"]?.string ?? keywords
+        mutedUntil = m ?? mutedUntil
+    }
+
+    /// These choices in the Mac's shape, keeping what only the Mac has
+    /// (desktop banners, chat, reminders...) from `base`.
+    public func mac(base: JSON?) -> JSON {
+        var o = base?.object ?? [:]
+        o["direct"] = .bool(direct); o["mentions"] = .bool(mentions); o["replies"] = .bool(replies)
+        o["huddles"] = .bool(huddles); o["reactions"] = .bool(reactions); o["assigned"] = .bool(assigned)
+        o["comments"] = .bool(comments); o["task_changes"] = .bool(taskChanges); o["due"] = .bool(due)
+        o["due_time"] = .string(dueTime); o["meetings"] = .bool(meetings); o["meeting_minutes"] = .int(Int64(meetingMinutes))
+        o["goals"] = .bool(goals); o["forms"] = .bool(forms); o["team"] = .bool(team); o["sound"] = .bool(sound)
+        o["dock_badge"] = .bool(badge)
+        o["channel_default"] = .string(channelDefault)
+        o["channel_modes"] = .array(channelModes.keys.sorted().map { id in [.id(id), .string(channelModes[id] ?? "")] })
+        o["keywords"] = .string(keywords)
+        return .object(o)
+    }
 
     /// `keywords` one by one, trimmed, blanks left out.
     public var keywordList: [String] {
@@ -380,10 +421,18 @@ public enum Notify {
         }
     }
 
-    /// The app icon's number: Primary Inbox rows plus unread direct messages.
-    public static func badge(_ data: JSON, view: WorkspaceView, me: UInt64, inbox items: [InboxItem]? = nil) -> Int {
-        let inbox = (items ?? Inbox.items(data, me: me)).filter { $0.tab == .primary }.count
+    /// The app icon's number, as the Mac's Dock counts it (dock_count and
+    /// inbox_badge in src/app): Primary Inbox rows not marked read
+    /// (`extra.replies_read`), my reminders that are due (unless the Mac's
+    /// "reminders" choice is off), and unread direct messages.
+    public static func badge(_ data: JSON, view: WorkspaceView, me: UInt64, inbox items: [InboxItem]? = nil, now: Int64 = nowTs()) -> Int {
+        let read = Set((data.at("extra.replies_read")?.array ?? []).compactMap(\.string))
+        let inbox = (items ?? Inbox.items(data, me: me)).filter { $0.tab == .primary && !read.contains($0.key) }.count
+        let reminders = data.at("extra.notify.reminders")?.bool == false ? 0
+            : (data.at("extra.reminders")?.array ?? []).filter {
+                ($0["owner"]?.uint ?? me) == me && $0["done"]?.bool != true && ($0["due_ts"]?.int ?? Int64.max) <= now
+            }.count
         let dms = view.visibleChannels(me: me).filter { $0.kind == .direct }.reduce(0) { $0 + $1.unread(me: me) }
-        return inbox + dms
+        return inbox + reminders + dms
     }
 }

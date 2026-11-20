@@ -117,15 +117,19 @@ final class Notifier {
         if ok { UIApplication.shared.registerForRemoteNotifications() }
     }
 
-    // MARK: choices (each person's own, kept on this iPhone like the Mac's)
+    // MARK: choices (each person's own, the same on their Mac and iPhone)
 
     var prefs: NotifyPrefs = Notifier.loadPrefs() {
         didSet {
             if let d = try? JSONEncoder().encode(prefs) { UserDefaults.standard.set(d, forKey: "notifyPrefs") }
+            // kept with the workspace, so my other devices take them too
+            if !adopting, prefs != oldValue { client?.setNotifyPrefs(prefs) }
             // the server's pushes follow them too
             client?.setPushPrefs(prefs.forServer)
         }
     }
+    /// Taking the choices made on another device (not a change made here).
+    @ObservationIgnored private var adopting = false
 
     /// The connection the choices go to (set by `scan`).
     @ObservationIgnored private weak var client: SyncClient?
@@ -143,6 +147,12 @@ final class Notifier {
     /// the icon's number and the clock notices up to date.
     func scan(client: SyncClient, nav: Nav) {
         self.client = client
+        // choices made on my other devices (my Mac) come with the workspace
+        if let synced = client.syncedNotifyPrefs, synced != prefs {
+            adopting = true
+            prefs = synced
+            adopting = false
+        }
         client.setPushPrefs(prefs.forServer)
         guard let data = client.data, let me = client.me else { return }
         let manager = ["owner", "admin"].contains(client.settings.role ?? "")
@@ -248,7 +258,8 @@ final class Notifier {
     }
 
     func updateBadge(_ data: JSON, view: WorkspaceView, me: UInt64, inbox: [InboxItem]) {
-        let n = prefs.badge ? Notify.badge(data, view: view, me: me, inbox: inbox) : 0
+        // none while muted, like the Mac's Dock (dock_count)
+        let n = prefs.badge && !prefs.muted(now: nowTs()) ? Notify.badge(data, view: view, me: me, inbox: inbox) : 0
         UNUserNotificationCenter.current().setBadgeCount(n)
     }
 

@@ -591,6 +591,11 @@ pub struct Extra {
     /// wins everywhere. Several Slack people can go to one member.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub slack_map: std::collections::BTreeMap<String, u64>,
+    /// My reading state and notification choices as last agreed with my
+    /// other devices through the team server (`sync::mine`), so a change
+    /// made here is told from one made there. Only on this computer.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub mine_sync: serde_json::Value,
 }
 
 impl Default for Extra {
@@ -646,6 +651,7 @@ impl Default for Extra {
             slack_not_under_me: vec![],
             slack_carried: vec![],
             slack_map: Default::default(),
+            mine_sync: serde_json::Value::Null,
         }
     }
 }

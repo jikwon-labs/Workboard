@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 mod dialogs;
 mod forms;
+mod mine;
 mod net;
 mod phone;
 mod shared_folder;
@@ -229,6 +230,11 @@ pub struct SyncRt {
     pub(super) phone_asked: Option<std::time::Instant>,
     /// "Show code" was pressed: the code shows under the QR code.
     pub(super) phone_code_shown: bool,
+    /// The server keeps my reading state for my other devices (it sent
+    /// `mine` on this connection): changes to it go up from now on.
+    pub(super) mine_ok: bool,
+    /// When my reading state was last looked at for changes (`ctx` time).
+    mine_checked: f64,
 }
 
 /// Asking a server which workspaces an email and password sign in to.

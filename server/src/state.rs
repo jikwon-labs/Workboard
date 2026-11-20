@@ -97,6 +97,10 @@ pub struct Saved {
     /// Slash commands owners and admins added (hooks.rs).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<crate::hooks::Slash>,
+    /// member -> their own reading state and notification choices, kept in
+    /// step between their devices (mine.rs, `wb_sync::mine`)
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub mine: BTreeMap<u64, Value>,
 }
 
 impl Saved {

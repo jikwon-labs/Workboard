@@ -3,8 +3,9 @@
 // made, @mentions of me in task comments and chat, tasks assigned to me, and
 // chat replies in threads I started or wrote in. My own actions are left
 // out. Rows go to Primary, Other, Later or Cleared; Later and Cleared are
-// this device's own (`extra.inbox_later`, `extra.inbox_cleared`, never shared),
-// keyed like the Mac's rows so the keys mean the same thing.
+// my own (`extra.inbox_later`, `extra.inbox_cleared`, never shared with the
+// team), kept in step with my other devices (Mine.swift) and keyed like the
+// Mac's rows so the keys mean the same thing.
 
 import Foundation
 
@@ -122,7 +123,8 @@ public enum Inbox {
     }
 
     /// Moves rows to Later or Cleared, or back to where they belong (nil).
-    /// This device's own: changed with `SyncClient.editLocal`.
+    /// My own: changed with `SyncClient.editLocal`, which sends it to my
+    /// other devices (Mine.swift).
     public static func move(_ data: inout JSON, keys: [String], to tab: InboxItem.Tab?) {
         var cleared = (data.at("extra.inbox_cleared")?.array ?? []).compactMap(\.string)
         var later = (data.at("extra.inbox_later")?.array ?? []).compactMap(\.string)

@@ -471,6 +471,8 @@ struct ThreadView: View {
                 .padding(.vertical, 8)
             }
             .defaultScrollAnchor(.bottom)
+            // the replies here count as read (on my Mac too), new ones as they come
+            .task(id: m.replies.count) { client.markThreadRead(channel: c.id, parent: m.id) }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     Toggle(isOn: $alsoToChannel) {

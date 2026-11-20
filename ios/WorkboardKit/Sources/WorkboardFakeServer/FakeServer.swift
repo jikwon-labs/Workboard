@@ -81,6 +81,9 @@ public final class FakeServer: @unchecked Sendable {
     var pushWorkspaces: [String: String] = [:]
     /// The notification choices each device sent with its token.
     var pushPrefs: [String: JSON] = [:]
+    /// Each member's own reading state (server/src/mine.rs), by member (0
+    /// without sign-in).
+    var mines: [UInt64: JSON] = [:]
     /// member -> account
     var accounts: [UInt64: Account] = [:]
     /// normalized reset code -> (email, made at)
@@ -427,6 +430,16 @@ public final class FakeServer: @unchecked Sendable {
             callJoin(ch, from: p)
         case let .typing(ch, thread):
             typing(ch, thread: thread, from: p)
+        case let .mine(data):
+            // Hub::take_mine: merged, and to all of this person's connections
+            let who = p.member ?? 0
+            var kept = mines[who] ?? [:]
+            if Mine.merge(&kept, data) {
+                mines[who] = kept
+                for q in peers.values where q.welcomed && (q.member ?? 0) == who { send(.mine(kept), to: q) }
+            } else if kept != data {
+                send(.mine(kept), to: p)
+            }
         case .ping:
             send(.pong, to: p)
         case .pong:
@@ -503,6 +516,7 @@ public final class FakeServer: @unchecked Sendable {
                         email: p.member.flatMap { accounts[$0]?.email })
         w.deltas = deltas
         send(.welcome(w), to: p)
+        send(.mine(mines[p.member ?? 0] ?? [:]), to: p)
     }
 
     /// Hub::request: access and backup requests with the real server's rules.

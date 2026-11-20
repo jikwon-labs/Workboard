@@ -39,6 +39,7 @@ mod hash;
 mod ids;
 mod merge;
 mod meta;
+pub mod mine;
 mod stamp;
 mod visibility;
 

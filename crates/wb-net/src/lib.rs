@@ -658,6 +658,16 @@ pub enum Msg {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thread: Option<u64>,
     },
+    /// This person's own reading state and notification choices
+    /// (`wb_sync::mine`), kept in step between their devices. The app sends
+    /// what it has whenever it changes; the server merges it into what it
+    /// keeps for that person and sends the result to all their connections.
+    /// It also sends it right after `welcome` (`{}` when it has nothing yet),
+    /// which tells the app the server takes it: until then the app sends
+    /// none. Never sent to anyone else. Older servers and apps ignore it.
+    Mine {
+        data: Value,
+    },
     Error {
         message: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -994,6 +1004,9 @@ pub enum Event {
     /// My scheduled messages (the answer to schedule, unschedule and
     /// scheduled_list).
     Scheduled(Vec<ScheduledMsg>),
+    /// My reading state and notification choices as the server keeps them
+    /// (`Msg::Mine`).
+    Mine(Value),
     /// The webhooks (owners and admins) and slash commands.
     Integrations {
         hooks: Vec<HookInfo>,
@@ -1552,6 +1565,7 @@ fn on_server_msg(
         Some(Msg::Restored { name }) => emit(Event::Restored(name)),
         Some(Msg::Presence { online }) => emit(Event::Presence(online)),
         Some(Msg::Scheduled { items }) => emit(Event::Scheduled(items)),
+        Some(Msg::Mine { data }) => emit(Event::Mine(data)),
         Some(Msg::IntegrationList { hooks, commands }) => {
             emit(Event::Integrations { hooks, commands })
         }

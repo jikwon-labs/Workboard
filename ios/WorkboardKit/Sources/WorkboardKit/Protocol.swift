@@ -18,6 +18,11 @@
 //                                copy again as update)
 //   app -> server  set_password {email, password, old_password?}
 //   server -> app  account      {email}
+//   both           mine         {data}   (my own reading state and notification
+//                                choices, Mine.swift; the server sends it after
+//                                welcome and when another device of mine changes it,
+//                                only to my connections. The app sends it only after
+//                                hearing it on that connection.)
 //   app -> server  push_token   {token, platform: "ios", env}   (ignored by servers that don't know it)
 //   app -> server  push_token   {token: ""}  stops notifications to this device
 //                                (sent on sign-out and before leaving for another server)
@@ -114,6 +119,9 @@ public enum ClientMessage: Equatable, Sendable {
     case schedule(item: JSON)
     case unschedule(id: UInt64)
     case scheduledList
+    /// My reading state and notification choices (wb_net::Msg::Mine,
+    /// Mine.swift), sent when they change here.
+    case mine(data: JSON)
     /// Webhooks and slash commands (wb_net::HookInfo, wb_net::CommandInfo as JSON).
     case integrations
     case hookAdd(hook: JSON)
@@ -172,6 +180,7 @@ public enum ClientMessage: Equatable, Sendable {
         case let .schedule(item): return ["type": "schedule", "item": item]
         case let .unschedule(id): return ["type": "unschedule", "id": .id(id)]
         case .scheduledList: return ["type": "scheduled_list"]
+        case let .mine(data): return ["type": "mine", "data": data]
         case .integrations: return ["type": "integrations"]
         case let .hookAdd(hook): return ["type": "hook_add", "hook": hook]
         case let .hookRemove(token): return ["type": "hook_remove", "token": .string(token)]
@@ -231,6 +240,7 @@ public enum ClientMessage: Equatable, Sendable {
         case "schedule": self = .schedule(item: j["item"] ?? .null)
         case "unschedule": self = .unschedule(id: j["id"]?.uint ?? 0)
         case "scheduled_list": self = .scheduledList
+        case "mine": self = .mine(data: j["data"] ?? [:])
         case "integrations": self = .integrations
         case "hook_add": self = .hookAdd(hook: j["hook"] ?? .null)
         case "hook_remove": self = .hookRemove(token: j["token"]?.string ?? "")
@@ -309,6 +319,9 @@ public enum ServerMessage: Equatable, Sendable {
     case presence([UInt64])
     /// My scheduled messages (wb_net::ScheduledMsg as JSON), soonest first.
     case scheduled([JSON])
+    /// My reading state and notification choices as the server keeps them
+    /// (after welcome, and when another device of mine changed them).
+    case mine(JSON)
     /// The webhooks (owners and admins) and slash commands.
     case integrationList(hooks: [JSON], commands: [JSON])
     case ping
@@ -363,6 +376,8 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "presence", "online": .array(online.map(JSON.id))]
         case let .scheduled(items):
             return ["type": "scheduled", "items": .array(items)]
+        case let .mine(data):
+            return ["type": "mine", "data": data]
         case let .integrationList(hooks, commands):
             return ["type": "integration_list", "hooks": .array(hooks), "commands": .array(commands)]
         case .ping: return ["type": "ping"]
@@ -427,6 +442,8 @@ public enum ServerMessage: Equatable, Sendable {
             self = .presence((j["online"]?.array ?? []).compactMap(\.uint))
         case "scheduled":
             self = .scheduled(j["items"]?.array ?? [])
+        case "mine":
+            self = .mine(j["data"] ?? [:])
         case "integration_list":
             self = .integrationList(hooks: j["hooks"]?.array ?? [], commands: j["commands"]?.array ?? [])
         case "ping": self = .ping

@@ -463,6 +463,15 @@ extension Sync {
 
     /// The copy sent to the server: this device's fingerprints left out, as
     /// wb_sync::shareable does.
+    /// `extra` keys that are each person's own and never go to the team
+    /// (wb_sync::PERSONAL_EXTRA in crates/wb-sync/src/visibility.rs).
+    public static let personalExtra = [
+        "chat_seen", "chat_drafts", "scheduled", "closed_dm_seen", "closed_dms", "replies_seen", "replies_read",
+        "starred", "recent", "notify", "muted_until", "pinned_tools", "rail_items", "hidden_nav", "hidden_views",
+        "hidden_cards", "accent", "auto_theme", "hide_tray", "labs", "shared", "sheet_rows", "sheet_week_rows",
+        "slack_under_me", "slack_not_under_me", "slack_carried", "mine_sync",
+    ]
+
     public static func outgoing(_ data: JSON) -> JSON {
         var v = data
         // items marked personal stay on this device (wb_sync::shareable)
@@ -470,6 +479,11 @@ extension Sync {
             guard let a = v.at(path)?.array else { continue }
             let kept = a.filter { $0["personal"]?.bool != true }
             if kept.count != a.count { v.set(path, .array(kept)) }
+        }
+        // each person's own reading state and choices (wb_sync::PERSONAL_EXTRA)
+        if case .object(var extra)? = v["extra"] {
+            for k in personalExtra { extra[k] = nil }
+            v["extra"] = .object(extra)
         }
         if v.at("extra.sync")?.object != nil {
             v.set("extra.sync.hashes", .object([:]))

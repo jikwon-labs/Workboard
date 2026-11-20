@@ -119,6 +119,7 @@ mod auth;
 mod canon;
 pub mod hooks;
 mod livekit;
+mod mine;
 mod notify;
 mod routes;
 mod schedule;
@@ -423,6 +424,9 @@ struct Hub {
     /// someone typing in a conversation: each connection passes it on to
     /// its app when that member can see the conversation (ws.rs)
     typing: broadcast::Sender<Typing>,
+    /// a member's own reading state changed (mine.rs): their connections
+    /// send it to their apps
+    mines: broadcast::Sender<(u64, Arc<Value>)>,
     /// true once the workspace is deleted (registry.rs): its connections
     /// end, telling their apps, and nothing more is written to its folder
     closed: watch::Sender<bool>,
@@ -476,6 +480,7 @@ impl Hub {
             members_online: Mutex::new(Default::default()),
             presence: watch::channel(vec![]).0,
             typing: broadcast::channel(64).0,
+            mines: broadcast::channel(64).0,
             closed: watch::channel(false).0,
         })
     }

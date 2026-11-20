@@ -291,6 +291,7 @@ impl App {
         let now = ctx.input(|i| i.time);
         if cfg.server.is_some() {
             self.net_tick(Some(ctx));
+            self.mine_tick(now);
             if self.sync_rt.pending {
                 if now - self.sync_rt.last_write >= WRITE_SECS {
                     self.sync_rt.last_write = now;
@@ -398,6 +399,8 @@ impl App {
         d.extra.inbox_later.clear();
         d.extra.starred.clear();
         d.extra.closed_dms.clear();
+        // what my other devices agreed on was about the workspace left
+        d.extra.mine_sync = serde_json::Value::Null;
         // Slack matches this computer carried belong to the workspace left;
         // the team's own carried ones (no stamp) count as carried here
         d.extra.slack_carried.clear();

@@ -223,6 +223,9 @@ public final class SyncClient {
     public internal(set) var commands: [CommandItem] = []
     /// This phone's notification choices as the server wants them (Push.swift).
     @ObservationIgnored public internal(set) var pushPrefs: JSON?
+    /// The server keeps my reading state for my other devices (it sent
+    /// `mine` on this connection): changes to it go up from now on (Mine.swift).
+    @ObservationIgnored var mineOK = false
     /// This iPhone's Trash (personal, never shared; see Trash.swift).
     public internal(set) var trash: [TrashItem] = []
     /// Workspaces kept on this iPhone besides the open one, the one left
@@ -597,6 +600,8 @@ public final class SyncClient {
         socket = nil
         // answers to what was asked on that connection won't come
         asked = []
+        // the next connection says again whether its server keeps my state
+        mineOK = false
     }
 
     func send(_ m: ClientMessage, on ws: URLSessionWebSocketTask) {
@@ -696,6 +701,8 @@ public final class SyncClient {
             commands = c.compactMap(CommandItem.init)
         case let .scheduled(items):
             scheduled = items.compactMap(ScheduledItem.init).sorted { ($0.at, $0.id) < ($1.at, $1.id) }
+        case let .mine(m):
+            takeMine(m)
         case .ping:
             send(.pong, on: ws)
         case .pong:
@@ -1082,9 +1089,11 @@ public final class SyncClient {
         pushesSent += 1
     }
 
-    private func refresh() {
+    func refresh() {
         guard let d = data else { return }
         view = WorkspaceView(d)
+        // my reading state changed here: my other devices hear it
+        sendMineIfChanged()
         scheduleSave()
     }
 

@@ -259,6 +259,8 @@ impl App {
                     if s != NetStatus::Connected {
                         // the list comes again after the next welcome
                         self.sync_rt.online = None;
+                        // and my reading state with it, from servers that keep it
+                        self.sync_rt.mine_ok = false;
                     }
                     if matches!(s, NetStatus::Gone(_)) && self.sync_rt.joining.is_none() {
                         self.toast(tr("This workspace was deleted from the server by its owner. Remove it from this computer in Work together."));
@@ -374,6 +376,10 @@ impl App {
                 NetEvent::Backups(list) => self.sync_rt.backups = Some(list),
                 NetEvent::Presence(online) => self.sync_rt.online = Some(online),
                 NetEvent::Scheduled(items) => self.sync_rt.scheduled = Some(items),
+                NetEvent::Mine(m) => {
+                    self.take_mine(m);
+                    changed = true;
+                }
                 NetEvent::Integrations { hooks, commands } => {
                     self.sync_rt.integrations = Some((hooks, commands))
                 }

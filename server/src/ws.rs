@@ -340,6 +340,7 @@ impl Conn {
                 })
             }
             Some(Msg::Ping) => Some(Msg::Pong.to_json()),
+            Some(Msg::Mine { data }) => hub.take_mine(member, &data),
             Some(Msg::Schedule { item }) => Some(match hub.schedule(member, item) {
                 Ok(items) => Msg::Scheduled { items }.to_json(),
                 Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
@@ -536,6 +537,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     let mut access = hub.access.subscribe();
     let mut presence = hub.presence.subscribe();
     let mut typing = hub.typing.subscribe();
+    let mut mines = hub.mines.subscribe();
     // this connection's requests don't bring it the access broadcast too
     let conn = NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed);
     let (welcome, was_hidden) = hub.welcome(tag, member, role, token);
@@ -547,6 +549,10 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     }
     let online = presence.borrow_and_update().clone();
     if !send(&mut socket, &Msg::Presence { online }.to_json()).await {
+        return;
+    }
+    // this person's own reading state (also: this server keeps it)
+    if !send(&mut socket, &hub.mine_for(member)).await {
         return;
     }
     let mut me = Conn {
@@ -617,6 +623,23 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                     if !send(&mut socket, &m.to_json()).await {
                         break;
                     }
+                }
+            }
+            m = mines.recv() => {
+                let data = match m {
+                    Ok((who, data)) if who == member => (*data).clone(),
+                    Ok(_) => continue,
+                    // fell behind: what the server keeps now says it all
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        if !send(&mut socket, &hub.mine_for(member)).await {
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if !send(&mut socket, &Msg::Mine { data }.to_json()).await {
+                    break;
                 }
             }
             m = tokio::time::timeout(silent, socket.next()) => {

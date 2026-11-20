@@ -1389,3 +1389,133 @@ fn updates_come_from_a_team_server_even_while_a_local_workspace_is_open() {
     );
     assert_eq!(together::pick_update_server(srv(" "), "", [None]), None);
 }
+
+/// My phone, signed in as me with the code my Mac shows: a bare
+/// connection that keeps the last `mine` it heard.
+struct Phone {
+    client: wb_net::Client,
+    mine: Option<serde_json::Value>,
+}
+
+impl Phone {
+    fn pump(&mut self) {
+        for e in self.client.events() {
+            if let wb_net::Event::Mine(m) = e {
+                self.mine = Some(m);
+            }
+        }
+    }
+
+    fn until(&mut self, what: &str, cond: impl Fn(&crate::sync::mine::MineView) -> bool) {
+        let held = wait_until(
+            std::time::Duration::from_secs(15),
+            std::time::Duration::from_millis(20),
+            || {
+                self.pump();
+                self.mine
+                    .as_ref()
+                    .is_some_and(|m| cond(&crate::sync::mine::resolve(m)))
+            },
+        );
+        assert!(held, "timed out waiting for: {} ({:?})", what, self.mine);
+    }
+}
+
+/// What I read, clear from the Inbox or choose for notifications on my Mac
+/// shows on my phone, and what I do on the phone shows on the Mac: the
+/// conversation no longer counts as unread there, nor in the Dock's number.
+#[test]
+fn my_reading_state_goes_between_my_mac_and_my_phone() {
+    use crate::sync::mine::collect;
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "the server keeps my state", |a| a.sync_rt.mine_ok);
+
+    a.ask_phone_link();
+    net_until(&mut a, "a code for my phone", |a| a.sync_rt.phone.is_some());
+    let code = a.sync_rt.phone.as_ref().unwrap().code.clone();
+    let mut phone = Phone {
+        client: wb_net::Client::start(
+            &addr,
+            wb_net::SignIn {
+                device: "phone1".into(),
+                link_code: Some(code),
+                app: Some("test".into()),
+                sync: Some(crate::sync::META_V),
+                ..Default::default()
+            },
+            std::sync::Arc::new(|| {}),
+        ),
+        mine: None,
+    };
+    phone.until("the phone hears what the server keeps", |_| true);
+
+    // on the Mac: clear an Inbox row, read a conversation, turn off DMs
+    let ch = a.data.channels[0].id;
+    a.data.extra.inbox_cleared.push("chat:1:2".into());
+    let read = a.data.channels[0].last_read.max(now_ts()) + 10;
+    a.data.channels[0].last_read = read;
+    a.data.extra.notify.direct = false;
+    a.send_mine();
+    phone.until("the phone gets the Mac's state", |v| {
+        v.inbox_cleared.contains("chat:1:2")
+            && v.read.get(&ch) == Some(&read)
+            && v.settings["notify"]["direct"] == serde_json::json!(false)
+    });
+
+    // someone writes; the Mac has seen everything before it
+    let me = a.data.me;
+    let other = a.data.members.iter().find(|m| m.id != me).unwrap().id;
+    let ts = read + 5;
+    a.data.channels[0]
+        .messages
+        .push(crate::app::slack::new_message(
+            777_001,
+            other,
+            "new".into(),
+            ts,
+        ));
+    let older: Vec<(u64, i64)> = a.data.channels[0]
+        .messages
+        .iter()
+        .filter(|m| m.id != 777_001)
+        .map(|m| (m.id, m.ts))
+        .collect();
+    a.data
+        .extra
+        .chat_seen
+        .insert(ch, SeenIds::of(older.into_iter()));
+    let c = a.data.channels[0].clone();
+    assert_eq!(a.unread_here(&c), 1);
+
+    // on the phone: read it, move the row back, save one for later, mute
+    let known = phone.mine.clone().unwrap();
+    let mut v = crate::sync::mine::resolve(&known);
+    v.read.insert(ch, ts);
+    v.inbox_cleared.clear();
+    v.inbox_later.insert("t:9:9".into());
+    v.replies_read.insert("chat:1:3".into());
+    v.settings
+        .insert("muted_until".into(), serde_json::json!(now_ts() + 3600));
+    let later = chrono::Utc::now().timestamp_millis() + 1000;
+    phone.client.send(wb_net::Msg::Mine {
+        data: collect(&v, &known, later),
+    });
+    net_until(&mut a, "the Mac takes the phone's state", |a| {
+        a.data.extra.inbox_later.contains(&"t:9:9".to_string())
+    });
+    assert!(a.data.extra.inbox_cleared.is_empty(), "the row is back");
+    assert!(a.data.extra.replies_read.contains(&"chat:1:3".to_string()));
+    assert!(a.data.extra.muted_until > now_ts());
+    assert!(!a.data.extra.notify.direct, "the Mac's own choice stays");
+    let c = a.data.channels[0].clone();
+    assert_eq!(c.last_read, ts);
+    assert_eq!(a.unread_here(&c), 0, "read on the phone: read here too");
+
+    // nothing new on the Mac: nothing more goes up
+    let before = a.data.extra.mine_sync.clone();
+    a.send_mine();
+    assert_eq!(a.data.extra.mine_sync, before);
+}

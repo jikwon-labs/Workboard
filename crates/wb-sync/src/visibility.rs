@@ -36,6 +36,8 @@ pub(crate) const PERSONAL_EXTRA: &[&str] = &[
     "slack_under_me",
     "slack_not_under_me",
     "slack_carried",
+    // the last reading state agreed with this person's other devices (mine.rs)
+    "mine_sync",
 ];
 
 /// The copy other people get: personal notes, reminders, settings and

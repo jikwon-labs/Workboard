@@ -321,11 +321,8 @@ fn clicking_the_direct_messages_heading_folds_them_and_shows_the_count_on_it() {
         "the heading carries the count while folded"
     );
 
-    // the + on the heading still starts a message
-    h.click("Sidebar New message");
-    assert!(h.app.new_message_open);
-    h.app.new_message_open = false;
-    h.settle();
+    // no "+" on the heading: the "New message" row is the one way in
+    assert!(!h.has("Sidebar New message"));
 
     h.click("Direct Messages");
     h.settle();

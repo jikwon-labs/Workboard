@@ -870,11 +870,9 @@ impl App {
             } else {
                 dms.iter().map(|d| d.2).sum()
             };
-            let (folded, hs) =
-                self.side_header_folding(ui, "Direct Messages", &[("+", "New message")], total);
-            if hs[0].clicked() {
-                self.new_message_open = true;
-            }
+            // "New message" is the row at the end, not a "+" on the heading
+            // too (two buttons for the same thing)
+            let (folded, _) = self.side_header_folding(ui, "Direct Messages", &[], total);
             // a search or a filter still shows what's in a folded section
             if folded && filter.is_empty() && !self.side_searching() {
                 return;

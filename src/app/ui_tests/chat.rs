@@ -282,6 +282,15 @@ fn sidebar_channels_have_one_add_button() {
 }
 
 #[test]
+fn sidebar_direct_messages_have_one_add_button() {
+    // same for Direct Messages: the "New message" row, no "+" on the heading
+    let mut h = Ui1::new();
+    assert!(!h.has("Sidebar New message"));
+    h.click_side("New message", false);
+    assert!(h.app.new_message_open);
+}
+
+#[test]
 fn sidebar_add_channel_takes_enter_and_lets_go_on_escape() {
     let mut h = Ui1::new();
     let n = h.app.data.channels.len();

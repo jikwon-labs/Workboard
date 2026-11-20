@@ -836,6 +836,27 @@ fn small_window_chat_chip_stays_above_the_messages() {
         h.app.data.channels[ch].messages.push(m);
     }
     h.click("general");
+    // the chip sits under the Channel tab with room below the tab line
+    let chip = h.rect(tr("Add bookmarks, notes, and more"));
+    let tab = h
+        .painted_text(tr("Channel"))
+        .into_iter()
+        .map(|(r, _)| r)
+        .filter(|r| r.bottom() < chip.top())
+        .max_by(|a, b| a.bottom().total_cmp(&b.bottom()))
+        .expect("the Channel tab");
+    assert!(
+        (chip.left() - (tab.left() - 26.0)).abs() <= 1.0,
+        "chip {:?} lines up with the tab {:?}",
+        chip,
+        tab
+    );
+    assert!(
+        chip.top() - tab.bottom() >= 18.0,
+        "chip {:?} clears the tab line under {:?}",
+        chip,
+        tab
+    );
     // at the newest message, then a little way up, then at the top
     chip_clear(&h);
     for _ in 0..12 {

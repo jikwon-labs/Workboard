@@ -1260,8 +1260,11 @@ impl App {
                     }
                 });
             });
+            // the chips start under the Channel tab and clear the line above,
+            // level with the box on the right
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
-                ui.add_space(14.0);
+                ui.add_space(16.0);
                 if ui.add(egui::Button::new(RichText::new(tr("Add bookmarks, notes, and more")).size(13.5).color(t.text2)).corner_radius(14)).clicked() {
                     self.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                 }

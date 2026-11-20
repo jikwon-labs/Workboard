@@ -92,70 +92,90 @@ impl App {
                 }
             });
         }
-        ui.add_space(8.0);
-        // workflows that start from this channel
+        // Workflows and Integrations open windows of their own: full-width
+        // rows that say what each is for. Buttons ending in "..." read as
+        // cut-off text in Korean.
         if is_channel {
-            let w = ui.button(tr("Workflows..."));
-            name_it(&w, "Workflows");
-            if w.clicked() {
-                self.modal = Some(Modal::Workflows {
-                    form: Box::new(super::workflows::WorkflowForm {
-                        channel: Some(cid),
-                        ..Default::default()
-                    }),
-                });
-                return false;
+            ui.add_space(10.0);
+            let mut rows = vec![(
+                "Workflows",
+                "Run steps automatically when a message is posted",
+            )];
+            // webhooks and slash commands: owners and admins on a server
+            if self.on_server() && self.i_manage() {
+                rows.push(("Integrations", "Webhooks and slash commands"));
+            }
+            match link_rows(ui, t, &rows) {
+                Some(0) => {
+                    self.modal = Some(Modal::Workflows {
+                        form: Box::new(super::workflows::WorkflowForm {
+                            channel: Some(cid),
+                            ..Default::default()
+                        }),
+                    });
+                    return false;
+                }
+                Some(_) => {
+                    if let Some(net) = &self.sync_rt.net {
+                        net.send(wb_net::Msg::Integrations);
+                    }
+                    self.modal = Some(Modal::Integrations {
+                        channel: cid,
+                        form: Default::default(),
+                    });
+                    return false;
+                }
+                None => {}
             }
         }
-        // webhooks and slash commands: owners and admins on a server
-        let mut integrations = false;
-        if is_channel && self.on_server() && self.i_manage() {
-            let b = ui.button(tr("Integrations..."));
-            name_it(&b, "Integrations");
-            integrations = b.clicked();
-            if integrations {
-                if let Some(net) = &self.sync_rt.net {
-                    net.send(wb_net::Msg::Integrations);
-                }
-            }
+        ui.add_space(10.0);
+        if ui.button(tr("Mark as read")).clicked() {
+            self.mark_read(cid);
+            self.dirty = true;
         }
-        if integrations {
-            self.modal = Some(Modal::Integrations {
-                channel: cid,
-                form: Default::default(),
-            });
-            return false;
+        // what removes it sits apart, under a line, in red
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(4.0);
+        if !is_channel {
+            // only hides it for me; it comes back with the next message
+            if ui
+                .add(egui::Button::new(
+                    RichText::new(tr("Close conversation")).color(t.danger),
+                ))
+                .on_hover_text(tr(
+                    "Hides it from your sidebar until a new message arrives. Nothing is deleted.",
+                ))
+                .clicked()
+            {
+                self.close_dm(cid);
+                close = true;
+            }
+            return close;
         }
-        ui.horizontal(|ui| {
-            if ui.button(tr("Mark as read")).clicked() {
-                self.mark_read(cid);
-                self.dirty = true;
-            }
-            if !is_channel {
-                // only hides it for me; it comes back with the next message
-                if ui.add(egui::Button::new(RichText::new(tr("Close conversation")).color(t.danger))).on_hover_text(tr("Hides it from your sidebar until a new message arrives. Nothing is deleted.")).clicked() {
-                    self.close_dm(cid);
-                    close = true;
-                }
-                return;
-            }
-            // deleting removes it for everyone: only whoever made it (any
-            // member for channels from before that was kept) or an
-            // admin, asked first, and it goes to my Trash
-            let member = self.may_manage_channel(&self.data.channels[ci]);
-            let ask = egui::Id::new(("delete_channel", cid));
-            let asking = ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false));
-            if !asking {
-                let b = ui.add_enabled(member, egui::Button::new(RichText::new(tr("Delete channel")).color(t.danger)));
-                let b = if member { b } else { b.on_disabled_hover_text(tr("Only whoever made this channel, or an admin, can delete it.")) };
-                if b.clicked() {
-                    ui.data_mut(|d| d.insert_temp(ask, true));
-                }
-            }
-        });
+        // deleting removes it for everyone: only whoever made it (any
+        // member for channels from before that was kept) or an admin,
+        // asked first, and it goes to my Trash
+        let member = self.may_manage_channel(&self.data.channels[ci]);
         let ask = egui::Id::new(("delete_channel", cid));
-        if is_channel && ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false)) {
-            ui.add_space(6.0);
+        let asking = ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false));
+        if !asking {
+            let b = ui.add_enabled(
+                member,
+                egui::Button::new(RichText::new(tr("Delete channel")).color(t.danger)),
+            );
+            let b = if member {
+                b
+            } else {
+                b.on_disabled_hover_text(tr(
+                    "Only whoever made this channel, or an admin, can delete it.",
+                ))
+            };
+            if b.clicked() {
+                ui.data_mut(|d| d.insert_temp(ask, true));
+            }
+        }
+        if ui.data(|d| d.get_temp::<bool>(ask).unwrap_or(false)) {
             let name = self.data.channels[ci].name.clone();
             ui.label(RichText::new(crate::trf!("Delete #{} for everyone? It goes to your Trash with its messages, and restoring it brings it back for the whole team.", name)).color(t.text));
             ui.horizontal(|ui| {
@@ -446,4 +466,76 @@ impl App {
         }
         close
     }
+}
+
+/// A framed group of rows that each open another window: the name, a line
+/// on what it is for, and a ">" at the right, as wide as the dialog.
+/// `rows` are (name, note) in English; returns the index of the one clicked.
+/// Each row is named by its English name for screen readers and tests.
+fn link_rows(ui: &mut Ui, t: &Theme, rows: &[(&str, &str)]) -> Option<usize> {
+    const ROW_H: f32 = 50.0;
+    const R: u8 = 6;
+    let w = ui.available_width();
+    let mut clicked = None;
+    let mut outer = Rect::NOTHING;
+    for (i, (name, note)) in rows.iter().enumerate() {
+        let (r, resp) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::click());
+        ui.add_space(-ui.spacing().item_spacing.y);
+        name_it(&resp, name);
+        outer = outer.union(r);
+        let first = i == 0;
+        let last = i + 1 == rows.len();
+        let p = ui.painter();
+        if resp.hovered() {
+            let corners = egui::CornerRadius {
+                nw: if first { R } else { 0 },
+                ne: if first { R } else { 0 },
+                sw: if last { R } else { 0 },
+                se: if last { R } else { 0 },
+            };
+            p.rect_filled(r.shrink(1.0), corners, crate::widgets::hover_fill(ui));
+        }
+        if !last {
+            p.hline(
+                r.left() + 1.0..=r.right() - 1.0,
+                r.bottom(),
+                Stroke::new(1.0_f32, t.border),
+            );
+        }
+        let x = r.left() + 12.0;
+        p.text(
+            pos2(x, r.top() + 16.0),
+            Align2::LEFT_CENTER,
+            tr(name),
+            FontId::proportional(14.0),
+            t.text,
+        );
+        p.text(
+            pos2(x, r.bottom() - 15.0),
+            Align2::LEFT_CENTER,
+            tr(note),
+            FontId::proportional(12.0),
+            t.text2,
+        );
+        line_icon(
+            p,
+            "chevron_right",
+            pos2(r.right() - 18.0, r.center().y),
+            t.text3,
+        );
+        if resp
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            clicked = Some(i);
+        }
+    }
+    ui.add_space(ui.spacing().item_spacing.y);
+    ui.painter().rect_stroke(
+        outer,
+        R,
+        Stroke::new(1.0_f32, t.border),
+        egui::StrokeKind::Inside,
+    );
+    clicked
 }

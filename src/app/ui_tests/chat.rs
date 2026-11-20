@@ -953,6 +953,48 @@ fn delete_channel_asks_first_and_close_conversation_only_hides() {
     assert!(!h.has("Alex Kim"));
 }
 
+/// Channel settings: Workflows opens from a full-width row that says what
+/// it is for (not a "Workflows..." button that read as cut-off text in
+/// Korean), and Delete channel sits on its own under Mark as read.
+#[test]
+fn channel_settings_open_workflows_from_a_row_and_keep_delete_apart() {
+    let mut h = Ui1::new();
+    let cid = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "website-redesign")
+        .unwrap()
+        .id;
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    h.settle();
+    let row = h.rect("Workflows");
+    let title = h.painted_text("워크플로");
+    let note = h.painted_text("메시지가 올라오면 정해 둔 일을 자동으로 실행");
+    let dots = h.painted_text("워크플로...");
+    let read = h.rect("읽음으로 표시");
+    let delete = h.rect("채널 삭제");
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert!(dots.is_empty(), "no trailing dots");
+    assert!(
+        title.iter().any(|(r, _)| row.contains(r.center())),
+        "the name is in the row"
+    );
+    assert!(
+        note.iter().any(|(r, _)| row.contains(r.center())),
+        "with a line on what it is for"
+    );
+    assert!(
+        row.width() > read.width() * 2.0,
+        "the row is as wide as the dialog"
+    );
+    assert!(read.top() > row.bottom() && delete.top() > read.bottom());
+    h.click("Workflows");
+    assert!(matches!(h.app.modal, Some(Modal::Workflows { .. })));
+}
+
 #[test]
 fn mentions_of_names_with_spaces_are_marked_whole() {
     let h = Ui1::new();

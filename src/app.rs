@@ -887,6 +887,11 @@ impl App {
                 link: String::new(),
             }),
             Some("reminder") => Some(Modal::reminder(String::new(), today())),
+            Some("channel") => data
+                .channels
+                .iter()
+                .find(|c| c.kind == ChannelKind::Channel)
+                .map(|c| Modal::ChannelSettings(c.id)),
             _ => None,
         };
         App {

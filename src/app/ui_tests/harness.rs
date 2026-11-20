@@ -172,8 +172,8 @@ impl Ui1 {
     }
 
     pub(super) fn click(&mut self, name: &str) {
-        if !self.has(name) && self.app.modal.is_some() {
-            // maybe further down a dialog that scrolls
+        if (!self.has(name) || self.clipped_in_dialog(name)) && self.app.modal.is_some() {
+            // maybe further down (or up) a dialog that scrolls
             self.scroll_dialog_to(name);
         }
         self.scroll_into_view(name);
@@ -354,20 +354,52 @@ impl Ui1 {
             .memory(|mem| mem.area_rect(super::menus::modal_window_id(m)))
     }
 
+    /// Whether a control of the open dialog is laid out but scrolled out of
+    /// it, wholly or in part: in the dialog's column, reaching above or below
+    /// what it shows (its title row and its margins stay put, so the top 56
+    /// and bottom 16 points don't count).
+    fn clipped_in_dialog(&self, name: &str) -> bool {
+        let Some(r) = self.try_modal_rect() else {
+            return false;
+        };
+        let Some(c) = self
+            .tree
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, c)| *c)
+        else {
+            return false;
+        };
+        let x = c.center().x;
+        x > r.left()
+            && x < r.right()
+            && (c.top() < r.top() + 56.0 || c.bottom() > r.bottom() - 16.0)
+    }
+
     // turn the mouse wheel over the open dialog until a control in it shows
     pub(super) fn scroll_dialog_to(&mut self, name: &str) {
         for _ in 0..30 {
-            if self.has(name) {
+            if self.has(name) && !self.clipped_in_dialog(name) {
                 break;
             }
             let Some(r) = self.try_modal_rect() else {
                 return;
             };
+            // a notch at a time, more when the control is far off
+            let dy = self.find(name).map_or(-120.0, |p| {
+                let far = (r.center().y - p.y).clamp(-480.0, 480.0);
+                if far.abs() < 120.0 {
+                    120.0_f32.copysign(far)
+                } else {
+                    far
+                }
+            });
             let at = r.center();
             self.frame(vec![egui::Event::PointerMoved(at)]);
             self.frame(vec![egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
-                delta: vec2(0.0, -120.0),
+                delta: vec2(0.0, dy),
                 modifiers: Default::default(),
             }]);
             self.settle();

@@ -330,9 +330,14 @@ final class ClientTests: FakeServerTestCase {
         await until("token registered") { server.registeredPushTokens[a.settings.device] == "a1b2c3" }
         XCTAssertFalse(a.pushedWhileAway, "the server didn't have the token before this welcome")
 
+        // read it where the app does, on each update: the update that
+        // answers this phone's own push right after the welcome resets it
+        var marks: [Bool] = []
         a.disconnect()
+        a.onUpdate = { [weak a] in marks.append(a?.pushedWhileAway ?? false) }
         a.connect()
-        await until("welcomed again") { a.state.isConnected && a.pushedWhileAway }
+        await until("welcomed again") { a.state.isConnected && marks.contains(true) }
+        a.onUpdate = {}
 
         let b = client(url, me: 2)
         await until("connected") { b.state.isConnected }

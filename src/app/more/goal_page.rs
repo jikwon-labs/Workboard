@@ -338,6 +338,20 @@ impl App {
                         }
                         if done {
                             ui.horizontal(|ui| {
+                                let b = ui.add(
+                                    egui::Button::new(
+                                        RichText::new(tr("Share to team chat"))
+                                            .color(Color32::WHITE)
+                                            .strong(),
+                                    )
+                                    .fill(color)
+                                    .corner_radius(10)
+                                    .min_size(vec2(0.0, 36.0)),
+                                );
+                                name_it(&b, "Share to team chat");
+                                if b.clicked() {
+                                    act = Some(PageAct::Share);
+                                }
                                 let b = secondary_button(ui, tr("Set the next goal"));
                                 name_it(&b, "Set the next goal");
                                 if b.clicked() {
@@ -980,6 +994,7 @@ impl App {
             PageAct::DismissBanner => self.goal_banner = None,
             PageAct::ShowDone(v) => self.goal_show_done = v,
             PageAct::NextGoal => self.goal_apply(GoalAct::NewGoal),
+            PageAct::Share => self.open_goal_share(gid),
             PageAct::Delete => {
                 if let Some(g) = self.data.extra.goals.iter().find(|g| g.id == gid) {
                     self.modal = Some(Modal::ConfirmRemove {
@@ -1000,6 +1015,7 @@ enum PageAct {
     DismissBanner,
     ShowDone(Option<(u64, usize)>),
     NextGoal,
+    Share,
     Delete,
 }
 

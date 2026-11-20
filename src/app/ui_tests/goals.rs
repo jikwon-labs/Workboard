@@ -290,3 +290,69 @@ fn goal_milestone_and_risk_notices_can_be_turned_off() {
     assert!(!h.app.data.extra.notify.goal_milestones);
     assert!(!h.app.data.extra.notify.goal_risk);
 }
+
+#[test]
+fn an_achieved_goal_is_shared_to_chat_as_a_card_that_opens_it() {
+    let (mut h, _, b) = two_goals();
+    // someone else helped: they are mentioned
+    let other = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.id != h.app.data.me)
+        .expect("a teammate")
+        .clone();
+    h.app.data.extra.goals[1].record(GoalEvent {
+        ts: now_ts(),
+        who: other.id,
+        what: GoalChange::Created,
+        pct: 0,
+    });
+    h.click("Done Lease signed");
+    h.click("Share from achieved");
+    let Some(Modal::ShareGoal { channel, .. }) = &h.app.modal else {
+        panic!("Share to team chat opens")
+    };
+    let channel = *channel;
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .expect("the general channel")
+        .id;
+    assert_eq!(channel, general, "it starts on the general channel");
+    h.click("Send goal to chat");
+    assert!(h.app.modal.is_none());
+    let c = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == general)
+        .unwrap();
+    let m = c.messages.last().expect("a message");
+    let card = m.goal.as_ref().expect("with the goal's card");
+    assert_eq!(card.goal, b);
+    assert_eq!((card.pct, card.targets, card.targets_done), (100, 1, 1));
+    assert!(
+        m.text.contains(&format!("@{}", other.shown())),
+        "{}",
+        m.text
+    );
+    assert!(m.mentions.contains(&other.id));
+
+    // in the channel the card opens the goal
+    h.app.section = Section::Chat;
+    h.app.chat.open = Some(general);
+    h.settle();
+    h.click("Open goal Office move");
+    assert_eq!(h.app.section, Section::Goals);
+    assert_eq!(h.app.goal_open, Some(b));
+    assert!(
+        h.has("Share to team chat"),
+        "the achieved goal's page offers sharing too"
+    );
+}

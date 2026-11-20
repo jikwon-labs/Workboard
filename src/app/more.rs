@@ -9,6 +9,7 @@ use super::*;
 mod forms;
 mod goal_dialogs;
 mod goal_page;
+mod goal_share;
 mod goals;
 mod inbox;
 mod overview;

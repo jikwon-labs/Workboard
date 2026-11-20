@@ -418,6 +418,10 @@ pub struct Message {
     /// shown in place of the person who set it up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot: Option<String>,
+    /// A goal shared to the conversation from its page ("Share to team
+    /// chat"), as it stood then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<GoalCard>,
 }
 
 /// The message a forwarded one carries: what it said, who wrote it, when
@@ -430,6 +434,29 @@ pub struct Forwarded {
     pub ts: i64,
     #[serde(default)]
     pub text: String,
+}
+
+/// A goal as a message shows it under its text: a copy taken when it was
+/// shared, so the card reads the same after the goal changes.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct GoalCard {
+    /// The goal it came from (opened by "Open goal" while it exists).
+    pub goal: u64,
+    pub name: String,
+    pub color: [u8; 3],
+    pub pct: u8,
+    pub targets: usize,
+    pub targets_done: usize,
+    /// Days before (more than 0) or after (less) the due date it was
+    /// achieved; None without both days.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub early: Option<i64>,
+    /// Days from start to achieved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub days: Option<i64>,
+    /// Who moved it, from its history.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub people: Vec<u64>,
 }
 
 /// A web page as a message shows it under its text.

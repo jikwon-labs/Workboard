@@ -92,6 +92,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     // a huddle message in chat has a Join button
     let id = h.app.data.new_id();
     h.app.data.channels[0].messages.push(Message {
+        goal: None,
         edited: None,
         imported: None,
         preview: None,

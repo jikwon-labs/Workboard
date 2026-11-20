@@ -550,6 +550,7 @@ fn a_huddle_join_gives_up_after_a_while_and_only_its_own_denial_cancels_it() {
 
 fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
     Message {
+        goal: None,
         mentions: vec![],
         id,
         author,
@@ -694,6 +695,7 @@ fn two_dms_with_the_same_people_show_as_one() {
 
 fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
     Message {
+        goal: None,
         mentions: vec![],
         id,
         author,

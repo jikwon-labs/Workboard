@@ -844,6 +844,25 @@ fn goal_screens_have_no_english_left() {
     h.app.modal = Some(Modal::GoalAchieved { id: 802 });
     h.settle();
     texts(&h.shapes, &mut shown);
+    h.app.open_goal_share(802);
+    h.settle();
+    texts(&h.shapes, &mut shown);
+    // the card in the conversation
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    h.app.modal = None;
+    h.app.share_goal(general, 802, "", false);
+    h.app.section = Section::Chat;
+    h.app.chat.open = Some(general);
+    h.settle();
+    texts(&h.shapes, &mut shown);
+    h.app.section = Section::Goals;
     h.app.modal = None;
     h.app.goal_open = None;
     h.app.data.extra.goals.clear();

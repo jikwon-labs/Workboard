@@ -689,6 +689,22 @@ impl App {
         }
         ui.add_space(12.0);
         ui.horizontal(|ui| {
+            let share = ui.add(
+                egui::Button::new(
+                    RichText::new(tr("Share to team chat"))
+                        .color(Color32::WHITE)
+                        .strong(),
+                )
+                .fill(color)
+                .corner_radius(10)
+                .min_size(vec2(0.0, 36.0)),
+            );
+            name_it(&share, "Share from achieved");
+            if share.clicked() {
+                // the share dialog takes this one's place
+                self.open_goal_share(gid);
+                close = true;
+            }
             let next = secondary_button(ui, tr("Set the next goal"));
             name_it(&next, "Next goal from achieved");
             if next.clicked() {

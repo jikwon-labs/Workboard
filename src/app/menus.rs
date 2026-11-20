@@ -219,6 +219,13 @@ pub(super) enum Modal {
     GoalAchieved {
         id: u64,
     },
+    /// Share an achieved goal's card in a channel.
+    ShareGoal {
+        id: u64,
+        channel: u64,
+        text: String,
+        mention: bool,
+    },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -1329,6 +1336,7 @@ impl App {
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
             Modal::NewGoal(_) => tr("New goal").into(),
             Modal::GoalAchieved { .. } => tr("Goal achieved").into(),
+            Modal::ShareGoal { .. } => tr("Share to team chat").into(),
             Modal::Together { .. } => tr("Work together").into(),
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
             Modal::JoinTeam { .. } => tr("Join a team").into(),
@@ -1573,6 +1581,15 @@ impl App {
             Modal::GoalAchieved { id } => {
                 let id = *id;
                 close = self.goal_achieved_body(ui, t, id);
+            }
+            Modal::ShareGoal {
+                id,
+                channel,
+                text,
+                mention,
+            } => {
+                let id = *id;
+                close = self.share_goal_body(ui, t, id, channel, text, mention);
             }
         }
         close

@@ -80,6 +80,8 @@ const THREAD_W: f32 = 360.0;
 
 pub(super) enum ChatAction {
     JoinHuddle(u64),
+    /// "Open goal" on a goal's card.
+    OpenGoal(u64),
     /// Open the Forward window for a message.
     Forward {
         ch: u64,
@@ -2445,6 +2447,11 @@ impl App {
                 if let Some(f) = &m.forwarded {
                     self.forwarded_card(ui, f);
                 }
+                if let Some(gc) = &m.goal {
+                    if let Some(id) = self.goal_chat_card(ui, gc) {
+                        acts.push(ChatAction::OpenGoal(id));
+                    }
+                }
                 if let Some(tid) = m.thread_of {
                     let b = ui.add(
                         egui::Label::new(
@@ -3393,6 +3400,10 @@ impl App {
                         }
                     }
                 }
+                ChatAction::OpenGoal(id) => {
+                    self.section = Section::Goals;
+                    self.goal_open = Some(id);
+                }
                 ChatAction::Forward { ch, msg } => {
                     self.modal = Some(Modal::Forward {
                         ch,
@@ -3438,6 +3449,7 @@ impl App {
                     let picked = std::mem::take(&mut self.chat.picked);
                     let mentions = self.chat_mentions(&text, ch, &picked);
                     let m = Message {
+                        goal: None,
                         edited: None,
                         imported: None,
                         preview: None,
@@ -3793,6 +3805,7 @@ impl App {
                     };
                     let mentions = self.chat_mentions(&text, ch, &picked);
                     let m = Message {
+                        goal: None,
                         edited: None,
                         imported: None,
                         preview: None,

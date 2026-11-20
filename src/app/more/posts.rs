@@ -158,6 +158,7 @@ impl App {
                                             let id = self.data.new_id();
                                             let me = self.data.me;
                                             let m = Message {
+                                                goal: None,
                                                 edited: None,
                                                 imported: None,
                                                 preview: None,

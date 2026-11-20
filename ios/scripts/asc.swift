@@ -139,9 +139,8 @@ func check() async {
 
 func distribute(version: String, since: Date?, groupName: String, notes: String) async {
     // The external group.
-    let encoded = groupName.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
-    let (_, groups) = await call(
-        "GET", "/v1/apps/\(appID)/betaGroups?filter%5Bname%5D=\(encoded)&limit=50")
+    // This endpoint takes no name filter, so match the name here.
+    let (_, groups) = await call("GET", "/v1/apps/\(appID)/betaGroups?limit=50")
     guard
         let group = items(groups).first(where: {
             str($0, "name") == groupName && !(attrs($0)["isInternalGroup"] as? Bool ?? false)

@@ -5,12 +5,21 @@
 # The same exe packed for the team server, Workboard-<version>-windows-x64.zip
 # (version from Cargo.toml), is kept as "Workboard-windows-zip";
 # scripts/publish-windows.sh takes it from there to the server's updates/.
+#
+# Pushes to main don't start it: they come too often. Start it by hand
+# (gh workflow run windows.yml --ref main, or "Run workflow" on GitHub),
+# or push to a windows-* branch. A new run on the same branch cancels the
+# one still going.
 name: Windows
 
 on:
   push:
-    branches: [main, "windows-*"]
+    branches: ["windows-*"]
   workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:

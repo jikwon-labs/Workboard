@@ -5,8 +5,8 @@
 #   UPDATES_DEST=<대상> scripts/publish-windows.sh [Actions 실행 번호]
 #
 # 1. GitHub Actions "Windows" 실행의 artifact Workboard-windows-zip 을 받는다(gh run download).
-#    실행 번호가 없으면 지금 커밋(HEAD)에서 성공한 실행을 쓴다. 그 커밋이 push 돼 실행이
-#    끝나 있어야 한다(gh run list --workflow windows.yml). 이 맥은 Windows 판을 빌드하지 못한다.
+#    실행 번호가 없으면 지금 커밋(HEAD)에서 성공한 실행을 쓴다. main push 로는 실행이 돌지
+#    않으니 push 뒤 gh workflow run windows.yml --ref main 으로 시작해 끝나 있어야 한다. 이 맥은 Windows 판을 빌드하지 못한다.
 #    이미 받아 둔 zip 으로 시험할 때는 ZIPFILE=<zip>.
 # 2. zip 이름이 Cargo.toml 의 버전과 맞는지(Workboard-<버전>-windows-x64.zip), 안에
 #    workboard.exe 가 있는지 보고 build/updates-windows/ 에 둔다.
@@ -41,7 +41,7 @@ else
     SHA="$(git rev-parse HEAD)"
     RUN="$(gh run list --workflow windows.yml --commit "$SHA" --status success --limit 1 \
       --json databaseId --jq '.[0].databaseId // empty')"
-    [ -n "$RUN" ] || fail "커밋 ${SHA:0:7} 에서 성공한 Windows 실행이 없다. push 하고 끝나길 기다리거나(gh run list --workflow windows.yml) 실행 번호를 준다."
+    [ -n "$RUN" ] || fail "커밋 ${SHA:0:7} 에서 성공한 Windows 실행이 없다. gh workflow run windows.yml --ref main 으로 시작해 끝나길 기다리거나(gh run list --workflow windows.yml) 실행 번호를 준다."
   fi
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT

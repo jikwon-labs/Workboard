@@ -4,6 +4,10 @@
 use super::*;
 use egui::Pos2;
 
+/// The red pill at the bottom of the sidebar while unread chats are below.
+pub(super) const UNREAD_PILL: &str = "Unread messages \u{2193}";
+const UNREAD_PILL_KO: &str = "안 읽은 메시지 \u{2193}";
+
 pub(super) struct Ui1 {
     pub(super) ctx: egui::Context,
     pub(super) app: App,
@@ -102,6 +106,13 @@ impl Ui1 {
             .map(|(_, r)| r.center())
     }
 
+    /// Whether the sidebar's "Unread messages" pill covers the point.
+    fn under_pill(&self, p: Pos2) -> bool {
+        self.tree
+            .iter()
+            .any(|(n, r)| (n == UNREAD_PILL || n == UNREAD_PILL_KO) && r.expand(4.0).contains(p))
+    }
+
     pub(super) fn has(&self, name: &str) -> bool {
         self.find(name).is_some()
     }
@@ -111,11 +122,16 @@ impl Ui1 {
         for _ in 0..40 {
             let Some(p) = self.find(name) else { return };
             let bottom = self.size.y - 20.0;
-            if p.y > 40.0 && p.y < bottom {
+            let covered = name != UNREAD_PILL && name != UNREAD_PILL_KO && self.under_pill(p);
+            if p.y > 40.0 && p.y < bottom && !covered {
                 return;
             }
             let at = pos2(p.x, self.size.y / 2.0);
-            let dy = if p.y >= bottom { -120.0 } else { 120.0 };
+            let dy = if p.y >= bottom || covered {
+                -120.0
+            } else {
+                120.0
+            };
             self.frame(vec![egui::Event::PointerMoved(at)]);
             self.frame(vec![egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
@@ -235,10 +251,15 @@ impl Ui1 {
         };
         for _ in 0..30 {
             let r = pick(self);
-            if r.center().y > 40.0 && r.center().y < 880.0 {
+            let covered = self.under_pill(r.center());
+            if r.center().y > 40.0 && r.center().y < 880.0 && !covered {
                 break;
             }
-            let dy = if r.center().y >= 880.0 { -120.0 } else { 120.0 };
+            let dy = if r.center().y >= 880.0 || covered {
+                -120.0
+            } else {
+                120.0
+            };
             self.frame(vec![egui::Event::PointerMoved(pos2(r.center().x, 450.0))]);
             self.frame(vec![egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,

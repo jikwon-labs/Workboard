@@ -746,6 +746,11 @@ struct SideUi {
     search_focus: bool,
     filter: Option<&'static str>,
     search: Option<String>,
+    /// This frame's channel and DM rows that show an unread count, for
+    /// the "Unread messages" pill when some are below the visible part.
+    unread_rows: Vec<Rect>,
+    /// Where the sidebar scrolls to next frame (after a click on that pill).
+    scroll_to: Option<f32>,
 }
 
 impl App {

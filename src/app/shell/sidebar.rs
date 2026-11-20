@@ -47,49 +47,96 @@ impl App {
                 self.sidebar_top(ui, t);
                 ui.add_space(4.0);
                 let filter = self.side.filter.unwrap_or("");
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let tc = t.text2;
-                        let muted = self.data.extra.muted_until > now_ts();
-                        if filter.is_empty() {
-                            self.sidebar_nav(ui, t, tc, muted);
-                            ui.add_space(6.0);
-                            let r = ui.available_rect_before_wrap();
-                            ui.painter().hline(
-                                r.left() + 6.0..=r.right() - 6.0,
-                                r.top(),
-                                Stroke::new(1.0_f32, t.border),
-                            );
+                self.side.unread_rows.clear();
+                let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                if let Some(y) = self.side.scroll_to.take() {
+                    area = area.vertical_scroll_offset(y);
+                }
+                let out = area.show(ui, |ui| {
+                    let tc = t.text2;
+                    let muted = self.data.extra.muted_until > now_ts();
+                    if filter.is_empty() {
+                        self.sidebar_nav(ui, t, tc, muted);
+                        ui.add_space(6.0);
+                        let r = ui.available_rect_before_wrap();
+                        ui.painter().hline(
+                            r.left() + 6.0..=r.right() - 6.0,
+                            r.top(),
+                            Stroke::new(1.0_f32, t.border),
+                        );
 
-                            if !self.hidden("AI Chats") {
-                                let hs = self.side_header(
-                                    ui,
-                                    "AI Chats",
-                                    &[("\u{22EF}", "More actions")],
-                                );
-                                if hs[0].clicked() {
-                                    self.section = Section::Ai;
-                                }
-                                if self.add_row(ui, "Ask, Build, Create").clicked() {
-                                    self.section = Section::Ai;
-                                }
+                        if !self.hidden("AI Chats") {
+                            let hs =
+                                self.side_header(ui, "AI Chats", &[("\u{22EF}", "More actions")]);
+                            if hs[0].clicked() {
+                                self.section = Section::Ai;
                             }
-
-                            self.sidebar_favorites(ui);
+                            if self.add_row(ui, "Ask, Build, Create").clicked() {
+                                self.section = Section::Ai;
+                            }
                         }
 
-                        let ws = self.data.workspace.clone();
-                        self.sidebar_spaces(ui, tc, filter, &ws);
+                        self.sidebar_favorites(ui);
+                    }
 
-                        // Channels
-                        self.sidebar_channels(ui, t, tc, filter, muted, &ws);
+                    let ws = self.data.workspace.clone();
+                    self.sidebar_spaces(ui, tc, filter, &ws);
 
-                        // Direct Messages
-                        self.sidebar_dms(ui, t, filter, muted);
-                        ui.add_space(20.0);
-                    });
+                    // Channels
+                    self.sidebar_channels(ui, t, tc, filter, muted, &ws);
+
+                    // Direct Messages
+                    self.sidebar_dms(ui, t, filter, muted);
+                    ui.add_space(20.0);
+                });
+                self.unread_below(ui, &out);
             });
+    }
+
+    /// A red "Unread messages" pill at the bottom of the sidebar while a
+    /// channel or DM with an unread count is scrolled out of view below;
+    /// clicking it scrolls that row into the middle.
+    fn unread_below(&mut self, ui: &mut Ui, out: &egui::scroll_area::ScrollAreaOutput<()>) {
+        let view = out.inner_rect;
+        let h = 26.0;
+        // a row behind the pill counts as out of view
+        let Some(first) = self
+            .side
+            .unread_rows
+            .iter()
+            .filter(|r| r.center().y > view.bottom() - h - 8.0)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .copied()
+        else {
+            return;
+        };
+        let label = format!("{} \u{2193}", tr("Unread messages"));
+        let g =
+            ui.painter()
+                .layout_no_wrap(label.clone(), FontId::proportional(13.0), Color32::WHITE);
+        let pill = Rect::from_center_size(
+            pos2(view.center().x, view.bottom() - 8.0 - h / 2.0),
+            vec2(g.size().x + 24.0, h),
+        );
+        let resp = ui.interact(pill, ui.id().with("unread_below"), Sense::click());
+        name_it(&resp, &label);
+        let t = self.t();
+        let fill = if resp.hovered() {
+            t.danger.gamma_multiply(0.85)
+        } else {
+            t.danger
+        };
+        ui.painter().rect_filled(pill, h / 2.0, fill);
+        ui.painter()
+            .galley(pill.center() - g.size() / 2.0, g, Color32::WHITE);
+        if resp
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            let y = out.state.offset.y + first.center().y - view.center().y;
+            self.side.scroll_to = Some(y.max(0.0));
+            ui.ctx().request_repaint();
+        }
     }
 
     /// The sidebar's top: Home, the search, filter and close buttons shown on
@@ -708,6 +755,9 @@ impl App {
                     quiet,
                 );
                 self.unread_pill(ui, r.rect, unread);
+                if unread > 0 {
+                    self.side.unread_rows.push(r.rect);
+                }
                 let sr = Rect::from_center_size(
                     r.rect.right_center() - vec2(14.0, 0.0),
                     vec2(20.0, 20.0),
@@ -872,6 +922,9 @@ impl App {
                     false,
                 );
                 self.unread_pill(ui, r.rect, unread);
+                if unread > 0 {
+                    self.side.unread_rows.push(r.rect);
+                }
                 let sr = Rect::from_center_size(
                     r.rect.right_center() - vec2(14.0, 0.0),
                     vec2(20.0, 20.0),

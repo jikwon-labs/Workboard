@@ -2699,3 +2699,74 @@ fn reply_box_shows_no_enter_hint() {
     });
     assert!(!found, "the reply box has no Enter hint");
 }
+
+/// A red "Unread messages" pill sits at the bottom of the sidebar while an
+/// unread DM is scrolled out of view below; clicking it brings the DM into
+/// view and the pill goes away.
+#[test]
+fn unread_pill_at_the_sidebar_bottom_scrolls_to_an_unread_dm_below() {
+    let pill = UNREAD_PILL;
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.section = Section::Home;
+    let me = h.app.data.me;
+    let later = now_ts() + 100;
+    for c in h.app.data.channels.iter_mut() {
+        c.last_read = later;
+    }
+    // the last DM in the sidebar, at the very bottom of the list
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .filter(|c| c.kind == ChannelKind::Direct && h.app.listed(c))
+        .last()
+        .expect("a DM")
+        .clone();
+    let other = dm.members.iter().copied().find(|m| *m != me).unwrap();
+    let name = h.app.data.member(other).unwrap().shown().to_string();
+    let mut m = h
+        .app
+        .data
+        .channels
+        .iter()
+        .flat_map(|c| c.messages.iter())
+        .next()
+        .cloned()
+        .expect("a message somewhere");
+    m.id = h.app.data.new_id();
+    m.author = other;
+    m.ts = later + 5;
+    m.imported = None;
+    let c = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == dm.id)
+        .unwrap();
+    c.messages.push(m);
+    h.settle();
+    let side = Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 560.0));
+    let visible = |h: &Ui1| {
+        h.tree
+            .iter()
+            .any(|(n, r)| *n == name && side.contains(r.center()))
+    };
+    assert!(!visible(&h), "the DM starts below the visible part");
+    let at = h.find(pill).expect("the pill shows while the DM is below");
+    assert!(side.contains(at) && at.y > 400.0, "at the sidebar's bottom");
+    h.click_at(at);
+    h.settle();
+    assert!(visible(&h), "clicking the pill scrolls the DM into view");
+    assert!(!h.has(pill), "and the pill goes away");
+
+    // nothing unread below in a window tall enough to show it all
+    let mut h = Ui1::new();
+    h.app.section = Section::Home;
+    for c in h.app.data.channels.iter_mut() {
+        c.last_read = now_ts() + 100;
+    }
+    h.settle();
+    assert!(!h.has(pill));
+}

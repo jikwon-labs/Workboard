@@ -26,6 +26,9 @@ pub const T: &[(&str, &str)] = &[
     ("Create a Channel", "채널 만들기"),
     ("channel-name", "채널-이름"),
     ("Add Channel", "채널 추가"),
+    // the red pill at the bottom of the sidebar when unread channels or
+    // DMs are scrolled out of view below
+    ("Unread messages", "안 읽은 메시지"),
     // the topic of a channel made with Add Channel
     ("Conversations about {}", "{}에 관한 대화"),
     ("\u{2014} You", "\u{2014} 나"),

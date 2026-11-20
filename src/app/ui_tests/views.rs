@@ -736,6 +736,11 @@ fn calendar_more_opens_the_days_tasks_and_spans_show_every_day() {
     let mut h = Ui1::new();
     let td = today();
     let base = task_named(&h, "Set up analytics dashboard").clone();
+    // only these on the calendar, so the sample tasks don't take the lines
+    for x in h.app.data.tasks.iter_mut() {
+        x.start = None;
+        x.due = None;
+    }
     for k in 0..8 {
         let mut x = base.clone();
         x.id = 9000 + k;
@@ -744,18 +749,23 @@ fn calendar_more_opens_the_days_tasks_and_spans_show_every_day() {
         x.due = Some(td);
         h.app.data.tasks.push(x);
     }
+    // three days inside today's week (weeks start on Sunday): on a Friday or
+    // Saturday a span from today would break onto the next row, and its
+    // one-day piece today would sit under "+N more"
+    let back = (td.weekday().num_days_from_sunday() as i64 - 4).max(0);
+    let first = td - Duration::days(back);
     let mut span = base.clone();
     span.id = 9100;
     span.name = "Three day task".into();
-    span.start = Some(td);
-    span.due = Some(td + Duration::days(2));
+    span.start = Some(first);
+    span.due = Some(first + Duration::days(2));
     h.app.data.tasks.push(span);
     h.click("View Calendar");
     for d in 0..3 {
         assert!(
             h.has(&format!(
                 "Calendar Three day task {}",
-                td + Duration::days(d)
+                first + Duration::days(d)
             )),
             "drawn on day {}",
             d

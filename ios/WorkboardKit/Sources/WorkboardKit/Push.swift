@@ -125,6 +125,10 @@ extension SyncClient {
                 switch ServerMessage(text: text) {
                 case .welcome:
                     try await ws.send(.string(stop))
+                    // what the server sends after welcome (presence, mine...) is
+                    // read and dropped meanwhile, or the answer to the ping waits behind it
+                    let reader = Task { while !Task.isCancelled { _ = try await ws.receive() } }
+                    defer { reader.cancel() }
                     // a ping answered means the server has read the message before it
                     try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
                         ws.sendPing { e in if let e { c.resume(throwing: e) } else { c.resume() } }

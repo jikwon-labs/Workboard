@@ -2749,8 +2749,11 @@ impl App {
             .frame(
                 egui::Frame::new()
                     .fill(t.app_bg)
+                    // a gap from the rail like on the right and bottom: with
+                    // none, the rail's and the card's round top corners met
+                    // and left a notch between them
                     .inner_margin(egui::Margin {
-                        left: 0,
+                        left: 6,
                         right: 6,
                         top: 0,
                         bottom: 6,

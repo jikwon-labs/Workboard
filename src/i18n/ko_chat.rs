@@ -49,6 +49,7 @@ pub const T: &[(&str, &str)] = &[
     ("Start SyncUp", "SyncUp 시작"),
     ("Jump on a voice call or video call", "음성 통화나 영상 통화를 바로 시작합니다"),
     ("Drop files to send", "놓으면 파일을 보냅니다"),
+    ("Drop files to reply", "놓으면 스레드 답글에 넣습니다"),
     // message box
     ("Message", "메시지"),
     ("Ask", "질문"),

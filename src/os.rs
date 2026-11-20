@@ -153,6 +153,50 @@ pub fn wake_input_method() -> bool {
     false
 }
 
+/// Where the pointer is on the screen, in egui points (`ppp` is egui's
+/// pixels per point, `zoom` its zoom factor), or None where that isn't
+/// known. While files are dragged in from Finder or File Explorer the window
+/// gets no mouse moves, so this is how it knows which part they are over.
+#[cfg(all(target_os = "macos", not(test)))]
+pub fn pointer_on_screen(_ppp: f32, zoom: f32) -> Option<(f32, f32)> {
+    #[repr(C)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventCreate(source: *const std::ffi::c_void) -> *mut std::ffi::c_void;
+        fn CGEventGetLocation(event: *const std::ffi::c_void) -> CGPoint;
+        fn CFRelease(cf: *const std::ffi::c_void);
+    }
+    // in points from the top left of the main screen, as the window's place
+    unsafe {
+        let e = CGEventCreate(std::ptr::null());
+        if e.is_null() {
+            return None;
+        }
+        let p = CGEventGetLocation(e);
+        CFRelease(e);
+        Some((p.x as f32 / zoom, p.y as f32 / zoom))
+    }
+}
+
+#[cfg(all(windows, not(test)))]
+pub fn pointer_on_screen(ppp: f32, _zoom: f32) -> Option<(f32, f32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    // in pixels, as the window's place
+    let mut p = POINT::default();
+    unsafe { GetCursorPos(&mut p) }.ok()?;
+    Some((p.x as f32 / ppp, p.y as f32 / ppp))
+}
+
+#[cfg(any(not(any(target_os = "macos", windows)), test))]
+pub fn pointer_on_screen(_ppp: f32, _zoom: f32) -> Option<(f32, f32)> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

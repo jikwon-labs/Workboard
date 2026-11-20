@@ -17,6 +17,8 @@ pub(super) struct Ui1 {
     pub(super) shapes: Vec<egui::epaint::ClippedShape>,
     /// files dropped on the window in the next frame
     pub(super) dropped: Vec<egui::DroppedFile>,
+    /// files being dragged over the window, every frame until cleared
+    pub(super) hovering: Vec<egui::HoveredFile>,
     /// the mouse cursor the last frame asked for
     pub(super) cursor: egui::CursorIcon,
     /// whether the window is in front (false: another app is)
@@ -40,6 +42,7 @@ impl Ui1 {
             size: vec2(w, h),
             shapes: vec![],
             dropped: vec![],
+            hovering: vec![],
             cursor: egui::CursorIcon::Default,
             focused: true,
         };
@@ -59,6 +62,7 @@ impl Ui1 {
             time: Some(self.time),
             events,
             dropped_files: std::mem::take(&mut self.dropped),
+            hovered_files: self.hovering.clone(),
             focused: self.focused,
             ..Default::default()
         };

@@ -533,3 +533,74 @@ fn pictures_look_the_same_under_the_pointer() {
     h.hover(pic);
     assert!(!h.hover_fill_at(pic), "no hover fill on the picture");
 }
+
+#[test]
+fn files_dragged_over_an_open_thread_light_up_only_the_thread() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let parent = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages[0]
+        .id;
+    h.app.chat.thread_open = Some(parent);
+    h.settle();
+    let reply_box = h.rect("Reply composer");
+    let message_box = h.rect("Message composer");
+    let pic = test_picture("thread-drop.png", 60, 40);
+    h.hovering = vec![egui::HoveredFile {
+        path: Some(pic.clone()),
+        ..Default::default()
+    }];
+    let hint_x = |h: &Ui1, text: &str| -> Vec<f32> {
+        h.painted_text(text)
+            .iter()
+            .map(|(r, _)| r.center().x)
+            .collect()
+    };
+    // over the thread: the thread alone says where they go
+    h.frame(vec![egui::Event::PointerMoved(pos2(
+        reply_box.center().x,
+        300.0,
+    ))]);
+    h.frame(vec![]);
+    let x = hint_x(&h, "Drop files to reply");
+    assert_eq!(x.len(), 1, "one box over the thread");
+    assert!(
+        x[0] > message_box.right(),
+        "inside the thread, not the whole window"
+    );
+    assert!(hint_x(&h, "Drop files to send").is_empty());
+    // over the conversation: the conversation alone, the thread left out
+    h.frame(vec![egui::Event::PointerMoved(pos2(
+        message_box.center().x,
+        300.0,
+    ))]);
+    h.frame(vec![]);
+    let x = hint_x(&h, "Drop files to send");
+    assert_eq!(x.len(), 1);
+    assert!(x[0] < reply_box.left(), "the box stops at the thread");
+    assert!(hint_x(&h, "Drop files to reply").is_empty());
+    // let go over the thread: the picture waits in the reply box
+    h.frame(vec![egui::Event::PointerMoved(pos2(
+        reply_box.center().x,
+        300.0,
+    ))]);
+    h.hovering.clear();
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(pic),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    assert_eq!(h.app.chat.thread_files.len(), 1);
+    assert!(h.app.chat.files.is_empty(), "not in the channel's box");
+    assert!(
+        hint_x(&h, "Drop files to reply").is_empty(),
+        "gone once dropped"
+    );
+}

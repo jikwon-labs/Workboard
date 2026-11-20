@@ -1638,16 +1638,14 @@ impl App {
     /// Files dropped on the chat: into the thread box when dropped over the
     /// thread panel, else the channel's.
     pub(super) fn take_dropped(&mut self, ctx: &egui::Context, thread_rect: Option<Rect>) {
-        let (dropped, at) = ctx.input(|i| {
-            (
-                i.raw
-                    .dropped_files
-                    .iter()
-                    .filter_map(|f| f.path.clone())
-                    .collect::<Vec<_>>(),
-                i.pointer.latest_pos(),
-            )
+        let dropped = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect::<Vec<_>>()
         });
+        let at = drag_pointer(ctx);
         // over an open task they belong to the task (see task_window)
         if dropped.is_empty() || self.open_task.is_some() {
             return;
@@ -3108,4 +3106,23 @@ pub(super) fn clean_shared_folder(
         }
     }
     removed
+}
+
+/// Where in the window files dragged in from Finder are. The window gets no
+/// mouse moves while they are dragged, so egui's pointer is wherever the
+/// mouse last was in it; the screen's pointer is asked instead where the OS
+/// can tell (os.rs).
+pub(super) fn drag_pointer(ctx: &egui::Context) -> Option<egui::Pos2> {
+    let zoom = ctx.zoom_factor();
+    let (ppp, inner, last) = ctx.input(|i| {
+        (
+            i.pixels_per_point,
+            i.viewport().inner_rect,
+            i.pointer.latest_pos(),
+        )
+    });
+    match (crate::os::pointer_on_screen(ppp, zoom), inner) {
+        (Some((x, y)), Some(r)) => Some(pos2(x, y) - r.min.to_vec2()),
+        _ => last,
+    }
 }

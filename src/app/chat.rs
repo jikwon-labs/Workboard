@@ -1145,7 +1145,7 @@ impl App {
         let dragging = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
 
         // ---- conversation (header with tabs, side panel, messages, composer)
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
+        let conv = egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 12, top: 8, bottom: 0 }).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_height(30.0);
@@ -1436,26 +1436,18 @@ impl App {
             });
             composer_took(ui, ("chat_composer_h", cid), composer_top);
         });
-        if dragging {
-            let r = ui.max_rect();
-            let p = ui.ctx().layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("drop_hint"),
-            ));
-            p.rect_filled(r.shrink(8.0), 12.0, t.primary.gamma_multiply(0.12));
-            p.rect_stroke(
-                r.shrink(8.0),
-                12.0,
-                Stroke::new(2.0_f32, t.primary),
-                egui::StrokeKind::Inside,
-            );
-            p.text(
-                r.center(),
-                Align2::CENTER_CENTER,
-                tr("Drop files to send"),
-                FontId::proportional(18.0),
-                t.text,
-            );
+        // only the part they will go to lights up: the thread beside the
+        // conversation is a box of its own (a task open over the chat takes
+        // them itself)
+        if dragging && self.open_task.is_none() {
+            // the window gets no mouse moves while files are dragged over it
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(50));
+            let at = super::files::drag_pointer(ui.ctx());
+            match thread_rect.filter(|r| at.is_some_and(|p| r.contains(p))) {
+                Some(r) => drop_hint(ui.ctx(), &t, r, tr("Drop files to reply")),
+                None => drop_hint(ui.ctx(), &t, conv.response.rect, tr("Drop files to send")),
+            }
         }
 
         // mark as read (unless the person just marked it unread and is still
@@ -1756,9 +1748,12 @@ impl App {
                         });
                     return;
                 }
-                egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+                let win = egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
                     self.thread_body(ui, cid, &channel, tid, &parent, true, &mut acts);
                 });
+                if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
+                    drop_hint(ctx, &t, win.response.rect, tr("Drop files to reply"));
+                }
                 // pictures and videos dragged in from Finder go in its reply box
                 let (dropped, close, front) = ctx.input(|i| {
                     (
@@ -3938,4 +3933,26 @@ fn composer_took(ui: &Ui, key: impl std::hash::Hash, top: f32) {
         ui.ctx().data_mut(|d| d.insert_temp(id, h));
         ui.ctx().request_repaint();
     }
+}
+
+/// The box over where files dragged in from Finder will go when let go.
+fn drop_hint(ctx: &egui::Context, t: &Theme, r: Rect, label: &str) {
+    let p = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("drop_hint"),
+    ));
+    p.rect_filled(r.shrink(8.0), 12.0, t.primary.gamma_multiply(0.12));
+    p.rect_stroke(
+        r.shrink(8.0),
+        12.0,
+        Stroke::new(2.0_f32, t.primary),
+        egui::StrokeKind::Inside,
+    );
+    p.text(
+        r.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(18.0),
+        t.text,
+    );
 }

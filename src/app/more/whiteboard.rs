@@ -1,7 +1,43 @@
 // Whiteboards: the canvas with its pen, shapes, sticky notes, pan and zoom,
-// and Undo.
+// and Undo. The bars floating over it are in wb_panels.rs, the list of
+// boards and the templates in wb_library.rs.
 
 use super::*;
+
+/// A whiteboard just made on this screen: its row in the sidebar lights up,
+/// its name field takes the typing focus (the name selected, so typing
+/// replaces it), and while it is empty a card in its middle says it was made
+/// and offers ways to start. Before, a new board was an empty grey box and
+/// people were not sure their click had done anything.
+#[derive(Clone, Debug)]
+pub struct WbNew {
+    pub id: u64,
+    /// Input time of the first frame it was on screen (the light fades from there).
+    pub since: Option<f64>,
+    /// The name field still has to take the focus.
+    pub focus: bool,
+    /// The "how to start" card is still up.
+    pub start: bool,
+    /// The name it was made with: a template renames it only if untouched.
+    pub name: String,
+}
+
+/// Where the board's 0,0 sits in the canvas at the starting view: clear of
+/// the tool bar down the left and the name bar at the top, which float over
+/// the board.
+pub const WB_ORIGIN: egui::Vec2 = egui::Vec2::new(88.0, 84.0);
+
+/// A sticky note's paper: its colour as a tint of the page, so the dark
+/// text on it reads (a full blue or green behind black text did not).
+pub(crate) fn note_fill(t: &Theme, c: [u8; 3]) -> Color32 {
+    let k = if t.dark { 0.42 } else { 0.32 };
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * k).round() as u8;
+    Color32::from_rgb(
+        mix(t.bg.r(), c[0]),
+        mix(t.bg.g(), c[1]),
+        mix(t.bg.b(), c[2]),
+    )
+}
 
 /// What the whiteboard's Undo takes back, newest last. Only my own actions
 /// are kept here, by the id of the stroke or note, so a teammate's stroke
@@ -74,11 +110,7 @@ impl App {
     pub(crate) fn whiteboard_canvas(&mut self, ui: &mut Ui) {
         let t = self.t();
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(t.bg)
-                    .inner_margin(egui::Margin::same(12)),
-            )
+            .frame(egui::Frame::new().fill(t.column_bg))
             .show_inside(ui, |ui| {
                 let Some(wi) = self
                     .wb_open
@@ -93,151 +125,20 @@ impl App {
                     return;
                 };
                 let wid = self.data.extra.whiteboards[wi].id;
-                let mut delete = false;
-                let mut btn_zoom: Option<f32> = None;
-                let mut reset_view = false;
                 if self.sweep.wb_width <= 0.0 {
                     self.sweep.wb_width = 2.5;
                 }
-                // wraps onto a second row in a narrow window
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut self.data.extra.whiteboards[wi].name)
-                                .font(FontId::proportional(18.0))
-                                .frame(false)
-                                .desired_width(200.0),
-                        )
-                        .changed()
-                    {
-                        self.dirty = true;
-                    }
-                    ui.separator();
-                    // the tool in use is outlined; each tool has its own icon
-                    // (the pen and the sticky note shared one emoji)
-                    for (tool, kind, label) in [
-                        (0u8, "pen", "Pen"),
-                        (3, "eraser", "Eraser"),
-                        (1, "sticky", "Sticky note"),
-                        (2, "move", "Move notes"),
-                    ] {
-                        let sel = self.wb_tool == tool;
-                        let text_color = if sel { t.text } else { t.text2 };
-                        if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, text_color, t.text2)
-                            .clicked()
-                        {
-                            self.wb_tool = tool;
-                        }
-                    }
-                    for c in WB_COLORS {
-                        let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
-                        ui.painter().circle_filled(r.center(), 8.0, rgb(c));
-                        hover_ring(ui, &resp, r.shrink(1.0), 9.0);
-                        if self.wb_color == c {
-                            ui.painter()
-                                .circle_stroke(r.center(), 10.0, Stroke::new(1.5_f32, t.text));
-                        }
-                        if resp.clicked() {
-                            self.wb_color = c;
-                        }
-                    }
-                    let wr = ui.add(
-                        egui::DragValue::new(&mut self.sweep.wb_width)
-                            .range(1.0..=16.0)
-                            .speed(0.2)
-                            .max_decimals(1)
-                            .prefix(tr("width ")),
-                    );
-                    name_it(&wr, "Pen width");
-                    ui.separator();
-                    let can_undo = self.sweep.wb_undo.iter().any(|u| u.0 == wid);
-                    if ui
-                        .add_enabled(can_undo, egui::Button::new(tr("Undo")))
-                        .clicked()
-                    {
-                        self.wb_undo(wid);
-                    }
-                    ui.separator();
-                    let zr = ui.button(crate::app::icons::sign_text(true));
-                    crate::app::icons::paint_sign(ui, &zr, true, None);
-                    let zr = zr.on_hover_text(tr("Zoom out"));
-                    name_it(&zr, "Zoom out");
-                    if zr.clicked() {
-                        btn_zoom = Some(1.0 / 1.25);
-                    }
-                    let zoom_now = self.sweep.wb_view.get(&wid).map_or(1.0, |v| v.zoom);
-                    ui.label(
-                        RichText::new(format!("{:.0}%", zoom_now * 100.0))
-                            .color(t.text2)
-                            .small(),
-                    );
-                    let zr = ui.button(crate::app::icons::sign_text(false));
-                    crate::app::icons::paint_sign(ui, &zr, false, None);
-                    let zr = zr.on_hover_text(tr("Zoom in"));
-                    name_it(&zr, "Zoom in");
-                    if zr.clicked() {
-                        btn_zoom = Some(1.25);
-                    }
-                    let rr = ui.button(tr("Reset view")).on_hover_text(crate::os::keys(tr(
-                        "Back to 100% at the board's top left corner. Drag with Space or the middle button, or scroll, to move around; pinch or \u{2318}+scroll to zoom.",
-                    )));
-                    name_it(&rr, "Reset view");
-                    if rr.clicked() {
-                        reset_view = true;
-                    }
-                    // the question belongs to this board only
-                    let asking = self
-                        .sweep
-                        .confirm
-                        .clone()
-                        .and_then(|c| c.strip_suffix(&format!(":{}", wid)).map(String::from));
-                    match asking.as_deref() {
-                        Some("wb_clear") => {
-                            ui.label(RichText::new(tr("Clear the whole board?")).color(t.danger));
-                            if ui.button(tr("Yes")).clicked() {
-                                self.sweep.confirm = None;
-                                let wb = &mut self.data.extra.whiteboards[wi];
-                                wb.strokes.clear();
-                                wb.notes.clear();
-                                self.sweep.wb_undo.retain(|u| u.0 != wid);
-                                self.dirty = true;
-                            }
-                            if ui.button(tr("No")).clicked() {
-                                self.sweep.confirm = None;
-                            }
-                        }
-                        _ => {
-                            if ui.button(tr("Clear")).clicked() {
-                                self.sweep.confirm = Some(format!("wb_clear:{}", wid));
-                            }
-                            // framed like the other buttons in this bar
-                            if ui
-                                .button(RichText::new(tr("Delete")).color(t.danger))
-                                .clicked()
-                            {
-                                delete = true;
-                            }
-                        }
-                    }
-                    let wid = self.data.extra.whiteboards[wi].id;
-                    self.star_toggle(ui, format!("wb:{}", wid));
-                });
+                // the board fills the whole page; its bars float over it
                 let (rect, resp) =
                     ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
                 name_it(&resp, "Whiteboard canvas");
                 crate::widgets::no_pointer(&resp);
-                let origin = rect.min;
+                let origin = rect.min + WB_ORIGIN;
                 // pan and zoom: Space or middle-button drag and two-finger
                 // scroll move the view; pinch, Cmd+scroll and the buttons zoom
                 let mut view = self.sweep.wb_view.get(&wid).copied().unwrap_or_default();
-                if reset_view {
-                    view = WbView::default();
-                }
-                if let Some(f) = btn_zoom {
-                    view.zoom_at(origin, rect.center(), f);
-                }
-                let space = !ui.ctx().wants_keyboard_input()
-                    && ui.input(|i| i.key_down(egui::Key::Space));
+                let space =
+                    !ui.ctx().wants_keyboard_input() && ui.input(|i| i.key_down(egui::Key::Space));
                 let panning = resp.dragged_by(egui::PointerButton::Middle)
                     || (space && resp.dragged_by(egui::PointerButton::Primary));
                 if panning {
@@ -256,9 +157,8 @@ impl App {
                     };
                 }
                 if ui.rect_contains_pointer(rect) {
-                    let (zoom, scroll, at) = ui.input(|i| {
-                        (i.zoom_delta(), i.smooth_scroll_delta, i.pointer.hover_pos())
-                    });
+                    let (zoom, scroll, at) = ui
+                        .input(|i| (i.zoom_delta(), i.smooth_scroll_delta, i.pointer.hover_pos()));
                     if zoom != 1.0 {
                         if let Some(at) = at {
                             view.zoom_at(origin, at, zoom);
@@ -274,18 +174,14 @@ impl App {
                         egui::CursorIcon::Grab
                     });
                 }
-                if view == WbView::default() {
-                    self.sweep.wb_view.remove(&wid);
-                } else {
-                    self.sweep.wb_view.insert(wid, view);
-                }
+                self.set_wb_view(wid, view);
                 let z = view.zoom;
                 let p = ui.painter_at(rect);
-                p.rect_filled(rect, 8.0, t.column_bg);
+                p.rect_filled(rect, 0.0, t.column_bg);
                 // dot grid, moving with the board
                 let step = 24.0 * z;
                 if step >= 6.0 {
-                    let off = view.pan;
+                    let off = WB_ORIGIN + view.pan;
                     let first = |lo: f32, o: f32| lo + (o.rem_euclid(step));
                     let mut y = first(rect.top(), off.y);
                     while y < rect.bottom() {
@@ -302,8 +198,11 @@ impl App {
                 self.data.fix_board_ids();
                 let wb = &mut self.data.extra.whiteboards[wi];
                 for s in &wb.strokes {
-                    let pts: Vec<egui::Pos2> =
-                        s.points.iter().map(|q| view.to_screen(origin, *q)).collect();
+                    let pts: Vec<egui::Pos2> = s
+                        .points
+                        .iter()
+                        .map(|q| view.to_screen(origin, *q))
+                        .collect();
                     p.add(egui::Shape::line(
                         pts,
                         Stroke::new(s.width * z, rgb(s.color)),
@@ -317,8 +216,13 @@ impl App {
                     // every widget of a note takes its id from the note, so
                     // notes skipped off screen don't hand their ids (and the
                     // typing focus) to another note
-                    let key = if n.id != 0 { n.id } else { (1 << 63) | i as u64 };
-                    let r = Rect::from_min_size(view.to_screen(origin, n.pos), vec2(160.0, 120.0) * z);
+                    let key = if n.id != 0 {
+                        n.id
+                    } else {
+                        (1 << 63) | i as u64
+                    };
+                    let r =
+                        Rect::from_min_size(view.to_screen(origin, n.pos), vec2(160.0, 120.0) * z);
                     // notes off the visible part of the board are not drawn
                     if !r.intersects(rect) {
                         continue;
@@ -328,7 +232,7 @@ impl App {
                         4.0 * z,
                         Color32::from_black_alpha(25),
                     );
-                    p.rect_filled(r, 4.0 * z, rgb(n.color).gamma_multiply(0.35).to_opaque());
+                    p.rect_filled(r, 4.0 * z, note_fill(&t, n.color));
                     let inner =
                         Rect::from_min_max(r.min + vec2(8.0, 18.0) * z, r.max - vec2(8.0, 8.0) * z);
                     let mut child = ui.new_child(
@@ -362,7 +266,11 @@ impl App {
                         );
                     }
                     if self.wb_tool == 2 && !space {
-                        let h = ui.interact(r.intersect(rect), ui.id().with(("note", wid, key)), Sense::drag());
+                        let h = ui.interact(
+                            r.intersect(rect),
+                            ui.id().with(("note", wid, key)),
+                            Sense::drag(),
+                        );
                         if h.drag_started() {
                             move_from = Some((n.id, n.pos));
                         }
@@ -371,11 +279,16 @@ impl App {
                         }
                     }
                     // a colour dot along the note's top edge recolours it
-                    let dot =
-                        Rect::from_center_size(r.left_top() + vec2(12.0, 10.0) * z, vec2(14.0, 14.0));
+                    let dot = Rect::from_center_size(
+                        r.left_top() + vec2(12.0, 10.0) * z,
+                        vec2(14.0, 14.0),
+                    );
                     if rect.contains_rect(dot) {
-                        let dr =
-                            ui.interact(dot, ui.id().with(("note_color", wid, key)), Sense::click());
+                        let dr = ui.interact(
+                            dot,
+                            ui.id().with(("note_color", wid, key)),
+                            Sense::click(),
+                        );
                         name_it(&dr, &format!("Note colour {}", i + 1));
                         p.circle_filled(dot.center(), 5.0, rgb(n.color));
                         hover_ring(ui, &dr, dot.shrink(1.0), 6.0);
@@ -417,8 +330,10 @@ impl App {
                         );
                     }
                     // a small x on the corner deletes just this note
-                    let xr =
-                        Rect::from_center_size(r.right_top() + vec2(-9.0, 9.0) * z, vec2(16.0, 16.0));
+                    let xr = Rect::from_center_size(
+                        r.right_top() + vec2(-9.0, 9.0) * z,
+                        vec2(16.0, 16.0),
+                    );
                     if rect.contains_rect(xr) {
                         let x = ui.interact(xr, ui.id().with(("note_x", wid, key)), Sense::click());
                         hover_bg(ui, &x, xr, 4.0);
@@ -514,11 +429,7 @@ impl App {
                                     id,
                                     pos: [local.x - 80.0, local.y - 60.0],
                                     text: String::new(),
-                                    color: if self.wb_color == [32, 32, 32] {
-                                        [0xf8, 0xae, 0x00]
-                                    } else {
-                                        self.wb_color
-                                    },
+                                    color: super::wb_panels::sticky_color(self.wb_color),
                                 });
                                 self.sweep.wb_undo.push((wid, WbUndo::Note(id)));
                                 self.dirty = true;
@@ -544,15 +455,19 @@ impl App {
                         _ => {}
                     }
                 }
-                if delete {
-                    let w = &self.data.extra.whiteboards[wi];
-                    self.modal = Some(Modal::ConfirmRemove {
-                        kind: "whiteboard",
-                        id: w.id,
-                        name: w.name.clone(),
-                    });
-                }
+                // drawn last, so they sit on top of the board and take the
+                // clicks over them
+                self.wb_panels(ui, rect, origin, wi);
             });
+    }
+
+    /// Keeps a board's view, forgetting it when it is the starting one.
+    pub(crate) fn set_wb_view(&mut self, wid: u64, view: WbView) {
+        if view == WbView::default() {
+            self.sweep.wb_view.remove(&wid);
+        } else {
+            self.sweep.wb_view.insert(wid, view);
+        }
     }
 
     /// Takes back the last pen stroke, note, note removal, note move or erasing on a board.

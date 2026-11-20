@@ -203,7 +203,6 @@ pub const T: &[(&str, &str)] = &[
     // goals
     ("Nobody", "없음"),
     // whiteboards
-    ("width ", "굵기 "),
     ("Eraser", "지우개"),
     ("Clear the whole board?", "보드 전체를 지울까요?"),
     ("Reset view", "보기 초기화"),

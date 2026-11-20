@@ -4,7 +4,6 @@
 pub const T: &[(&str, &str)] = &[
     // hub sidebars (hubs.rs)
     ("+  Create", "+  만들기"),
-    ("Back to Home", "홈으로 돌아가기"),
     ("  Favorites", "  즐겨찾기"),
     ("  Popular Wikis", "  인기 위키"),
     ("Star a Doc to see it here", "별표한 문서가 여기에 보입니다"),
@@ -66,9 +65,6 @@ pub const T: &[(&str, &str)] = &[
     ("AI Personal Center", "AI 개인 센터"),
     ("Improve your performance and career with AI cards", "AI 카드로 성과와 커리어를 높입니다"),
     ("Start from scratch", "처음부터 시작"),
-    ("Your Whiteboards", "내 화이트보드"),
-    ("Choose a Whiteboard template", "화이트보드 템플릿 선택"),
-    ("Create Whiteboards to map out project plans and brainstorm feature\nconcepts, on your own or with your team.", "화이트보드로 프로젝트 계획을 그리고 기능 아이디어를 모으세요.\n혼자서도, 팀과 함께도 쓸 수 있습니다."),
     ("Organizational Chart", "조직도"),
     ("Visualize your team structure", "팀 구조를 한눈에 봅니다"),
     ("Action Plan", "실행 계획"),

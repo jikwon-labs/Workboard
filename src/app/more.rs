@@ -12,6 +12,8 @@ mod inbox;
 mod overview;
 mod posts;
 mod search;
+mod wb_library;
+mod wb_panels;
 mod whiteboard;
 
 // for tests that name them `more::form_answers` and `more::Hit`
@@ -19,7 +21,10 @@ mod whiteboard;
 pub use forms::form_answers;
 #[cfg(test)]
 pub use search::Hit;
-pub use whiteboard::{WbUndo, WbView};
+pub use whiteboard::{WbNew, WbUndo, WbView};
+// for tests that place the pointer on the board
+#[cfg(test)]
+pub use whiteboard::{WB_COLORS, WB_ORIGIN};
 
 /// Screen state of the app pages (not saved).
 #[derive(Default)]
@@ -45,6 +50,8 @@ pub struct SweepUi {
     pub wb_drawing: Option<(u64, u64)>,
     /// Each whiteboard's pan and zoom on screen (not saved).
     pub wb_view: HashMap<u64, WbView>,
+    /// The whiteboard just made here, shown as new for a moment.
+    pub wb_new: Option<WbNew>,
     /// The form `form_fill` holds answers for.
     pub form_for: Option<u64>,
     pub form_error: Option<String>,

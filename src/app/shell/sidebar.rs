@@ -16,24 +16,31 @@ impl App {
             .count()
     }
 
+    /// The thin strip a closed sidebar leaves (Home and the app hubs alike):
+    /// its "»" opens the sidebar again, as Cmd+\ does.
+    pub(crate) fn collapsed_sidebar(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        egui::SidePanel::left("sidebar_c")
+            .exact_width(40.0)
+            .resizable(false)
+            .frame(side_panel_frame(&t, egui::Margin::same(6)))
+            .show_inside(ui, |ui| {
+                let r = ui
+                    .add(ghost(egui::Button::new(
+                        RichText::new("\u{00BB}").size(16.0),
+                    )))
+                    .on_hover_text(tr("Open sidebar"));
+                name_it(&r, "Open sidebar");
+                if r.clicked() {
+                    self.sidebar_collapsed = false;
+                }
+            });
+    }
+
     pub(crate) fn sidebar(&mut self, ui: &mut Ui) {
         let t = self.t();
         if self.sidebar_collapsed {
-            egui::SidePanel::left("sidebar_c")
-                .exact_width(40.0)
-                .resizable(false)
-                .frame(side_panel_frame(&t, egui::Margin::same(6)))
-                .show_inside(ui, |ui| {
-                    if ui
-                        .add(ghost(egui::Button::new(
-                            RichText::new("\u{00BB}").size(16.0),
-                        )))
-                        .on_hover_text(tr("Open sidebar"))
-                        .clicked()
-                    {
-                        self.sidebar_collapsed = false;
-                    }
-                });
+            self.collapsed_sidebar(ui);
             return;
         }
         // App hubs (hubs.rs) reuse this id, so they keep the same width.

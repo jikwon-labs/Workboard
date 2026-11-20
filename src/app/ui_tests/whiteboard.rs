@@ -2,6 +2,7 @@
 // and a teammate's changes arriving mid-edit.
 
 use super::*;
+use crate::app::more::WB_ORIGIN;
 
 /// A whiteboard on a team (a server that isn't connected), open on screen,
 /// with three strokes and two notes the team already knows.
@@ -122,9 +123,11 @@ fn whiteboard_notes_delete_undo_and_clear_asks() {
     assert!(board(&h).notes.is_empty());
     h.click("Undo");
     assert_eq!(board(&h).notes.len(), 1, "undo brings the note back");
-    h.click("Clear");
+    // Clear and Delete wait in the board menu, away from the zoom buttons
+    h.click("Board menu");
+    h.click("Clear board");
     assert_eq!(board(&h).strokes.len(), 1, "Clear asks first");
-    h.click("Yes");
+    h.click("Clear");
     let b = board(&h);
     assert!(
         b.strokes.is_empty() && b.notes.is_empty(),
@@ -133,7 +136,8 @@ fn whiteboard_notes_delete_undo_and_clear_asks() {
         b.notes.len(),
         h.app.sweep.confirm
     );
-    h.click("Delete");
+    h.click("Board menu");
+    h.click("Delete whiteboard");
     assert!(
         matches!(
             h.app.modal,
@@ -287,7 +291,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
     // Cmd+scroll zooms at the pointer
     let at = canvas.center() + vec2(100.0, 50.0);
     h.frame(vec![egui::Event::PointerMoved(at)]);
-    let before = view(&h).to_board(canvas.min, at);
+    let before = view(&h).to_board(canvas.min + WB_ORIGIN, at);
     h.frame(vec![egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
         delta: vec2(0.0, 5.0),
@@ -296,7 +300,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
     h.settle();
     let v = view(&h);
     assert!(v.zoom > 1.0, "zoomed in: {}", v.zoom);
-    let after = v.to_board(canvas.min, at);
+    let after = v.to_board(canvas.min + WB_ORIGIN, at);
     assert!((before[0] - after[0]).abs() < 0.5 && (before[1] - after[1]).abs() < 0.5);
     // a pen stroke is stored in board coordinates
     h.app.wb_tool = 0;
@@ -304,7 +308,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
     let to = from + vec2(80.0, 40.0);
     h.drag_by(from, to);
     let s = board(&h).strokes.last().cloned().expect("a stroke");
-    let want = v.to_board(canvas.min, from);
+    let want = v.to_board(canvas.min + WB_ORIGIN, from);
     assert!((s.points[0][0] - want[0]).abs() < 2.0 && (s.points[0][1] - want[1]).abs() < 2.0);
     // the middle button pans and doesn't draw
     let n = board(&h).strokes.len();
@@ -515,7 +519,7 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
     h.app.wb_tool = 2;
     h.settle();
     let view = h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
-    let grab = view.to_screen(canvas.min, [at0[0] + 80.0, at0[1] + 4.0]);
+    let grab = view.to_screen(canvas.min + WB_ORIGIN, [at0[0] + 80.0, at0[1] + 4.0]);
     h.drag_by(grab, grab + vec2(40.0, 30.0));
     let moved = board_of(&h, wid)
         .notes
@@ -662,4 +666,178 @@ fn typing_in_a_note_keeps_going_to_it_after_scrolling_the_board() {
     );
     assert_eq!(text(&h, 7001), "Mid");
     assert_eq!(text(&h, 7000), "Top");
+}
+
+/// Opens the Whiteboards page from the rail.
+fn open_whiteboards(h: &mut Ui1) {
+    h.click("Rail More");
+    h.click("Whiteboards");
+    assert_eq!(h.app.section, Section::Whiteboards);
+}
+
+/// The hub sidebar's "«" looks like closing the sidebar, so it closes it
+/// (it used to go Home); the "»" strip it leaves opens it again.
+#[test]
+fn hub_sidebar_close_button_closes_it_and_the_strip_opens_it() {
+    let mut h = Ui1::new();
+    open_whiteboards(&mut h);
+    assert!(h.has("All Whiteboards"));
+    h.click("Close sidebar");
+    assert!(h.app.sidebar_collapsed);
+    assert_eq!(h.app.section, Section::Whiteboards, "still on Whiteboards");
+    assert!(!h.has("All Whiteboards"), "the sidebar is closed");
+    h.click("Open sidebar");
+    assert!(!h.app.sidebar_collapsed);
+    assert!(h.has("All Whiteboards"));
+}
+
+/// Whiteboards has no "+ Create" button by its title any more: boards are
+/// made from the "New whiteboard" row above the list of boards. A board
+/// just made shows it was made: its row is in the list, its name is ready
+/// to type over, and a card offers ways to start until one is picked.
+#[test]
+fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
+    let mut h = Ui1::new();
+    open_whiteboards(&mut h);
+    assert!(!h.has("Create in Whiteboards"));
+    assert!(!h.has("New in Whiteboards"));
+    h.click("New whiteboard");
+    let wid = h.app.wb_open.expect("a board was made and opened");
+    let made = board_of(&h, wid).name;
+    assert!(h.has(&made), "its row is in the sidebar");
+    assert!(h.has("Draw with the pen"), "the card says how to start");
+    let name_id = egui::Id::new(("wb_name", wid));
+    assert!(
+        h.ctx.memory(|m| m.has_focus(name_id)),
+        "the name has the focus"
+    );
+    // the whole name is selected, so typing replaces it
+    h.type_text("Roadmap");
+    assert_eq!(board_of(&h, wid).name, "Roadmap");
+    // a template fills it, keeping the name typed
+    h.click("Action Plan");
+    let b = board_of(&h, wid);
+    assert_eq!(b.notes.len(), 5);
+    assert_eq!(b.name, "Roadmap", "a name already typed stays");
+    assert!(!h.has("Draw with the pen"), "the card has gone");
+
+    // an untouched name takes the template's
+    h.click("New whiteboard");
+    let wid2 = h.app.wb_open.unwrap();
+    assert_ne!(wid, wid2);
+    h.click("Flow Chart");
+    let b = board_of(&h, wid2);
+    assert_eq!(b.name, "Flow Chart");
+    assert_eq!(b.notes.len(), 4);
+
+    // picking a way to draw puts the card away and chooses the tool
+    h.click("New whiteboard");
+    h.app.wb_tool = 2;
+    h.settle();
+    h.click("Draw with the pen");
+    assert_eq!(h.app.wb_tool, 0);
+    assert!(!h.has("Draw with the pen"));
+}
+
+/// The tools are down the left; the bar along the bottom shows only what
+/// the chosen tool can be set to.
+#[test]
+fn each_whiteboard_tool_shows_its_own_settings() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    h.app.sweep.wb_new = None;
+    h.settle();
+    h.click("Pen");
+    assert_eq!(h.app.wb_tool, 0);
+    assert!(h.has("Pen width"));
+    assert!(h.has("Colour 6"), "six pen colours");
+    h.click("Colour 3");
+    assert_eq!(h.app.wb_color, crate::app::more::WB_COLORS[2]);
+    h.click("Sticky note");
+    assert_eq!(h.app.wb_tool, 1);
+    assert!(!h.has("Pen width"), "no width for a note");
+    assert!(h.has("Colour 5") && !h.has("Colour 6"), "no black paper");
+    h.click("Eraser");
+    assert_eq!(h.app.wb_tool, 3);
+    assert!(!h.has("Colour 1"));
+    h.click("Move notes");
+    assert_eq!(h.app.wb_tool, 2);
+}
+
+/// The bars float over the board: pressing on one does not draw under it.
+#[test]
+fn drawing_does_not_start_on_a_floating_bar() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    h.app.sweep.wb_new = None;
+    h.app.wb_tool = 0;
+    h.settle();
+    let wid = h.app.wb_open.unwrap();
+    // from the gap between the tool bar's buttons, across the board
+    let pen = h.rect("Pen");
+    let from = pos2(pen.center().x, pen.bottom() + 2.0);
+    h.drag_by(from, from + vec2(300.0, 40.0));
+    assert!(board_of(&h, wid).strokes.is_empty());
+    // on the board itself it draws
+    let canvas = h.rect("Whiteboard canvas");
+    h.drag_by(canvas.center(), canvas.center() + vec2(60.0, 30.0));
+    assert_eq!(board_of(&h, wid).strokes.len(), 1);
+}
+
+/// The zoom in the top right bar goes back to 100% when pressed, and Reset
+/// view goes back to the starting view.
+#[test]
+fn whiteboard_zoom_goes_back_to_100_percent() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    h.app.sweep.wb_new = None;
+    h.settle();
+    let wid = h.app.wb_open.unwrap();
+    let view = |h: &Ui1| h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+    // moved away from the start first
+    let canvas = h.rect("Whiteboard canvas");
+    h.frame(vec![egui::Event::PointerMoved(canvas.center())]);
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(-60.0, -40.0),
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    assert!(view(&h).pan != egui::Vec2::ZERO);
+    h.click("Zoom in");
+    h.click("Zoom in");
+    assert!((view(&h).zoom - 1.5625).abs() < 1e-3);
+    h.click("Zoom to 100%");
+    assert!((view(&h).zoom - 1.0).abs() < 1e-3);
+    assert!(
+        view(&h).pan != egui::Vec2::ZERO,
+        "100% keeps the place on the board"
+    );
+    h.click("Reset view");
+    assert_eq!(view(&h), crate::app::more::WbView::default());
+}
+
+/// With no board open the page shows the templates and a card for each
+/// board; a card opens its board and its star adds it to Favorites.
+#[test]
+fn whiteboard_list_shows_a_card_for_each_board() {
+    let mut h = Ui1::new();
+    open_whiteboards(&mut h);
+    assert!(h.has("Start from scratch"));
+    assert!(h.has("Root Cause Analysis"));
+    h.click("Action Plan");
+    let wid = h.app.wb_open.unwrap();
+    h.click("All Whiteboards");
+    assert_eq!(h.app.wb_open, None, "back to the list");
+    let key = format!("Star wb:{}", wid);
+    h.click(&key);
+    assert!(h.app.data.extra.starred.contains(&format!("wb:{}", wid)));
+    assert_eq!(h.app.wb_open, None, "the star does not open the board");
+    // its card (drawn after the template card and the sidebar row of the
+    // same name) opens it
+    h.click("Action Plan");
+    assert_eq!(h.app.wb_open, Some(wid));
 }

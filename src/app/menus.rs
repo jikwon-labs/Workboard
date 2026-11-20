@@ -947,12 +947,22 @@ impl App {
     pub(super) fn new_whiteboard(&mut self) {
         let id = self.data.new_id();
         let n = self.data.extra.whiteboards.len() + 1;
+        let name = crate::trf!("Whiteboard {}", n);
         self.data.extra.whiteboards.push(Whiteboard {
             id,
-            name: crate::trf!("Whiteboard {}", n),
+            name: name.clone(),
             strokes: vec![],
             notes: vec![],
             owner: self.data.me,
+        });
+        // shown as just made: lit in the sidebar, the name ready to type
+        // over, and a card in the middle of the empty board
+        self.sweep.wb_new = Some(crate::app::more::WbNew {
+            id,
+            since: None,
+            focus: true,
+            start: true,
+            name,
         });
         self.wb_open = Some(id);
         self.section = Section::Whiteboards;

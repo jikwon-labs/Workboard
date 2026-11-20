@@ -923,7 +923,7 @@ impl App {
                 .map(|c| Modal::ChannelSettings(c.id)),
             _ => None,
         };
-        App {
+        let mut app = App {
             data,
             loc,
             view,
@@ -1089,7 +1089,32 @@ impl App {
             lang_choice,
             reminder_about: (None, None),
             link_pending: None,
+        };
+        // for screenshots of the whiteboard page: --whiteboard new (a board
+        // just made), <template name> (a board made from it), or list (a few
+        // boards and the page that lists them)
+        if let Some(w) = arg("--whiteboard") {
+            let made: &[&str] = match w.as_str() {
+                "list" => &[
+                    "Action Plan",
+                    "Customer Journey Map",
+                    "Organizational Chart",
+                    "new",
+                ],
+                _ => &[w.as_str()],
+            };
+            for m in made {
+                app.new_whiteboard();
+                if let Some(id) = app.wb_open.filter(|_| *m != "new") {
+                    app.wb_fill_template(id, m);
+                }
+            }
+            if w == "list" {
+                app.wb_open = None;
+                app.sweep.wb_new = None;
+            }
         }
+        app
     }
 
     fn t(&self) -> Theme {

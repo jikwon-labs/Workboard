@@ -9,6 +9,18 @@ use super::*;
 /// `dash_open` for the built-in Workspace overview (not a saved dashboard).
 pub(super) const WORKSPACE_OVERVIEW: u64 = 0;
 
+/// What a hub sidebar offers beside its title for making something new.
+#[derive(Clone, Copy, PartialEq)]
+enum HubNew {
+    /// A filled "+ Create" button.
+    Create,
+    /// A small framed "+".
+    Plus,
+    /// Nothing there: the hub makes new things from its own rows
+    /// (Whiteboards has a "New whiteboard" row above its boards).
+    None,
+}
+
 /// A template card as in the galleries: round coloured icon (`glyph` is a
 /// line icon kind, or "+"), title, description.
 fn gallery_card(
@@ -126,6 +138,7 @@ impl App {
     }
 
     /// The sidebar used by every app hub. Returns (clicked item, plus clicked).
+    /// Closed (its "«", or Cmd+\), it leaves the same "»" strip as Home's.
     fn hub_sidebar(
         &mut self,
         ui: &mut Ui,
@@ -133,11 +146,15 @@ impl App {
         title: &str,
         items: &[(&str, &str, Option<usize>)],
         selected: u8,
-        create_button: bool,
+        new: HubNew,
     ) -> (Option<u8>, bool) {
         let t = self.t();
         let mut clicked = None;
         let mut plus = false;
+        if self.sidebar_collapsed {
+            self.collapsed_sidebar(ui);
+            return (None, false);
+        }
         // The same id as the Home and Chat sidebar (`sidebar` in
         // shell/sidebar.rs), so one dragged width applies everywhere.
         egui::SidePanel::left("sidebar")
@@ -155,7 +172,7 @@ impl App {
                     FontId::proportional(17.0),
                     t.text,
                 );
-                if create_button {
+                if new == HubNew::Create {
                     let br = Rect::from_min_size(
                         pos2(hr.right() - 80.0, hr.center().y - 14.0),
                         vec2(80.0, 28.0),
@@ -179,7 +196,7 @@ impl App {
                         t.on_primary,
                     );
                     plus |= b.clicked();
-                } else {
+                } else if new == HubNew::Plus {
                     let br = Rect::from_center_size(
                         pos2(hr.right() - 14.0, hr.center().y),
                         vec2(28.0, 28.0),
@@ -199,12 +216,18 @@ impl App {
                 }
                 let cr = Rect::from_center_size(
                     pos2(
-                        hr.right() - (if create_button { 100.0 } else { 44.0 }),
+                        hr.right()
+                            - match new {
+                                HubNew::Create => 100.0,
+                                HubNew::Plus => 44.0,
+                                HubNew::None => 14.0,
+                            },
                         hr.center().y,
                     ),
                     vec2(24.0, 24.0),
                 );
                 let c = ui.interact(cr, ui.id().with("hub_collapse"), Sense::click());
+                name_it(&c, "Close sidebar");
                 if c.hovered() {
                     ui.painter().rect_filled(cr, 5.0, t.row_selected);
                 }
@@ -215,8 +238,10 @@ impl App {
                     FontId::proportional(16.0),
                     t.text2,
                 );
-                if c.on_hover_text(tr("Back to Home")).clicked() {
-                    self.section = Section::Home;
+                // it looks like closing the sidebar, so it does that (it
+                // used to go back Home, which the rail already does)
+                if c.on_hover_text(tr("Close sidebar")).clicked() {
+                    self.sidebar_collapsed = true;
                 }
                 ui.add_space(4.0);
                 for (i, (icon, label, count)) in items.iter().enumerate() {
@@ -349,6 +374,9 @@ impl App {
                             }
                         }
                     }
+                }
+                if id == "wb" {
+                    self.wb_sidebar_boards(ui);
                 }
                 if id == "docs" {
                     ui.add_space(14.0);
@@ -508,7 +536,7 @@ impl App {
                 self.count_doc_view(id, now_ts());
             }
         }
-        let (clicked, plus) = self.hub_sidebar(ui, "docs", "Docs", &items, sel, true);
+        let (clicked, plus) = self.hub_sidebar(ui, "docs", "Docs", &items, sel, HubNew::Create);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.doc_open = None;
@@ -1077,7 +1105,8 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, true);
+        let (clicked, plus) =
+            self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, HubNew::Create);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.dash_open = None;
@@ -1209,76 +1238,36 @@ impl App {
 
     pub(super) fn whiteboards_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
+        let me = self.data.me;
+        let boards = &self.data.extra.whiteboards;
+        // My: the ones I made (older ones without a maker count as mine too)
+        let mine = boards
+            .iter()
+            .filter(|w| w.owner == me || w.owner == 0)
+            .count();
         let items: [(&str, &str, Option<usize>); 2] = [
-            ("whiteboards", "All Whiteboards", None),
-            ("@me", "My Whiteboards", None),
+            ("whiteboards", "All Whiteboards", Some(boards.len())),
+            ("@me", "My Whiteboards", Some(mine)),
         ];
         let sel = if self.wb_open.is_some() {
             99
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, true);
+        let (clicked, _) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, HubNew::None);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.wb_open = None;
         }
-        if plus {
-            self.new_whiteboard();
-        }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
-            if self.wb_open.is_some() {
-                self.whiteboard_canvas(ui);
-                return;
-            }
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                if !self.data.extra.whiteboards.is_empty() {
-                    egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
-                        ui.label(RichText::new(tr("Your Whiteboards")).size(15.0));
-                        let me = self.data.me;
-                        let mine_only = self.hub_filter.min(1) == 1;
-                        // My: the ones I made (older ones without a maker show in both)
-                        for w in self.data.extra.whiteboards.clone().into_iter().filter(|w| !mine_only || w.owner == me || w.owner == 0) {
-                            ui.horizontal(|ui| {
-                                self.star_toggle(ui, format!("wb:{}", w.id));
-                                if icon_button_ex(ui, &t, "whiteboards", &w.name, &w.name, false, 0.0, t.text, t.text2).clicked() {
-                                    self.wb_open = Some(w.id);
-                                }
-                            });
-                        }
-                    });
-                }
-                let choice = self.gallery(ui, tr("Choose a Whiteboard template"), tr("Create Whiteboards to map out project plans and brainstorm feature\nconcepts, on your own or with your team."), &[
-                    ([0xb6, 0x60, 0xe0], "teams", "Organizational Chart", "Visualize your team structure", false),
-                    ([0x0f, 0x9d, 0x9f], "list", "Action Plan", "Turn goals into actionable steps", false),
-                    ([0x10, 0x90, 0xe0], "send", "Customer Journey Map", "Optimize every customer touchpoint", false),
-                    ([0xee, 0x5e, 0x99], "shapes", "Flow Chart", "Structure and communicate processes and workflows", false),
-                    ([0xe1, 0x6b, 0x16], "search", "Root Cause Analysis", "Analyze issues using the Ishikawa Fishbone diagram", false),
-                ]);
-                if let Some(name) = choice {
-                    self.new_whiteboard();
-                    let notes: Vec<(&str, [f32; 2])> = match name.as_str() {
-                        "Organizational Chart" => vec![("CEO", [360.0, 40.0]), ("CTO", [160.0, 230.0]), ("COO", [360.0, 230.0]), ("CMO", [560.0, 230.0])],
-                        "Action Plan" => vec![("Goal", [40.0, 40.0]), ("Step 1", [240.0, 40.0]), ("Step 2", [440.0, 40.0]), ("Step 3", [640.0, 40.0]), ("Owner / due date", [40.0, 220.0])],
-                        "Customer Journey Map" => vec![("Awareness", [40.0, 40.0]), ("Consideration", [220.0, 40.0]), ("Purchase", [400.0, 40.0]), ("Retention", [580.0, 40.0]), ("Advocacy", [760.0, 40.0])],
-                        "Flow Chart" => vec![("Start", [40.0, 120.0]), ("Step", [240.0, 120.0]), ("Decision?", [440.0, 120.0]), ("End", [640.0, 120.0])],
-                        "Root Cause Analysis" => vec![("Problem", [680.0, 160.0]), ("People", [60.0, 40.0]), ("Process", [300.0, 40.0]), ("Tools", [60.0, 300.0]), ("Environment", [300.0, 300.0])],
-                        _ => vec![],
-                    };
-                    // each note gets its id now, like any new item
-                    let ids: Vec<u64> = notes.iter().map(|_| self.data.new_id()).collect();
-                    if let Some(w) = self.wb_open.and_then(|id| self.data.extra.whiteboards.iter_mut().find(|w| w.id == id)) {
-                        // made in the language of the person making it, like a new task's name
-                        if name != "Start from scratch" {
-                            w.name = tr(&name).to_string();
-                        }
-                        for (i, ((txt, pos), id)) in notes.into_iter().zip(ids).enumerate() {
-                            w.notes.push(Sticky { id, pos, text: tr(txt).to_string(), color: STATUS_PALETTE[1 + (i * 2) % 13] });
-                        }
-                    }
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(t.bg))
+            .show_inside(ui, |ui| {
+                if self.wb_open.is_some() {
+                    self.whiteboard_canvas(ui);
+                } else {
+                    self.wb_library(ui);
                 }
             });
-        });
     }
 
     // ---------------------------------------------------------------- forms
@@ -1292,7 +1281,7 @@ impl App {
         } else {
             self.hub_filter.min(1)
         };
-        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, true);
+        let (clicked, plus) = self.hub_sidebar(ui, "forms", "Forms", &items, sel, HubNew::Create);
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.form_open = None;
@@ -1432,7 +1421,14 @@ impl App {
         };
         // teams are made and changed by the owner and admins on a server
         let may = self.may_manage();
-        let (clicked, plus) = self.hub_sidebar(ui, "teams", "Teams", &items, sel, may);
+        let (clicked, plus) = self.hub_sidebar(
+            ui,
+            "teams",
+            "Teams",
+            &items,
+            sel,
+            if may { HubNew::Create } else { HubNew::Plus },
+        );
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.team_open = None;

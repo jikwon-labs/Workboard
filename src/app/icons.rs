@@ -103,6 +103,8 @@ pub(super) const KINDS: &[&str] = &[
     "logout",
     "plus",
     "login",
+    "undo",
+    "fit",
 ];
 
 /// `line_icon` drawn `scale` times larger around `c` (the big icon of an
@@ -1249,6 +1251,26 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
         "plus" => {
             line(vec2(0.0, -6.5), vec2(0.0, 6.5));
             line(vec2(-6.5, 0.0), vec2(6.5, 0.0));
+        }
+        "undo" => {
+            // a hook from the left arrow head round to the bottom
+            let mut pts = vec![c + vec2(-6.5, -2.5)];
+            for i in 0..=10 {
+                let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 10.0;
+                pts.push(c + vec2(1.5, 1.5) + vec2(a.cos(), a.sin()) * 4.0 * vec2(1.25, 1.0));
+            }
+            pts.push(c + vec2(-1.5, 5.5));
+            p.add(egui::Shape::line(pts, s));
+            line(vec2(-6.5, -2.5), vec2(-3.0, -6.0));
+            line(vec2(-6.5, -2.5), vec2(-3.0, 1.0));
+        }
+        "fit" => {
+            // four corners: the whole board in view
+            for (sx, sy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                let k = c + vec2(6.5 * sx, 6.5 * sy);
+                p.line_segment([k, k - vec2(4.0 * sx, 0.0)], s);
+                p.line_segment([k, k - vec2(0.0, 4.0 * sy)], s);
+            }
         }
         "login" => {
             let pts = vec![

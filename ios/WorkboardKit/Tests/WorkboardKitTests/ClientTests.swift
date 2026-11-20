@@ -313,6 +313,42 @@ final class ClientTests: FakeServerTestCase {
         XCTAssertEqual(heard.first { $0.text == "theirs" }?.author, 2)
     }
 
+    /// Back after being away, the messages the welcome brings were pushed to
+    /// this phone already (the server pushes only to phones not connected),
+    /// so they don't notify again; ones heard while connected still do. A
+    /// phone the server has no token for got no pushes, so its welcome
+    /// still notifies.
+    func testAWelcomeAfterBeingAwayIsMarkedAsPushedOnlyWhenTheServerHasTheToken() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        let url = "ws://127.0.0.1:\(port)"
+        let s = storage()
+        let pre = SyncClient(storage: s, tokens: MemoryTokenStore())
+        pre.setPushToken("a1b2c3", env: "development")
+        let a = client(url, me: 1, storage: s)
+        await until("token registered") { server.registeredPushTokens[a.settings.device] == "a1b2c3" }
+        XCTAssertFalse(a.pushedWhileAway, "the server didn't have the token before this welcome")
+
+        a.disconnect()
+        a.connect()
+        await until("welcomed again") { a.state.isConnected && a.pushedWhileAway }
+
+        let b = client(url, me: 2)
+        await until("connected") { b.state.isConnected }
+        let seen = a.updatesReceived
+        b.edit { d, me in Edits.sendMessage(&d, channel: 303, text: "hello", me: me, id: b.newId(), ts: nowTs()) }
+        await until("update merged") { a.updatesReceived > seen }
+        XCTAssertFalse(a.pushedWhileAway, "heard while connected: the server didn't push it")
+
+        let c = client(url, me: 2)
+        await until("c connected") { c.state.isConnected }
+        c.disconnect()
+        c.connect()
+        await until("c welcomed again") { c.state.isConnected && c.updatesReceived >= 2 }
+        XCTAssertFalse(c.pushedWhileAway, "no token, no pushes")
+    }
+
     func testPushTokenIsSentAfterWelcome() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make())
         let port = try await server.start(port: 0)

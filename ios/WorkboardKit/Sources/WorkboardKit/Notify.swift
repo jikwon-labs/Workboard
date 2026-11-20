@@ -343,6 +343,16 @@ public enum Notify {
     /// huddle), not already told. `seen` gains every key of `all` (what
     /// exists with every kind on), so turning a kind on later doesn't bring
     /// back old news.
+    /// The kinds the server pushes to a phone that isn't connected
+    /// (server/src/push.rs): messages in DMs, mentions, thread replies,
+    /// channels set to every message and keywords.
+    public static func pushedByServer(_ k: Note.Kind) -> Bool {
+        switch k {
+        case .direct, .channel, .mention, .keyword, .reply: return true
+        case .huddle, .reaction, .assigned, .comment, .taskChange, .form, .member: return false
+        }
+    }
+
     public static func fresh(_ found: [Note], all: [String], seen: inout Set<String>, now: Int64) -> [Note] {
         var out: [Note] = []
         for n in found where seen.insert(n.key).inserted {

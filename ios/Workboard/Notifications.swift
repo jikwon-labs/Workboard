@@ -157,6 +157,9 @@ final class Notifier {
             var fresh = Notify.fresh(found, all: all, seen: &seen, now: nowTs())
             let active = UIApplication.shared.applicationState == .active
             fresh.removeAll { active && visible($0.target, nav: nav) }
+            // back after being away (a notification tapped, the app brought
+            // forward): the server pushed those messages already
+            if client.pushedWhileAway { fresh.removeAll { Notify.pushedByServer($0.kind) } }
             deliver(fresh, view: client.view)
         }
         updateBadge(data, view: client.view, me: me, inbox: inbox)

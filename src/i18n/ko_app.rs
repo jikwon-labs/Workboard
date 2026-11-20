@@ -68,7 +68,6 @@ pub const T: &[(&str, &str)] = &[
     ("Next task", "다음 작업"),
     ("Move to another List", "다른 목록으로 이동"),
     ("Archived", "보관됨"),
-    ("Copy task ID", "작업 ID 복사"),
     ("Task ID copied", "작업 ID를 복사했습니다"),
     ("Move to...", "이동..."),
     ("Remind me", "리마인더 설정"),

@@ -349,12 +349,47 @@ fn date_picker_fits_its_content_and_shows_set_recurring() {
     }
 }
 
+/// The task window's "..." menu draws its rows like the right-click menu:
+/// plain lines, not a stack of outlined buttons. The header has no separate
+/// "ID" button (the menu has Copy ID) and no second eye beside Watch.
+#[test]
+fn task_window_menu_rows_have_no_frame() {
+    let mut h = Ui1::new();
+    h.click_left("Task Write copy for landing page", 120.0);
+    assert!(
+        h.painted_text("ID").is_empty(),
+        "no ID button in the header"
+    );
+    h.click("Task actions");
+    assert!(h.has("Duplicate"), "the menu is open");
+    fn boxes(s: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+        match s {
+            egui::Shape::Rect(r) => out.push(r.clone()),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| boxes(s, out)),
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    for c in &h.shapes {
+        boxes(&c.shape, &mut found);
+    }
+    for row in ["Duplicate", "Copy ID", "Copy link", "Delete task"] {
+        let r = h.rect(row);
+        let framed = found.iter().any(|b| {
+            b.rect.expand(1.0).contains_rect(r)
+                && b.rect.height() < r.height() + 8.0
+                && (b.stroke.width > 0.0 || b.fill.a() > 0)
+        });
+        assert!(!framed, "{row} is drawn without a box");
+    }
+}
+
 #[test]
 fn escape_closes_the_task_menu_first_then_the_task() {
     let mut h = Ui1::new();
     h.click_left("Task Write copy for landing page", 120.0);
     assert!(h.app.open_task.is_some());
-    h.click("\u{2026}");
+    h.click("Task actions");
     assert!(h.has("Duplicate"), "the task window menu is open");
     h.key(egui::Key::Escape);
     assert!(!h.has("Duplicate"), "Escape closes the menu");
@@ -1185,7 +1220,7 @@ fn subtask_due_date_takes_a_time() {
 fn task_window_picker_sets_parent_and_adds_existing_subtask() {
     let mut h = Ui1::new();
     let id = open_design_task(&mut h);
-    h.click("\u{2026}");
+    h.click("Task actions");
     h.click("Make subtask of...");
     assert!(matches!(
         h.app.modal,

@@ -578,20 +578,20 @@ impl App {
                 self.side_header(ui, "Spaces", &[("\u{22EF}", "Spaces settings")], 0);
             // "New Space" at the end is the one add button here
             name_it(&hs[0], "Spaces settings");
-            popup(ui, &hs[0], ui.id().with("spaces_settings"), 200.0, |ui| {
+            click_menu(&hs[0], |ui| {
                 if ui.button(tr("Expand all")).clicked() {
                     for s in &mut self.data.spaces {
                         s.expanded = true;
                     }
                     self.dirty = true;
-                    close_popup(ui);
+                    ui.close_menu();
                 }
                 if ui.button(tr("Collapse all")).clicked() {
                     for s in &mut self.data.spaces {
                         s.expanded = false;
                     }
                     self.dirty = true;
-                    close_popup(ui);
+                    ui.close_menu();
                 }
             });
             if !self.fold_shows(folded, filter) {

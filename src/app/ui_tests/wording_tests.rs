@@ -38,7 +38,7 @@ fn open_tasks_and_active_people_are_not_called_in_progress_in_korean() {
 fn task_picker_rows_show_only_the_task_name() {
     let mut h = Ui1::new();
     h.click_left("Task Design new homepage layout", 120.0);
-    h.click("\u{2026}");
+    h.click("Task actions");
     h.click("Make subtask of...");
     assert!(shows(&h, "Plan Q1 campaign"));
     let drawn: Vec<String> = painted(&h)

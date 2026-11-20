@@ -225,25 +225,19 @@ impl App {
                         {
                             close = true;
                         }
-                        let r = ui.add(ghost(egui::Button::new(
-                            RichText::new("\u{2026}").size(16.0),
-                        )));
-                        if ui
-                            .add(ghost(egui::Button::new(RichText::new("ID").size(12.0))))
-                            .on_hover_text(tr("Copy task ID"))
-                            .clicked()
-                        {
-                            ui.ctx().copy_text(tid.to_string());
-                            self.toast(tr("Task ID copied"));
-                        }
+                        // the menu has "Copy ID", so no separate ID button here
+                        let r = icons::icon_button(ui, &t, "dots", "", "Task actions", false)
+                            .on_hover_text(tr("More"));
                         self.watchers_header(ui, &t, win_id, &mut task);
-                        popup(ui, &r, win_id.with("more"), 200.0, |ui| {
+                        // a real menu, like the one a task's right click opens:
+                        // rows without a frame each
+                        click_menu(&r, |ui| {
                             if ui.button(tr("Move to...")).clicked() {
                                 self.modal = Some(Modal::MoveTasks {
                                     ids: vec![tid],
                                     query: String::new(),
                                 });
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if ui.button(tr("Make subtask of...")).clicked() {
                                 self.modal = Some(Modal::PickTask {
@@ -251,20 +245,20 @@ impl App {
                                     mode: TaskPick::Parent,
                                     query: String::new(),
                                 });
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if task.parent.is_some()
                                 && ui.button(tr("Make top-level task")).clicked()
                             {
                                 task.parent = None;
                                 self.make_top_level(tid);
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if ui.button(tr("Duplicate")).clicked() {
                                 if let Some(n) = self.duplicate_task(tid) {
                                     self.actions.push(Action::Open(n));
                                 }
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if ui.button(tr("Remind me")).clicked() {
                                 self.modal = Some(Modal::reminder(
@@ -272,12 +266,12 @@ impl App {
                                     today() + Duration::days(1),
                                 ));
                                 self.reminder_about = (Some(task.id), None);
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if ui.button(tr("Copy ID")).clicked() {
                                 ui.ctx().copy_text(tid.to_string());
                                 self.toast(tr("Task ID copied"));
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if ui
                                 .button(if task.archived {
@@ -289,7 +283,7 @@ impl App {
                             {
                                 let a = !task.archived;
                                 self.set_archived(&[tid], a);
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             ui.separator();
                             if self.may_manage() && ui.button(tr("Save as template")).clicked() {
@@ -310,11 +304,11 @@ impl App {
                                 });
                                 self.toast = Some((tr("Saved as a template").into(), now_ts()));
                                 self.dirty = true;
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if ui.button(tr("Copy link")).clicked() {
                                 self.copy_link(ui, nav::task_link(tid));
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if ui
                                 .button(if self.data.is_my_timer(&task) {
@@ -325,14 +319,14 @@ impl App {
                                 .clicked()
                             {
                                 self.actions.push(Action::ToggleTimer(tid));
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                             if ui
                                 .button(RichText::new(tr("Delete task")).color(t.danger))
                                 .clicked()
                             {
                                 self.actions.push(Action::DeleteTask(tid));
-                                close_popup(ui);
+                                ui.close_menu();
                             }
                         });
                     });

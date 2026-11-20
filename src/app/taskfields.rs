@@ -370,7 +370,8 @@ impl App {
             ui.painter().rect_filled(r, 6.0, t.hover);
         }
         if task.watchers.is_empty() {
-            super::icons::line_icon_scaled(ui.painter(), "eye", r.center(), t.text3, 0.8);
+            // a person, not a second eye beside the Watch button's
+            super::icons::line_icon_scaled(ui.painter(), "person", r.center(), t.text3, 0.8);
         } else {
             let shown: Vec<u64> = task.watchers.iter().take(4).copied().collect();
             paint_avatars(

@@ -804,6 +804,84 @@ fn search_shortens_a_long_path_before_its_kind() {
     );
 }
 
+#[test]
+fn search_keeps_a_message_of_several_lines_on_its_row() {
+    let mut h = Ui1::new();
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter()
+        .position(|c| c.name == "general")
+        .unwrap();
+    h.app.data.channels[ch]
+        .messages
+        .push(crate::app::slack::new_message(
+            990_001,
+            2,
+            "Lunch plan\nPizza at noon\n\n  Bring cash".into(),
+            1_900_000_000,
+        ));
+    h.app.palette = Some("pizza".into());
+    h.settle();
+    let title = "Lunch plan Pizza at noon Bring cash";
+    assert!(h.has(title), "the message is found and named on one line");
+    let row = h.rect(title);
+    // everything painted around the row stays inside it, on one line
+    let near = row.expand2(vec2(0.0, 30.0));
+    let texts = h.texts_in(near);
+    let ours: Vec<_> = texts
+        .iter()
+        .filter(|(t, _)| t.contains("Pizza") || t.contains("Lunch"))
+        .collect();
+    assert_eq!(ours.len(), 1, "{:?}", texts);
+    let (t, r) = ours[0];
+    assert!(!t.contains('\n'), "{:?}", t);
+    assert!(
+        r.top() >= row.top() - 1.0 && r.bottom() <= row.bottom() + 1.0,
+        "{:?} at {:?} spills out of its row {:?}",
+        t,
+        r,
+        row
+    );
+    let over = overlapping(&texts);
+    assert!(over.is_empty(), "{:?}", over);
+}
+
+#[test]
+fn search_no_results_has_room_above_and_below() {
+    let mut h = Ui1::new();
+    h.app.palette = Some("zzqx nothing matches".into());
+    h.settle();
+    let nr = h
+        .painted_text(tr("No results"))
+        .first()
+        .expect("No results is shown")
+        .0;
+    // the tabs above it
+    let tab = h
+        .painted_text(tr("People"))
+        .iter()
+        .map(|(r, _)| *r)
+        .filter(|r| r.bottom() < nr.top())
+        .max_by(|a, b| a.bottom().total_cmp(&b.bottom()))
+        .expect("the People tab");
+    assert!(
+        nr.top() - tab.bottom() >= 24.0,
+        "tabs end at {}, No results starts at {}",
+        tab.bottom(),
+        nr.top()
+    );
+    // and it sits in the middle of the palette, not at its left edge
+    let all = h
+        .painted_text(tr("All"))
+        .iter()
+        .map(|(r, _)| *r)
+        .find(|r| (r.center().y - tab.center().y).abs() < 4.0)
+        .expect("the All tab");
+    assert!(nr.left() > all.right() + 100.0, "{:?} after {:?}", nr, all);
+}
+
 fn chip_clear(h: &Ui1) {
     let chip = h.rect(tr("Add bookmarks, notes, and more"));
     let page = Rect::from_min_max(pos2(chip.left() - 20.0, chip.top()), h.size.to_pos2());

@@ -278,8 +278,23 @@ pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
     resp
 }
 
-/// `text` cut with an ellipsis so it is at most `max_w` wide in `font`.
+/// `text` on one line: each line break, with the spaces around it, becomes a
+/// single space and blank lines are dropped.
+pub fn one_line(text: &str) -> String {
+    if !text.contains(['\n', '\r']) {
+        return text.to_string();
+    }
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `text` on one line, cut with an ellipsis so it is at most `max_w` wide in
+/// `font`.
 pub fn fit_text(p: &egui::Painter, text: &str, font: &FontId, max_w: f32) -> String {
+    let text = &one_line(text);
     let w = |s: &str| {
         p.layout_no_wrap(s.to_string(), font.clone(), Color32::WHITE)
             .size()
@@ -373,4 +388,27 @@ pub fn paint_triangle(p: &egui::Painter, center: Pos2, open: bool, color: Color3
         ]
     };
     p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_line_joins_lines_with_single_spaces() {
+        assert_eq!(one_line("plain  text"), "plain  text");
+        assert_eq!(one_line("Lunch\nPizza \r\n\n  cash"), "Lunch Pizza cash");
+    }
+
+    #[test]
+    fn fit_text_never_paints_a_line_break() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            let p = ctx.layer_painter(egui::LayerId::background());
+            let font = FontId::proportional(14.0);
+            assert_eq!(fit_text(&p, "a\nb", &font, 1000.0), "a b");
+            let cut = fit_text(&p, "first line\nsecond line", &font, 60.0);
+            assert!(!cut.contains('\n') && cut.ends_with('\u{2026}'), "{cut}");
+        });
+    }
 }

@@ -285,7 +285,7 @@ impl App {
                         rows.push((
                             "Messages",
                             "chat",
-                            truncate(&super::chat::shown_text(m), 60),
+                            truncate(&one_line(&super::chat::shown_text(m)), 60),
                             place.clone(),
                             Hit::Chat(c.id),
                         ));
@@ -553,7 +553,11 @@ impl App {
                             }
                         }
                         if rows.is_empty() && !q.trim().is_empty() {
-                            ui.label(RichText::new(tr("No results")).color(t.text3));
+                            ui.add_space(14.0);
+                            ui.vertical_centered(|ui| {
+                                ui.label(RichText::new(tr("No results")).color(t.text3));
+                            });
+                            ui.add_space(14.0);
                         }
                         // archived ones are left out: say so rather than drop them silently
                         let arch = self.archived_matches(&q, kind);

@@ -191,6 +191,7 @@ impl App {
 
     /// Single-key shortcuts (only while no text field has focus):
     /// T new task, R reminder, N or P notepad, Cmd+\ sidebar, Cmd+[ / ] history.
+    /// The mouse's back / forward buttons also move through the history.
     pub(super) fn single_key_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Backslash)) {
             self.sidebar_collapsed = !self.sidebar_collapsed;
@@ -201,6 +202,28 @@ impl App {
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma))
         {
             self.open_settings("My settings");
+        }
+        // the mouse's back / forward side buttons, like a web browser: they
+        // work while a text field has focus too, but not over a dialog
+        if self.modal.is_none()
+            && self.quick_add.is_none()
+            && self.palette.is_none()
+            && self.rename.is_none()
+        {
+            let (back, fwd) = ctx.input(|i| {
+                (
+                    i.pointer.button_pressed(egui::PointerButton::Extra1),
+                    i.pointer.button_pressed(egui::PointerButton::Extra2),
+                )
+            });
+            if back {
+                self.go_back();
+                return;
+            }
+            if fwd {
+                self.go_forward();
+                return;
+            }
         }
         let typing = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
         if typing

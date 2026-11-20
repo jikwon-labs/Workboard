@@ -1099,6 +1099,30 @@ fn cmd_brackets_go_back_and_forward() {
 }
 
 #[test]
+fn mouse_side_buttons_go_back_and_forward() {
+    let mut h = Ui1::new();
+    let start = h.app.loc;
+    h.click("Inbox");
+    h.click("My Tasks");
+    let mid = pos2(700.0, 400.0);
+    h.click_button(mid, egui::PointerButton::Extra1);
+    assert_eq!(h.app.loc, Location::Inbox, "the back button goes back");
+    h.click_button(mid, egui::PointerButton::Extra1);
+    assert_eq!(h.app.loc, start, "and back again");
+    h.click_button(mid, egui::PointerButton::Extra2);
+    assert_eq!(
+        h.app.loc,
+        Location::Inbox,
+        "the forward button goes forward"
+    );
+    // not while a dialog is open
+    h.app.palette = Some(String::new());
+    h.settle();
+    h.click_button(mid, egui::PointerButton::Extra1);
+    assert_eq!(h.app.loc, Location::Inbox);
+}
+
+#[test]
 fn option_t_while_typing_and_enter_in_search() {
     let mut h = Ui1::new();
     h.app.palette = Some(String::new());

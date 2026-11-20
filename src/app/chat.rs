@@ -75,6 +75,9 @@ fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
     picked
 }
 
+/// The thread panel's width until it is dragged wider or narrower.
+const THREAD_W: f32 = 360.0;
+
 pub(super) enum ChatAction {
     JoinHuddle(u64),
     /// Open the Forward window for a message.
@@ -94,6 +97,14 @@ pub(super) enum ChatAction {
     },
     Thread(u64),
     CloseThread,
+    /// The open thread moves out to its own window (conversation, and where
+    /// on the screen the window goes: None for wherever the system puts it).
+    ThreadWindow {
+        ch: u64,
+        at: Option<Rect>,
+    },
+    /// The thread's window goes back to being the panel beside the conversation.
+    DockThread,
     Save {
         ch: u64,
         msg: u64,
@@ -715,7 +726,7 @@ impl App {
         self.data.extra.closed_dm_seen.insert(cid, seen);
         if self.chat.open == Some(cid) {
             self.chat.open = None;
-            self.chat.thread_open = None;
+            self.leave_thread();
         }
         self.dirty = true;
     }
@@ -942,7 +953,7 @@ impl App {
                 .iter()
                 .find(|c| self.listed(c))
                 .map(|c| c.id);
-            self.chat.thread_open = None;
+            self.leave_thread();
         }
         let mut acts: Vec<ChatAction> = vec![];
         let Some(cid) = self.chat.open else {
@@ -995,7 +1006,7 @@ impl App {
                     .any(|d| d.messages.iter().any(|m| m.id == tid))
             });
             if !keep {
-                self.chat.thread_open = None;
+                self.leave_thread();
             }
             return;
         }
@@ -1056,9 +1067,13 @@ impl App {
             self.dirty = true;
         }
 
-        // ---- thread panel
+        // ---- thread panel (not while the thread is in its own window)
         let mut thread_rect: Option<Rect> = None;
-        if let Some(tid) = self.chat.thread_open {
+        if let Some(tid) = self
+            .chat
+            .thread_open
+            .filter(|_| self.chat.thread_window.is_none())
+        {
             let found = at.iter().find_map(|&(c, m)| {
                 let ch = self.data.channels.get(c)?;
                 let m = ch.messages.get(m)?;
@@ -1071,97 +1086,22 @@ impl App {
                 if !self.notify_rt.away {
                     self.mark_thread_read(pc, &parent);
                 }
+                // wider by dragging its left edge; the conversation keeps room
+                let max_w = (ui.available_width() - 480.0).max(THREAD_W);
                 let panel = egui::SidePanel::right("thread")
-                    .exact_width(360.0)
-                    .resizable(false)
+                    .default_width(THREAD_W)
+                    .width_range(300.0..=max_w)
+                    .resizable(true)
                     .frame(
                         egui::Frame::new()
                             .fill(t.column_bg)
                             .inner_margin(egui::Margin::symmetric(14, 10)),
                     )
                     .show_inside(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(tr("Thread")).size(15.0).strong());
-                            ui.label(RichText::new(self.channel_label(&channel)).color(t.text3));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.add(ghost(egui::Button::new("\u{00D7}"))).clicked() {
-                                    acts.push(ChatAction::CloseThread);
-                                }
-                            });
-                        });
-                        ui.separator();
-                        // the box, the typing line under it and "Also send to",
-                        // all inside the window; one row of tiles when pictures
-                        // wait in the box
-                        let composer_h = 140.0
-                            + if self.chat.thread_files.is_empty() {
-                                0.0
-                            } else {
-                                76.0
-                            };
-                        egui::ScrollArea::vertical()
-                            .id_salt("thread_scroll")
-                            .max_height(ui.available_height() - composer_h)
-                            .auto_shrink([false, false])
-                            .stick_to_bottom(true)
-                            .show(ui, |ui| {
-                                self.message_row(ui, cid, &parent, false, &mut acts);
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(if parent.replies.len() == 1 {
-                                            tr("1 reply").to_string()
-                                        } else {
-                                            trf!("{} replies", parent.replies.len())
-                                        })
-                                        .small()
-                                        .color(t.text3),
-                                    );
-                                    let r = ui.available_rect_before_wrap();
-                                    ui.painter().hline(
-                                        r.x_range(),
-                                        r.center().y,
-                                        Stroke::new(1.0_f32, t.border),
-                                    );
-                                });
-                                for r in &parent.replies {
-                                    self.message_row(ui, cid, r, false, &mut acts);
-                                }
-                                if std::mem::take(&mut self.chat.thread_to_bottom) {
-                                    ui.scroll_to_cursor(Some(Align::BOTTOM));
-                                }
-                            });
-                        if let Some((text, files)) = self.composer(ui, tr("Reply..."), true) {
-                            acts.push(ChatAction::Send {
-                                ch: cid,
-                                text,
-                                parent: Some(tid),
-                                files,
-                            });
-                        } else if self.chat.thread_typed {
-                            // the others in the thread see that I'm typing
-                            self.typing_now(cid, Some(tid));
-                        }
-                        // who else is answering in this thread
-                        self.typing_row(ui, &channel, Some(tid));
-                        // the reply also goes in the conversation, marked as one
-                        let place = self
-                            .data
-                            .channels
-                            .iter()
-                            .find(|c| c.id == cid)
-                            .map(|c| match c.kind {
-                                ChannelKind::Channel => format!("#{}", c.name),
-                                ChannelKind::Direct => self.channel_label(c),
-                            })
-                            .unwrap_or_default();
-                        let also = check(
-                            ui,
-                            &mut self.chat.also_channel,
-                            trf!("Also send to {}", place),
-                        );
-                        name_it(&also, "Also send to the channel");
+                        self.thread_body(ui, cid, &channel, tid, &parent, false, &mut acts);
                     });
                 thread_rect = Some(panel.response.rect);
+                self.chat.thread_panel_pass = ui.ctx().cumulative_pass_nr();
             }
         }
         // pictures and videos dragged in from Finder
@@ -1501,6 +1441,310 @@ impl App {
             if self.persist {
                 self.dirty = true;
             }
+        }
+        self.apply_chat(acts);
+    }
+
+    /// Leaving a conversation closes its thread panel; a thread in its own
+    /// window stays open.
+    pub(super) fn leave_thread(&mut self) {
+        if self.chat.thread_window.is_none() {
+            self.chat.thread_open = None;
+        }
+    }
+
+    /// Opens a thread of conversation `ch` (None: leaves the open one, as
+    /// [`Self::leave_thread`]). With the thread window open it shows there.
+    pub(super) fn show_thread(&mut self, ch: u64, thread: Option<u64>) {
+        match thread {
+            Some(tid) => {
+                self.chat.thread_open = Some(tid);
+                if self.chat.thread_window.is_some() {
+                    self.chat.thread_window = Some(ch);
+                }
+            }
+            None => self.leave_thread(),
+        }
+    }
+
+    /// The thread's message in conversation `cid` or a copy of it: (the
+    /// copy it is in, the message).
+    fn thread_parent(&self, cid: u64, tid: u64) -> Option<(u64, Message)> {
+        let c = self.data.channels.iter().find(|c| c.id == cid)?;
+        self.conversation(c).iter().find_map(|d| {
+            d.messages
+                .iter()
+                .find(|m| m.id == tid)
+                .map(|m| (d.id, m.clone()))
+        })
+    }
+
+    /// The thread: its header, the message and replies, the reply box. In
+    /// the panel beside the conversation (`in_window` false) or its own window.
+    #[allow(clippy::too_many_arguments)]
+    fn thread_body(
+        &mut self,
+        ui: &mut Ui,
+        cid: u64,
+        channel: &Channel,
+        tid: u64,
+        parent: &Message,
+        in_window: bool,
+        acts: &mut Vec<ChatAction>,
+    ) {
+        let t = self.t();
+        let row = ui.horizontal(|ui| {
+            let title = ui.label(RichText::new(tr("Thread")).size(15.0).strong());
+            let place = ui.label(RichText::new(self.channel_label(channel)).color(t.text3));
+            let buttons = ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let close = ui.add(ghost(egui::Button::new("\u{00D7}")));
+                name_it(&close, "Close thread");
+                if close.clicked() {
+                    acts.push(ChatAction::CloseThread);
+                }
+                if in_window {
+                    let back = icon_button(ui, &t, "sidebar", "", "Back to the sidebar", false)
+                        .on_hover_text(tr("Back to the sidebar"));
+                    if back.clicked() {
+                        acts.push(ChatAction::DockThread);
+                    }
+                } else {
+                    let out = icon_button(ui, &t, "pop_out", "", "Open in new window", false)
+                        .on_hover_text(tr("Open in new window"));
+                    if out.clicked() {
+                        // the window opens where the panel is, as big
+                        let at = ui
+                            .ctx()
+                            .input(|i| i.viewport().inner_rect)
+                            .map(|w| ui.clip_rect().translate(w.min.to_vec2()));
+                        acts.push(ChatAction::ThreadWindow { ch: cid, at });
+                    }
+                }
+            });
+            title.rect.union(place.rect).left()..=buttons.response.rect.left()
+        });
+        if !in_window {
+            // the header pulls the thread out into its own window
+            let xs = row.inner;
+            let grip =
+                Rect::from_x_y_ranges(*xs.start()..=(*xs.end() - 4.0), row.response.rect.y_range());
+            let id = ui.id().with("thread_grip");
+            let drag = ui.interact(grip, id, Sense::drag());
+            name_it(&drag, "Drag the thread out to a new window");
+            if drag.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            if drag.drag_started() {
+                if let Some(p) = drag.interact_pointer_pos() {
+                    ui.data_mut(|d| d.insert_temp(id, p));
+                }
+            }
+            let from: Option<egui::Pos2> = ui.data(|d| d.get_temp(id));
+            let at = ui.ctx().input(|i| i.pointer.latest_pos());
+            if drag.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                // what goes where the pointer is: the panel, faint
+                if let (Some(p), Some(f)) = (at, from) {
+                    let panel = ui.clip_rect();
+                    let ghost_r = panel.translate(p - f);
+                    let painter = ui
+                        .ctx()
+                        .layer_painter(egui::LayerId::new(egui::Order::Tooltip, id.with("ghost")));
+                    painter.rect(
+                        ghost_r,
+                        8.0,
+                        t.column_bg.gamma_multiply(0.75),
+                        Stroke::new(1.0_f32, t.border),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+            if drag.drag_stopped() {
+                ui.data_mut(|d| d.remove::<egui::Pos2>(id));
+                // dragged far enough (not a slip of the hand): the window
+                // opens where the panel was dropped
+                if let (Some(p), Some(f)) = (at.or(drag.interact_pointer_pos()), from) {
+                    if (p - f).length() > 40.0 {
+                        let rect = ui
+                            .ctx()
+                            .input(|i| i.viewport().inner_rect)
+                            .map(|w| ui.clip_rect().translate(w.min.to_vec2() + (p - f)));
+                        acts.push(ChatAction::ThreadWindow { ch: cid, at: rect });
+                    }
+                }
+            }
+        }
+        ui.separator();
+        // the box, the typing line under it and "Also send to",
+        // all inside the window; one row of tiles when pictures
+        // wait in the box
+        let composer_h = 140.0
+            + if self.chat.thread_files.is_empty() {
+                0.0
+            } else {
+                76.0
+            };
+        egui::ScrollArea::vertical()
+            .id_salt("thread_scroll")
+            .max_height(ui.available_height() - composer_h)
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                self.message_row(ui, cid, parent, false, acts);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(if parent.replies.len() == 1 {
+                            tr("1 reply").to_string()
+                        } else {
+                            trf!("{} replies", parent.replies.len())
+                        })
+                        .small()
+                        .color(t.text3),
+                    );
+                    let r = ui.available_rect_before_wrap();
+                    ui.painter()
+                        .hline(r.x_range(), r.center().y, Stroke::new(1.0_f32, t.border));
+                });
+                for r in &parent.replies {
+                    self.message_row(ui, cid, r, false, acts);
+                }
+                if std::mem::take(&mut self.chat.thread_to_bottom) {
+                    ui.scroll_to_cursor(Some(Align::BOTTOM));
+                }
+            });
+        if let Some((text, files)) = self.composer(ui, tr("Reply..."), true) {
+            acts.push(ChatAction::Send {
+                ch: cid,
+                text,
+                parent: Some(tid),
+                files,
+            });
+        } else if self.chat.thread_typed {
+            // the others in the thread see that I'm typing
+            self.typing_now(cid, Some(tid));
+        }
+        // who else is answering in this thread
+        self.typing_row(ui, channel, Some(tid));
+        // the reply also goes in the conversation, marked as one
+        let place = match channel.kind {
+            ChannelKind::Channel => format!("#{}", channel.name),
+            ChannelKind::Direct => self.channel_label(channel),
+        };
+        let also = check(
+            ui,
+            &mut self.chat.also_channel,
+            trf!("Also send to {}", place),
+        );
+        name_it(&also, "Also send to the channel");
+    }
+
+    /// The thread moved out to its own window: a separate window of the
+    /// system, moved and sized on its own (inside the app's window where
+    /// there is only one, as in the click tests).
+    pub(super) fn thread_window(&mut self, ctx: &egui::Context) {
+        let (Some(cid), Some(tid)) = (self.chat.thread_window, self.chat.thread_open) else {
+            self.chat.thread_window = None;
+            self.chat.thread_window_focused = false;
+            return;
+        };
+        // its message deleted, the conversation gone or out of reach
+        let seen = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .is_some_and(|c| self.can_see(c));
+        let found = self.thread_parent(cid, tid).filter(|_| seen);
+        let Some((pc, parent)) = found else {
+            self.chat.thread_window = None;
+            self.chat.thread_open = None;
+            self.chat.thread_window_focused = false;
+            return;
+        };
+        let messages = self
+            .data
+            .channels
+            .iter_mut()
+            .find(|c| c.id == cid)
+            .map(|c| std::mem::take(&mut c.messages))
+            .unwrap_or_default();
+        let ci = self.data.channels.iter().position(|c| c.id == cid);
+        let channel = ci
+            .map(|i| self.data.channels[i].clone())
+            .unwrap_or_default();
+        if let Some(i) = ci {
+            self.data.channels[i].messages = messages;
+        }
+        // just moved out of the panel: from the next frame on
+        if self.chat.thread_panel_pass == ctx.cumulative_pass_nr() {
+            ctx.request_repaint();
+            return;
+        }
+        let t = self.t();
+        let title = format!("{} \u{00B7} {}", tr("Thread"), self.channel_label(&channel));
+        let mut builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_min_inner_size([320.0, 360.0]);
+        builder = match self.chat.thread_window_at {
+            Some(r) => builder.with_position(r.min).with_inner_size(r.size()),
+            None => builder.with_inner_size([THREAD_W + 40.0, 640.0]),
+        };
+        let mut acts: Vec<ChatAction> = vec![];
+        let mut closed = false;
+        let mut focused = false;
+        let frame = egui::Frame::new()
+            .fill(t.column_bg)
+            .inner_margin(egui::Margin::symmetric(14, 10));
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("thread_window"),
+            builder,
+            |ctx, class| {
+                if class == egui::ViewportClass::Embedded {
+                    egui::Window::new("thread_window")
+                        .title_bar(false)
+                        .collapsible(false)
+                        .default_size([THREAD_W + 40.0, 600.0])
+                        // over the right of the app's window, where the panel was
+                        .default_pos(ctx.screen_rect().right_top() + vec2(-THREAD_W - 80.0, 60.0))
+                        .frame(
+                            frame
+                                .stroke(Stroke::new(1.0_f32, t.border))
+                                .corner_radius(10),
+                        )
+                        .show(ctx, |ui| {
+                            ui.set_min_height(560.0);
+                            self.thread_body(ui, cid, &channel, tid, &parent, true, &mut acts);
+                        });
+                    return;
+                }
+                egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+                    self.thread_body(ui, cid, &channel, tid, &parent, true, &mut acts);
+                });
+                // pictures and videos dragged in from Finder go in its reply box
+                let (dropped, close, front) = ctx.input(|i| {
+                    (
+                        i.raw
+                            .dropped_files
+                            .iter()
+                            .filter_map(|f| f.path.clone())
+                            .collect::<Vec<_>>(),
+                        i.viewport().close_requested(),
+                        i.viewport().focused.unwrap_or(false),
+                    )
+                });
+                for f in dropped {
+                    self.add_media(true, Some(f), None);
+                }
+                closed = close;
+                focused = front;
+            },
+        );
+        self.chat.thread_window_focused = focused;
+        if focused || !self.notify_rt.away {
+            self.mark_thread_read(pc, &parent);
+        }
+        if closed {
+            acts.push(ChatAction::CloseThread);
         }
         self.apply_chat(acts);
     }
@@ -2764,7 +3008,7 @@ impl App {
                     name_it(&b, "Forwarded from");
                     if b.clicked() {
                         self.chat.open = Some(*cid);
-                        self.chat.thread_open = None;
+                        self.leave_thread();
                     }
                 }
             });
@@ -2832,7 +3076,7 @@ impl App {
         if let Some((ch, thread)) = open {
             self.section = Section::Chat;
             self.chat.open = Some(ch);
-            self.chat.thread_open = thread;
+            self.show_thread(ch, thread);
             return true;
         }
         false
@@ -2915,7 +3159,7 @@ impl App {
         };
         self.section = Section::Chat;
         self.chat.open = Some(ch);
-        self.chat.thread_open = parent;
+        self.show_thread(ch, parent);
         true
     }
 
@@ -2976,8 +3220,31 @@ impl App {
             };
             match a {
                 ChatAction::JoinHuddle(ch) => self.join_huddle(ch),
-                ChatAction::Thread(id) => self.chat.thread_open = Some(id),
-                ChatAction::CloseThread => self.chat.thread_open = None,
+                ChatAction::Thread(id) => {
+                    // with the thread window open the thread shows in it
+                    if let Some(ch) = self.chat.open {
+                        self.show_thread(ch, Some(id));
+                    } else {
+                        self.chat.thread_open = Some(id);
+                    }
+                }
+                ChatAction::CloseThread => {
+                    self.chat.thread_open = None;
+                    self.chat.thread_window = None;
+                }
+                ChatAction::ThreadWindow { ch, at } => {
+                    if self.chat.thread_open.is_some() {
+                        self.chat.thread_window = Some(ch);
+                        self.chat.thread_window_at = at;
+                    }
+                }
+                ChatAction::DockThread => {
+                    // back beside its conversation
+                    if let Some(ch) = self.chat.thread_window.take() {
+                        self.section = Section::Chat;
+                        self.chat.open = Some(ch);
+                    }
+                }
                 ChatAction::React { ch, msg, emoji } => {
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
                         if let Some(m) = find_msg(&mut c.messages, msg) {
@@ -3422,7 +3689,7 @@ impl App {
                         ..Default::default()
                     });
                     self.chat.open = Some(id);
-                    self.chat.thread_open = None;
+                    self.leave_thread();
                     self.dirty = true;
                 }
                 ChatAction::Dm(uid) => {
@@ -3456,7 +3723,7 @@ impl App {
                         }
                     };
                     self.chat.open = Some(id);
-                    self.chat.thread_open = None;
+                    self.leave_thread();
                 }
             }
         }

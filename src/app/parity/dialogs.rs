@@ -365,7 +365,7 @@ impl App {
         });
         self.section = Section::Chat;
         self.chat.open = Some(id);
-        self.chat.thread_open = None;
+        self.leave_thread();
         self.dirty = true;
         id
     }

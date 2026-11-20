@@ -786,7 +786,7 @@ impl App {
                 } else if r.clicked() {
                     self.section = Section::Chat;
                     self.chat.open = Some(id);
-                    self.chat.thread_open = None;
+                    self.leave_thread();
                 }
             }
             if let Some(mut name) = self.new_channel.take() {
@@ -953,7 +953,7 @@ impl App {
                 } else if r.clicked() {
                     self.section = Section::Chat;
                     self.chat.open = Some(id);
-                    self.chat.thread_open = None;
+                    self.leave_thread();
                 }
             }
             if filter.is_empty() && self.add_row(ui, "New message").clicked() {

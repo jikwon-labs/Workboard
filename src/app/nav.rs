@@ -485,7 +485,7 @@ impl App {
         }
         self.section = Section::Chat;
         self.chat.open = Some(ch);
-        self.chat.thread_open = thread;
+        self.show_thread(ch, thread);
     }
 
     /// Chat replies for the Replies page: replies by others in threads I
@@ -558,7 +558,7 @@ impl App {
         match s.section {
             Section::Chat => {
                 if self.chat.open != s.item {
-                    self.chat.thread_open = None;
+                    self.leave_thread();
                 }
                 self.chat.open = s.item;
             }

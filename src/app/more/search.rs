@@ -388,7 +388,7 @@ impl App {
             Hit::Chat(id) => {
                 self.section = Section::Chat;
                 self.chat.open = Some(id);
-                self.chat.thread_open = None;
+                self.leave_thread();
             }
             Hit::Whiteboard(id) => {
                 self.wb_open = Some(id);

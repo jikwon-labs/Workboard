@@ -716,6 +716,7 @@ impl App {
         self.open_task = None;
         self.chat.open = None;
         self.chat.thread_open = None;
+        self.chat.thread_window = None;
         self.recent.clear();
         self.clear_history();
         self.palette = None;

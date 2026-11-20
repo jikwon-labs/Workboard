@@ -1290,6 +1290,20 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-5.0, -5.0), vec2(5.0, 5.0));
             line(vec2(5.0, -5.0), vec2(-5.0, 5.0));
         }
+        "pop_out" => {
+            // a window with an arrow leaving it by the top right corner
+            let pts = vec![
+                c + vec2(-1.0, -6.0),
+                c + vec2(-6.0, -6.0),
+                c + vec2(-6.0, 6.0),
+                c + vec2(6.0, 6.0),
+                c + vec2(6.0, 1.0),
+            ];
+            p.add(egui::Shape::line(pts, s));
+            line(vec2(-1.0, 1.0), vec2(6.5, -6.5));
+            line(vec2(6.5, -6.5), vec2(2.0, -6.5));
+            line(vec2(6.5, -6.5), vec2(6.5, -2.0));
+        }
         "arrow_up_left" => {
             line(vec2(5.0, 6.0), vec2(5.0, -1.0));
             line(vec2(5.0, -1.0), vec2(-5.0, -1.0));

@@ -117,6 +117,105 @@ fn click_message_replies_opens_thread() {
 }
 
 #[test]
+fn thread_moves_to_its_own_window_and_back() {
+    let mut h = Ui1::new();
+    // a second channel to go to while the thread is in its window
+    let mut random = h.app.data.channels[0].clone();
+    random.id = 7_777;
+    random.name = "random".into();
+    random.messages.clear();
+    h.app.data.channels.push(random);
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("1 reply");
+    let tid = h.app.chat.thread_open.unwrap();
+    assert!(!h.has("Back to the sidebar"));
+
+    h.click("Open in new window");
+    assert_eq!(
+        h.app.chat.thread_window,
+        Some(cid),
+        "the thread has its own window"
+    );
+    assert!(h.has("Back to the sidebar"));
+    assert!(
+        !h.has("Open in new window"),
+        "and no panel beside the conversation"
+    );
+
+    // replies are written in the window
+    h.click("Reply composer");
+    h.type_text("from the window");
+    h.key(egui::Key::Enter);
+    let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    let m = ch.messages.iter().find(|m| m.id == tid).unwrap();
+    assert_eq!(m.replies.last().unwrap().text, "from the window");
+
+    // another channel: the window stays with its thread
+    h.click("random");
+    assert_eq!(h.app.chat.open, Some(7_777));
+    assert_eq!(h.app.chat.thread_open, Some(tid));
+    assert!(h.has("Back to the sidebar"), "the window is still open");
+
+    // back beside its conversation
+    h.click("Back to the sidebar");
+    assert_eq!(h.app.chat.thread_window, None);
+    assert_eq!(h.app.chat.open, Some(cid));
+    assert_eq!(h.app.chat.thread_open, Some(tid));
+    assert!(h.has("Open in new window"), "the panel is back");
+
+    // closing the window closes the thread
+    h.click("Open in new window");
+    h.click("Close thread");
+    assert_eq!(h.app.chat.thread_open, None);
+    assert_eq!(h.app.chat.thread_window, None);
+    assert!(!h.has("Back to the sidebar"));
+}
+
+#[test]
+fn thread_header_drags_out_to_a_new_window() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    let grip = h.find("Drag the thread out to a new window").unwrap();
+    // a slip of the hand leaves it where it is
+    h.drag_by(grip, grip + vec2(-12.0, 4.0));
+    assert_eq!(h.app.chat.thread_window, None);
+    h.drag_by(grip, grip + vec2(-400.0, 80.0));
+    assert!(
+        h.app.chat.thread_window.is_some(),
+        "dragged out: its own window"
+    );
+    assert!(h.has("Back to the sidebar"));
+}
+
+#[test]
+fn thread_panel_is_wider_by_dragging_its_edge() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    let before = h.rect("Reply composer");
+    // the panel's left edge, just left of its 14-point margin
+    let edge = pos2(before.left() - 22.0, before.top() - 200.0);
+    h.drag_by(edge, edge + vec2(-150.0, 0.0));
+    let after = h.rect("Reply composer");
+    assert!(
+        after.width() > before.width() + 100.0,
+        "wider: {} -> {}",
+        before.width(),
+        after.width()
+    );
+    // not so wide that the conversation has no room
+    h.drag_by(pos2(after.left() - 22.0, edge.y), pos2(10.0, edge.y));
+    let widest = h.rect("Reply composer");
+    assert!(
+        widest.left() > 600.0,
+        "the conversation keeps room: {:?}",
+        widest
+    );
+}
+
+#[test]
 fn click_thread_reply_and_hover_reaction() {
     let mut h = Ui1::new();
     h.click("general");

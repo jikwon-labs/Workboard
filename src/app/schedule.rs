@@ -226,7 +226,7 @@ impl App {
                 self.unschedule(item.id);
                 self.section = Section::Chat;
                 self.chat.open = Some(item.channel);
-                self.chat.thread_open = None;
+                self.leave_thread();
                 self.drafts
                     .chat
                     .saved

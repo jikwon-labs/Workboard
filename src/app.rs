@@ -638,6 +638,19 @@ struct ChatUi {
     /// messages" (by conversation; `CHAT_PAGE` for any other).
     window: Option<(u64, usize)>,
     thread_open: Option<u64>,
+    /// The open thread shows in its own window, not the panel beside the
+    /// conversation: the conversation it is in (it stays open while other
+    /// conversations are looked at).
+    thread_window: Option<u64>,
+    /// Where on the screen that window first opens (where the panel was,
+    /// or where its header was dragged to); None: wherever the system puts it.
+    thread_window_at: Option<Rect>,
+    /// The thread's window is the one in front: its replies count as read.
+    thread_window_focused: bool,
+    /// The pass the thread panel was last drawn in: the window waits for
+    /// the next one (drawn in the app's own window, as in the click tests,
+    /// both would be the same reply box).
+    thread_panel_pass: u64,
     /// The reply being written in the open thread (`thread_open`).
     thread_text: String,
     /// The reply box was just typed in (this frame), with words in it: the
@@ -5365,6 +5378,7 @@ impl App {
             self.top_bar(ctx);
             self.rail(ctx);
             self.content(ctx);
+            self.thread_window(ctx);
             self.task_window(ctx);
             self.dialogs(ctx);
             self.modals(ctx);

@@ -17,6 +17,8 @@ pub const T: &[(&str, &str)] = &[
     ("Several people are typing...", "여러 명이 입력 중..."),
     // thread
     ("Thread", "스레드"),
+    ("Open in new window", "새 창에서 열기"),
+    ("Back to the sidebar", "사이드바로 되돌리기"),
     ("1 reply", "답장 1개"),
     ("{} replies", "답장 {}개"),
     ("Reply...", "답장..."),

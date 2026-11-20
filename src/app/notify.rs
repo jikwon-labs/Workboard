@@ -898,7 +898,9 @@ impl App {
     /// the Dock badge.
     pub(super) fn notify_tick(&mut self, ctx: Option<&egui::Context>) {
         if let Some(ctx) = ctx {
-            self.notify_rt.away = !ctx.input(|i| i.viewport().focused.unwrap_or(true));
+            // the thread's own window in front counts as the app's
+            self.notify_rt.away = !ctx.input(|i| i.viewport().focused.unwrap_or(true))
+                && !self.chat.thread_window_focused;
         }
         for target in crate::notifier::take_clicked() {
             self.open_target(&target);

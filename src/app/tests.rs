@@ -562,6 +562,7 @@ fn everything_survives_save_and_load() {
                 unit: String::new(),
             },
         }],
+        ..Default::default()
     });
     let json = serde_json::to_string(&a.data).unwrap();
     let back: Data = serde_json::from_str(&json).unwrap();
@@ -619,6 +620,7 @@ fn goal_progress_mixes_target_kinds() {
                 },
             },
         ],
+        ..Default::default()
     };
     let p = a.goal_progress(&g);
     assert!((p - (0.5 + 1.0 + 0.5) / 3.0).abs() < 1e-4, "{}", p);
@@ -1277,6 +1279,7 @@ fn app_items_go_to_trash_and_back() {
         due: None,
         owner: a.data.me,
         targets: vec![],
+        ..Default::default()
     });
     a.remove_item("goal", id);
     a.data.extra.teams.push(Team {
@@ -1957,6 +1960,7 @@ fn goal_tasks_ignore_deleted_ones() {
                 ids: vec![id, 123456789],
             },
         }],
+        ..Default::default()
     };
     assert_eq!(a.goal_progress(&g), 1.0);
 }
@@ -2660,4 +2664,118 @@ fn a_list_deleted_while_archived_comes_back_not_archived() {
         .toast
         .as_ref()
         .is_some_and(|t| t.0.contains("archived Folder or Space")));
+}
+
+#[test]
+fn goal_pace_compares_progress_with_time_used() {
+    let day = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+    let g = Goal {
+        start: Some(day - Duration::days(50)),
+        due: Some(day + Duration::days(50)),
+        ..Default::default()
+    };
+    assert_eq!(g.time_used(day), Some(0.5));
+    assert_eq!(g.pace(0.5, day), Some(Pace::OnTrack));
+    assert_eq!(g.pace(0.46, day), Some(Pace::OnTrack), "within 5 points");
+    assert_eq!(g.pace(0.30, day), Some(Pace::Behind));
+    assert_eq!(g.pace(0.10, day), Some(Pace::AtRisk));
+    assert_eq!(g.pace(1.0, day), Some(Pace::Done));
+    // the first tenth of the time is too early to call anything late
+    assert_eq!(g.pace(0.0, day - Duration::days(45)), Some(Pace::OnTrack));
+    assert_eq!(Goal::default().pace(0.3, day), None, "no dates, no pace");
+    assert_eq!(Goal::default().pace(1.0, day), Some(Pace::Done));
+}
+
+#[test]
+fn goal_milestones_are_kept_once_and_old_goals_start_quietly() {
+    let mut a = app();
+    let me = a.data.me;
+    let set = |a: &mut App, v: f64| {
+        if let TargetKind::Number { current, .. } = &mut a.data.extra.goals[0].targets[0].kind {
+            *current = v;
+        }
+    };
+    // a goal from before history was kept, already at 80%
+    a.data.extra.goals = vec![Goal {
+        id: 1,
+        name: "Old".into(),
+        owner: me,
+        targets: vec![GoalTarget {
+            name: "n".into(),
+            kind: TargetKind::Number {
+                start: 0.0,
+                target: 10.0,
+                current: 8.0,
+                unit: String::new(),
+            },
+        }],
+        ..Default::default()
+    }];
+    a.goal_watch(now_ts());
+    let g = &a.data.extra.goals[0];
+    assert_eq!(g.reached, 75, "what it passed already is taken as it is");
+    assert_eq!(g.log.len(), 1);
+    assert_eq!(g.log[0].what, GoalChange::Tracked, "without announcing it");
+    assert_eq!(g.days.last().map(|d| d.1), Some(80));
+    // reaching 100% records the milestone and the day
+    set(&mut a, 10.0);
+    a.goal_watch(now_ts());
+    let g = &a.data.extra.goals[0];
+    assert_eq!(g.reached, 100);
+    assert_eq!(g.done_on, Some(today()));
+    assert_eq!(g.days.len(), 1, "one entry per day");
+    assert!(g
+        .log
+        .iter()
+        .any(|e| e.what == GoalChange::Milestone(100) && e.who == 0));
+    // dropping back clears the day; crossing again isn't announced twice
+    set(&mut a, 5.0);
+    a.goal_watch(now_ts());
+    assert_eq!(a.data.extra.goals[0].done_on, None);
+    set(&mut a, 10.0);
+    a.goal_watch(now_ts());
+    let g = &a.data.extra.goals[0];
+    assert_eq!(g.done_on, Some(today()));
+    let times = g
+        .log
+        .iter()
+        .filter(|e| e.what == GoalChange::Milestone(100))
+        .count();
+    assert_eq!(times, 1);
+}
+
+#[test]
+fn goal_history_survives_save_and_load_and_old_files_load() {
+    let g = Goal {
+        id: 5,
+        name: "G".into(),
+        start: Some(today()),
+        reached: 50,
+        log: vec![GoalEvent {
+            ts: 1,
+            who: 1,
+            what: GoalChange::Number {
+                target: "n".into(),
+                from: 1.0,
+                to: 2.0,
+                unit: "u".into(),
+            },
+            pct: 50,
+        }],
+        days: vec![(today(), 50)],
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&g).unwrap();
+    assert!(
+        json.contains("\"done_on\":null"),
+        "written even when empty: {json}"
+    );
+    let back: Goal = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.log, g.log);
+    assert_eq!(back.days, g.days);
+    assert_eq!(back.reached, 50);
+    // a goal saved before these were kept
+    let old = r#"{"id":1,"name":"Old","color":[1,2,3],"due":null,"owner":1,"targets":[]}"#;
+    let g: Goal = serde_json::from_str(old).unwrap();
+    assert!(g.start.is_none() && g.log.is_empty() && g.reached == 0);
 }

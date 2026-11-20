@@ -1263,57 +1263,11 @@ impl App {
     // ---------------------------------------------------------------- goals
 
     pub(super) fn goals_hub(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        if !self.data.extra.goals.is_empty() {
+        if self.data.extra.goals.is_empty() {
+            self.goals_empty(ui);
+        } else {
             self.goals_page(ui);
-            return;
         }
-        let r = ui.max_rect();
-        ui.painter().rect_filled(
-            r,
-            egui::CornerRadius {
-                nw: 8,
-                ne: 8,
-                sw: 8,
-                se: 8,
-            },
-            // the theme's panel grey: a fixed light grey hid the dark theme's text
-            t.sidebar,
-        );
-        ui.add_space(110.0);
-        ui.vertical_centered(|ui| {
-            ui.label(RichText::new(tr("Make your goals a reality.")).size(26.0).color(t.text2));
-            ui.add_space(8.0);
-            ui.label(RichText::new(tr("Create Goals, break them down into measurable targets, and track progress in real-time.")).size(16.0).color(t.text3));
-            ui.add_space(30.0);
-            let (pr, _) = ui.allocate_exact_size(vec2(480.0, 300.0), Sense::hover());
-            ui.painter().rect_filled(pr, 6.0, t.card);
-            ui.painter().rect_stroke(pr, 6.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
-            let band = Rect::from_min_size(pr.min + vec2(0.0, 34.0), vec2(pr.width(), 100.0));
-            ui.painter().rect_filled(band, 0.0, Color32::from_rgb(0xe3, 0x9b, 0x6f));
-            let card = Rect::from_min_size(pr.min + vec2(66.0, 76.0), vec2(pr.width() - 132.0, 120.0));
-            ui.painter().rect_filled(card, 3.0, t.card);
-            ui.painter().rect_stroke(card, 3.0, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
-            for (i, c) in [[0x3d, 0xb8, 0x8b], [0x44, 0x66, 0xff], [0xe1, 0x6b, 0x16]].iter().enumerate() {
-                let y = card.top() + 28.0 + i as f32 * 32.0;
-                ui.painter().circle_filled(pos2(card.left() + 18.0, y), 8.0, rgb(*c));
-                ui.painter().rect_filled(Rect::from_min_size(pos2(card.left() + 34.0, y - 3.0), vec2(120.0, 6.0)), 3.0, t.hover);
-                ui.painter().rect_filled(Rect::from_min_size(pos2(card.right() - 110.0, y - 2.0), vec2(96.0, 4.0)), 2.0, t.hover);
-            }
-            ui.painter().circle_stroke(pr.min + vec2(80.0, 60.0), 14.0, Stroke::new(3.0_f32, Color32::WHITE));
-            ui.painter().text(pr.min + vec2(80.0, 60.0), Align2::CENTER_CENTER, "30%", FontId::proportional(8.0), Color32::WHITE);
-            ui.add_space(30.0);
-            if ui.add(Tint(egui::Button::new(RichText::new(tr("Set a Goal")).size(16.0).color(t.on_primary)).fill(t.primary).corner_radius(6).min_size(vec2(124.0, 42.0)))).clicked() {
-                let id = self.data.new_id();
-                self.data.extra.goals.push(Goal { id, name: tr("New goal").into(), color: STATUS_PALETTE[1], due: None, owner: self.data.me, targets: vec![] });
-                self.goal_open = Some(id);
-                self.dirty = true;
-            }
-            ui.add_space(8.0);
-            if ui.link(RichText::new(tr("Learn more")).color(t.text2)).clicked() {
-                self.modal = Some(Modal::Unavailable { title: tr("Goals").into(), body: tr("Create a Goal, add targets (a number, done / not done, or a set of tasks) and the progress bar fills in as you go.").into() });
-            }
-        });
     }
 
     // ---------------------------------------------------------------- teams

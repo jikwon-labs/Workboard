@@ -767,11 +767,92 @@ fn goal_targets_are_named_in_korean() {
     set_lang(Lang::Ko);
     h.click("Rail More");
     h.click("Goals");
-    h.click("목표 설정");
-    h.click("숫자");
-    h.click("작업");
+    h.click("New goal");
+    h.type_text("출시");
+    h.click("Create goal");
+    h.click("Add target");
+    h.click("Add Tasks target");
     set_lang(Lang::En);
     let g = h.app.data.extra.goals.last().expect("a goal");
     let names: Vec<&str> = g.targets.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(names, ["목표치", "작업 끝내기"]);
+}
+
+/// Goals in Korean: cards, rows with targets, a goal's page, New goal, Goal
+/// achieved and the empty page show no English of their own.
+#[test]
+fn goal_screens_have_no_english_left() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let day = today();
+    let task = h.app.data.tasks[0].id;
+    let target = |name: &str, kind: TargetKind| GoalTarget {
+        name: name.into(),
+        kind,
+    };
+    h.app.data.extra.goals = vec![
+        Goal {
+            id: 801,
+            name: "Launch".into(),
+            color: [0x5f, 0x55, 0xee],
+            due: Some(day + chrono::Duration::days(20)),
+            owner: me,
+            start: Some(day - chrono::Duration::days(40)),
+            targets: vec![
+                target(
+                    "Testers",
+                    TargetKind::Number {
+                        start: 0.0,
+                        target: 50.0,
+                        current: 38.0,
+                        unit: "x".into(),
+                    },
+                ),
+                target("Review", TargetKind::TrueFalse { done: false }),
+                target("Work", TargetKind::Tasks { ids: vec![task] }),
+            ],
+            ..Default::default()
+        },
+        Goal {
+            id: 802,
+            name: "Move".into(),
+            color: [0x00, 0x88, 0x44],
+            owner: me,
+            start: Some(day - chrono::Duration::days(9)),
+            due: Some(day + chrono::Duration::days(3)),
+            done_on: Some(day),
+            targets: vec![target("Lease", TargetKind::TrueFalse { done: true })],
+            ..Default::default()
+        },
+    ];
+    let mut data = data_strings(&h.app.data);
+    set_lang(Lang::Ko);
+    h.click("Rail More");
+    h.click("Goals");
+    h.settle();
+    let mut shown = vec![];
+    texts(&h.shapes, &mut shown);
+    h.click("Show as list");
+    h.click("Show targets of Launch");
+    texts(&h.shapes, &mut shown);
+    h.click("Goal row Launch");
+    h.settle();
+    texts(&h.shapes, &mut shown);
+    h.app.modal = Some(Modal::NewGoal(Box::new(super::more::GoalDraft::new(me))));
+    h.settle();
+    texts(&h.shapes, &mut shown);
+    h.app.modal = Some(Modal::GoalAchieved { id: 802 });
+    h.settle();
+    texts(&h.shapes, &mut shown);
+    h.app.modal = None;
+    h.app.goal_open = None;
+    h.app.data.extra.goals.clear();
+    h.settle();
+    texts(&h.shapes, &mut shown);
+    set_lang(Lang::En);
+    data.extend(data_strings(&h.app.data));
+    let mut left: Vec<&String> = shown.iter().filter(|s| english_left(s, &data)).collect();
+    left.sort();
+    left.dedup();
+    assert!(left.is_empty(), "English on the goal screens: {:?}", left);
 }

@@ -43,7 +43,7 @@ pub struct GoalTarget {
     pub kind: TargetKind,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Goal {
     pub id: u64,
     pub name: String,
@@ -51,6 +51,135 @@ pub struct Goal {
     pub due: Option<NaiveDate>,
     pub owner: u64,
     pub targets: Vec<GoalTarget>,
+    /// When it started: progress is compared with how much of start..due
+    /// has gone by (`Goal::pace`). None on goals from before it was kept;
+    /// set once and changed, never cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<NaiveDate>,
+    /// The day it reached 100%; None again if it drops back. Always
+    /// written (null too) so an older copy's day isn't filled back in.
+    #[serde(default)]
+    pub done_on: Option<NaiveDate>,
+    /// The highest milestone (25, 50, 75 or 100) reached so far. It only
+    /// goes up, so dropping back and crossing again isn't announced twice.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub reached: u8,
+    /// What happened to it, oldest first (the last `GOAL_LOG_KEEP`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub log: Vec<GoalEvent>,
+    /// Its progress (percent) at the end of each day it changed, oldest
+    /// first (the last `GOAL_DAYS_KEEP`): for "up N points since last week".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub days: Vec<(NaiveDate, u8)>,
+}
+
+pub const GOAL_LOG_KEEP: usize = 100;
+pub const GOAL_DAYS_KEEP: usize = 60;
+
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
+}
+
+/// One line of a goal's history.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GoalEvent {
+    pub ts: i64,
+    /// Who did it; 0 when the app noticed it (a milestone reached through
+    /// tasks closed elsewhere).
+    pub who: u64,
+    pub what: GoalChange,
+    /// The goal's progress afterwards, 0-100.
+    pub pct: u8,
+}
+
+/// What a `GoalEvent` records. Target names are as they were then.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum GoalChange {
+    Created,
+    /// A goal from before history was kept, first seen by this version.
+    Tracked,
+    Number {
+        target: String,
+        from: f64,
+        to: f64,
+        unit: String,
+    },
+    Done {
+        target: String,
+        done: bool,
+    },
+    Task {
+        target: String,
+        task: String,
+        done: bool,
+    },
+    Milestone(u8),
+}
+
+/// Where a goal stands against the time it has had.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pace {
+    /// At or ahead of where it should be by now.
+    OnTrack,
+    /// A little behind.
+    Behind,
+    /// Far behind.
+    AtRisk,
+    Done,
+}
+
+impl Goal {
+    /// The share of start..due gone by on `day`, 0-1; None without both days.
+    pub fn time_used(&self, day: NaiveDate) -> Option<f32> {
+        let (s, d) = (self.start?, self.due?);
+        let total = (d - s).num_days();
+        if total <= 0 {
+            return Some(1.0);
+        }
+        Some(((day - s).num_days() as f32 / total as f32).clamp(0.0, 1.0))
+    }
+
+    /// `progress` (0-1) against the time used on `day`. None when it can't be
+    /// told (no start or due) and it isn't done.
+    pub fn pace(&self, progress: f32, day: NaiveDate) -> Option<Pace> {
+        if progress >= 1.0 {
+            return Some(Pace::Done);
+        }
+        let used = self.time_used(day)?;
+        // the first tenth of the time is too early to call anything late
+        let gap = used - progress;
+        Some(if used < 0.1 || gap <= 0.05 {
+            Pace::OnTrack
+        } else if gap <= 0.25 {
+            Pace::Behind
+        } else {
+            Pace::AtRisk
+        })
+    }
+
+    /// The progress (percent) it had at the end of `day`: the last day kept
+    /// on or before it.
+    pub fn pct_on(&self, day: NaiveDate) -> Option<u8> {
+        self.days.iter().rev().find(|(d, _)| *d <= day).map(|x| x.1)
+    }
+
+    /// Adds a line to the history, dropping the oldest past the limit.
+    pub fn record(&mut self, ev: GoalEvent) {
+        self.log.push(ev);
+        if self.log.len() > GOAL_LOG_KEEP {
+            let extra = self.log.len() - GOAL_LOG_KEEP;
+            self.log.drain(..extra);
+        }
+    }
+
+    /// The day the milestone `m` was reached, from the history.
+    pub fn milestone_day(&self, m: u8) -> Option<i64> {
+        self.log
+            .iter()
+            .rev()
+            .find(|e| e.what == GoalChange::Milestone(m))
+            .map(|e| e.ts)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -384,6 +513,10 @@ pub struct NotifySettings {
     pub meeting_minutes: u32,
     /// My goals due tomorrow and today.
     pub goals: bool,
+    /// My goals passing 25, 50, 75 and 100%.
+    pub goal_milestones: bool,
+    /// My goals falling far behind their time.
+    pub goal_risk: bool,
     /// Someone joins the workspace (owners and admins).
     pub team: bool,
     /// A form I made gets an answer.
@@ -423,6 +556,8 @@ impl Default for NotifySettings {
             meetings: true,
             meeting_minutes: 10,
             goals: true,
+            goal_milestones: true,
+            goal_risk: true,
             team: true,
             forms: true,
             connection: true,
@@ -514,6 +649,8 @@ pub struct Extra {
     /// Sidebar sections folded shut by clicking their heading.
     pub folded_nav: Vec<String>,
     pub hidden_views: Vec<String>,
+    /// How the Goals page lists goals: "" cards, "list" rows.
+    pub goals_view: String,
     /// Theme colour: black, purple, blue, pink, violet, indigo, orange, teal, bronze, mint.
     pub accent: String,
     /// Follow the computer's light / dark setting.
@@ -639,6 +776,7 @@ impl Default for Extra {
             hidden_nav: vec![],
             folded_nav: vec![],
             hidden_views: vec![],
+            goals_view: String::new(),
             accent: "black".into(),
             auto_theme: false,
             hide_tray: false,

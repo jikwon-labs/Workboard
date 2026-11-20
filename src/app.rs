@@ -531,6 +531,14 @@ pub struct App {
     dash_open: Option<u64>,
     meeting_open: Option<u64>,
     goal_open: Option<u64>,
+    /// Goals page: 0 all, 1 mine, 2 achieved
+    goal_filter: u8,
+    /// the goal whose targets show under its row in the rows view
+    goal_list_open: Option<u64>,
+    /// a milestone just reached on a goal's page: (goal, 25/50/75)
+    goal_banner: Option<(u64, u8)>,
+    /// the tasks target showing its closed tasks too: (goal, target)
+    goal_show_done: Option<(u64, usize)>,
     ws_file: String,
     sidebar_collapsed: bool,
     force_menu: Option<String>,
@@ -1024,6 +1032,10 @@ impl App {
             dash_open: None,
             meeting_open: None,
             goal_open: None,
+            goal_filter: 0,
+            goal_list_open: None,
+            goal_banner: None,
+            goal_show_done: None,
             ws_file,
             sidebar_collapsed: false,
             force_menu: arg("--menu"),

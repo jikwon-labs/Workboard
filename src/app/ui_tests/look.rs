@@ -588,7 +588,7 @@ fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
     h.click("Goals");
     h.settle();
     let t = h.app.t();
-    let (r, text) = h.painted_text("Set a Goal")[0];
+    let (r, text) = h.painted_text("+ New goal")[0];
     // the button's own fill under its label
     fn fills(s: &egui::Shape, p: Pos2, out: &mut Vec<Color32>) {
         match s {

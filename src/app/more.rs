@@ -7,6 +7,8 @@ use super::menus::ROLES;
 use super::*;
 
 mod forms;
+mod goal_dialogs;
+mod goal_page;
 mod goals;
 mod inbox;
 mod overview;
@@ -20,6 +22,7 @@ mod whiteboard;
 #[cfg(test)]
 pub use forms::form_answers;
 pub use forms::FormTab;
+pub(crate) use goal_dialogs::GoalDraft;
 #[cfg(test)]
 pub use search::Hit;
 pub use whiteboard::{WbNew, WbUndo, WbView};

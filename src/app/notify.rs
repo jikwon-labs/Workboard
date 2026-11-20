@@ -670,6 +670,7 @@ impl App {
     /// Notices on the clock: my tasks due today, meetings about to start,
     /// goals coming due. `now` is passed in so tests can move the clock.
     pub(super) fn notify_clock(&mut self, now: i64) {
+        self.goal_watch(now);
         let n = self.data.extra.notify.clone();
         let me = self.data.me;
         let local = local(now).unwrap_or_else(chrono::Local::now);

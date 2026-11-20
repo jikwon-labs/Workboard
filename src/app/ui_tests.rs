@@ -13,6 +13,7 @@ mod comments;
 mod docs;
 mod empty_states;
 mod forms;
+mod goals;
 mod harness;
 mod huddle;
 mod i18n_tests;

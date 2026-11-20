@@ -186,7 +186,9 @@ fn click_goals_dashboards_teams_create() {
     h.click("Rail More");
     h.click("Goals");
     let g = h.app.data.extra.goals.len();
-    h.click("Set a Goal");
+    h.click("New goal");
+    h.type_text("Grow");
+    h.click("Create goal");
     assert_eq!(h.app.data.extra.goals.len(), g + 1);
 
     h.click("Rail More");

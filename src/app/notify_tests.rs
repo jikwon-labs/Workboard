@@ -414,6 +414,7 @@ fn a_goal_due_tomorrow_is_announced() {
             name: "Done".into(),
             kind: TargetKind::TrueFalse { done: false },
         }],
+        ..Default::default()
     });
     a.notify_clock(at(day, 10, 0));
     assert_eq!(kinds(&a), vec![Kind::Goal]);

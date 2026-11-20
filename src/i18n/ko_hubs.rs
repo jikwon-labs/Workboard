@@ -95,11 +95,6 @@ pub const T: &[(&str, &str)] = &[
     ("Job Application", "입사 지원서"),
     ("IT Requests", "IT 요청"),
     // goals
-    ("Make your goals a reality.", "목표를 현실로 만드세요."),
-    ("Create Goals, break them down into measurable targets, and track progress in real-time.", "목표를 만들고 측정 가능한 지표로 나눈 뒤 진행 상황을 실시간으로 확인하세요."),
-    ("Set a Goal", "목표 설정"),
-    ("Learn more", "자세히 알아보기"),
-    ("Create a Goal, add targets (a number, done / not done, or a set of tasks) and the progress bar fills in as you go.", "목표를 만들고 지표(숫자, 완료 여부, 작업 묶음)를 추가하면 진행할수록 진행 막대가 채워집니다."),
     // teams
     ("Create team", "팀 만들기"),
     ("Manage teams and see their work", "팀을 관리하고 업무를 확인하세요"),

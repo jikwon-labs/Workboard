@@ -8,6 +8,7 @@
 // menus/ (workspace, prefs, fields, items); modal_body picks one.
 
 use super::icons::{icon_button, icon_button_ex, line_icon};
+use super::more::GoalDraft;
 use super::*;
 use egui::Response;
 
@@ -210,6 +211,13 @@ pub(super) enum Modal {
     Integrations {
         channel: u64,
         form: Box<super::integrations::IntegrationForm>,
+    },
+    // new kinds go last: a kind's place names its window, and moving
+    // the others renames theirs
+    NewGoal(Box<GoalDraft>),
+    /// A goal I moved to 100%.
+    GoalAchieved {
+        id: u64,
     },
 }
 
@@ -1319,6 +1327,8 @@ impl App {
             Modal::Bookmark { .. } => tr("Add bookmark").into(),
             Modal::SwitchUser => tr("Switch person").into(),
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
+            Modal::NewGoal(_) => tr("New goal").into(),
+            Modal::GoalAchieved { .. } => tr("Goal achieved").into(),
             Modal::Together { .. } => tr("Work together").into(),
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
             Modal::JoinTeam { .. } => tr("Join a team").into(),
@@ -1559,6 +1569,11 @@ impl App {
                 close = self.confirm_remove_body(ui, t, kind, *id, name)
             }
             Modal::NewDashboard { name } => close = self.new_dashboard_body(ui, t, name),
+            Modal::NewGoal(d) => close = self.new_goal_body(ui, t, d),
+            Modal::GoalAchieved { id } => {
+                let id = *id;
+                close = self.goal_achieved_body(ui, t, id);
+            }
         }
         close
     }

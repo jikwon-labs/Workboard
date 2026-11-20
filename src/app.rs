@@ -6020,7 +6020,60 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
         }
         break;
     }
+    line_up_baselines(&mut fonts);
     ctx.set_fonts(fonts);
+}
+
+/// The share of a font's line that sits above its baseline, as egui lays
+/// it out (ab_glyph scales the ascent-to-descent span to the font size).
+fn ascent_share(data: &egui::FontData) -> Option<f32> {
+    use ab_glyph::Font;
+    let f = ab_glyph::FontRef::try_from_slice_and_index(&data.font, data.index).ok()?;
+    let (a, d) = (f.ascent_unscaled(), f.descent_unscaled());
+    (a > d).then(|| a / (a - d))
+}
+
+/// egui draws each fallback font from its own ascent, so a fallback whose
+/// ascent takes a smaller share of its line than the first font's sits
+/// higher: Korean in Apple SD Gothic Neo floated about 1pt above Latin in
+/// SF ("Yongsu에도 보내기"). Each fallback the app adds (the system font,
+/// the Korean font) gets a copy per family moved onto the first font's
+/// baseline. egui's own emoji fonts keep their tweaks.
+fn line_up_baselines(fonts: &mut egui::FontDefinitions) {
+    for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        let Some(list) = fonts.families.get(&fam).cloned() else {
+            continue;
+        };
+        let Some(first) = list.first().and_then(|n| fonts.font_data.get(n)) else {
+            continue;
+        };
+        let Some(base) = ascent_share(first) else {
+            continue;
+        };
+        let mut moved = list.clone();
+        for (i, name) in list.iter().enumerate().skip(1) {
+            if name != "system-ui" && name != "cjk" {
+                continue;
+            }
+            let Some(data) = fonts.font_data.get(name) else {
+                continue;
+            };
+            let Some(own) = ascent_share(data) else {
+                continue;
+            };
+            if (base - own).abs() < 0.005 {
+                continue;
+            }
+            let mut copy = (**data).clone();
+            copy.tweak.baseline_offset_factor = base - own;
+            let copy_name = format!("{name}@{fam:?}");
+            fonts
+                .font_data
+                .insert(copy_name.clone(), std::sync::Arc::new(copy));
+            moved[i] = copy_name;
+        }
+        fonts.families.insert(fam, moved);
+    }
 }
 
 /// The bold font family `setup_fonts` adds when the system has one.

@@ -87,6 +87,41 @@ fn shortcut_symbols_have_glyphs() {
     }
 }
 
+/// Korean and Latin in one line sit on one baseline: the Korean font's
+/// glyphs used to float about a point above the system font's
+/// ("Yongsu에도 보내기", "Yongsu에 메시지 쓰기").
+#[test]
+fn korean_sits_on_the_latin_baseline() {
+    let ctx = egui::Context::default();
+    // a Retina screen, where a point's error shows as two pixels
+    ctx.set_pixels_per_point(2.0);
+    crate::app::setup_fonts(&ctx);
+    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    for f in [
+        FontId::proportional(12.0),
+        FontId::proportional(13.0),
+        FontId::proportional(14.0),
+        FontId::proportional(20.0),
+        FontId::monospace(13.0),
+    ] {
+        if !ctx.fonts(|x| x.has_glyph(&f, '\u{C5D0}')) {
+            return; // no Korean font on this machine
+        }
+        let g =
+            ctx.fonts(|x| x.layout_no_wrap("Yongsu\u{C5D0}x".into(), f.clone(), Color32::WHITE));
+        let ys: Vec<f32> = g.rows[0].glyphs.iter().map(|g| g.pos.y).collect();
+        let latin = ys[0];
+        let korean = ys[6];
+        assert!(
+            (latin - korean).abs() <= 0.5,
+            "{:?}: Latin baseline {} and Korean baseline {}",
+            f,
+            latin,
+            korean
+        );
+    }
+}
+
 #[test]
 fn short_window_profile_menu_scrolls_to_trash_and_switch_person() {
     let mut h = Ui1::sized(900.0, 560.0);

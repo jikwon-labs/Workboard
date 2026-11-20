@@ -679,6 +679,10 @@ struct ChatUi {
     /// The pass Chat was last drawn in: a gap means it was left (for
     /// another page) and opened again, which starts `read_line` afresh.
     drawn_pass: u64,
+    /// Chat was drawn in the last frame, so the open conversation is read as
+    /// it comes in: the sidebar, rail and Dock, drawn before it marks new
+    /// messages read, don't count them for a frame.
+    shown: bool,
 }
 
 /// The Posts page: the post being written and the filters.
@@ -5455,6 +5459,7 @@ impl App {
             });
         }
         self.handle_screenshot(ctx);
+        self.chat.shown = self.chat.drawn_pass == ctx.cumulative_pass_nr();
         // read at the end of the pass: egui drops the focus on Escape before
         // the next pass reaches our code
         self.typing_was_on = ctx

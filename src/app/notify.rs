@@ -887,6 +887,7 @@ impl App {
             .channels
             .iter()
             .filter(|c| c.kind == ChannelKind::Direct && c.members.contains(&me))
+            .filter(|c| !self.reading_now(c))
             // the sidebar's rule: messages not seen by id, so a late one
             // (its author's clock behind) still counts and a read one doesn't
             .map(|c| self.unread_here(c))

@@ -3132,3 +3132,83 @@ fn a_long_message_scrolls_inside_the_box_and_keeps_what_is_under_it() {
         also
     );
 }
+
+#[test]
+fn a_message_coming_into_the_open_chat_shows_no_count_and_no_jump() {
+    let mut h = Ui1::new();
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
+        .unwrap()
+        .id;
+    let now = chrono::Utc::now().timestamp();
+    let long = |i: usize| format!("Earlier line {} that runs on long enough to wrap", i);
+    {
+        let c = h.app.data.channels.iter_mut().find(|c| c.id == dm).unwrap();
+        for i in 0..30 {
+            c.messages.push(crate::app::slack::new_message(
+                930_000 + i as u64,
+                2,
+                long(i),
+                now - 600 + i as i64,
+            ));
+        }
+    }
+    h.app.section = Section::Chat;
+    h.app.chat.open = Some(dm);
+    for _ in 0..10 {
+        h.frame(vec![]);
+    }
+    // the red counts painted in the sidebar
+    let danger = h.app.t().danger;
+    let counts = |h: &Ui1| {
+        h.shapes
+            .iter()
+            .filter(|s| match &s.shape {
+                egui::Shape::Rect(r) => r.fill == danger && r.rect.height() <= 17.0,
+                _ => false,
+            })
+            .count()
+    };
+    let before = counts(&h);
+    let arrive = |h: &mut Ui1, id: u64, text: &str, ts: i64| {
+        let copy = teammate_change(&h.app.data, |d| {
+            let c = d.channels.iter_mut().find(|c| c.id == dm).unwrap();
+            c.messages
+                .push(crate::app::slack::new_message(id, 2, text.into(), ts));
+        });
+        h.app.take_net_events(vec![wb_net::Event::Update {
+            data: copy,
+            rev: 1,
+            hidden: vec![],
+        }]);
+    };
+
+    arrive(&mut h, 990_101, "hello there", now + 1);
+    h.frame(vec![]);
+    assert_eq!(counts(&h), before, "no count flashes on the open chat");
+    let first = (h.find(&long(29)), h.find("hello there"));
+    assert!(first.1.is_some(), "the new message shows at once");
+    for _ in 0..5 {
+        h.frame(vec![]);
+        assert_eq!(counts(&h), before);
+        assert_eq!(
+            (h.find(&long(29)), h.find("hello there")),
+            first,
+            "the list doesn't move after the first frame"
+        );
+    }
+
+    // with the window behind another app it isn't read: it counts
+    h.focused = false;
+    h.settle();
+    arrive(&mut h, 990_102, "while away", now + 2);
+    h.settle();
+    assert!(counts(&h) > before, "counted while away");
+    h.focused = true;
+    h.settle();
+    assert_eq!(counts(&h), before, "read on coming back");
+}

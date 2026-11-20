@@ -589,3 +589,32 @@ pub fn empty_card(ui: &mut Ui, t: &Theme, glyph: &str, text: &str) {
             });
         });
 }
+
+/// A list kept at its bottom (`stick_to_bottom`) catches up with new content
+/// only on the frame after it changes size: a message that comes in first
+/// shows lower down (cut off) and the list then jumps to it. While such a
+/// list sits at its bottom and its content or height changes, the frame is
+/// laid out again before it shows, already at the bottom.
+pub fn redo_when_stuck_list_changes<R>(
+    ctx: &egui::Context,
+    out: &egui::scroll_area::ScrollAreaOutput<R>,
+) {
+    let key = out.id.with("stuck_list_size");
+    let now = [
+        out.content_size.y,
+        out.inner_rect.height(),
+        out.state.offset.y,
+    ];
+    let before: Option<[f32; 3]> = ctx.data_mut(|d| {
+        let before = d.get_temp(key);
+        d.insert_temp(key, now);
+        before
+    });
+    let Some([content, height, offset]) = before else {
+        return;
+    };
+    let was_at_bottom = offset >= content - height - 0.5;
+    if was_at_bottom && (now[0] != content || now[1] != height) {
+        ctx.request_discard("a list kept at its bottom changed size");
+    }
+}

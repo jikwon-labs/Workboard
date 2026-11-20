@@ -515,6 +515,20 @@ impl App {
         c.messages.iter().filter(|m| self.is_unread(c, m)).count()
     }
 
+    /// Conversation `c` (or a copy of it) is open in Chat and read as
+    /// messages come in, as the end of [`Self::chat`] marks it: not
+    /// marked unread to stay so, the window in front.
+    pub(super) fn reading_now(&self, c: &Channel) -> bool {
+        let Some(open) = self.chat.open else {
+            return false;
+        };
+        self.chat.shown
+            && self.section == Section::Chat
+            && self.chat.keep_unread != Some(open)
+            && !self.notify_rt.away
+            && self.conversation(c).iter().any(|d| d.id == open)
+    }
+
     /// A message from someone else in channel `c` I haven't seen.
     pub(super) fn is_unread(&self, c: &Channel, m: &Message) -> bool {
         m.author != self.data.me
@@ -1382,6 +1396,7 @@ impl App {
                     }
                 });
             });
+            crate::widgets::redo_when_stuck_list_changes(ui.ctx(), &list);
             // scrolled up while messages came in: a quiet note over the
             // composer that takes the list down to them
             let at_bottom = list.state.offset.y + list.inner_rect.height() >= list.content_size.y - 24.0;
@@ -1600,7 +1615,7 @@ impl App {
                 76.0
             })
         .max(composer_seen(ui, ("thread_composer_h", tid)));
-        egui::ScrollArea::vertical()
+        let list = egui::ScrollArea::vertical()
             .id_salt("thread_scroll")
             .max_height(ui.available_height() - composer_h)
             .auto_shrink([false, false])
@@ -1628,6 +1643,7 @@ impl App {
                     ui.scroll_to_cursor(Some(Align::BOTTOM));
                 }
             });
+        crate::widgets::redo_when_stuck_list_changes(ui.ctx(), &list);
         let composer_top = ui.cursor().top();
         if let Some((text, files)) = self.composer(ui, tr("Reply..."), true) {
             acts.push(ChatAction::Send {

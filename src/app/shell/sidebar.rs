@@ -1051,7 +1051,7 @@ impl App {
     }
 
     pub(in crate::app) fn unread_count(&self, c: &Channel) -> usize {
-        if !self.data.extra.notify.chat {
+        if !self.data.extra.notify.chat || self.reading_now(c) {
             return 0;
         }
         self.unread(c)

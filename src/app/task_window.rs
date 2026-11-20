@@ -1116,7 +1116,7 @@ impl App {
             .filter(|q| !q.is_empty());
         let only_id = win_id.with("comments_only");
         let mut only_comments: bool = right_ui.data(|d| d.get_temp(only_id)).unwrap_or(false);
-        egui::ScrollArea::vertical()
+        let feed = egui::ScrollArea::vertical()
             .id_salt("activity")
             .max_height(list_h)
             .auto_shrink([false, false])
@@ -1127,6 +1127,7 @@ impl App {
                 }
                 self.comment_feed(ui, &mut task, q.as_deref(), only_comments, win_id);
             });
+        crate::widgets::redo_when_stuck_list_changes(right_ui.ctx(), &feed);
         right_ui.add_space(6.0);
         if level < crate::sync::Level::Comment {
             right_ui.disable();

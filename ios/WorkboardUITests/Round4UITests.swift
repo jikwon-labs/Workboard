@@ -27,6 +27,34 @@ final class Round4UITests: WorkboardUITestCase {
         XCTAssertTrue(a.staticTexts["Look @Alex Kim " + tail].waitForExistence(timeout: 5))
     }
 
+    /// Sending right after a name filled in from the @ list empties the box
+    /// while it still holds the cursor at the end of the long text; the app
+    /// must stay up and take the next message (a TestFlight crash on iOS 18.5).
+    func testSendRightAfterPickingAMentionThenKeepTyping() {
+        let a = launchFresh(["-wbOpen", "channel:301"])
+        let box = a.textFields["composer"]
+        waitEnabled(box)
+        box.tap()
+        box.typeText("Ping @Al")
+        let alex = a.buttons["mention-2"]
+        XCTAssertTrue(alex.waitForExistence(timeout: 5))
+        alex.tap()
+        XCTAssertEqual(box.value as? String, "Ping @Alex Kim ")
+        a.buttons["sendButton"].tap()
+        let sent = a.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Ping @Alex Kim")).firstMatch
+        XCTAssertTrue(sent.waitForExistence(timeout: 5))
+        let emptied = expectation(for: NSPredicate(format: "value != %@", "Ping @Alex Kim "), evaluatedWith: box)
+        wait(for: [emptied], timeout: 5)
+
+        let next = "still here \(Int.random(in: 1000...9999))"
+        box.tap()
+        box.typeText(next)
+        XCTAssertEqual(box.value as? String, next, "typing starts over in the empty box")
+        a.buttons["sendButton"].tap()
+        XCTAssertTrue(a.staticTexts[next].waitForExistence(timeout: 5))
+        XCTAssertEqual(a.state, .runningForeground)
+    }
+
     func testTrashIsEmptyForTheNextPersonAfterSignOut() {
         let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         join(a, member: 3, password: "sam-password-r4")

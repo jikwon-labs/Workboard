@@ -1377,8 +1377,29 @@ private struct SelectingField: View {
     /// The text was just changed by a formatting button (keep its selection).
     @State private var wrapped = false
 
+    /// The selection, but only while it still points inside `text`. Sending
+    /// empties the box before `onChange` can clear the selection, and iOS 18
+    /// crashes when the field is handed a range from the old, longer text.
+    private var fittingSelection: Binding<TextSelection?> {
+        Binding(
+            get: { Self.fits(selection, in: text) ? selection : nil },
+            set: { selection = $0 }
+        )
+    }
+
+    static func fits(_ selection: TextSelection?, in text: String) -> Bool {
+        guard let selection else { return true }
+        func ok(_ i: String.Index) -> Bool {
+            i >= text.startIndex && i <= text.endIndex && i.samePosition(in: text) != nil
+        }
+        switch selection.indices {
+        case .selection(let r): return ok(r.lowerBound) && ok(r.upperBound)
+        default: return false
+        }
+    }
+
     var body: some View {
-        TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
+        TextField(placeholder, text: $text, selection: fittingSelection, axis: .vertical)
             .onChange(of: text) { old, new in
                 if wrapped {
                     wrapped = false

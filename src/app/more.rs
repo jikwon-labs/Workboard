@@ -714,11 +714,18 @@ impl App {
 
     pub(super) fn ai_page(&mut self, ui: &mut Ui) {
         let t = self.t();
+        let mut close = false;
         egui::Frame::new().inner_margin(egui::Margin::symmetric(40, 40)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(26.0, 28.0), Sense::hover());
                 line_icon_scaled(ui.painter(), "sparkle", r.center(), t.text, 1.4);
                 ui.label(RichText::new(tr("AI")).size(24.0));
+                // the page has nothing to do yet, so give an obvious way out
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    close = icon_button(ui, &t, "close", "", "Close AI", false)
+                        .on_hover_text(format!("{} (Esc)", tr("Close")))
+                        .clicked();
+                });
             });
             ui.add_space(8.0);
             ui.label(RichText::new(tr("Ask, Build, Create, Skills, Artifacts, Super Agents, AI Chats and the AI Notetaker need an AI service.")).color(t.text2));
@@ -728,6 +735,10 @@ impl App {
             // to an unreadable grey on the dark theme
             ui.add(egui::TextEdit::multiline(&mut String::new()).interactive(false).hint_text(RichText::new(tr("Ask anything... (available with the server)")).color(t.text3)).desired_rows(3).desired_width(600.0));
         });
+        close |= self.modal.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if close {
+            self.section = Section::Home;
+        }
     }
 }
 

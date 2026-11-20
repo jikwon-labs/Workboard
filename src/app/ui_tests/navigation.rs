@@ -475,6 +475,21 @@ fn click_every_rail_more_app() {
 }
 
 #[test]
+fn the_ai_page_closes_with_its_button_or_escape() {
+    let mut h = Ui1::new();
+    h.click("Rail Planner");
+    h.click("Rail AI");
+    assert_eq!(h.app.section, Section::Ai);
+    h.click("Close AI");
+    assert_eq!(h.app.section, Section::Home, "the X goes back home");
+
+    h.click("Rail AI");
+    assert_eq!(h.app.section, Section::Ai);
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.section, Section::Home, "Esc does the same");
+}
+
+#[test]
 fn help_says_where_the_workspace_is_kept() {
     let mut h = Ui1::new();
     h.app.modal = Some(Modal::Help);

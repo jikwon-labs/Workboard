@@ -1570,7 +1570,7 @@ impl App {
                 self.files.upload(&a, &remote);
             }
         }
-        if let Some(p) = self.pasted.take() {
+        if let Some(p) = self.paste.pasted.take() {
             if self.section == Section::Chat && self.chat.open.is_some() {
                 let thread = ctx
                     .is_some_and(|c| c.memory(|m| m.focused()) == Some(egui::Id::new(THREAD_BOX)))
@@ -1919,7 +1919,7 @@ impl App {
                     .iter()
                     .any(|e| matches!(e, egui::Event::Paste(_)));
             if !pasting || typing_elsewhere || !self.chat_box_shown(ctx) {
-                self.paste_text_seen = false;
+                self.paste.text_seen = false;
                 return;
             }
             // the box takes this frame's pasted text itself
@@ -1930,22 +1930,22 @@ impl App {
             .iter()
             .any(|e| matches!(e, egui::Event::Paste(_)))
         {
-            self.paste_text_seen = true;
+            self.paste.text_seen = true;
             // files copied in Finder come with their names as text: send the files instead
             let p = media::pasteboard();
             if !p.files.is_empty() {
                 raw.events.retain(|e| !matches!(e, egui::Event::Paste(_)));
-                self.pasted = Some(p);
+                self.paste.pasted = Some(p);
             }
         }
         if v_up {
-            if !self.paste_text_seen {
+            if !self.paste.text_seen {
                 let p = media::pasteboard();
                 if !p.files.is_empty() || p.png.is_some() {
-                    self.pasted = Some(p);
+                    self.paste.pasted = Some(p);
                 }
             }
-            self.paste_text_seen = false;
+            self.paste.text_seen = false;
         }
     }
 
@@ -1966,22 +1966,22 @@ impl App {
                 continue;
             };
             if modifiers.command {
-                self.paste_cmd = true;
+                self.paste.cmd = true;
             }
             if *key == egui::Key::V {
                 if *pressed {
-                    self.v_typed = true;
+                    self.paste.v_typed = true;
                 } else {
-                    up |= modifiers.command || (self.paste_cmd && !self.v_typed);
-                    self.v_typed = false;
-                    self.paste_cmd = false;
+                    up |= modifiers.command || (self.paste.cmd && !self.paste.v_typed);
+                    self.paste.v_typed = false;
+                    self.paste.cmd = false;
                 }
             } else if *pressed && !modifiers.command {
-                self.paste_cmd = false;
+                self.paste.cmd = false;
             }
         }
         if raw.modifiers.command {
-            self.paste_cmd = true;
+            self.paste.cmd = true;
         }
         up
     }

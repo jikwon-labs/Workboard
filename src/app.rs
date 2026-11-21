@@ -581,17 +581,8 @@ pub struct App {
     viewer: Option<files::Viewer>,
     /// plain files someone clicked to save, waiting to be fetched
     file_saves: Vec<Attachment>,
-    /// Files or a picture pasted into a message box (see raw_input_hook).
-    pasted: Option<crate::media::Pasted>,
-    /// egui pasted text for the Cmd+V being held.
-    paste_text_seen: bool,
     /// What the iPad's on-screen keyboard covered last frame (files.rs)
     keyboard_cover: f32,
-    /// Cmd was held since the last key typed: a V let go after Cmd is still
-    /// the end of a Cmd+V.
-    paste_cmd: bool,
-    /// V went down as typing (egui swallows the V of a Cmd+V).
-    v_typed: bool,
     /// Input method fixes for the raw input (see ime.rs).
     ime: ime::ImeFix,
     /// iPad: a finger scrolls, taps and drags like an iPad app (touch.rs)
@@ -650,6 +641,8 @@ pub struct App {
     link_pending: Option<String>,
     /// Quitting: whether it was confirmed, wanted, or being asked about.
     quit: QuitState,
+    /// Pasting into a message box: what came in and the keys around it.
+    paste: PasteState,
 }
 
 /// Quitting (`ask_before_quit`).
@@ -663,6 +656,20 @@ struct QuitState {
     /// The open "Quit Workboard?" alert: true arrives on Quit, false on
     /// Cancel.
     reply: Option<std::sync::mpsc::Receiver<bool>>,
+}
+
+/// Pasting files or a picture into a message box (see raw_input_hook).
+#[derive(Default)]
+struct PasteState {
+    /// Files or a picture pasted into a message box.
+    pasted: Option<crate::media::Pasted>,
+    /// egui pasted text for the Cmd+V being held.
+    text_seen: bool,
+    /// Cmd was held since the last key typed: a V let go after Cmd is still
+    /// the end of a Cmd+V.
+    cmd: bool,
+    /// V went down as typing (egui swallows the V of a Cmd+V).
+    v_typed: bool,
 }
 
 /// The open channel and thread: what is being written, edited or deleted.
@@ -1137,16 +1144,13 @@ impl App {
             }),
             viewer: None,
             file_saves: vec![],
-            pasted: None,
-            paste_text_seen: false,
             keyboard_cover: 0.0,
-            paste_cmd: false,
-            v_typed: false,
             ime: Default::default(),
             touch: touch::TouchScroll::new(),
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,
+            paste: Default::default(),
             quit: Default::default(),
             typing_was_on: false,
             focus_was: None,

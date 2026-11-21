@@ -144,11 +144,11 @@ fn popup_body<R>(
 /// right click opens: rows draw as menu rows and `ui.menu_button` inside
 /// opens a side submenu instead of a new dropdown over the parent.
 ///
-/// egui only opens submenus to the right, so near the right edge of the
-/// window the menu is shifted left to leave room for one.
+/// Near the right edge of the window the menu's right edge lines up with
+/// the button's, and a submenu opens to the left (patched egui). Before,
+/// the menu was pushed far left of its button to leave room for a submenu.
 pub fn click_menu(resp: &Response, add: impl FnOnce(&mut Ui)) {
     const MENU_W: f32 = 230.0;
-    const SUB_ROOM: f32 = 240.0;
     let ctx = &resp.ctx;
     let bar_id = resp.id.with("__click_menu");
     let mut st = egui::menu::BarState::load(ctx, bar_id);
@@ -165,12 +165,15 @@ pub fn click_menu(resp: &Response, add: impl FnOnce(&mut Ui)) {
     } else if resp.clicked() {
         let screen = ctx.screen_rect();
         let margin = egui::Frame::menu(&ctx.style()).total_margin().left;
-        let mut pos = resp.rect.left_bottom() + vec2(-margin, ctx.style().spacing.menu_spacing);
-        let max_x = screen.right() - MENU_W - SUB_ROOM;
-        if pos.x > max_x {
-            pos.x = max_x.max(screen.left() + 4.0);
+        let pos = resp.rect.left_bottom() + vec2(-margin, ctx.style().spacing.menu_spacing);
+        let root = egui::menu::MenuRoot::new(pos, resp.id);
+        // too close to the right edge to open rightwards: hang the menu from
+        // the button's right edge instead (the frame's margin past it, as
+        // the left side is)
+        if pos.x + MENU_W > screen.right() - 8.0 {
+            root.menu_state.write().right_edge = Some(resp.rect.right() + margin);
         }
-        **st = Some(egui::menu::MenuRoot::new(pos, resp.id));
+        **st = Some(root);
     }
     // (MenuRootManager::show returns None while the menu stays open, so
     // read the state instead)

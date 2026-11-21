@@ -31,6 +31,12 @@ the egui contributors) so text boxes edit like the Mac. Used through
   tools) made accesskit_consumer panic with "Focused id ... is not in the
   node list" and the app quit.
 
+- `src/menu.rs`: a submenu opens to the left of its parent when it does
+  not fit to the right and there is more room on the left, and
+  `MenuState::right_edge` hangs a menu from its right edge (`click_menu`
+  lines a menu up with a button at the right edge of the window this way).
+  Before, egui only opened submenus to the right.
+
 - `src/lib.rs`: `#![allow(warnings)]`, so the old code does not fill every
   build with warnings.
 

@@ -20,7 +20,7 @@ use super::{
     Sense, TextStyle, Ui, Vec2,
 };
 use crate::{
-    epaint, vec2,
+    epaint, pos2, vec2,
     widgets::{Button, ImageButton},
     Align2, Area, Color32, Frame, Key, LayerId, Layout, NumExt, Order, Stroke, Style, TextWrapMode,
     UiKind, WidgetText,
@@ -163,10 +163,10 @@ fn menu_popup<'c, R>(
     menu_id: Id,
     add_contents: impl FnOnce(&mut Ui) -> R + 'c,
 ) -> InnerResponse<R> {
-    let pos = {
+    let (pos, right_edge) = {
         let mut menu_state = menu_state_arc.write();
         menu_state.entry_count = 0;
-        menu_state.rect.min
+        (menu_state.rect.min, menu_state.right_edge)
     };
 
     let area_id = menu_id.with("__menu");
@@ -179,10 +179,13 @@ fn menu_popup<'c, R>(
             .insert(area_id)
     });
 
-    let area = Area::new(area_id)
-        .kind(UiKind::Menu)
-        .order(Order::Foreground)
-        .fixed_pos(pos)
+    // Workboard patch: a submenu opened to the left hangs from its right edge
+    let area = Area::new(area_id).kind(UiKind::Menu).order(Order::Foreground);
+    let area = match right_edge {
+        Some(x) => area.pivot(Align2::RIGHT_TOP).fixed_pos(pos2(x, pos.y)),
+        None => area.fixed_pos(pos),
+    };
+    let area = area
         .default_width(ctx.style().spacing.menu_width)
         .sense(Sense::hover());
 
@@ -208,7 +211,10 @@ fn menu_popup<'c, R>(
         // During the sizing pass we didn't know the size yet,
         // so we might have just constrained the position unnecessarily.
         // Therefore keep the original=desired position until the next frame.
-        Rect::from_min_size(pos, area_rect.size())
+        match right_edge {
+            Some(x) => Rect::from_min_size(pos2(x - area_rect.width(), pos.y), area_rect.size()),
+            None => Rect::from_min_size(pos, area_rect.size()),
+        }
     } else {
         // We knew the size, and this is where it ended up (potentially constrained to screen).
         // Remember it for the future:
@@ -641,6 +647,11 @@ pub struct MenuState {
 
     /// Used to hash different [`Id`]s for sub-menus
     entry_count: usize,
+
+    /// Workboard patch: when set, the menu is placed with its right edge at
+    /// this x (a submenu opened to the left of its parent, or a menu lined
+    /// up with the right edge of its button)
+    pub right_edge: Option<f32>,
 }
 
 impl MenuState {
@@ -650,6 +661,7 @@ impl MenuState {
             sub_menu: None,
             response: MenuResponse::Stay,
             entry_count: 0,
+            right_edge: None,
         }
     }
 
@@ -696,12 +708,26 @@ impl MenuState {
             // ensure to repaint once even when pointer is not moving
             ui.ctx().request_repaint();
         } else if !open && button.hovered() {
-            // TODO(emilk): open menu to the left if there isn't enough space to the right
             let mut pos = button.rect.right_top();
             pos.x = self.rect.right() + ui.spacing().menu_spacing;
             pos.y -= Frame::menu(ui.style()).total_margin().top; // align the first button in the submenu with the parent button
 
+            // Workboard patch: open the submenu to the left when it does not
+            // fit to the right and there is more room on the left (its width
+            // is not known yet: guess the parent's)
+            let screen = ui.ctx().screen_rect();
+            let guess = self.rect.width().max(ui.spacing().menu_width);
+            let left_x = self.rect.left() - ui.spacing().menu_spacing;
+            let right_room = screen.right() - pos.x;
+            let left_room = left_x - screen.left();
+            let left = pos.x + guess > screen.right() && left_room > right_room;
+
             self.open_submenu(sub_id, pos);
+            if left {
+                if let Some(sub) = self.current_submenu() {
+                    sub.write().right_edge = Some(left_x);
+                }
+            }
         } else if open
             && ui.response().contains_pointer()
             && !button.hovered()

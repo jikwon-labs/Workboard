@@ -411,3 +411,43 @@ fn comment_links_to_private_or_archived_places_do_not_open() {
     assert_eq!(h.app.open_task, None);
     assert_eq!(h.app.loc, Location::List(lid));
 }
+
+#[test]
+fn comment_menu_at_the_right_edge_hangs_from_its_button() {
+    // the comment's "..." sits at the right edge of the task panel. Its
+    // menu used to open far left of it, leaving room for the "Assign
+    // comment" submenu on the right; now it lines up with the button and
+    // the submenu opens to the left
+    let mut h = Ui1::new();
+    h.open_clean_task();
+    h.click("Comment box");
+    h.type_text("Please review");
+    h.click("Send Comment");
+    let dots = h.rect("Comment actions");
+    assert!(
+        dots.right() > h.size.x - 240.0,
+        "the button is near the right edge: {:?}",
+        dots
+    );
+    h.click("Comment actions");
+    let row = h.rect("Assign comment");
+    assert!(
+        (row.right() - dots.right()).abs() <= 16.0,
+        "the menu's right edge is at the button's: menu row {:?}, button {:?}",
+        row,
+        dots
+    );
+    assert!(row.top() > dots.bottom(), "the menu opens below the button");
+    h.hover(row.center());
+    h.settle();
+    let me = h.rect("Me");
+    assert!(
+        me.right() <= row.left(),
+        "the submenu opens to the left: {:?} vs {:?}",
+        me,
+        row
+    );
+    assert!(me.left() >= 0.0, "the submenu stays in the window: {:?}", me);
+    h.click("Me");
+    assert!(h.has("Assigned to Me"), "the left submenu still works");
+}

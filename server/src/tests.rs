@@ -1561,3 +1561,46 @@ fn guessing_link_codes_stops_after_a_few_tries_a_minute() {
     assert_eq!(try_code(&real).map(|r| r.0), Ok(2));
     let _ = std::fs::remove_dir_all(&home);
 }
+
+/// People who may see the same get the same broadcast, made once per
+/// revision: a whole copy or a change, without what is hidden from them,
+/// the same as made for each on its own.
+#[test]
+fn a_broadcast_is_made_once_for_people_who_see_the_same() {
+    let canon = json!({"members": [{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4}], "channels": [
+        {"id": 10, "kind": "Channel", "members": []},
+        {"id": 12, "kind": "Channel", "private": true, "members": [1, 4]},
+    ]});
+    let delta = json!({"channels": [{"id": 12, "kind": "Channel", "private": true, "members": [1, 4], "name": "x"}]});
+    let c = Canon::new(&canon, 5, Some(delta.clone()), &Saved::default());
+    // 2 and 3 aren't in channel 12; 1 and 4 are
+    let (two, gone) = c.update_for(2);
+    assert_eq!(c.update_for(3), (two.clone(), gone.clone()));
+    let (data, hidden) = copy_for(&canon, 2, false).unwrap();
+    let alone = Msg::Update {
+        data,
+        rev: 5,
+        hidden: hidden.clone(),
+    }
+    .to_json();
+    assert_eq!(two, alone);
+    assert_eq!(gone, left_out(&canon, &hidden));
+    assert_eq!(c.made.locked().len(), 1);
+    // nothing hidden: the whole copy, not kept with the others
+    assert_eq!(c.update_for(1).0, c.whole_json());
+    assert_eq!(c.update_for(4).0, c.whole_json());
+    assert_eq!(c.made.locked().len(), 1);
+    // the change: one for 2 and 3, another for 1 and 4
+    let d2 = c.delta_for(2, &[]).unwrap();
+    assert_eq!(c.delta_for(3, &[]).unwrap(), d2);
+    assert!(!d2.0.contains("\"name\":\"x\""), "{}", d2.0);
+    let d1 = c.delta_for(1, &[]).unwrap();
+    assert_eq!(c.delta_for(4, &[]).unwrap(), d1);
+    assert!(d1.0.contains("\"name\":\"x\""), "{}", d1.0);
+    assert_eq!(c.made.locked().len(), 3);
+    // one whose last copy left channel 12 out gets it back whole: its own
+    let back = c.delta_for(4, &[12]).unwrap();
+    assert_eq!(c.made.locked().len(), 4);
+    let fresh = Canon::new(&canon, 5, Some(delta), &Saved::default());
+    assert_eq!(fresh.delta_for(4, &[12]).unwrap(), back);
+}

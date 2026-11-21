@@ -298,6 +298,9 @@ const PUT_BACK: &str =
 /// How long after telling that a connection isn't told again.
 const PUT_BACK_QUIET_SECS: u64 = 10;
 
+/// A message made for one revision and what it left out (`left_out`).
+type Made = Arc<std::sync::OnceLock<(String, Vec<u64>)>>;
+
 /// A new team copy for every connection; each one sends what its person may see.
 struct Canon {
     data: Value,
@@ -310,6 +313,10 @@ struct Canon {
     delta: Option<Value>,
     /// owners and admins when it was made (they see every shared space)
     managers: Vec<u64>,
+    /// the messages already made for people something is hidden from, by
+    /// (a change?, what is hidden, what comes back whole): people who see
+    /// the same get the same message, made once
+    made: Mutex<std::collections::HashMap<(bool, Vec<u64>, Vec<u64>), Made>>,
 }
 
 impl Canon {
@@ -325,26 +332,43 @@ impl Canon {
                 .filter(|(_, r)| r.manages())
                 .map(|(m, _)| *m)
                 .collect(),
+            made: Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// The message for `key`, made with `make` by the first connection
+    /// that needs it. Others that need the same wait for it rather than
+    /// make it again; different ones are made side by side.
+    fn made(
+        &self,
+        key: (bool, Vec<u64>, Vec<u64>),
+        make: impl FnOnce() -> (String, Vec<u64>),
+    ) -> (String, Vec<u64>) {
+        let cell = self.made.locked().entry(key).or_default().clone();
+        cell.get_or_init(make).clone()
     }
 
     /// The whole copy `member` gets, and what is left out of it (`left_out`).
     fn update_for(&self, member: u64) -> (String, Vec<u64>) {
-        match copy_for(&self.data, member, self.managers.contains(&member)) {
-            Some((data, hidden)) => {
-                let gone = left_out(&self.data, &hidden);
-                (
-                    Msg::Update {
-                        data,
-                        rev: self.rev,
-                        hidden,
-                    }
-                    .to_json(),
-                    gone,
-                )
-            }
-            None => (self.whole_json().to_string(), vec![]),
+        // (copy_for, made once for each set of hidden items)
+        let hidden = wb_sync::hidden_from(&self.data, member, self.managers.contains(&member));
+        if hidden.is_empty() {
+            return (self.whole_json().to_string(), vec![]);
         }
+        self.made((false, hidden.clone(), vec![]), || {
+            let mut data = self.data.clone();
+            wb_sync::hide(&mut data, &hidden);
+            let gone = left_out(&self.data, &hidden);
+            (
+                Msg::Update {
+                    data,
+                    rev: self.rev,
+                    hidden,
+                }
+                .to_json(),
+                gone,
+            )
+        })
     }
 
     /// The whole copy as an update message (`json`).
@@ -366,9 +390,8 @@ impl Canon {
     /// lists, which didn't change and so aren't in the change. None when
     /// this revision goes whole.
     fn delta_for(&self, member: u64, was_hidden: &[u64]) -> Option<(String, Vec<u64>)> {
-        let mut d = self.delta.clone()?;
+        let delta = self.delta.as_ref()?;
         let hidden = wb_sync::hidden_from(&self.data, member, self.managers.contains(&member));
-        wb_sync::hide(&mut d, &hidden);
         let gone = left_out(&self.data, &hidden);
         let still: std::collections::HashSet<u64> = gone.iter().copied().collect();
         let back: Vec<u64> = was_hidden
@@ -376,17 +399,21 @@ impl Canon {
             .filter(|i| !still.contains(i))
             .copied()
             .collect();
-        wb_sync::include_whole(&mut d, &self.data, &back);
-        Some((
-            Msg::Delta {
-                data: d,
-                rev: self.rev,
-                base: self.rev - 1,
-                hidden,
-            }
-            .to_json(),
-            gone,
-        ))
+        Some(self.made((true, hidden.clone(), back.clone()), || {
+            let mut d = delta.clone();
+            wb_sync::hide(&mut d, &hidden);
+            wb_sync::include_whole(&mut d, &self.data, &back);
+            (
+                Msg::Delta {
+                    data: d,
+                    rev: self.rev,
+                    base: self.rev - 1,
+                    hidden,
+                }
+                .to_json(),
+                gone,
+            )
+        }))
     }
 }
 

@@ -467,7 +467,7 @@ impl App {
             self.forms_home(ui);
             return;
         };
-        // what was typed or flagged on one form doesn't stay on another
+        // what was typed, flagged or picked on one form doesn't stay on another
         if self.sweep.form_for != self.form_open {
             self.sweep.form_error = None;
             self.sweep.form_for = self.form_open;
@@ -475,6 +475,7 @@ impl App {
             self.sweep.forms.choice = None;
             self.sweep.forms.picked = None;
             self.sweep.forms.drag = None;
+            self.sweep.forms.answers_filter = 0;
             self.form_fill.clear();
         }
         self.fit_form_fill(fi);

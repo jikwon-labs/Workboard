@@ -730,3 +730,28 @@ fn forms_go_between_teammates_through_a_server() {
     });
     assert!(b.app.data.extra.forms.iter().all(|f| f.id != private));
 }
+
+/// The Answers tab's filter belongs to the form it was picked on: another
+/// form's Answers start on All, as its typed answers and problems start
+/// empty.
+#[test]
+fn another_forms_answers_start_on_all() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    for (tpl, answer) in [("Feedback Form", "Loved it"), ("IT Requests", "No wifi")] {
+        h.click(tpl);
+        h.click("Fill out");
+        h.click("Answer 1");
+        h.type_text(answer);
+        h.click("Submit");
+        h.click("Back to all forms");
+    }
+    h.click("Open form IT Requests");
+    h.click("Answers");
+    h.click("Done answers");
+    assert!(!h.has("Answer task No wifi"), "not done yet");
+    h.click("Open form Feedback Form");
+    h.click("Answers");
+    assert_eq!(h.app.sweep.forms.answers_filter, 0);
+    assert!(h.has("Answer task Loved it"));
+}

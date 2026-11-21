@@ -638,3 +638,36 @@ fn plus_buttons_draw_the_plus_in_their_middle() {
     h.click("general");
     h.assert_plus_centered("Add files");
 }
+
+/// Buttons with one glyph in them (the bulk bar's "x", a Space's "..." in
+/// Settings, the Timeline's zoom "-" and "+") are square: a button is as
+/// wide as its text plus the side padding, so these came out wider than
+/// tall.
+#[test]
+fn one_glyph_buttons_are_square() {
+    let square = |r: Rect, what: &str| {
+        assert!(
+            (r.width() - r.height()).abs() < 0.5,
+            "{what}: {:?}",
+            r.size()
+        );
+    };
+    let mut h = Ui1::new();
+    h.hover(h.find("Task Write copy for landing page").unwrap());
+    h.click("Select Write copy for landing page");
+    square(h.rect("Clear selection"), "Clear selection");
+    assert_eq!(
+        h.rect("Clear selection").height(),
+        crate::widgets::CONTROL_H
+    );
+    h.click("Clear selection");
+    assert!(h.app.selected.is_empty());
+
+    h.app.open_settings("Spaces");
+    h.settle();
+    let main = Rect::from_min_max(pos2(400.0, 0.0), h.size.to_pos2());
+    let dots = h.rect_in("Space options Team Space", main);
+    square(dots, "Space options");
+    h.click_at(dots.center());
+    assert!(h.has("Color & Icon"), "the Space menu opens");
+}

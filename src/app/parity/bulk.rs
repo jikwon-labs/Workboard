@@ -42,11 +42,13 @@ impl App {
                                 .strong()
                                 .color(Color32::WHITE),
                             );
-                            if ui
-                                .small_button("\u{00D7}")
-                                .on_hover_text(tr("Clear selection"))
-                                .clicked()
-                            {
+                            let clear = crate::app::icons::square_button(
+                                ui,
+                                "\u{00D7}",
+                                crate::widgets::CONTROL_H,
+                                "Clear selection",
+                            );
+                            if clear.on_hover_text(tr("Clear selection")).clicked() {
                                 self.selected.clear();
                             }
                             ui.separator();

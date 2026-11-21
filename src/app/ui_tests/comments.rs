@@ -455,3 +455,27 @@ fn comment_menu_at_the_right_edge_hangs_from_its_button() {
     h.click("Me");
     assert!(h.has("Assigned to Me"), "the left submenu still works");
 }
+
+#[test]
+fn history_lines_show_before_the_first_comment() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    let me = h.app.data.me;
+    let task = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    task.activity.push(Activity {
+        ts: 1,
+        author: me,
+        text: "set priority to Urgent".into(),
+        ..Default::default()
+    });
+    h.settle();
+    assert!(
+        drawn_texts(&h.shapes)
+            .iter()
+            .any(|x| x.contains("set priority to Urgent")),
+        "a change shows in the feed without a comment"
+    );
+    // the invitation to comment is still there under it
+    assert!(!h.painted_text("Send the first comment").is_empty());
+    assert!(h.has("@  Mention a teammate"));
+}

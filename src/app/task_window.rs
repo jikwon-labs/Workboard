@@ -1082,60 +1082,6 @@ impl App {
         let mut assign_resp: Option<egui::Response> = None;
         // alone in the workspace: nobody to mention or hand it to
         let alone = self.data.solo();
-        if !has_comments {
-            let r = right_ui.available_rect_before_wrap();
-            let c = pos2(r.left() + 10.0, r.top() + r.height() * 0.32);
-            right_ui.painter().text(
-                c,
-                Align2::LEFT_BOTTOM,
-                tr("Send the first comment"),
-                FontId::proportional(16.0),
-                t.text,
-            );
-            right_ui.painter().text(
-                c + vec2(0.0, 8.0),
-                Align2::LEFT_TOP,
-                tr(if alone {
-                    "Keep notes and updates on this task here."
-                } else {
-                    "Ask a question, share an update, or loop someone in."
-                }),
-                FontId::proportional(13.0),
-                t.text2,
-            );
-            let row = Rect::from_min_size(c + vec2(0.0, 34.0), vec2(r.width() - 20.0, 30.0));
-            let mut bui = right_ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(row)
-                    .layout(Layout::left_to_right(Align::Center)),
-            );
-            if !alone && bui.button(tr("@  Mention a teammate")).clicked() {
-                if !self.comment.text.ends_with('@') {
-                    if !self.comment.text.is_empty() && !self.comment.text.ends_with(' ') {
-                        self.comment.text.push(' ');
-                    }
-                    self.comment.text.push('@');
-                }
-                bui.data_mut(|d| d.insert_temp(win_id.with("mention_open"), true));
-                bui.memory_mut(|m| m.request_focus(comment_id));
-            }
-            if !alone {
-                assign_resp = Some(icons::icon_button(
-                    &mut bui,
-                    &t,
-                    "person",
-                    tr("Assign this task"),
-                    "Assign this task",
-                    true,
-                ));
-            }
-        }
-        if let Some(r) = assign_resp {
-            let data = &self.data;
-            popup(&right_ui, &r, win_id.with("assign_popup"), 220.0, |ui| {
-                assignee_menu(ui, &t, data, &mut task.assignees)
-            });
-        }
         let input_h = 150.0;
         let list_h = right_ui.available_height() - input_h;
         let q = find
@@ -1150,11 +1096,59 @@ impl App {
             .auto_shrink([false, false])
             .stick_to_bottom(true)
             .show(&mut right_ui, |ui| {
-                if !has_comments {
+                // the history lines show from the start, not only once a
+                // comment is there
+                self.comment_feed(ui, &mut task, q.as_deref(), only_comments, win_id);
+                if has_comments || q.is_some() {
                     return;
                 }
-                self.comment_feed(ui, &mut task, q.as_deref(), only_comments, win_id);
+                // no comments yet: invite the first one under the history
+                ui.add_space(18.0);
+                ui.label(
+                    RichText::new(tr("Send the first comment"))
+                        .size(16.0)
+                        .color(t.text),
+                );
+                ui.label(
+                    RichText::new(tr(if alone {
+                        "Keep notes and updates on this task here."
+                    } else {
+                        "Ask a question, share an update, or loop someone in."
+                    }))
+                    .size(13.0)
+                    .color(t.text2),
+                );
+                if alone {
+                    return;
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|bui| {
+                    if bui.button(tr("@  Mention a teammate")).clicked() {
+                        if !self.comment.text.ends_with('@') {
+                            if !self.comment.text.is_empty() && !self.comment.text.ends_with(' ') {
+                                self.comment.text.push(' ');
+                            }
+                            self.comment.text.push('@');
+                        }
+                        bui.data_mut(|d| d.insert_temp(win_id.with("mention_open"), true));
+                        bui.memory_mut(|m| m.request_focus(comment_id));
+                    }
+                    assign_resp = Some(icons::icon_button(
+                        bui,
+                        &t,
+                        "person",
+                        tr("Assign this task"),
+                        "Assign this task",
+                        true,
+                    ));
+                });
             });
+        if let Some(r) = assign_resp {
+            let data = &self.data;
+            popup(&right_ui, &r, win_id.with("assign_popup"), 220.0, |ui| {
+                assignee_menu(ui, &t, data, &mut task.assignees)
+            });
+        }
         crate::widgets::redo_when_stuck_list_changes(right_ui.ctx(), &feed);
         right_ui.add_space(6.0);
         if level < crate::sync::Level::Comment {

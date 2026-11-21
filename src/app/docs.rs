@@ -188,6 +188,7 @@ impl App {
     }
 
     /// Pages panel, formatting bar and the editable / rendered body.
+    /// Pages panel, formatting bar and the editable / rendered body.
     pub(super) fn doc_body(&mut self, ui: &mut Ui, idx: usize) {
         let t = self.t();
         let id = self.data.docs[idx].id;
@@ -202,6 +203,70 @@ impl App {
             pages.y_range(),
             Stroke::new(1.0_f32, t.border),
         );
+        self.doc_pages_panel(ui, pages, root);
+        // the open page may have been deleted from a menu above
+        if !self
+            .doc_open
+            .is_some_and(|d| self.data.docs.iter().any(|x| x.id == d))
+        {
+            return;
+        }
+        // the page may have changed above
+        let Some(idx) = self
+            .doc_open
+            .and_then(|d| self.data.docs.iter().position(|x| x.id == d))
+            .or(Some(idx))
+        else {
+            return;
+        };
+        let mut mui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(main)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        let ui = &mut mui;
+        // in a space shared with me to view or comment, the page only reads
+        let level = self.doc_level(self.data.docs[idx].id);
+        if level < crate::sync::Level::Edit {
+            self.doc_preview = true;
+        }
+        // formatting bar
+        let body_id = egui::Id::new(("doc_body", self.data.docs[idx].id));
+        let mut pick = self.doc_format_bar(ui, idx, level, body_id);
+        let r = ui.available_rect_before_wrap();
+        ui.painter()
+            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
+        let focused = ui.memory(|m| m.has_focus(body_id));
+        let mut slash_enter = false;
+        if focused && !self.doc_preview {
+            slash_enter = self.doc_keys(ui, idx, body_id, &mut pick);
+        }
+        if let Some(label) = pick {
+            self.doc_apply_format(ui, idx, body_id, label);
+        }
+        let page = PageBody {
+            idx,
+            id: body_id,
+            focused,
+            slash_enter,
+        };
+        // a heading picked in "On this page": scroll to its line
+        let jump_id = egui::Id::new(("doc_jump", self.data.docs[idx].id));
+        let jump: Option<usize> = ui.data_mut(|m| m.remove_temp(jump_id));
+        egui::ScrollArea::vertical()
+            .id_salt(("doc_scroll", self.data.docs[idx].id))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(60, 24))
+                    .show(ui, |ui| self.doc_page(ui, page, jump));
+            });
+    }
+
+    /// The Pages panel down the left: the doc and its pages, and the open
+    /// page's headings ("On this page").
+    fn doc_pages_panel(&mut self, ui: &mut Ui, pages: Rect, root: u64) {
+        let t = self.t();
         let mut pui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(pages.shrink(8.0))
@@ -296,34 +361,18 @@ impl App {
                     }
                 }
             });
-        // the open page may have been deleted from a menu above
-        if !self
-            .doc_open
-            .is_some_and(|d| self.data.docs.iter().any(|x| x.id == d))
-        {
-            return;
-        }
-        // the page may have changed above
-        let Some(idx) = self
-            .doc_open
-            .and_then(|d| self.data.docs.iter().position(|x| x.id == d))
-            .or(Some(idx))
-        else {
-            return;
-        };
-        let mut mui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(main)
-                .layout(Layout::top_down(Align::Min)),
-        );
-        let ui = &mut mui;
-        // in a space shared with me to view or comment, the page only reads
-        let level = self.doc_level(self.data.docs[idx].id);
-        if level < crate::sync::Level::Edit {
-            self.doc_preview = true;
-        }
-        // formatting bar
-        let body_id = egui::Id::new(("doc_body", self.data.docs[idx].id));
+    }
+
+    /// The bar over the page: Edit / View, the formatting buttons, Link
+    /// task, AI and the word count. Returns the formatting button pressed.
+    fn doc_format_bar(
+        &mut self,
+        ui: &mut Ui,
+        idx: usize,
+        level: crate::sync::Level,
+        body_id: egui::Id,
+    ) -> Option<&'static str> {
+        let t = self.t();
         let mut pick: Option<&'static str> = None;
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(16, 6))
@@ -459,507 +508,406 @@ impl App {
                     });
                 });
             });
-        let r = ui.available_rect_before_wrap();
-        ui.painter()
-            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
-        let focused = ui.memory(|m| m.has_focus(body_id));
+        pick
+    }
+
+    /// The keys the body takes while it is being typed in: Cmd+B, I and E
+    /// format (into `pick`), the arrows and Enter move in the "/" menu, Tab
+    /// and Shift+Tab indent. Returns whether Enter was for the "/" menu.
+    fn doc_keys(
+        &mut self,
+        ui: &mut Ui,
+        idx: usize,
+        body_id: egui::Id,
+        pick: &mut Option<&'static str>,
+    ) -> bool {
         let arm_id = body_id.with("slash_at");
         let slash_sel_id = body_id.with("slash_sel");
         let mut slash_enter = false;
-        if focused && !self.doc_preview {
-            let cmd = |k| egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, k);
-            let (b, i, e) = ui.input_mut(|inp| {
-                (
-                    inp.consume_shortcut(&cmd(egui::Key::B)),
-                    inp.consume_shortcut(&cmd(egui::Key::I)),
-                    inp.consume_shortcut(&cmd(egui::Key::E)),
-                )
-            });
-            if b {
-                pick = Some("Bold");
-            } else if i {
-                pick = Some("Italic");
-            } else if e {
-                pick = Some("Inline code");
-            }
-            if ui.data(|m| m.get_temp::<usize>(arm_id)).is_some() {
-                // the "/" menu takes the arrow keys and Enter while it is open
-                let (up, down, enter) = ui.input_mut(|inp| {
-                    (
-                        inp.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
-                        inp.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
-                        inp.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-                    )
-                });
-                let sel: usize = ui.data(|m| m.get_temp(slash_sel_id)).unwrap_or(0);
-                let sel = if down {
-                    sel + 1
-                } else if up {
-                    sel.saturating_sub(1)
-                } else {
-                    sel
-                };
-                ui.data_mut(|m| m.insert_temp(slash_sel_id, sel));
-                slash_enter = enter;
-            }
-            // Tab and Shift+Tab indent and outdent the line (the field keeps
-            // focus on Tab, see lock_focus below)
-            let (shift_tab, tab) = ui.input_mut(|inp| {
-                (
-                    inp.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab),
-                    inp.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
-                )
-            });
-            if tab || shift_tab {
-                let d = &mut self.data.docs[idx];
-                let n = d.body.chars().count();
-                let cur: usize = ui
-                    .data(|m| m.get_temp(body_id.with("cursor")))
-                    .unwrap_or(n)
-                    .min(n);
-                let c = indent_line(&mut d.body, cur, tab);
-                d.updated = now_ts();
-                self.dirty = true;
-                set_cursor(ui.ctx(), body_id, c);
-            }
+        let cmd = |k| egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, k);
+        let (b, i, e) = ui.input_mut(|inp| {
+            (
+                inp.consume_shortcut(&cmd(egui::Key::B)),
+                inp.consume_shortcut(&cmd(egui::Key::I)),
+                inp.consume_shortcut(&cmd(egui::Key::E)),
+            )
+        });
+        if b {
+            *pick = Some("Bold");
+        } else if i {
+            *pick = Some("Italic");
+        } else if e {
+            *pick = Some("Inline code");
         }
-        if let Some(label) = pick {
+        if ui.data(|m| m.get_temp::<usize>(arm_id)).is_some() {
+            // the "/" menu takes the arrow keys and Enter while it is open
+            let (up, down, enter) = ui.input_mut(|inp| {
+                (
+                    inp.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    inp.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                    inp.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                )
+            });
+            let sel: usize = ui.data(|m| m.get_temp(slash_sel_id)).unwrap_or(0);
+            let sel = if down {
+                sel + 1
+            } else if up {
+                sel.saturating_sub(1)
+            } else {
+                sel
+            };
+            ui.data_mut(|m| m.insert_temp(slash_sel_id, sel));
+            slash_enter = enter;
+        }
+        // Tab and Shift+Tab indent and outdent the line (the field keeps
+        // focus on Tab, see lock_focus below)
+        let (shift_tab, tab) = ui.input_mut(|inp| {
+            (
+                inp.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab),
+                inp.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
+            )
+        });
+        if tab || shift_tab {
             let d = &mut self.data.docs[idx];
             let n = d.body.chars().count();
             let cur: usize = ui
                 .data(|m| m.get_temp(body_id.with("cursor")))
                 .unwrap_or(n)
                 .min(n);
-            let sel_end: usize = ui
-                .data(|m| m.get_temp(body_id.with("sel")))
-                .unwrap_or(cur)
-                .min(n);
-            let c = if label == "Link" {
-                apply_link(&mut d.body, cur, sel_end)
-            } else {
-                apply_block(&mut d.body, cur, sel_end, label)
-            };
+            let c = indent_line(&mut d.body, cur, tab);
             d.updated = now_ts();
             self.dirty = true;
             set_cursor(ui.ctx(), body_id, c);
         }
-        // a heading picked in "On this page": scroll to its line
-        let jump_id = egui::Id::new(("doc_jump", self.data.docs[idx].id));
-        let jump: Option<usize> = ui.data_mut(|m| m.remove_temp(jump_id));
-        egui::ScrollArea::vertical()
-            .id_salt(("doc_scroll", self.data.docs[idx].id))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(60, 24))
-                    .show(ui, |ui| {
-                        let d = &mut self.data.docs[idx];
-                        let r1 = ui.add(
-                            egui::TextEdit::singleline(&mut d.title)
-                                .font(FontId::proportional(32.0))
-                                .frame(false)
-                                .hint_text(tr("Untitled"))
-                                .desired_width(f32::INFINITY),
-                        );
-                        if r1.changed() {
-                            d.updated = now_ts();
-                            self.dirty = true;
+        slash_enter
+    }
+
+    /// Applies a formatting button (or its shortcut) at the cursor.
+    fn doc_apply_format(&mut self, ui: &mut Ui, idx: usize, body_id: egui::Id, label: &str) {
+        let d = &mut self.data.docs[idx];
+        let n = d.body.chars().count();
+        let cur: usize = ui
+            .data(|m| m.get_temp(body_id.with("cursor")))
+            .unwrap_or(n)
+            .min(n);
+        let sel_end: usize = ui
+            .data(|m| m.get_temp(body_id.with("sel")))
+            .unwrap_or(cur)
+            .min(n);
+        let c = if label == "Link" {
+            apply_link(&mut d.body, cur, sel_end)
+        } else {
+            apply_block(&mut d.body, cur, sel_end, label)
+        };
+        d.updated = now_ts();
+        self.dirty = true;
+        set_cursor(ui.ctx(), body_id, c);
+    }
+
+    /// The page itself: its title and tags, and the body (rendered, or
+    /// being edited with its marks, the "/" menu and its sub pages).
+    fn doc_page(&mut self, ui: &mut Ui, page: PageBody, jump: Option<usize>) {
+        let t = self.t();
+        let PageBody {
+            idx,
+            id: body_id,
+            focused,
+            ..
+        } = page;
+        let d = &mut self.data.docs[idx];
+        let r1 = ui.add(
+            egui::TextEdit::singleline(&mut d.title)
+                .font(FontId::proportional(32.0))
+                .frame(false)
+                .hint_text(tr("Untitled"))
+                .desired_width(f32::INFINITY),
+        );
+        if r1.changed() {
+            d.updated = now_ts();
+            self.dirty = true;
+        }
+        if self.data.docs[idx].parent.is_none() {
+            self.doc_tags_row(ui, idx);
+        }
+        ui.add_space(10.0);
+        if self.doc_preview {
+            self.render_markdown(ui, idx, jump);
+            return;
+        }
+        let d = &mut self.data.docs[idx];
+        let empty = d.body.is_empty();
+        // Markdown markers show only on the cursor's lines
+        let shown = if focused {
+            let n = d.body.chars().count();
+            let a: usize = ui.data(|m| m.get_temp(body_id.with("cursor"))).unwrap_or(n);
+            let b: usize = ui.data(|m| m.get_temp(body_id.with("sel"))).unwrap_or(a);
+            cursor_lines(&d.body, a, b)
+        } else {
+            0..0
+        };
+        let mut layouter = |ui: &Ui, s: &str, wrap: f32| {
+            ui.fonts(|f| f.layout_job(doc_layout_job_live(s, &t, wrap, shown.clone())))
+        };
+        let out = egui::TextEdit::multiline(&mut d.body)
+            .id(body_id)
+            .frame(false)
+            .lock_focus(true)
+            .hint_text(tr("Start writing, or type '/' for commands"))
+            .font(FontId::proportional(16.0))
+            .desired_width(f32::INFINITY)
+            .desired_rows(if empty { 3 } else { 24 })
+            .layouter(&mut layouter)
+            .show(ui);
+        name_field(&out.response, "Doc body");
+        if out.response.changed() {
+            d.updated = now_ts();
+            self.dirty = true;
+        }
+        // painted marks over the hidden Markdown markers: bullets,
+        // checkboxes (click to tick), quote bars and dividers
+        let click = if out.response.clicked() {
+            ui.input(|i| i.pointer.interact_pos())
+        } else {
+            None
+        };
+        let tick = paint_line_marks(ui, &t, &out, &d.body, click);
+        if let Some(line) = jump {
+            if let Some((_, start, _)) = line_kinds(&d.body).get(line) {
+                let row = out
+                    .galley
+                    .pos_from_cursor(&out.galley.from_ccursor(egui::text::CCursor::new(*start)));
+                ui.scroll_to_rect(
+                    row.translate(out.galley_pos.to_vec2()).expand(4.0),
+                    Some(Align::TOP),
+                );
+            }
+        }
+        if let Some(start) = tick {
+            toggle_check_at(&mut d.body, start);
+            d.updated = now_ts();
+            self.dirty = true;
+        }
+        // Enter on a list item starts the next item (or ends an empty one)
+        let mut cursor_now = out
+            .cursor_range
+            .map(|cr| (cr.primary.ccursor.index, cr.secondary.ccursor.index));
+        if out.response.changed()
+            && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift)
+        {
+            if let Some((a, _)) = cursor_now.filter(|(a, b)| a == b) {
+                if let Some(c) = continue_list(&mut d.body, a) {
+                    set_cursor(ui.ctx(), body_id, c);
+                    cursor_now = Some((c, c));
+                }
+            }
+        }
+        // a new, empty page offers how to start, as in the original
+        if empty && self.doc_start_offer(ui, idx, body_id) {
+            return;
+        }
+        let d = &mut self.data.docs[idx];
+        // the cursor moved to other lines (or the field gained or
+        // lost focus): draw again so the markers follow it
+        let shown_next = match cursor_now {
+            Some((a, b)) if out.response.has_focus() => cursor_lines(&d.body, a, b),
+            _ if out.response.has_focus() => shown.clone(),
+            _ => 0..0,
+        };
+        if shown_next != shown {
+            ui.ctx().request_repaint();
+        }
+        if let Some((a, b)) = cursor_now {
+            keep_cursor(ui, body_id, &d.body, out.response.has_focus(), a, b);
+        }
+        if self.doc_slash_menu(ui, page, &out) {
+            return;
+        }
+        // sub pages listed under the text, as in the original
+        self.doc_sub_pages(ui, idx);
+    }
+
+    /// Under an empty page: Start writing, and a table or a subpage to add.
+    /// Returns true when a subpage was added (and opened).
+    fn doc_start_offer(&mut self, ui: &mut Ui, idx: usize, body_id: egui::Id) -> bool {
+        let t = self.t();
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add(ghost(egui::Button::new(
+                    RichText::new(tr("Start writing")).color(t.text2),
+                )))
+                .clicked()
+            {
+                set_cursor(ui.ctx(), body_id, 0);
+            }
+        });
+        ui.add_space(6.0);
+        ui.label(RichText::new(tr("Add new")).small().color(t.text3));
+        let mut add_table = false;
+        let mut add_sub = false;
+        ui.horizontal(|ui| {
+            if super::icons::icon_button(ui, &t, "table", tr("Table"), "Table", true).clicked() {
+                add_table = true;
+            }
+            if super::icons::icon_button(ui, &t, "docs", tr("Subpage"), "Subpage", true).clicked() {
+                add_sub = true;
+            }
+        });
+        if add_table {
+            let d = &mut self.data.docs[idx];
+            d.body.push_str(TABLE_TEMPLATE);
+            d.updated = now_ts();
+            self.dirty = true;
+        }
+        if add_sub {
+            let pid = self.data.docs[idx].id;
+            self.add_page(pid);
+            return true;
+        }
+        false
+    }
+
+    /// The "/" command menu under the cursor while it is open, and what
+    /// picking from it does. Returns true when it added (and opened) a sub
+    /// page.
+    fn doc_slash_menu(
+        &mut self,
+        ui: &mut Ui,
+        page: PageBody,
+        out: &egui::text_edit::TextEditOutput,
+    ) -> bool {
+        let t = self.t();
+        let PageBody {
+            idx,
+            id: body_id,
+            slash_enter,
+            ..
+        } = page;
+        let arm_id = body_id.with("slash_at");
+        let slash_sel_id = body_id.with("slash_sel");
+        let d = &mut self.data.docs[idx];
+        let chars: Vec<char> = d.body.chars().collect();
+        let armed: Option<usize> = ui
+            .data(|m| m.get_temp(arm_id))
+            .filter(|a: &usize| *a > 0 && chars.get(*a - 1) == Some(&'/'));
+        if let Some(a) = armed {
+            let cur: usize = ui
+                .data(|m| m.get_temp(body_id.with("cursor")))
+                .unwrap_or(a)
+                .clamp(a, chars.len());
+            let query: String = chars[a..cur]
+                .iter()
+                .collect::<String>()
+                .trim()
+                .to_lowercase();
+            let items: Vec<&'static str> = SLASH
+                .iter()
+                .copied()
+                .filter(|l| l.to_lowercase().contains(&query))
+                .collect();
+            let sel: usize = ui
+                .data(|m| m.get_temp(slash_sel_id))
+                .unwrap_or(0)
+                .min(items.len().saturating_sub(1));
+            let ccur = egui::text::CCursor::new(a);
+            let pos = out.galley_pos
+                + out
+                    .galley
+                    .pos_from_cursor(&out.galley.from_ccursor(ccur))
+                    .left_bottom()
+                    .to_vec2()
+                + vec2(0.0, 4.0);
+            let mut chosen: Option<&'static str> = if slash_enter {
+                items.get(sel).copied()
+            } else {
+                None
+            };
+            let area = egui::Area::new(body_id.with("slash"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(pos)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_width(200.0);
+                        ui.label(RichText::new(tr("Basic blocks")).small().color(t.text3));
+                        if items.is_empty() {
+                            ui.label(RichText::new(tr("No matching blocks")).color(t.text3));
                         }
-                        if self.data.docs[idx].parent.is_none() {
-                            self.doc_tags_row(ui, idx);
-                        }
-                        ui.add_space(10.0);
-                        if self.doc_preview {
-                            self.render_markdown(ui, idx, jump);
-                            return;
-                        }
-                        let d = &mut self.data.docs[idx];
-                        let empty = d.body.is_empty();
-                        // Markdown markers show only on the cursor's lines
-                        let shown = if focused {
-                            let n = d.body.chars().count();
-                            let a: usize =
-                                ui.data(|m| m.get_temp(body_id.with("cursor"))).unwrap_or(n);
-                            let b: usize =
-                                ui.data(|m| m.get_temp(body_id.with("sel"))).unwrap_or(a);
-                            cursor_lines(&d.body, a, b)
-                        } else {
-                            0..0
-                        };
-                        let mut layouter = |ui: &Ui, s: &str, wrap: f32| {
-                            ui.fonts(|f| {
-                                f.layout_job(doc_layout_job_live(s, &t, wrap, shown.clone()))
-                            })
-                        };
-                        let out = egui::TextEdit::multiline(&mut d.body)
-                            .id(body_id)
-                            .frame(false)
-                            .lock_focus(true)
-                            .hint_text(tr("Start writing, or type '/' for commands"))
-                            .font(FontId::proportional(16.0))
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(if empty { 3 } else { 24 })
-                            .layouter(&mut layouter)
-                            .show(ui);
-                        name_field(&out.response, "Doc body");
-                        if out.response.changed() {
-                            d.updated = now_ts();
-                            self.dirty = true;
-                        }
-                        // painted marks over the hidden Markdown markers: bullets,
-                        // checkboxes (click to tick), quote bars and dividers
-                        let click = if out.response.clicked() {
-                            ui.input(|i| i.pointer.interact_pos())
-                        } else {
-                            None
-                        };
-                        let mut tick: Option<usize> = None;
-                        for ((kind, start, _), line) in
-                            line_kinds(&d.body).into_iter().zip(d.body.split('\n'))
-                        {
-                            // list items may be indented; the mark sits at the marker
-                            let ind = if matches!(
-                                kind,
-                                LineKind::Bullet | LineKind::Check(_) | LineKind::Numbered
-                            ) {
-                                indent_of(line)
-                            } else {
-                                0
-                            };
-                            let at = out.galley_pos
-                                + out
-                                    .galley
-                                    .pos_from_cursor(
-                                        &out.galley
-                                            .from_ccursor(egui::text::CCursor::new(start + ind)),
-                                    )
-                                    .min
-                                    .to_vec2();
-                            let row = out.galley.pos_from_cursor(
-                                &out.galley.from_ccursor(egui::text::CCursor::new(start)),
-                            );
-                            let h = row.height();
-                            let mid = at.y + h / 2.0;
-                            let p = ui.painter();
-                            match kind {
-                                LineKind::Bullet => {
-                                    p.circle_filled(pos2(at.x + 5.0, mid), 2.6, t.text);
-                                }
-                                LineKind::Check(done) => {
-                                    let bx = Rect::from_min_size(
-                                        pos2(at.x + 2.0, mid - 7.5),
-                                        vec2(15.0, 15.0),
-                                    );
-                                    if done {
-                                        p.rect_filled(bx, 3.0, t.primary);
-                                        p.line_segment(
-                                            [
-                                                bx.left_center() + vec2(3.5, 0.0),
-                                                bx.center_bottom() + vec2(-1.0, -4.0),
-                                            ],
-                                            Stroke::new(1.8_f32, t.on_primary),
-                                        );
-                                        p.line_segment(
-                                            [
-                                                bx.center_bottom() + vec2(-1.0, -4.0),
-                                                bx.right_top() + vec2(-3.5, 4.0),
-                                            ],
-                                            Stroke::new(1.8_f32, t.on_primary),
-                                        );
-                                    } else {
-                                        p.rect_stroke(
-                                            bx,
-                                            3.0,
-                                            Stroke::new(1.3_f32, t.text3),
-                                            egui::StrokeKind::Inside,
-                                        );
-                                    }
-                                    if click.is_some_and(|c| bx.expand(2.0).contains(c)) {
-                                        tick = Some(start);
-                                    }
-                                }
-                                LineKind::Quote => {
-                                    p.rect_filled(
-                                        Rect::from_min_size(
-                                            pos2(at.x + 1.0, at.y + 1.0),
-                                            vec2(3.0, h - 2.0),
-                                        ),
-                                        1.0,
-                                        t.border,
-                                    );
-                                }
-                                LineKind::Divider => {
-                                    p.hline(
-                                        at.x..=out.response.rect.right(),
-                                        mid,
-                                        Stroke::new(1.0_f32, t.border),
-                                    );
-                                }
-                                _ => {}
-                            }
-                        }
-                        if let Some(line) = jump {
-                            if let Some((_, start, _)) = line_kinds(&d.body).get(line) {
-                                let row = out.galley.pos_from_cursor(
-                                    &out.galley.from_ccursor(egui::text::CCursor::new(*start)),
-                                );
-                                ui.scroll_to_rect(
-                                    row.translate(out.galley_pos.to_vec2()).expand(4.0),
-                                    Some(Align::TOP),
-                                );
-                            }
-                        }
-                        if let Some(start) = tick {
-                            toggle_check_at(&mut d.body, start);
-                            d.updated = now_ts();
-                            self.dirty = true;
-                        }
-                        // Enter on a list item starts the next item (or ends an empty one)
-                        let mut cursor_now = out
-                            .cursor_range
-                            .map(|cr| (cr.primary.ccursor.index, cr.secondary.ccursor.index));
-                        if out.response.changed()
-                            && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift)
-                        {
-                            if let Some((a, _)) = cursor_now.filter(|(a, b)| a == b) {
-                                if let Some(c) = continue_list(&mut d.body, a) {
-                                    set_cursor(ui.ctx(), body_id, c);
-                                    cursor_now = Some((c, c));
-                                }
-                            }
-                        }
-                        // a new, empty page offers how to start, as in the original
-                        if empty {
-                            ui.add_space(8.0);
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .add(ghost(egui::Button::new(
-                                        RichText::new(tr("Start writing")).color(t.text2),
-                                    )))
-                                    .clicked()
-                                {
-                                    set_cursor(ui.ctx(), body_id, 0);
-                                }
-                            });
-                            ui.add_space(6.0);
-                            ui.label(RichText::new(tr("Add new")).small().color(t.text3));
-                            let mut add_table = false;
-                            let mut add_sub = false;
-                            ui.horizontal(|ui| {
-                                if super::icons::icon_button(
-                                    ui,
-                                    &t,
-                                    "table",
-                                    tr("Table"),
-                                    "Table",
-                                    true,
+                        for (i, label) in items.iter().enumerate() {
+                            if ui
+                                .add(
+                                    egui::Button::new(tr(label))
+                                        .frame(i == sel)
+                                        .selected(i == sel)
+                                        .min_size(vec2(190.0, 22.0)),
                                 )
                                 .clicked()
-                                {
-                                    add_table = true;
-                                }
-                                if super::icons::icon_button(
-                                    ui,
-                                    &t,
-                                    "docs",
-                                    tr("Subpage"),
-                                    "Subpage",
-                                    true,
-                                )
-                                .clicked()
-                                {
-                                    add_sub = true;
-                                }
-                            });
-                            if add_table {
-                                let d = &mut self.data.docs[idx];
-                                d.body.push_str(TABLE_TEMPLATE);
-                                d.updated = now_ts();
-                                self.dirty = true;
-                            }
-                            if add_sub {
-                                let pid = self.data.docs[idx].id;
-                                self.add_page(pid);
-                                return;
-                            }
-                        }
-                        let d = &mut self.data.docs[idx];
-                        // the cursor moved to other lines (or the field gained or
-                        // lost focus): draw again so the markers follow it
-                        let shown_next = match cursor_now {
-                            Some((a, b)) if out.response.has_focus() => cursor_lines(&d.body, a, b),
-                            _ if out.response.has_focus() => shown.clone(),
-                            _ => 0..0,
-                        };
-                        if shown_next != shown {
-                            ui.ctx().request_repaint();
-                        }
-                        if let Some((a, b)) = cursor_now {
-                            ui.data_mut(|m| {
-                                m.insert_temp(body_id.with("cursor"), a);
-                                m.insert_temp(body_id.with("sel"), b);
-                            });
-                            // "/" typed at the start of a line opens the command menu; it
-                            // stays open while a filter word is typed after it, and while
-                            // the menu is clicked (the click takes focus away)
-                            let chars: Vec<char> = d.body.chars().collect();
-                            let slash_here = a > 0
-                                && a == b
-                                && chars.get(a - 1) == Some(&'/')
-                                && (a == 1 || chars.get(a - 2) == Some(&'\n'));
-                            if out.response.has_focus() {
-                                let prev: Option<usize> = ui.data(|m| m.get_temp(arm_id));
-                                let keep = prev.filter(|s| {
-                                    a == b
-                                        && *s > 0
-                                        && a >= *s
-                                        && a <= chars.len()
-                                        && chars.get(*s - 1) == Some(&'/')
-                                        && a - *s <= 24
-                                        && !chars[*s..a].contains(&'\n')
-                                });
-                                let next = if slash_here { Some(a) } else { keep };
-                                ui.data_mut(|m| match next {
-                                    Some(s) => {
-                                        if prev != Some(s) && slash_here {
-                                            m.insert_temp(slash_sel_id, 0usize);
-                                        }
-                                        m.insert_temp(arm_id, s);
-                                    }
-                                    None => {
-                                        m.remove::<usize>(arm_id);
-                                        m.remove::<usize>(slash_sel_id);
-                                    }
-                                });
-                            }
-                        }
-                        let d = &mut self.data.docs[idx];
-                        let chars: Vec<char> = d.body.chars().collect();
-                        let armed: Option<usize> = ui
-                            .data(|m| m.get_temp(arm_id))
-                            .filter(|a: &usize| *a > 0 && chars.get(*a - 1) == Some(&'/'));
-                        if let Some(a) = armed {
-                            let cur: usize = ui
-                                .data(|m| m.get_temp(body_id.with("cursor")))
-                                .unwrap_or(a)
-                                .clamp(a, chars.len());
-                            let query: String = chars[a..cur]
-                                .iter()
-                                .collect::<String>()
-                                .trim()
-                                .to_lowercase();
-                            let items: Vec<&'static str> = SLASH
-                                .iter()
-                                .copied()
-                                .filter(|l| l.to_lowercase().contains(&query))
-                                .collect();
-                            let sel: usize = ui
-                                .data(|m| m.get_temp(slash_sel_id))
-                                .unwrap_or(0)
-                                .min(items.len().saturating_sub(1));
-                            let ccur = egui::text::CCursor::new(a);
-                            let pos = out.galley_pos
-                                + out
-                                    .galley
-                                    .pos_from_cursor(&out.galley.from_ccursor(ccur))
-                                    .left_bottom()
-                                    .to_vec2()
-                                + vec2(0.0, 4.0);
-                            let mut chosen: Option<&'static str> = if slash_enter {
-                                items.get(sel).copied()
-                            } else {
-                                None
-                            };
-                            let area = egui::Area::new(body_id.with("slash"))
-                                .order(egui::Order::Foreground)
-                                .fixed_pos(pos)
-                                .show(ui.ctx(), |ui| {
-                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                        ui.set_width(200.0);
-                                        ui.label(
-                                            RichText::new(tr("Basic blocks"))
-                                                .small()
-                                                .color(t.text3),
-                                        );
-                                        if items.is_empty() {
-                                            ui.label(
-                                                RichText::new(tr("No matching blocks"))
-                                                    .color(t.text3),
-                                            );
-                                        }
-                                        for (i, label) in items.iter().enumerate() {
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(tr(label))
-                                                        .frame(i == sel)
-                                                        .selected(i == sel)
-                                                        .min_size(vec2(190.0, 22.0)),
-                                                )
-                                                .clicked()
-                                            {
-                                                chosen = Some(label);
-                                            }
-                                        }
-                                    });
-                                });
-                            let pressed_elsewhere = ui.input(|i| i.pointer.any_pressed())
-                                && !ui.ctx().pointer_hover_pos().map_or(false, |p| {
-                                    area.response.rect.contains(p) || out.response.rect.contains(p)
-                                });
-                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) || pressed_elsewhere {
-                                ui.data_mut(|m| m.remove::<usize>(arm_id));
-                            }
-                            if slash_enter && items.is_empty() {
-                                // nothing to pick: Enter is a plain line break again
-                                let at = byte_at(&d.body, cur);
-                                d.body.insert(at, '\n');
-                                ui.data_mut(|m| m.remove::<usize>(arm_id));
-                                set_cursor(ui.ctx(), body_id, cur + 1);
-                            }
-                            if let Some(label) = chosen {
-                                // drop the "/" and the filter word, then apply the block
-                                let from = byte_at(&d.body, a - 1);
-                                let to = byte_at(&d.body, cur);
-                                d.body.replace_range(from..to, "");
-                                d.updated = now_ts();
-                                self.dirty = true;
-                                ui.data_mut(|m| m.remove::<usize>(arm_id));
-                                match label {
-                                    "Table" => {
-                                        d.body.insert_str(from, TABLE_TEMPLATE);
-                                        set_cursor(ui.ctx(), body_id, a - 1 + 2);
-                                    }
-                                    "Sub page" => {
-                                        let pid = d.id;
-                                        self.add_page(pid);
-                                        return;
-                                    }
-                                    _ => {
-                                        let c = apply_block(&mut d.body, a - 1, a - 1, label);
-                                        set_cursor(ui.ctx(), body_id, c);
-                                    }
-                                }
-                            }
-                        }
-                        // sub pages listed under the text, as in the original
-                        let kids: Vec<(u64, String)> = self
-                            .data
-                            .docs
-                            .iter()
-                            .filter(|x| x.parent == Some(self.data.docs[idx].id))
-                            .map(|x| (x.id, x.title.clone()))
-                            .collect();
-                        if !kids.is_empty() {
-                            ui.add_space(16.0);
-                            ui.label(RichText::new(tr("Sub pages")).small().color(t.text3));
-                            for (kid, title) in kids {
-                                if ui.link(format!("\u{1F4C4} {}", title)).clicked() {
-                                    self.doc_open = Some(kid);
-                                }
+                            {
+                                chosen = Some(label);
                             }
                         }
                     });
-            });
+                });
+            let pressed_elsewhere = ui.input(|i| i.pointer.any_pressed())
+                && !ui.ctx().pointer_hover_pos().map_or(false, |p| {
+                    area.response.rect.contains(p) || out.response.rect.contains(p)
+                });
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) || pressed_elsewhere {
+                ui.data_mut(|m| m.remove::<usize>(arm_id));
+            }
+            if slash_enter && items.is_empty() {
+                // nothing to pick: Enter is a plain line break again
+                let at = byte_at(&d.body, cur);
+                d.body.insert(at, '\n');
+                ui.data_mut(|m| m.remove::<usize>(arm_id));
+                set_cursor(ui.ctx(), body_id, cur + 1);
+            }
+            if let Some(label) = chosen {
+                // drop the "/" and the filter word, then apply the block
+                let from = byte_at(&d.body, a - 1);
+                let to = byte_at(&d.body, cur);
+                d.body.replace_range(from..to, "");
+                d.updated = now_ts();
+                self.dirty = true;
+                ui.data_mut(|m| m.remove::<usize>(arm_id));
+                match label {
+                    "Table" => {
+                        d.body.insert_str(from, TABLE_TEMPLATE);
+                        set_cursor(ui.ctx(), body_id, a - 1 + 2);
+                    }
+                    "Sub page" => {
+                        let pid = d.id;
+                        self.add_page(pid);
+                        return true;
+                    }
+                    _ => {
+                        let c = apply_block(&mut d.body, a - 1, a - 1, label);
+                        set_cursor(ui.ctx(), body_id, c);
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Links to the page's sub pages, under its text.
+    fn doc_sub_pages(&mut self, ui: &mut Ui, idx: usize) {
+        let t = self.t();
+        let kids: Vec<(u64, String)> = self
+            .data
+            .docs
+            .iter()
+            .filter(|x| x.parent == Some(self.data.docs[idx].id))
+            .map(|x| (x.id, x.title.clone()))
+            .collect();
+        if !kids.is_empty() {
+            ui.add_space(16.0);
+            ui.label(RichText::new(tr("Sub pages")).small().color(t.text3));
+            for (kid, title) in kids {
+                if ui.link(format!("\u{1F4C4} {}", title)).clicked() {
+                    self.doc_open = Some(kid);
+                }
+            }
+        }
     }
 
     /// Draws the Doc's Markdown: headings, lists (indented too), checklists
@@ -2090,5 +2038,150 @@ impl App {
             }
         }
         self.dirty = true;
+    }
+}
+
+/// The open page's body this frame, for the steps that edit it.
+#[derive(Clone, Copy)]
+struct PageBody {
+    /// The page's place in `data.docs`.
+    idx: usize,
+    /// The body field's id; its cursor and selection are kept under it.
+    id: egui::Id,
+    focused: bool,
+    /// Enter was pressed for the "/" menu.
+    slash_enter: bool,
+}
+
+/// Paints the marks over the hidden Markdown markers in the body field
+/// `out` shows: bullets, checkboxes, quote bars and dividers. Returns where
+/// the line starts whose checkbox `click` hit.
+fn paint_line_marks(
+    ui: &Ui,
+    t: &Theme,
+    out: &egui::text_edit::TextEditOutput,
+    body: &str,
+    click: Option<egui::Pos2>,
+) -> Option<usize> {
+    let mut tick: Option<usize> = None;
+    for ((kind, start, _), line) in line_kinds(body).into_iter().zip(body.split('\n')) {
+        // list items may be indented; the mark sits at the marker
+        let ind = if matches!(
+            kind,
+            LineKind::Bullet | LineKind::Check(_) | LineKind::Numbered
+        ) {
+            indent_of(line)
+        } else {
+            0
+        };
+        let at = out.galley_pos
+            + out
+                .galley
+                .pos_from_cursor(
+                    &out.galley
+                        .from_ccursor(egui::text::CCursor::new(start + ind)),
+                )
+                .min
+                .to_vec2();
+        let row = out
+            .galley
+            .pos_from_cursor(&out.galley.from_ccursor(egui::text::CCursor::new(start)));
+        let h = row.height();
+        let mid = at.y + h / 2.0;
+        let p = ui.painter();
+        match kind {
+            LineKind::Bullet => {
+                p.circle_filled(pos2(at.x + 5.0, mid), 2.6, t.text);
+            }
+            LineKind::Check(done) => {
+                let bx = Rect::from_min_size(pos2(at.x + 2.0, mid - 7.5), vec2(15.0, 15.0));
+                if done {
+                    p.rect_filled(bx, 3.0, t.primary);
+                    p.line_segment(
+                        [
+                            bx.left_center() + vec2(3.5, 0.0),
+                            bx.center_bottom() + vec2(-1.0, -4.0),
+                        ],
+                        Stroke::new(1.8_f32, t.on_primary),
+                    );
+                    p.line_segment(
+                        [
+                            bx.center_bottom() + vec2(-1.0, -4.0),
+                            bx.right_top() + vec2(-3.5, 4.0),
+                        ],
+                        Stroke::new(1.8_f32, t.on_primary),
+                    );
+                } else {
+                    p.rect_stroke(
+                        bx,
+                        3.0,
+                        Stroke::new(1.3_f32, t.text3),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if click.is_some_and(|c| bx.expand(2.0).contains(c)) {
+                    tick = Some(start);
+                }
+            }
+            LineKind::Quote => {
+                p.rect_filled(
+                    Rect::from_min_size(pos2(at.x + 1.0, at.y + 1.0), vec2(3.0, h - 2.0)),
+                    1.0,
+                    t.border,
+                );
+            }
+            LineKind::Divider => {
+                p.hline(
+                    at.x..=out.response.rect.right(),
+                    mid,
+                    Stroke::new(1.0_f32, t.border),
+                );
+            }
+            _ => {}
+        }
+    }
+    tick
+}
+
+/// Keeps the body's cursor and selection (`a`, `b`) for the next frame, and
+/// opens or closes the "/" command menu: "/" typed at the start of a line
+/// opens it; it stays open while a filter word is typed after it, and
+/// while the menu is clicked (the click takes focus away).
+fn keep_cursor(ui: &Ui, body_id: egui::Id, body: &str, has_focus: bool, a: usize, b: usize) {
+    let arm_id = body_id.with("slash_at");
+    let slash_sel_id = body_id.with("slash_sel");
+    ui.data_mut(|m| {
+        m.insert_temp(body_id.with("cursor"), a);
+        m.insert_temp(body_id.with("sel"), b);
+    });
+    let chars: Vec<char> = body.chars().collect();
+    let slash_here = a > 0
+        && a == b
+        && chars.get(a - 1) == Some(&'/')
+        && (a == 1 || chars.get(a - 2) == Some(&'\n'));
+    if has_focus {
+        let prev: Option<usize> = ui.data(|m| m.get_temp(arm_id));
+        let keep = prev.filter(|s| {
+            a == b
+                && *s > 0
+                && a >= *s
+                && a <= chars.len()
+                && chars.get(*s - 1) == Some(&'/')
+                && a - *s <= 24
+                && !chars[*s..a].contains(&'\n')
+        });
+        let next = if slash_here { Some(a) } else { keep };
+        ui.data_mut(|m| match next {
+            Some(s) => {
+                if prev != Some(s) && slash_here {
+                    m.insert_temp(slash_sel_id, 0usize);
+                }
+                m.insert_temp(arm_id, s);
+            }
+            None => {
+                m.remove::<usize>(arm_id);
+                m.remove::<usize>(slash_sel_id);
+            }
+        });
     }
 }

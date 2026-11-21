@@ -1265,6 +1265,18 @@ fn prepare(
         if meta.len() > MAX_FILE {
             return Err(format!("{} is larger than 90 MB.", name));
         }
+        // a HEIC, TIFF or BMP goes as a JPEG (a PNG when see-through) that
+        // every device opens, under that name (media::converted_for_sending)
+        let mut name = name.to_string();
+        let converted = match kind {
+            MediaKind::Image => converted_copy(dir, &src, &mut name)?,
+            _ => None,
+        };
+        let src = converted
+            .as_ref()
+            .map(|c| c.0.clone())
+            .unwrap_or(src.clone());
+        let name = name.as_str();
         // a picture or video goes without where it was taken, the phone and
         // its tags (src/scrub.rs): a cleaned copy is what's measured, kept
         // and sent
@@ -1304,6 +1316,23 @@ fn prepare(
         let _ = std::fs::remove_file(t);
     }
     out
+}
+
+/// A HEIC, TIFF or BMP picture converted to a JPEG or PNG in `dir`, with
+/// `name` given that ending; None for any other picture, and for one that
+/// can't be converted here (it goes as it is). Removed when dropped.
+fn converted_copy(dir: &Path, src: &Path, name: &mut String) -> Result<Option<TempFile>, String> {
+    let Some((bytes, ext)) = media::converted_for_sending(src) else {
+        return Ok(None);
+    };
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let t = dir.join(format!(".convert-{:x}.{}", wb_sync::random_u64(), ext));
+    std::fs::write(&t, bytes).map_err(|e| e.to_string())?;
+    *name = Path::new(name.as_str())
+        .with_extension(ext)
+        .to_string_lossy()
+        .into_owned();
+    Ok(Some(TempFile(t)))
 }
 
 /// A copy of a picture or video with its personal details taken out, in

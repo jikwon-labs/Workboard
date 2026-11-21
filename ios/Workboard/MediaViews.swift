@@ -472,8 +472,10 @@ enum MediaUpload {
         return f.string(from: Date())
     }
 
-    /// Pictures become JPEG with their orientation applied (every app reads
-    /// that); videos go up as they are.
+    /// A JPEG, PNG, GIF or WebP goes as it is, without where it was taken
+    /// and the phone (MediaScrub); any other picture (a HEIC) becomes a JPEG,
+    /// or a PNG when see-through, that every device opens (PictureConvert,
+    /// as the Mac does). Videos go up as they are.
     static func prepare(_ item: PhotosPickerItem) async throws -> Prepared {
         if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
             guard let movie = try await item.loadTransferable(type: PickedMovie.self) else { throw Unreadable() }
@@ -497,22 +499,29 @@ enum MediaUpload {
             let still = await still(asset, secs: length)
             return Prepared(data: nil, file: movie.url, bytes: bytes, name: "Video-\(stamp()).\(ext.isEmpty ? "mov" : ext)", contentType: type, isVideo: true, w: w, h: h, secs: length, preview: still.flatMap(UIImage.init(data:)), still: still)
         }
-        guard let raw = try await item.loadTransferable(type: Data.self), let image = UIImage(data: raw) else { throw Unreadable() }
-        let maxSide: CGFloat = 4096
-        let scale = min(1, maxSide / max(image.size.width, image.size.height))
-        let size = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        let drawn = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-        guard let jpeg = drawn.jpegData(compressionQuality: 0.85) else { throw Unreadable() }
-        let preview = drawn.preparingThumbnail(of: CGSize(width: 120, height: 120 * size.height / max(size.width, 1)))
-        return Prepared(data: jpeg, bytes: jpeg.count, name: "Photo-\(stamp()).jpg", contentType: "image/jpeg", isVideo: false, w: Int(size.width), h: Int(size.height), secs: 0, preview: preview)
+        guard let raw = try await item.loadTransferable(type: Data.self) else { throw Unreadable() }
+        let data: Data, ext: String
+        if let common = PictureConvert.commonExt(raw) {
+            (data, ext) = (MediaScrub.scrub(raw) ?? raw, common)
+        } else if let c = PictureConvert.converted(raw) {
+            (data, ext) = c
+        } else {
+            throw Unreadable()
+        }
+        // the size as shown: UIImage applies a JPEG's turn
+        guard let image = UIImage(data: data) else { throw Unreadable() }
+        let size = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        let preview = image.preparingThumbnail(of: CGSize(width: 120, height: 120 * size.height / max(size.width, 1)))
+        let type = ext == "jpg" ? "image/jpeg" : "image/\(ext)"
+        return Prepared(data: data, bytes: data.count, name: "Photo-\(stamp()).\(ext)", contentType: type, isVideo: false, w: Int(size.width.rounded()), h: Int(size.height.rounded()), secs: 0, preview: preview)
     }
 }
 
 /// Puts a file picked in Files on the server as it is (no picture size, no
 /// still), except that a picture or video goes without where it was taken
-/// and the phone (MediaScrub); the pending file then holds its Attachment.
+/// and the phone (MediaScrub), and a HEIC, TIFF or BMP goes as a JPEG or PNG
+/// under that name (PictureConvert); the pending file then holds its
+/// Attachment.
 @MainActor
 func uploadFile(_ url: URL, server: String, auth: String?, into f: PendingFile) async {
     f.isFile = true
@@ -531,12 +540,21 @@ func uploadFile(_ url: URL, server: String, auth: String?, into f: PendingFile) 
             return
         }
         // a copy of our own: the picked file is only readable while access lasts
-        let ext = url.pathExtension.lowercased()
+        var ext = url.pathExtension.lowercased()
         var tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         if !ext.isEmpty { tmp.appendPathExtension(ext) }
         try FileManager.default.copyItem(at: url, to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
-        if MediaScrub.mediaExts.contains(ext), try MediaScrub.scrubFile(at: tmp) {
+        if PictureConvert.convertedExts.contains(ext),
+           let c = PictureConvert.converted(try Data(contentsOf: tmp)) {
+            let out = tmp.deletingPathExtension().appendingPathExtension(c.ext)
+            try c.data.write(to: out, options: .atomic)
+            try? FileManager.default.removeItem(at: tmp)
+            tmp = out
+            ext = c.ext
+            f.name = ((f.name as NSString).deletingPathExtension as NSString).appendingPathExtension(c.ext) ?? f.name
+            bytes = c.data.count
+        } else if MediaScrub.mediaExts.contains(ext), try MediaScrub.scrubFile(at: tmp) {
             bytes = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? bytes
         }
         // streamed from the file, never read whole

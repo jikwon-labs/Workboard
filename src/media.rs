@@ -101,6 +101,29 @@ pub fn content_type(path: &Path) -> &'static str {
     }
 }
 
+/// Picture endings sent as a JPEG (a PNG when see-through) instead: not
+/// every device opens them (Windows and Linux can't show a HEIC). Every
+/// other picture goes as it is.
+pub const CONVERTED_EXTS: [&str; 5] = ["heic", "heif", "tif", "tiff", "bmp"];
+/// Longer side of a converted picture (the iPhone app sends the same).
+pub const CONVERTED_MAX: u32 = 4096;
+
+/// The picture at `path` as JPEG or PNG bytes and that ending ("jpg" or
+/// "png"), turned upright and no larger than CONVERTED_MAX, when its ending
+/// is one of CONVERTED_EXTS. None for any other file, and for one that
+/// can't be read here (a HEIC outside macOS): that goes as it is.
+pub fn converted_for_sending(path: &Path) -> Option<(Vec<u8>, &'static str)> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !CONVERTED_EXTS.contains(&ext.as_str()) {
+        return None;
+    }
+    converted(path, CONVERTED_MAX)
+}
+
 /// "1:05", "12:30", "1:02:03".
 pub fn clock(secs: f32) -> String {
     let s = secs.max(0.0).round() as u64;
@@ -141,7 +164,7 @@ pub fn pick_picture() -> Option<PathBuf> {
 #[cfg(all(target_os = "macos", not(test)))]
 pub use mac::pasteboard;
 #[cfg(target_os = "macos")]
-pub use mac::{pick_files, probe, thumbnail, video_still_jpeg, Player};
+pub use mac::{converted, pick_files, probe, thumbnail, video_still_jpeg, Player};
 #[cfg(all(not(target_os = "macos"), not(test)))]
 pub use other::pasteboard;
 
@@ -223,6 +246,27 @@ mod other {
             img = img.thumbnail(max, max);
         }
         Some(premultiplied(img.into_rgba8()))
+    }
+
+    /// The picture upright, no larger than `max` on its longer side, as a
+    /// PNG when any of it is see-through, else a JPEG. None when it can't be
+    /// read (a HEIC: the `image` crate has no decoder for it).
+    pub fn converted(path: &Path, max: u32) -> Option<(Vec<u8>, &'static str)> {
+        let mut img = open(path)?;
+        if img.width() > max || img.height() > max {
+            img = img.thumbnail(max, max);
+        }
+        let mut out = Vec::new();
+        if img.color().has_alpha() && img.to_rgba8().pixels().any(|p| p[3] < 255) {
+            img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+                .ok()?;
+            Some((out, "png"))
+        } else {
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85)
+                .encode_image(&img.to_rgb8())
+                .ok()?;
+            Some((out, "jpg"))
+        }
     }
 
     fn premultiplied(img: image::RgbaImage) -> Rgba {
@@ -345,7 +389,7 @@ mod other {
     }
 }
 #[cfg(not(target_os = "macos"))]
-pub use other::{pick_files, pick_zip, probe, thumbnail, video_still_jpeg, Player};
+pub use other::{converted, pick_files, pick_zip, probe, thumbnail, video_still_jpeg, Player};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -434,6 +478,7 @@ mod mac {
     extern "C" {
         fn CGImageGetWidth(img: CFRef) -> usize;
         fn CGImageGetHeight(img: CFRef) -> usize;
+        fn CGImageGetAlphaInfo(img: CFRef) -> u32;
         fn CGColorSpaceCreateDeviceRGB() -> CFRef;
         fn CGBitmapContextCreate(
             data: *mut c_void,
@@ -715,33 +760,76 @@ mod mac {
             if img.is_null() {
                 return None;
             }
-            let data: *mut Object = msg_send![class!(NSMutableData), data];
-            let dest = CGImageDestinationCreateWithData(
-                data as CFRef,
-                ns("public.jpeg") as CFRef,
-                1,
-                null(),
-            );
-            if dest.is_null() {
-                CFRelease(img);
-                return None;
-            }
-            let q: *mut Object = msg_send![class!(NSNumber), numberWithDouble: 0.75f64];
-            let props = dict(&[(kCGImageDestinationLossyCompressionQuality, q)]);
-            CGImageDestinationAddImage(dest, img, props as CFRef);
-            let ok = CGImageDestinationFinalize(dest);
-            CFRelease(dest);
+            let out = encode(img, "public.jpeg", Some(0.75));
             CFRelease(img);
-            if !ok {
-                return None;
-            }
-            let len: usize = msg_send![data, length];
-            let bytes: *const u8 = msg_send![data, bytes];
-            if bytes.is_null() || len == 0 {
-                return None;
-            }
-            Some(std::slice::from_raw_parts(bytes, len).to_vec())
+            out
         })
+    }
+
+    /// The picture upright, no larger than `max` on its longer side, as a
+    /// PNG when any of it is see-through, else a JPEG. Nothing of the
+    /// original's metadata (where it was taken, the camera) is carried over;
+    /// its colour profile is.
+    pub fn converted(path: &Path, max: u32) -> Option<(Vec<u8>, &'static str)> {
+        autoreleasepool(|| unsafe {
+            let src = image_source(path)?;
+            let opts = dict(&[
+                (kCGImageSourceCreateThumbnailFromImageAlways, yes()),
+                (kCGImageSourceCreateThumbnailWithTransform, yes()),
+                (kCGImageSourceThumbnailMaxPixelSize, number(max as i64)),
+            ]);
+            let img = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFRef);
+            CFRelease(src);
+            if img.is_null() {
+                return None;
+            }
+            let out = if see_through(img) {
+                encode(img, "public.png", None).map(|b| (b, "png"))
+            } else {
+                encode(img, "public.jpeg", Some(0.85)).map(|b| (b, "jpg"))
+            };
+            CFRelease(img);
+            out
+        })
+    }
+
+    /// Whether any pixel of the picture is (partly) see-through: one with an
+    /// alpha channel is often fully solid all the same.
+    unsafe fn see_through(img: CFRef) -> bool {
+        // kCGImageAlphaPremultipliedLast/First, Last, First, Only
+        if !matches!(CGImageGetAlphaInfo(img), 1..=4 | 7) {
+            return false;
+        }
+        pixels(img).is_some_and(|p| p.px.chunks_exact(4).any(|c| c[3] < 255))
+    }
+
+    /// The picture written as `uti` ("public.jpeg", "public.png"), with
+    /// that lossy quality when given.
+    unsafe fn encode(img: CFRef, uti: &str, quality: Option<f64>) -> Option<Vec<u8>> {
+        let data: *mut Object = msg_send![class!(NSMutableData), data];
+        let dest = CGImageDestinationCreateWithData(data as CFRef, ns(uti) as CFRef, 1, null());
+        if dest.is_null() {
+            return None;
+        }
+        let props = match quality {
+            Some(q) => {
+                let q: *mut Object = msg_send![class!(NSNumber), numberWithDouble: q];
+                dict(&[(kCGImageDestinationLossyCompressionQuality, q)]) as CFRef
+            }
+            None => null(),
+        };
+        CGImageDestinationAddImage(dest, img, props);
+        let ok = CGImageDestinationFinalize(dest);
+        CFRelease(dest);
+        if !ok {
+            return None;
+        }
+        let len: usize = msg_send![data, length];
+        let bytes: *const u8 = msg_send![data, bytes];
+        if bytes.is_null() || len == 0 {
+            return None;
+        }
+        Some(std::slice::from_raw_parts(bytes, len).to_vec())
     }
 
     #[cfg(not(test))]
@@ -1112,6 +1200,31 @@ mod other_tests {
     }
 
     #[test]
+    fn a_bmp_or_tiff_is_converted_and_a_png_is_not() {
+        let dir = temp("convert");
+        let mut img = image::RgbaImage::from_pixel(5000, 100, image::Rgba([200, 100, 50, 255]));
+        let bmp = dir.join("wide.bmp");
+        image::DynamicImage::ImageRgba8(img.clone())
+            .to_rgb8()
+            .save(&bmp)
+            .unwrap();
+        let (bytes, ext) = converted_for_sending(&bmp).unwrap();
+        assert_eq!(ext, "jpg");
+        let out = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(out.width(), CONVERTED_MAX);
+        assert!((81..=82).contains(&out.height()), "{}", out.height());
+        // see-through stays see-through, as a PNG
+        img.put_pixel(0, 0, image::Rgba([0, 0, 0, 0]));
+        let tiff = dir.join("clear.tiff");
+        img.save(&tiff).unwrap();
+        assert_eq!(converted_for_sending(&tiff).unwrap().1, "png");
+        let png = dir.join("clear.png");
+        img.save(&png).unwrap();
+        assert!(converted_for_sending(&png).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn see_through_pixels_come_out_premultiplied() {
         let dir = temp("alpha");
         let p = dir.join("half.png");
@@ -1216,6 +1329,61 @@ mod tests {
         let bad = dir.join("bad.png");
         std::fs::write(&bad, b"not a picture").unwrap();
         assert!(probe(&bad, MediaKind::Image).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_heic_is_converted_to_a_jpeg_and_others_are_not() {
+        let dir = temp("convert");
+        let png = picture(&dir);
+        let heic = dir.join("pic.heic");
+        let ok = std::process::Command::new("sips")
+            .args(["-s", "format", "heic"])
+            .arg(&png)
+            .arg("--out")
+            .arg(&heic)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "sips made the HEIC");
+        let (bytes, ext) = converted_for_sending(&heic).unwrap();
+        assert_eq!(ext, "jpg");
+        assert!(bytes.starts_with(&[0xFF, 0xD8, 0xFF]));
+        let jpg = dir.join("out.jpg");
+        std::fs::write(&jpg, &bytes).unwrap();
+        assert_eq!(probe(&jpg, MediaKind::Image).unwrap(), (400, 300, 0.0));
+        let t = thumbnail(&jpg, MediaKind::Image, 100).unwrap();
+        let at =
+            |x: u32, y: u32| &t.px[((y * t.w + x) * 4) as usize..((y * t.w + x) * 4 + 4) as usize];
+        assert!(at(10, 10)[0] > 180 && at(90, 60)[2] > 180, "same picture");
+        // above, a small one wasn't enlarged; a big one comes out no larger
+        // than asked
+        let (small, _) = converted(&heic, 100).unwrap();
+        let s = dir.join("small.jpg");
+        std::fs::write(&s, small).unwrap();
+        let (w, h, _) = probe(&s, MediaKind::Image).unwrap();
+        assert!(w == 100 && (75..=76).contains(&h), "{}x{}", w, h);
+        // PNG, JPEG, GIF and WebP go as they are
+        assert!(converted_for_sending(&png).is_none());
+        assert!(converted_for_sending(&jpg).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_see_through_picture_is_converted_to_a_png() {
+        let dir = temp("convert-alpha");
+        let p = dir.join("half.png");
+        let mut img = image::RgbaImage::from_pixel(40, 30, image::Rgba([200, 100, 50, 255]));
+        img.put_pixel(3, 3, image::Rgba([0, 0, 0, 0]));
+        img.save(&p).unwrap();
+        assert_eq!(converted(&p, 4096).unwrap().1, "png");
+        // an alpha channel that is solid everywhere makes a JPEG
+        let solid = dir.join("solid.png");
+        image::RgbaImage::from_pixel(40, 30, image::Rgba([200, 100, 50, 255]))
+            .save(&solid)
+            .unwrap();
+        assert_eq!(converted(&solid, 4096).unwrap().1, "jpg");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

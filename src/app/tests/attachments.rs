@@ -503,6 +503,44 @@ fn a_picture_goes_without_where_it_was_taken() {
 }
 
 #[test]
+fn a_bmp_goes_as_a_jpeg_under_that_name() {
+    let pic = picture_file("Scan.bmp", 60, 40);
+    let before = std::fs::read(&pic).unwrap();
+    let mut a = app();
+    a.add_media(false, Some(pic.clone()), None);
+    let files = until_ready(&mut a, false);
+    let att = &files[0];
+    assert_eq!(att.name, "Scan.jpg");
+    assert_eq!((att.kind, att.w, att.h), (MediaKind::Image, 60, 40));
+    let path = a.files.local(&att.file).unwrap();
+    let kept = std::fs::read(&path).unwrap();
+    assert!(
+        kept.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "a JPEG is kept and sent"
+    );
+    let (sha, bytes) = wb_net::sha256_file(&path).unwrap();
+    assert_eq!((att.file.clone(), att.bytes), (sha, bytes));
+    // the person's own file is left alone, and no converted copy lies about
+    assert_eq!(std::fs::read(&pic).unwrap(), before);
+    let left = std::fs::read_dir(a.files.dir())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().starts_with(".convert-"));
+    assert!(!left);
+}
+
+#[test]
+fn a_png_or_jpeg_goes_as_it_is() {
+    let pic = picture_file("Chart.png", 60, 40);
+    let mut a = app();
+    a.add_media(false, Some(pic.clone()), None);
+    let files = until_ready(&mut a, false);
+    assert_eq!(files[0].name, "Chart.png");
+    let kept = std::fs::read(a.files.local(&files[0].file).unwrap()).unwrap();
+    assert_eq!(kept, std::fs::read(&pic).unwrap());
+}
+
+#[test]
 fn a_video_goes_without_where_it_was_taken() {
     let Some(ffmpeg) = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
         .into_iter()

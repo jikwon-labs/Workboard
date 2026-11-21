@@ -73,7 +73,25 @@ extension FakeServer {
                 let author = q("author").flatMap { UInt64($0) } ?? 2
                 var snap = snapshot ?? [:]
                 let id = UInt64(Date().timeIntervalSince1970 * 1000) * 1024 + 1023
-                Edits.sendMessage(&snap, channel: ch, text: q("text") ?? "Hello", me: author, id: id, ts: nowTs())
+                // &file=NAME sends a file (&kind=Image: a small picture),
+                // kept here so the app can fetch it; &reply=ID sends it as
+                // a reply in that message's thread
+                var attachments: [JSON] = []
+                if let name = q("file") {
+                    let picture = q("kind") == "Image"
+                    let bytes = picture ? Self.tinyPNG : Data(name.utf8)
+                    let sha = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+                    files[sha] = (bytes, picture ? "image/png" : "application/octet-stream")
+                    attachments.append(picture
+                        ? FileAPI.attachment(sha: sha, name: name, isVideo: false, bytes: bytes.count, w: 1, h: 1, secs: 0)
+                        : FileAPI.fileAttachment(sha: sha, name: name, bytes: bytes.count))
+                }
+                let text = q("text") ?? (attachments.isEmpty ? "Hello" : "")
+                if let parent = q("reply").flatMap({ UInt64($0) }) {
+                    Edits.sendReply(&snap, channel: ch, to: parent, text: text, attachments: attachments, me: author, id: id, ts: nowTs())
+                } else {
+                    Edits.sendMessage(&snap, channel: ch, text: text, attachments: attachments, me: author, id: id, ts: nowTs())
+                }
                 if let key = q("imported") {
                     // as a Mac's Slack import writes it (Message::imported)
                     var chans = snap["channels"]?.array ?? []
@@ -252,6 +270,9 @@ extension FakeServer {
             respond(p, 404, ["error": "not_found"])
         }
     }
+
+    /// A 1x1 PNG for pictures sent with /admin/say.
+    static let tinyPNG = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")!
 
     /// A file put here (tests).
     public func storedFile(_ sha: String) -> Data? { queue.sync { files[sha]?.data } }

@@ -249,6 +249,7 @@ struct ChannelRow: View {
 
 struct ConversationView: View {
     @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
     @Environment(Notifier.self) private var notifier
     @Environment(CallManager.self) private var calls
     @Environment(\.openURL) private var openURL
@@ -264,50 +265,33 @@ struct ConversationView: View {
     @State private var position: UInt64?
     /// The newest message the last time the list was at the bottom.
     @State private var bottomSeen: Int64 = 0
+    /// Only some of the messages (the filter menu), or the files.
+    @State private var filter: MessageFilter = .all
+    /// A message to scroll to once the list is back ("Show in conversation").
+    @State private var jump: UInt64?
 
     var body: some View {
         let me = client.me ?? 0
         let v = client.view
         if let c = v.channels.first(where: { $0.id == channelId }) {
-            let atBottom = position == nil || position == c.messages.last?.id
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if !c.topic.isEmpty {
-                        Text(c.topic).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
-                    }
-                    ForEach(Array(c.messages.enumerated()), id: \.element.id) { i, m in
-                        let prev = i > 0 ? c.messages[i - 1] : nil
-                        let grouped = prev != nil && prev!.author == m.author && m.ts - prev!.ts < 300 && prev!.replies.isEmpty && m.id != readLine
-                        VStack(alignment: .leading, spacing: 0) {
-                            if m.id == readLine { ReadLine() }
-                            MessageRow(message: m, channelId: c.id, compact: grouped)
-                            if !m.replies.isEmpty {
-                                NavigationLink(value: Nav.Route.thread(channel: c.id, message: m.id)) {
-                                    RepliesChip(message: m)
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.leading, 64)
-                                .padding(.bottom, 6)
-                                .accessibilityIdentifier("replies-\(m.id)")
-                            }
+            let shown = filter == .all ? c.messages : c.messages.filter(filter.keeps)
+            let atBottom = position == nil || position == shown.last?.id
+            Group {
+                if filter == .files {
+                    ConversationFilesView(channel: c) { f in
+                        if let parent = f.parent {
+                            nav.path.append(.thread(channel: c.id, message: parent))
+                        } else {
+                            filter = .all
+                            jump = f.message.id
                         }
-                        .id(m.id)
                     }
+                } else {
+                    messageList(c, shown: shown, atBottom: atBottom, me: me)
                 }
-                .scrollTargetLayout()
-                .padding(.vertical, 8)
             }
-            .defaultScrollAnchor(.bottom)
-            .scrollPosition(id: $position, anchor: .bottom)
-            .overlay(alignment: .bottom) {
-                let below = atBottom ? 0 : c.newer(than: bottomSeen, me: me)
-                if below > 0 {
-                    NewBelowNote(count: below) {
-                        withAnimation { position = c.messages.last?.id }
-                    }
-                    .padding(.bottom, 10)
-                    .transition(.opacity)
-                }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if filter != .all { MessageFilterBanner(filter: $filter) }
             }
             .onAppear {
                 readLine = c.firstUnread(me: me)
@@ -327,7 +311,7 @@ struct ConversationView: View {
                     readLine = c.firstUnread(me: me)
                 }
                 markRead(c)
-                if was, let new {
+                if was, let new, filter == .all || c.messages.last.map(filter.keeps) == true {
                     bottomSeen = c.messages.last?.ts ?? 0
                     withAnimation { position = new }
                 }
@@ -361,6 +345,9 @@ struct ConversationView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    MessageFilterMenu(filter: $filter)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button { huddle(c.id, video: false) } label: { Label("Start huddle", systemImage: "headphones") }
                         Button { huddle(c.id, video: true) } label: { Label("Start with video", systemImage: "video") }
@@ -391,6 +378,61 @@ struct ConversationView: View {
             .sheet(isPresented: $posting) { NewPostSheet(channelId: c.id) }
         } else {
             EmptyNote(title: "This conversation is gone", systemImage: "bubble.left")
+        }
+    }
+
+    /// The messages the filter keeps (all of them when it is off).
+    func messageList(_ c: ChannelView, shown: [MessageView], atBottom: Bool, me: UInt64) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if !c.topic.isEmpty && filter == .all {
+                    Text(c.topic).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
+                }
+                if shown.isEmpty && filter == .links {
+                    EmptyNote(title: "No links in this conversation yet", systemImage: "link")
+                        .padding(.top, 40)
+                        .accessibilityIdentifier("noLinksNote")
+                }
+                ForEach(Array(shown.enumerated()), id: \.element.id) { i, m in
+                    let prev = i > 0 ? shown[i - 1] : nil
+                    let grouped = prev != nil && prev!.author == m.author && m.ts - prev!.ts < 300 && prev!.replies.isEmpty && m.id != readLine
+                    VStack(alignment: .leading, spacing: 0) {
+                        if m.id == readLine { ReadLine() }
+                        MessageRow(message: m, channelId: c.id, compact: grouped)
+                        if !m.replies.isEmpty {
+                            NavigationLink(value: Nav.Route.thread(channel: c.id, message: m.id)) {
+                                RepliesChip(message: m)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.leading, 64)
+                            .padding(.bottom, 6)
+                            .accessibilityIdentifier("replies-\(m.id)")
+                        }
+                    }
+                    .id(m.id)
+                }
+            }
+            .scrollTargetLayout()
+            .padding(.vertical, 8)
+        }
+        .defaultScrollAnchor(.bottom)
+        .scrollPosition(id: $position, anchor: .bottom)
+        .overlay(alignment: .bottom) {
+            let below = atBottom || filter != .all ? 0 : c.newer(than: bottomSeen, me: me)
+            if below > 0 {
+                NewBelowNote(count: below) {
+                    withAnimation { position = c.messages.last?.id }
+                }
+                .padding(.bottom, 10)
+                .transition(.opacity)
+            }
+        }
+        .task(id: jump) {
+            // back from the files: once the list is laid out
+            guard let id = jump else { return }
+            try? await Task.sleep(for: .milliseconds(200))
+            withAnimation { position = id }
+            jump = nil
         }
     }
 

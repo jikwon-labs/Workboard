@@ -118,6 +118,9 @@ final class FileLoad {
 struct FileTile: View {
     @Environment(SyncClient.self) private var client
     let attachment: AttachmentView
+    /// Shown after the size, and the tile takes the whole width (the
+    /// conversation's Other files: who sent it and when).
+    var detail: String?
     @State private var file = FileLoad()
     @State private var loading = false
     @State private var shown: URL?
@@ -149,7 +152,8 @@ struct FileTile: View {
                     if let e = file.error {
                         Text(verbatim: e).font(.caption).foregroundStyle(.red).lineLimit(2)
                     } else {
-                        Text(verbatim: ByteCountFormatter.string(fromByteCount: Int64(attachment.bytes), countStyle: .file))
+                        let size = ByteCountFormatter.string(fromByteCount: Int64(attachment.bytes), countStyle: .file)
+                        Text(verbatim: detail.map { "\(size) · \($0)" } ?? size)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -158,7 +162,7 @@ struct FileTile: View {
                 if loading { ProgressView() }
             }
             .padding(8)
-            .frame(maxWidth: 260, alignment: .leading)
+            .frame(maxWidth: detail == nil ? 260 : .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(.secondarySystemBackground)))
         }
         .buttonStyle(.plain)
@@ -194,6 +198,9 @@ struct FileTile: View {
 struct PictureView: View {
     @Environment(SyncClient.self) private var client
     let attachment: AttachmentView
+    /// The box it fills (a square in the conversation's files); its own
+    /// shape when nil.
+    var box: CGSize?
     @Environment(\.displayScale) private var displayScale
     @State private var file = FileLoad()
     /// Decoded at the size of the box; the full picture only opens large.
@@ -201,7 +208,7 @@ struct PictureView: View {
     @State private var showLarge = false
 
     var body: some View {
-        let size = boxSize(attachment)
+        let size = box ?? boxSize(attachment)
         Button { if image != nil { showLarge = true } } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(.secondarySystemFill))
@@ -227,7 +234,7 @@ struct PictureView: View {
         .task(id: attachment.file) {
             await file.load(attachment, client: client)
             if let u = file.url {
-                image = await PictureCache.thumbnail(u, key: attachment.file, maxPixels: fillPixels(attachment, box: boxSize(attachment), scale: displayScale))
+                image = await PictureCache.thumbnail(u, key: attachment.file, maxPixels: fillPixels(attachment, box: box ?? boxSize(attachment), scale: displayScale))
             }
         }
         .fullScreenCover(isPresented: $showLarge) {
@@ -279,6 +286,8 @@ struct VideoTile: View {
     @Environment(SyncClient.self) private var client
     @Environment(\.displayScale) private var displayScale
     let attachment: AttachmentView
+    /// As in PictureView.
+    var box: CGSize?
     @State private var file = FileLoad()
     @State private var loading = false
     @State private var player: AVPlayer?
@@ -286,7 +295,7 @@ struct VideoTile: View {
     @State private var still: UIImage?
 
     var body: some View {
-        let size = boxSize(attachment)
+        let size = box ?? boxSize(attachment)
         Button(action: play) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.black.opacity(0.85))
@@ -327,7 +336,7 @@ struct VideoTile: View {
         .task(id: attachment.thumb) {
             guard let t = attachment.thumb, still == nil else { return }
             if let u = try? await FileAPI.download(server: client.settings.server, auth: client.fileAuth, sha: t, ext: "jpg") {
-                still = await PictureCache.thumbnail(u, key: t, maxPixels: fillPixels(attachment, box: boxSize(attachment), scale: displayScale))
+                still = await PictureCache.thumbnail(u, key: t, maxPixels: fillPixels(attachment, box: box ?? boxSize(attachment), scale: displayScale))
             }
         }
         .fullScreenCover(isPresented: Binding(get: { player != nil }, set: { if !$0 { player?.pause(); player = nil } })) {

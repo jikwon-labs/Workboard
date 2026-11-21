@@ -2625,6 +2625,28 @@
         }
       }
     },
+    "Files": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일"
+          }
+        }
+      }
+    },
+    "Filter messages": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메시지 거르기"
+          }
+        }
+      }
+    },
     "Find the other workspaces you have on this server, or connect to another server's address below. Each workspace stays on this iPhone with its sign-in and the changes it hasn't sent yet.": {
       "localizations": {
         "ko": {
@@ -3354,6 +3376,17 @@
         }
       }
     },
+    "Links": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "링크"
+          }
+        }
+      }
+    },
     "List": {
       "extractionState": "manual",
       "localizations": {
@@ -3658,12 +3691,56 @@
         }
       }
     },
+    "Messages turned into tasks": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "작업으로 만든 메시지"
+          }
+        }
+      }
+    },
     "Messages with \"%@\"": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "\"%@\" 가 들어간 메시지"
+          }
+        }
+      }
+    },
+    "Messages with files": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일이 있는 메시지"
+          }
+        }
+      }
+    },
+    "Messages with links": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "링크가 있는 메시지"
+          }
+        }
+      }
+    },
+    "Messages with replies": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "답장이 있는 메시지"
           }
         }
       }
@@ -4190,6 +4267,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "다음 주"
+          }
+        }
+      }
+    },
+    "No files in this conversation yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 대화에 아직 파일이 없습니다"
+          }
+        }
+      }
+    },
+    "No links in this conversation yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 대화에 아직 링크가 없습니다"
           }
         }
       }
@@ -4816,6 +4915,17 @@
         }
       }
     },
+    "Other files": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "다른 파일"
+          }
+        }
+      }
+    },
     "Other services post to this channel by sending {\"text\": \"...\"} to the address.": {
       "localizations": {
         "ko": {
@@ -4989,6 +5099,17 @@
         }
       }
     },
+    "Pictures and videos": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사진과 동영상"
+          }
+        }
+      }
+    },
     "Pin to channel": {
       "localizations": {
         "ko": {
@@ -5016,6 +5137,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "고정됨"
+          }
+        }
+      }
+    },
+    "Pinned messages": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "고정된 메시지"
           }
         }
       }
@@ -5507,6 +5639,17 @@
         }
       }
     },
+    "Replies": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "답장"
+          }
+        }
+      }
+    },
     "Replies in my threads": {
       "localizations": {
         "ko": {
@@ -5665,6 +5808,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "저장됨"
+          }
+        }
+      }
+    },
+    "Saved messages": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "저장한 메시지"
           }
         }
       }
@@ -6027,6 +6181,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "완료한 작업 %lld개 보기"
+          }
+        }
+      }
+    },
+    "Show in conversation": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "대화에서 보기"
           }
         }
       }
@@ -7338,6 +7503,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "알림 켜기"
+          }
+        }
+      }
+    },
+    "Turned into tasks": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "작업으로 만든 메시지"
           }
         }
       }

@@ -3237,30 +3237,80 @@ fn a_post_card_stacks_its_title_and_text_and_names_where_it_went() {
 
 /// The Sort menu above the posts ends where the post cards end, in a wide
 /// and a narrow window and in both languages (the filter chips before it
-/// differ in width).
+/// differ in width), and never sits on top of the chips: with no room
+/// beside them (the smallest window, a long channel name picked) it goes
+/// under them.
 #[test]
 fn the_posts_sort_menu_lines_up_with_the_cards() {
-    for (w, ko) in [(1440.0, false), (900.0, false), (1440.0, true)] {
+    for (w, ko, long) in [
+        (1440.0, false, false),
+        (900.0, false, false),
+        (1440.0, true, false),
+        (900.0, false, true),
+        (1000.0, false, true),
+    ] {
         let mut h = Ui1::sized(w, 900.0);
         h.click("general");
         h.click("Post");
         h.click("Message composer");
         h.type_text("Office closed on Friday for the move");
         h.key(egui::Key::Enter);
+        if long {
+            let id = h.app.data.new_id();
+            let me = h.app.data.me;
+            h.app.data.channels.push(Channel {
+                id,
+                name: "engineering-announcements".into(),
+                kind: ChannelKind::Channel,
+                members: vec![me],
+                ..Default::default()
+            });
+            h.app.post.f_channel = Some(id);
+            // the post is in #general: show it too, to measure the card
+            h.app
+                .data
+                .channels
+                .iter_mut()
+                .find(|c| c.id == id)
+                .unwrap()
+                .messages = h
+                .app
+                .data
+                .channels
+                .iter()
+                .find(|c| c.name == "general")
+                .unwrap()
+                .messages
+                .iter()
+                .filter(|m| m.post_title.is_some())
+                .cloned()
+                .collect();
+        }
         if ko {
             crate::i18n::set_lang(crate::i18n::Lang::Ko);
         }
         h.app.section = Section::Posts;
         h.settle();
+        let case = format!("{w} ko {ko} long filter {long}");
         let sort = h.rect("Sort posts");
+        let label = h.painted_text(tr("Sort:"))[0].0;
+        let chip = h.rect("Post type filter");
         let open = h.rect(tr("Open in channel"));
         // the card's inner margin is 14 points
         let card_right = open.right() + 14.0;
         assert!(
             (sort.right() - card_right).abs() <= 2.0,
-            "{w} ko {ko}: Sort ends at {} but the cards at {card_right}",
+            "{case}: Sort ends at {} but the cards at {card_right}",
             sort.right()
         );
+        assert!(
+            !sort.intersects(chip) && !label.intersects(chip),
+            "{case}: Sort {sort:?} / {label:?} sits on the Type chip {chip:?}"
+        );
+        // and it still sorts
+        h.click("Sort posts");
+        h.click(tr("Oldest"));
+        assert!(h.app.post.sort_old, "{case}: Oldest picked");
         crate::i18n::set_lang(crate::i18n::Lang::En);
     }
 }

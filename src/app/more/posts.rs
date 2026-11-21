@@ -207,6 +207,7 @@ impl App {
                 ui.painter()
                     .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
                 ui.add_space(16.0);
+                let mut sort_below = false;
                 ui.horizontal(|ui| {
                     let row_left = ui.cursor().left();
                     ui.add_space(pad);
@@ -320,36 +321,32 @@ impl App {
                         }
                     });
                     // the sort menu ends where the post cards below end,
-                    // however wide the filters before it are
-                    let room = (row_left + pad + cw - ui.cursor().left()).max(0.0);
-                    let h = ui.min_rect().height();
-                    ui.allocate_ui_with_layout(
-                        vec2(room, h),
-                        Layout::right_to_left(Align::Center),
-                        |ui| {
-                            let sort = egui::ComboBox::from_id_salt("post_sort")
-                                .selected_text(if self.post.sort_old {
-                                    tr("Oldest")
-                                } else {
-                                    tr("Newest")
-                                })
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut self.post.sort_old,
-                                        false,
-                                        tr("Newest"),
-                                    );
-                                    ui.selectable_value(
-                                        &mut self.post.sort_old,
-                                        true,
-                                        tr("Oldest"),
-                                    );
-                                });
-                            name_it(&sort.response, "Sort posts");
-                            ui.label(RichText::new(tr("Sort:")).color(t.text2));
-                        },
-                    );
+                    // however wide the filters before it are; with no room
+                    // beside them (a narrow window, a long channel name) it
+                    // goes under them rather than on top of them
+                    let room = row_left + pad + cw - ui.cursor().left();
+                    if room >= sort_menu_width(ui) {
+                        let h = ui.min_rect().height();
+                        ui.allocate_ui_with_layout(
+                            vec2(room, h),
+                            Layout::right_to_left(Align::Center),
+                            |ui| sort_menu(ui, &mut self.post.sort_old, t.text2),
+                        );
+                    } else {
+                        sort_below = true;
+                    }
                 });
+                if sort_below {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        let h = ui.spacing().interact_size.y;
+                        ui.allocate_ui_with_layout(
+                            vec2(pad + cw, h),
+                            Layout::right_to_left(Align::Center),
+                            |ui| sort_menu(ui, &mut self.post.sort_old, t.text2),
+                        );
+                    });
+                }
                 ui.add_space(12.0);
                 let mut posts: Vec<(String, u64, Message)> = vec![];
                 for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
@@ -469,4 +466,30 @@ impl App {
                 }
             });
     }
+}
+
+/// "Sort:" and the Newest / Oldest menu, laid out right to left.
+fn sort_menu(ui: &mut Ui, sort_old: &mut bool, label: Color32) {
+    let sort = egui::ComboBox::from_id_salt("post_sort")
+        .selected_text(if *sort_old {
+            tr("Oldest")
+        } else {
+            tr("Newest")
+        })
+        .show_ui(ui, |ui| {
+            ui.selectable_value(sort_old, false, tr("Newest"));
+            ui.selectable_value(sort_old, true, tr("Oldest"));
+        });
+    name_it(&sort.response, "Sort posts");
+    ui.label(RichText::new(tr("Sort:")).color(label));
+}
+
+/// The width `sort_menu` takes.
+fn sort_menu_width(ui: &Ui) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let label = ui
+        .fonts(|f| f.layout_no_wrap(tr("Sort:").to_string(), font, Color32::WHITE))
+        .size()
+        .x;
+    label + ui.spacing().item_spacing.x + ui.spacing().combo_width
 }

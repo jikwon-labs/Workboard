@@ -3564,4 +3564,5 @@ fn trailing_mention_is_the_at_word_at_the_end() {
     assert_eq!(trailing_mention("@"), Some((0, "")));
     assert_eq!(trailing_mention("mail a@b"), None);
     assert_eq!(trailing_mention("@Al done"), None);
+    assert_eq!(trailing_mention("안녕 @민"), Some((7, "민")));
 }

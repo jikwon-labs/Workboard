@@ -2063,6 +2063,7 @@ impl App {
                         .filter(|m| !m.invited && m.id != me)
                         .cloned()
                         .collect();
+                    let nobody = people.is_empty();
                     let people = mention_matches(
                         people,
                         trailing_mention(&self.chat.text).map_or("", |m| m.1),
@@ -2071,7 +2072,12 @@ impl App {
                     let mut picked = None;
                     popup(ui, &at, mention_popup, 210.0, |ui| {
                         if people.is_empty() {
-                            ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
+                            let why = if nobody {
+                                tr("No one else here yet")
+                            } else {
+                                tr("No one by that name")
+                            };
+                            ui.label(RichText::new(why).color(t.text3));
                         }
                         for m in &people {
                             if menu_row(ui, &t, m.shown(), false, |p, c| {
@@ -2273,6 +2279,7 @@ impl App {
                 } else {
                     &self.chat.text
                 };
+                let nobody = people.is_empty();
                 let people = mention_matches(people, trailing_mention(so_far).map_or("", |m| m.1));
                 let teams = self.team_names();
                 let slash_names = self.slash_choices("/");
@@ -2357,7 +2364,12 @@ impl App {
                     name_it(&at, "Mention someone in the reply");
                     popup(ui, &at, mention_popup, 210.0, |ui| {
                         if people.is_empty() {
-                            ui.label(RichText::new(tr("No one else here yet")).color(t.text3));
+                            let why = if nobody {
+                                tr("No one else here yet")
+                            } else {
+                                tr("No one by that name")
+                            };
+                            ui.label(RichText::new(why).color(t.text3));
                         }
                         for m in &people {
                             if menu_row(ui, &t, m.shown(), false, |p, c| {
@@ -4140,37 +4152,19 @@ fn drop_hint(ctx: &egui::Context, t: &Theme, r: Rect, label: &str) {
     );
 }
 
-/// Where an "@name" being typed at the end of `text` starts: an "@" at the
-/// start of a word followed only by letters so far (none: the "@" alone).
-/// A name picked from the @ list replaces it, and the list offers only the
-/// people whose name has what was typed after the "@".
+/// Where the "@name" being typed at the end of `text` starts, and the
+/// letters typed after its "@" (see `mention_word`): a name picked from the
+/// @ list replaces them.
 pub(super) fn trailing_mention(text: &str) -> Option<(usize, &str)> {
-    let at = text.rfind('@')?;
-    let query = &text[at + 1..];
-    if query.chars().any(char::is_whitespace) {
-        return None;
-    }
-    let before = text[..at].chars().last();
-    before
-        .map_or(true, char::is_whitespace)
-        .then_some((at, query))
+    super::mention_word(text).map(|w| (text.len() - w.len() - 1, w))
 }
 
-/// `people` narrowed to the names holding `query` (all of them when it's
-/// empty or nobody's name has it).
+/// `people` narrowed to the names starting with `query`, as the task
+/// comments' @ list does.
 fn mention_matches(people: Vec<Member>, query: &str) -> Vec<Member> {
     let q = query.to_lowercase();
-    if q.is_empty() {
-        return people;
-    }
-    let hits: Vec<Member> = people
-        .iter()
-        .filter(|m| m.shown().to_lowercase().contains(&q))
-        .cloned()
-        .collect();
-    if hits.is_empty() {
-        people
-    } else {
-        hits
-    }
+    people
+        .into_iter()
+        .filter(|m| m.any_name(|n| n.to_lowercase().starts_with(&q)))
+        .collect()
 }

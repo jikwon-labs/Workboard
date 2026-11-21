@@ -2879,6 +2879,7 @@ fn milestones_stay_when_some_of_the_goals_tasks_are_not_here() {
         name: "G".into(),
         owner: 1,
         targets: vec![GoalTarget {
+            id: 0,
             name: "t".into(),
             kind: TargetKind::Tasks {
                 ids: vec![open, hidden],
@@ -2888,12 +2889,14 @@ fn milestones_stay_when_some_of_the_goals_tasks_are_not_here() {
         reached: 50,
         log: vec![
             GoalEvent {
+                id: 0,
                 ts: now - 60,
                 who: 0,
                 what: GoalChange::Tracked,
                 pct: 0,
             },
             GoalEvent {
+                id: 0,
                 ts: now - 30,
                 who: 0,
                 what: GoalChange::Milestone(50),

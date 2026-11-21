@@ -910,3 +910,58 @@ fn a_goal_far_behind_is_announced_once_after_the_morning_time() {
     a.notify_clock(at(day, 15, 0));
     assert_eq!(a.notify_rt.sent.len(), 1, "once per due date");
 }
+
+#[test]
+fn a_goal_due_today_is_announced_once_unless_turned_off_and_opens_the_goal() {
+    let mut a = app();
+    let day = today();
+    a.data.extra.goals.clear();
+    a.data.extra.notify.due = false;
+    let id = a.data.new_id();
+    let me = a.data.me;
+    let goal = |id: u64, name: &str| Goal {
+        id,
+        name: name.into(),
+        due: Some(day),
+        owner: me,
+        start: Some(day - Duration::days(10)),
+        targets: vec![GoalTarget {
+            name: "Ship".into(),
+            kind: TargetKind::TrueFalse { done: false },
+        }],
+        ..Default::default()
+    };
+    a.data.extra.goals.push(goal(id, "Launch"));
+    a.data.extra.notify.goal_risk = false;
+    a.notify_clock(at(day, 10, 0));
+    assert_eq!(kinds(&a), vec![Kind::Goal]);
+    assert_eq!(a.notify_rt.sent[0].title, "Goal due today: Launch");
+    assert_eq!(a.notify_rt.sent[0].body, "0% done");
+    a.notify_clock(at(day, 16, 0));
+    assert_eq!(a.notify_rt.sent.len(), 1, "once");
+    // clicking it opens the goal
+    a.open_target(&a.notify_rt.sent[0].target.clone());
+    assert_eq!(a.section, Section::Goals);
+    assert_eq!(a.goal_open, Some(id));
+    // another due today with "Goal deadlines" turned off: nothing
+    a.data.extra.notify.goals = false;
+    let other = a.data.new_id();
+    a.data.extra.goals.push(goal(other, "Second"));
+    a.notify_clock(at(day, 17, 0));
+    assert_eq!(a.notify_rt.sent.len(), 1);
+    // a goal already achieved isn't announced as due
+    a.data.extra.notify.goals = true;
+    for g in a.data.extra.goals.iter_mut().filter(|g| g.id == other) {
+        g.targets[0].kind = TargetKind::TrueFalse { done: true };
+    }
+    // (it reaching 100% elsewhere is news of its own)
+    a.notify_clock(at(day, 18, 0));
+    assert!(
+        a.notify_rt
+            .sent
+            .iter()
+            .all(|n| n.title != "Goal due today: Second"),
+        "{:?}",
+        a.notify_rt.sent
+    );
+}

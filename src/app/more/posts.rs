@@ -9,9 +9,9 @@ impl App {
         let t = self.t();
         self.page_bar(ui, tr("Posts"), |s, ui| {
             let tt = s.t();
+            // to the title, keeping what is being written
             if primary_button(ui, &tt, tr("New Post")).clicked() {
-                s.post.title.clear();
-                s.post.body.clear();
+                s.post.focus_title = true;
             }
         });
         egui::ScrollArea::vertical()
@@ -91,6 +91,10 @@ impl App {
                                                 .desired_width(f32::INFINITY),
                                         );
                                         name_field(&r, "Post title");
+                                        if std::mem::take(&mut self.post.focus_title) {
+                                            r.request_focus();
+                                            r.scroll_to_me(Some(Align::Center));
+                                        }
                                         r.has_focus()
                                     })
                                     .inner;

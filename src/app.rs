@@ -740,6 +740,9 @@ struct PostsUi {
     f_channel: Option<u64>,
     f_author: Option<u64>,
     f_type: Option<String>,
+    /// "New Post" was pressed: the title takes the keyboard (and comes into
+    /// sight) on the next draw.
+    focus_title: bool,
 }
 
 /// List rows: keyboard focus, the order drawn, dragging and renaming.

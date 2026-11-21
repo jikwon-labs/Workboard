@@ -605,3 +605,54 @@ fn cmd_enter_posts_from_the_title_or_the_text() {
     assert_eq!(all_posts(&h).len(), 2);
     assert_eq!(h.app.post.body, "No title yet");
 }
+
+/// "New Post" puts the cursor in the title, even from far down the list,
+/// and keeps what was being written (it used to clear it without asking
+/// and leave the keyboard nowhere).
+#[test]
+fn new_post_puts_the_cursor_in_the_title_and_keeps_what_was_written() {
+    let mut h = posts_page();
+    h.click("New Post");
+    h.type_text("Hello");
+    assert_eq!(h.app.post.title, "Hello", "typing goes into the title");
+
+    let gen = channel_id(&h, "general");
+    for i in 0..20 {
+        add_post(
+            &mut h,
+            gen,
+            2,
+            &format!("Post {i}"),
+            "text",
+            "Idea",
+            i * 60 + 60,
+        );
+    }
+    h.click("Post text");
+    h.type_text("Draft");
+    // down the list, the box out of sight
+    h.frame(vec![egui::Event::PointerMoved(pos2(900.0, 600.0))]);
+    for _ in 0..10 {
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -400.0),
+            modifiers: Default::default(),
+        }]);
+    }
+    h.settle();
+    assert!(
+        h.find("Post title").is_none_or(|p| p.y < 60.0),
+        "scrolled away"
+    );
+    h.click("New Post");
+    h.settle();
+    assert_eq!(h.app.post.title, "Hello", "kept");
+    assert_eq!(h.app.post.body, "Draft", "kept");
+    let at = h.find("Post title").unwrap();
+    assert!(
+        at.y > 60.0 && at.y < 900.0,
+        "the title is back in sight: {at:?}"
+    );
+    h.type_text("!");
+    assert_eq!(h.app.post.title, "Hello!");
+}

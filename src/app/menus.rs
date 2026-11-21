@@ -983,6 +983,7 @@ impl App {
             focus: true,
             start: true,
             name,
+            all_templates: false,
         });
         self.wb_open = Some(id);
         self.section = Section::Whiteboards;

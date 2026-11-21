@@ -20,6 +20,10 @@ pub struct WbNew {
     pub start: bool,
     /// The name it was made with: a template renames it only if untouched.
     pub name: String,
+    /// "More templates" was pressed: the card lists every template, and the
+    /// one picked fills this board (it used to go to the list of boards,
+    /// where a template made another board and left this one empty).
+    pub all_templates: bool,
 }
 
 /// Where the board's 0,0 sits in the canvas at the starting view: clear of

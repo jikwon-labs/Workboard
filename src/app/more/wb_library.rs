@@ -7,7 +7,7 @@ use super::*;
 use egui::Pos2;
 
 /// The templates: (name, what it is for, colour).
-const TEMPLATES: [(&str, &str, [u8; 3]); 5] = [
+pub(super) const TEMPLATES: [(&str, &str, [u8; 3]); 5] = [
     (
         "Organizational Chart",
         "Visualize your team structure",

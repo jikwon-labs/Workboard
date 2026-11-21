@@ -842,6 +842,51 @@ fn whiteboard_list_shows_a_card_for_each_board() {
     assert_eq!(h.app.wb_open, Some(wid));
 }
 
+/// "More templates" on a new board's card lists every template on the card,
+/// and the one picked fills that board. It used to go to the list of
+/// boards, where picking a template made another board and left the new
+/// one empty.
+#[test]
+fn more_templates_fill_the_board_just_made() {
+    let mut h = Ui1::new();
+    open_whiteboards(&mut h);
+    h.click("New whiteboard");
+    let wid = h.app.wb_open.unwrap();
+    let boards = h.app.data.extra.whiteboards.len();
+    assert!(!h.has("Root Cause Analysis"));
+    h.click("More templates");
+    assert_eq!(h.app.wb_open, Some(wid), "the board stays open");
+    assert!(h.has("Draw with the pen"), "the card stays up");
+    assert!(!h.has("More templates"), "every template is shown");
+    // all of them on the card, wrapped inside its edges
+    let left = h.rect("Draw with the pen").left();
+    let right = h.rect("Add sticky notes").right();
+    for name in [
+        "Action Plan",
+        "Flow Chart",
+        "Organizational Chart",
+        "Customer Journey Map",
+        "Root Cause Analysis",
+    ] {
+        let r = h.rect(name);
+        assert!(
+            r.left() >= left - 0.5 && r.right() <= right + 0.5,
+            "{name} {r:?} inside {left}..{right}"
+        );
+    }
+    h.click("Root Cause Analysis");
+    assert_eq!(
+        h.app.data.extra.whiteboards.len(),
+        boards,
+        "no other board was made"
+    );
+    assert_eq!(h.app.wb_open, Some(wid));
+    let b = board_of(&h, wid);
+    assert_eq!(b.name, "Root Cause Analysis");
+    assert_eq!(b.notes.len(), 5);
+    assert!(!h.has("Draw with the pen"), "the card has gone");
+}
+
 /// The "Clear the whole board?" question in the board menu has room inside
 /// the menu's edge, the words on one line and the buttons just under them.
 /// The buttons were centred in the height the menu had before, far below

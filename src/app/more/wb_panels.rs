@@ -719,6 +719,50 @@ impl App {
         );
         job.halign = egui::Align::Center;
         let sub = ui.painter().layout_job(job);
+        // the templates as chips, wrapped onto rows: two and "More templates",
+        // or all of them once that is pressed (the two first, where they were)
+        const SHOWN: [&str; 2] = ["Action Plan", "Flow Chart"];
+        let mut names: Vec<&str> = SHOWN.to_vec();
+        if new.all_templates {
+            names.extend(
+                super::wb_library::TEMPLATES
+                    .iter()
+                    .map(|(n, ..)| *n)
+                    .filter(|n| !SHOWN.contains(n)),
+            );
+        }
+        let mut more = (!new.all_templates).then(|| {
+            ui.painter().layout_no_wrap(
+                format!("{} \u{203A}", tr("More templates")),
+                FontId::proportional(13.0),
+                t.text2,
+            )
+        });
+        let mut chips: Vec<(Option<&str>, egui::Vec2)> = names
+            .iter()
+            .map(|n| {
+                let w = ui
+                    .painter()
+                    .layout_no_wrap(tr(n).to_string(), FontId::proportional(13.0), t.text)
+                    .size()
+                    .x;
+                (Some(*n), vec2(w + 40.0, 32.0))
+            })
+            .collect();
+        if let Some(g) = &more {
+            chips.push((None, vec2(g.size().x + 16.0, 32.0)));
+        }
+        let mut at = vec![];
+        let (mut x, mut row) = (0.0f32, 0.0f32);
+        for (_, size) in &chips {
+            if x > 0.0 && x + size.x > cw - 48.0 {
+                x = 0.0;
+                row += 1.0;
+            }
+            at.push(vec2(x, row * 40.0));
+            x += size.x + 8.0;
+        }
+        let chips_h = row * 40.0 + 32.0;
         let h = 24.0
             + 40.0
             + 14.0
@@ -729,7 +773,7 @@ impl App {
             + 72.0
             + 18.0
             + 22.0
-            + 32.0
+            + chips_h
             + 22.0;
         let cr = Rect::from_center_size(rect.center() + vec2(0.0, (1.0 - e) * 10.0), vec2(cw, h));
         let mut c = ui.new_child(
@@ -819,13 +863,36 @@ impl App {
         );
         y += 22.0;
 
-        let mut x = cr.left() + 24.0;
-        for (name, colour) in [
-            ("Action Plan", [0x0f, 0x9d, 0x9f]),
-            ("Flow Chart", [0xee, 0x5e, 0x99]),
-        ] {
+        let top = pos2(cr.left() + 24.0, y);
+        for ((name, size), off) in chips.into_iter().zip(at) {
+            let r = Rect::from_min_size(top + off, size);
+            let Some(name) = name else {
+                // every template, here on the card, so the one picked fills
+                // this board
+                let resp = c.interact(r, c.id().with("more"), Sense::click());
+                name_it(&resp, "More templates");
+                if let Some(g) = more.take() {
+                    p.galley(
+                        pos2(r.left() + 8.0, r.center().y - g.size().y / 2.0),
+                        g,
+                        if resp.hovered() { t.text } else { t.text2 },
+                    );
+                }
+                if resp.hovered() {
+                    c.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if resp.clicked() {
+                    if let Some(n) = self.sweep.wb_new.as_mut().filter(|n| n.id == wid) {
+                        n.all_templates = true;
+                    }
+                }
+                continue;
+            };
+            let colour = super::wb_library::TEMPLATES
+                .iter()
+                .find(|(n, ..)| *n == name)
+                .map_or([0x88, 0x88, 0x88], |(_, _, c)| *c);
             let g = p.layout_no_wrap(tr(name).to_string(), FontId::proportional(13.0), t.text);
-            let r = Rect::from_min_size(pos2(x, y), vec2(g.size().x + 40.0, 32.0));
             let resp = c.interact(r, c.id().with(("template", name)), Sense::click());
             name_it(&resp, name);
             let hovered = resp.hovered();
@@ -854,28 +921,6 @@ impl App {
                 self.wb_tool = 2;
                 self.close_wb_start(wid);
             }
-            x = r.right() + 8.0;
-        }
-        // the gallery with every template
-        let g = p.layout_no_wrap(
-            format!("{} \u{203A}", tr("More templates")),
-            FontId::proportional(13.0),
-            t.text2,
-        );
-        let r = Rect::from_min_size(pos2(x, y), vec2(g.size().x + 16.0, 32.0));
-        let resp = c.interact(r, c.id().with("more"), Sense::click());
-        name_it(&resp, "More templates");
-        p.galley(
-            pos2(r.left() + 8.0, r.center().y - g.size().y / 2.0),
-            g,
-            if resp.hovered() { t.text } else { t.text2 },
-        );
-        if resp.hovered() {
-            c.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        if resp.clicked() {
-            self.close_wb_start(wid);
-            self.wb_open = None;
         }
     }
 }

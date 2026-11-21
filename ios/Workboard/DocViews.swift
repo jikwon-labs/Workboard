@@ -206,6 +206,12 @@ struct DocDetailView: View {
                     bodyFocused = true
                 }
             }
+            .onDisappear {
+                // taken off screen while writing (a notification opened a
+                // chat or a task in its place): what was written is kept,
+                // as the task and meeting screens keep theirs
+                if editing && client.canEdit { save(d) }
+            }
             .navigationTitle(editing ? "Editing" : "")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(editing)

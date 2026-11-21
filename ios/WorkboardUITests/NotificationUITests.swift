@@ -28,6 +28,43 @@ final class NotificationUITests: WorkboardUITestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists)
     }
 
+    /// A banner tapped while a doc is being written opens the conversation
+    /// and keeps what was written. With one Home stack the doc's screen is
+    /// replaced, and its unsaved words used to go with it.
+    func testABannerTappedWhileWritingADocKeepsTheWords() {
+        let first = launchFresh(["-wbOpen", "chats"], server: adminServer)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let card = first.buttons["notifyCardButton"]
+        if card.waitForExistence(timeout: 8) {
+            card.tap()
+            let allow = springboard.buttons["Allow"]
+            if allow.waitForExistence(timeout: 5) { allow.tap() }
+        }
+        first.terminate()
+
+        let app = launchApp(["-wbServer", adminServer, "-wbMe", "1", "-wbOpen", "doc:402"])
+        let edit = app.buttons["docEdit"]
+        waitEnabled(edit)
+        edit.tap()
+        let editor = app.textViews["docEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        let tag = "Kept words \(Int.random(in: 100000...999999))"
+        editor.typeText("\n\n" + tag)
+        let text = "Draft check \(Int(Date().timeIntervalSince1970) % 100000)"
+        say("@Jamie Park " + text, channel: 301)
+        let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        XCTAssertTrue(banner.waitForExistence(timeout: 10), "banner shown")
+        banner.tap()
+        XCTAssertTrue(app.navigationBars["#general"].waitForExistence(timeout: 8), "tapping opens the conversation")
+        sleep(2) // the edit reaches the server
+        app.terminate()
+
+        let again = launchApp(["-wbServer", adminServer, "-wbMe", "1", "-wbOpen", "doc:402"])
+        let body = again.staticTexts["docBody"]
+        XCTAssertTrue(body.waitForExistence(timeout: 8))
+        waitLabel(body, contains: tag)
+    }
+
     /// Tapping a notification while the app is in the background brings it
     /// forward on the conversation (this used to stop the app).
     func testTappingABannerFromTheBackgroundOpensConversation() {

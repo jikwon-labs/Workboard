@@ -1097,3 +1097,51 @@ fn a_long_owner_name_fits_in_a_card_and_a_row() {
     let row = h.rect("Goal row Beta launch");
     assert_apart(&texts_in(&h, row), row, "row");
 }
+
+#[test]
+fn a_goals_page_fits_the_narrowest_window_with_big_numbers() {
+    let mut h = Ui1::sized(900.0, 900.0);
+    h.app.data = two_goals().0.app.data.clone();
+    let id = add_goal_with(
+        &mut h,
+        "Revenue",
+        vec![GoalTarget {
+            name: "New contracts".into(),
+            kind: TargetKind::Number {
+                start: 0.0,
+                target: 10_000_000_000.0,
+                current: 4_200_000_000.0,
+                unit: "won".into(),
+            },
+        }, number("Most of all", -1e15, 1e15, 999_999_999_999_999.0)],
+    );
+    h.hover(pos2(450.0, 450.0));
+    h.app.section = Section::Goals;
+    h.app.goal_open = Some(id);
+    h.settle();
+    let window = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 900.0));
+    for name in [
+        "Remove target New contracts",
+        "Remove target Most of all",
+        "Add target",
+        "Goal settings",
+        "Edit New contracts",
+    ] {
+        let r = h.rect(name);
+        assert!(
+            window.shrink(8.0).contains_rect(r),
+            "{name} {r:?} is cut off by the window's edge"
+        );
+    }
+    // the boxes end where the row on top does, at the page's edge
+    let edge = h.rect("Goal settings").right();
+    let overview = h.rect("Goal overview");
+    assert!(overview.right() <= edge + 0.5, "{overview:?} past {edge}");
+    // (below the window's own top bar)
+    let page = texts_in(&h, window.expand(2000.0));
+    let past: Vec<_> = page
+        .iter()
+        .filter(|(_, r)| r.top() > 60.0 && r.right() > edge + 0.5)
+        .collect();
+    assert!(past.is_empty(), "past the page's edge: {past:?}");
+}

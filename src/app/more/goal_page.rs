@@ -254,7 +254,10 @@ impl App {
                             );
                         }
                         ui.add(egui::Label::new(RichText::new(&g.name).size(26.0).strong()).wrap());
-                        ui.horizontal(|ui| {
+                        // wrapped under the pill when it doesn't fit beside
+                        // it: one long line widened the whole page past a
+                        // narrow window's edge
+                        ui.horizontal_wrapped(|ui| {
                             if let Some(p) = row.pace {
                                 pace_pill(ui, t, p);
                             }
@@ -270,58 +273,125 @@ impl App {
                                 ),
                                 _ => tr("Add a start and due date to see the pace").into(),
                             };
-                            ui.label(RichText::new(line).size(13.0).color(t.text2));
+                            ui.add(
+                                egui::Label::new(RichText::new(line).size(13.0).color(t.text2))
+                                    .wrap(),
+                            );
                         });
-                        ui.horizontal_wrapped(|ui| {
-                            if let Some(m) = self.data.member(g.owner) {
-                                info_chip(ui, t, |ui| {
-                                    let (r, _) =
-                                        ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-                                    paint_avatar(ui.painter(), r.center(), 10.0, m, t.card);
-                                    ui.label(RichText::new(m.shown()).size(13.0));
-                                });
+                        // the owner, due date and start in chips, as many
+                        // to a line as fit: egui's wrapping can't move a
+                        // framed chip down, and three side by side widened
+                        // the page past a narrow window's edge
+                        let font = FontId::proportional(13.0);
+                        let text_w = |s: &str| {
+                            ui.painter()
+                                .layout_no_wrap(s.to_string(), font.clone(), t.text)
+                                .size()
+                                .x
+                        };
+                        let owner = self.data.member(g.owner).map(|m| {
+                            let name =
+                                crate::widgets::fit_text(ui.painter(), m.shown(), &font, info_w - 60.0);
+                            (m, name)
+                        });
+                        let due_text = g.due.map(|d| (d.text("%b %-d"), dday(d, day)));
+                        let since = g.start.map(|s| trf!("Since {}", s.text("%b %-d")));
+                        // (inner margins and outline 22, the parts 6 apart)
+                        let mut chips: Vec<(u8, f32)> = vec![];
+                        if let Some((_, name)) = &owner {
+                            chips.push((0, 22.0 + 20.0 + 6.0 + text_w(name)));
+                        }
+                        if let Some((d, left)) = &due_text {
+                            let late = if done { 0.0 } else { 6.0 + text_w(left) };
+                            chips.push((1, 22.0 + 16.0 + 6.0 + text_w(d) + late));
+                        }
+                        if let Some(s) = &since {
+                            chips.push((2, 22.0 + 16.0 + 6.0 + text_w(s)));
+                        }
+                        let gap = ui.spacing().item_spacing.x;
+                        let mut lines: Vec<Vec<u8>> = vec![];
+                        let mut x = f32::INFINITY;
+                        for (c, w) in chips {
+                            if x + gap + w > info_w {
+                                lines.push(vec![]);
+                                x = -gap;
                             }
-                            if let Some(due) = g.due {
-                                info_chip(ui, t, |ui| {
-                                    let (r, _) =
-                                        ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
-                                    icons::line_icon(ui.painter(), "calendar", r.center(), t.text2);
-                                    ui.label(RichText::new(due.text("%b %-d")).size(13.0));
-                                    if !done {
-                                        let fg = match row.pace {
-                                            Some(p @ (Pace::Behind | Pace::AtRisk)) => {
-                                                pace_colors(p, t).1
-                                            }
-                                            _ => t.text,
-                                        };
-                                        ui.label(
-                                            RichText::new(dday(due, day))
-                                                .size(13.0)
-                                                .strong()
-                                                .color(fg),
-                                        );
+                            x += gap + w;
+                            if let Some(l) = lines.last_mut() {
+                                l.push(c);
+                            }
+                        }
+                        for line in lines {
+                            ui.horizontal(|ui| {
+                                for c in line {
+                                    match c {
+                                        0 => {
+                                            let Some((m, name)) = &owner else { continue };
+                                            info_chip(ui, t, |ui| {
+                                                let (r, _) = ui.allocate_exact_size(
+                                                    vec2(20.0, 20.0),
+                                                    Sense::hover(),
+                                                );
+                                                paint_avatar(ui.painter(), r.center(), 10.0, m, t.card);
+                                                ui.label(RichText::new(name).size(13.0));
+                                            });
+                                        }
+                                        1 => {
+                                            let Some((d, left)) = &due_text else { continue };
+                                            info_chip(ui, t, |ui| {
+                                                let (r, _) = ui.allocate_exact_size(
+                                                    vec2(16.0, 20.0),
+                                                    Sense::hover(),
+                                                );
+                                                icons::line_icon(
+                                                    ui.painter(),
+                                                    "calendar",
+                                                    r.center(),
+                                                    t.text2,
+                                                );
+                                                ui.label(RichText::new(d).size(13.0));
+                                                if !done {
+                                                    let fg = match row.pace {
+                                                        Some(p @ (Pace::Behind | Pace::AtRisk)) => {
+                                                            pace_colors(p, t).1
+                                                        }
+                                                        _ => t.text,
+                                                    };
+                                                    ui.label(
+                                                        RichText::new(left)
+                                                            .size(13.0)
+                                                            .strong()
+                                                            .color(fg),
+                                                    );
+                                                }
+                                            });
+                                        }
+                                        _ => {
+                                            let Some(s) = &since else { continue };
+                                            info_chip(ui, t, |ui| {
+                                                let (r, _) = ui.allocate_exact_size(
+                                                    vec2(16.0, 20.0),
+                                                    Sense::hover(),
+                                                );
+                                                icons::line_icon(
+                                                    ui.painter(),
+                                                    "hourglass",
+                                                    r.center(),
+                                                    t.text2,
+                                                );
+                                                ui.label(RichText::new(s).size(13.0));
+                                            });
+                                        }
                                     }
-                                });
-                            }
-                            if let Some(s) = g.start {
-                                info_chip(ui, t, |ui| {
-                                    let (r, _) =
-                                        ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
-                                    icons::line_icon(
-                                        ui.painter(),
-                                        "hourglass",
-                                        r.center(),
-                                        t.text2,
-                                    );
-                                    ui.label(
-                                        RichText::new(trf!("Since {}", s.text("%b %-d")))
-                                            .size(13.0),
-                                    );
-                                });
-                            }
-                        });
+                                }
+                            });
+                        }
                         if let Some(e) = row.expect {
-                            let bw = (info_w - 100.0).min(420.0);
+                            // the label (40), the percent after it (up to 36)
+                            // and the spacing between, which here is the
+                            // hero's wide one
+                            let sp = ui.spacing().item_spacing.x;
+                            let bw = (info_w - 40.0 - 36.0 - 2.0 * sp).min(420.0);
                             for (label, frac, c, name) in [
                                 (
                                     tr("Progress"),
@@ -514,14 +584,44 @@ impl App {
     ) -> Option<PageAct> {
         let mut act = None;
         let accent = pace_colors(Pace::Done, t);
+        // what goes at the right is measured first (the value as big as it
+        // fits, from 22 pt down to 14), and the name takes what is left, so
+        // a long number never pushes the row past the window's edge
+        let gap = ui.spacing().item_spacing.x;
+        let width_of = |s: &str, f: FontId| {
+            ui.painter()
+                .layout_no_wrap(s.to_string(), f, t.text)
+                .size()
+                .x
+        };
+        let unit_w = if v.st.unit.is_empty() {
+            0.0
+        } else {
+            width_of(&v.st.unit, FontId::proportional(14.0)) + gap
+        };
+        let fixed = 36.0 + gap + 28.0 + gap * 2.0 + unit_w;
+        let value_room = (ui.available_width() - fixed - 120.0).max(60.0);
+        let value_w22 = width_of(&v.st.value, FontId::proportional(22.0));
+        let value_size = if value_w22 <= value_room {
+            22.0
+        } else {
+            (22.0 * value_room / value_w22).max(14.0)
+        };
+        let right_w = 28.0
+            + gap
+            + match v.kind {
+                1 => done_toggle_width(ui, t),
+                _ => width_of(&v.st.value, FontId::proportional(value_size)).ceil() + unit_w,
+            };
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
             ui.painter().rect_filled(r, 10.0, accent.0);
             let icon = ["hash", "check", "list"][v.kind as usize];
             icons::line_icon(ui.painter(), icon, r.center(), accent.1);
+            let name_w = (ui.available_width() - right_w - gap).max(80.0);
             ui.vertical(|ui| {
+                ui.set_width(name_w);
                 ui.spacing_mut().item_spacing.y = 2.0;
-                let name_w = (ui.available_width() - 190.0).max(120.0);
                 let name_id = egui::Id::new(("target name", gid, i));
                 let mut name = typed_name(ui, name_id, &self.data.extra.goals[gi].targets[i].name);
                 let r = ui.add(
@@ -549,7 +649,7 @@ impl App {
                     1 => tr("Done or not").into(),
                     _ => trf!("Tasks · {} picked", v.tasks.len()),
                 };
-                ui.label(RichText::new(sub).size(12.5).color(t.text2));
+                ui.add(egui::Label::new(RichText::new(sub).size(12.5).color(t.text2)).truncate());
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let x = close_x(ui, 28.0, t.text3);
@@ -569,7 +669,7 @@ impl App {
                         if !v.st.unit.is_empty() {
                             ui.label(RichText::new(&v.st.unit).size(14.0).color(t.text2));
                         }
-                        ui.label(RichText::new(&v.st.value).size(22.0).strong());
+                        ui.label(RichText::new(&v.st.value).size(value_size).strong());
                     }
                 }
             });
@@ -1192,14 +1292,8 @@ fn keep_typed(ui: &Ui, id: egui::Id, r: &egui::Response, typed: &str) -> bool {
 fn done_toggle(ui: &mut Ui, t: &Theme, done: bool, color: Color32) -> egui::Response {
     let font = FontId::proportional(14.0);
     let tick_w = 16.0;
-    let text_w = |s: &str| {
-        ui.painter()
-            .layout_no_wrap(s.to_string(), font.clone(), t.text)
-            .size()
-            .x
-    };
-    let w = (text_w(tr("Done")) + tick_w).max(text_w(tr("Mark done"))) + 32.0;
-    let (r, resp) = ui.allocate_exact_size(vec2(w.ceil(), 34.0), Sense::click());
+    let w = done_toggle_width(ui, t);
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 34.0), Sense::click());
     let hovered = resp.hovered() && resp.enabled();
     let p = ui.painter();
     let (text, fg) = if done {
@@ -1234,6 +1328,17 @@ fn done_toggle(ui: &mut Ui, t: &Theme, done: bool, color: Color32) -> egui::Resp
     }
     p.galley(pos2(x, r.center().y - g.size().y / 2.0), g, fg);
     resp
+}
+
+/// How wide `done_toggle` is: the wider of "✓ Done" and "Mark done".
+fn done_toggle_width(ui: &Ui, t: &Theme) -> f32 {
+    let text_w = |s: &str| {
+        ui.painter()
+            .layout_no_wrap(s.to_string(), FontId::proportional(14.0), t.text)
+            .size()
+            .x
+    };
+    ((text_w(tr("Done")) + 16.0).max(text_w(tr("Mark done"))) + 32.0).ceil()
 }
 
 /// A small framed group (owner, dates) under the goal's name.

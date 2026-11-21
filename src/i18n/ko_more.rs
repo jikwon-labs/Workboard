@@ -56,8 +56,7 @@ pub const T: &[(&str, &str)] = &[
     ("{} in {} \u{2022} {}", "{1}의 {0} \u{2022} {2}"),
     ("Open in channel", "채널에서 열기"),
     // meetings
-    ("+ Meeting", "+ 회의"),
-    ("No meetings yet", "아직 회의가 없습니다"),
+    ("No meetings yet", "아직 회의가 없어요"),
     ("Pick a meeting or create one to keep the agenda and notes together.", "회의를 선택하거나 새로 만들어 안건과 메모를 한곳에 모으세요."),
     ("at", "시각"),
     ("Attendees", "참석자"),

@@ -293,14 +293,10 @@ impl App {
     /// templates, and a card for each board with a small picture of it.
     pub(crate) fn wb_library(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let me = self.data.me;
-        let mine_only = self.hub_filter.min(1) == 1;
-        // My: the ones I made (older ones without a maker show in both)
+        let filter = self.hub_filter.min(2);
+        // the sidebar's filter: All, My or Favorites
         let shown: Vec<usize> = (0..self.data.extra.whiteboards.len())
-            .filter(|&i| {
-                let w = &self.data.extra.whiteboards[i];
-                !mine_only || w.owner == me || w.owner == 0
-            })
+            .filter(|&i| self.wb_in_filter(&self.data.extra.whiteboards[i], filter))
             .collect();
         let mut open = None;
         let mut star = None;
@@ -322,10 +318,10 @@ impl App {
                 ui.painter().text(
                     head.left_center(),
                     Align2::LEFT_CENTER,
-                    tr(if mine_only {
-                        "My Whiteboards"
-                    } else {
-                        "All Whiteboards"
+                    tr(match filter {
+                        1 => "My Whiteboards",
+                        2 => "Favorites",
+                        _ => "All Whiteboards",
                     }),
                     crate::app::bold_font(ui.ctx(), 22.0),
                     t.text,
@@ -592,51 +588,31 @@ impl App {
         }
     }
 
-    /// The hub sidebar's "Boards": its heading with a "+" that makes a new
-    /// board, then every board with the open one marked. A board just made lights up for a
-    /// moment, so it is clear the click made it.
-    pub(crate) fn wb_sidebar_boards(&mut self, ui: &mut Ui) {
-        let t = self.t();
+    /// The hub sidebar's boards, under its "Boards" heading and + (the
+    /// shared sidebar, hubs/side.rs): every board narrowed by the search
+    /// `q`, the open one marked. A board just made lights up for a moment,
+    /// so it is clear the click made it.
+    pub(crate) fn wb_sidebar_boards(&mut self, ui: &mut Ui, t: &Theme, q: &str) {
         let now = ui.input(|i| i.time);
-        ui.add_space(14.0);
-        // the heading, with a framed "+" at its end that makes a new board
-        // (as Spaces and Channels have; a whole row said "New whiteboard")
-        let (lr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
-        ui.painter().text(
-            lr.left_center() + vec2(8.0, 0.0),
-            Align2::LEFT_CENTER,
-            tr("Boards"),
-            FontId::proportional(13.0),
-            t.text2,
-        );
-        let br = Rect::from_center_size(pos2(lr.right() - 13.0, lr.center().y), vec2(22.0, 22.0));
-        let resp = ui.interact(br, ui.id().with("wb_new_board"), Sense::click());
-        name_it(&resp, "New whiteboard");
-        ui.painter().rect_filled(
-            br,
-            5.0,
-            if resp.hovered() {
-                t.border
-            } else {
-                t.row_selected
-            },
-        );
-        crate::app::icons::paint_plus(ui.painter(), br.center(), 15.0, t.text2);
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        if resp.on_hover_text(tr("New whiteboard")).clicked() {
-            self.new_whiteboard();
-        }
-        ui.add_space(4.0);
-
         let rows: Vec<(u64, String, Option<[u8; 3]>)> = self
             .data
             .extra
             .whiteboards
             .iter()
+            .filter(|w| q.is_empty() || w.name.to_lowercase().contains(q))
             .map(|w| (w.id, w.name.clone(), w.notes.first().map(|n| n.color)))
             .collect();
+        if rows.is_empty() {
+            crate::app::hubs::side::side_empty(
+                ui,
+                t,
+                if q.is_empty() {
+                    tr("No whiteboards yet")
+                } else {
+                    tr("No whiteboard has that name")
+                },
+            );
+        }
         let open = self.wb_open;
         let lit = self
             .sweep
@@ -644,65 +620,59 @@ impl App {
             .as_mut()
             .map(|n| (n.id, *n.since.get_or_insert(now)));
         let mut pick = None;
-        egui::ScrollArea::vertical()
-            .id_salt("wb_boards")
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                for (id, name, colour) in rows {
-                    let w = ui.available_width();
-                    let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                    let title = if name.is_empty() {
-                        tr("Untitled whiteboard").to_string()
-                    } else {
-                        name
-                    };
-                    name_it(&resp, &title);
-                    let sel = open == Some(id);
-                    let mut bg = if sel {
-                        Some(t.row_selected)
-                    } else if resp.hovered() {
-                        Some(t.hover)
-                    } else {
-                        None
-                    };
-                    if let Some((_, since)) = lit.filter(|l| l.0 == id) {
-                        let k = ((now - since) / 1.4).clamp(0.0, 1.0) as f32;
-                        if k < 1.0 {
-                            let base = bg.unwrap_or(t.sidebar);
-                            bg = Some(mix(mix(t.sidebar, t.primary, 0.28), base, k * k));
-                            ui.ctx().request_repaint();
-                        }
-                    }
-                    let p = ui.painter();
-                    if let Some(bg) = bg {
-                        p.rect_filled(r, 7.0, bg);
-                    }
-                    let sw =
-                        Rect::from_center_size(r.left_center() + vec2(16.0, 0.0), vec2(14.0, 14.0));
-                    p.rect_filled(sw, 3.5, colour.map_or(t.bg, |c| note_fill(&t, c)));
-                    p.rect_stroke(
-                        sw,
-                        3.5,
-                        Stroke::new(1.0_f32, colour.map_or(t.border, rgb)),
-                        egui::StrokeKind::Inside,
-                    );
-                    let g = elided(
-                        p,
-                        &title,
-                        FontId::proportional(14.0),
-                        if sel { t.text } else { t.text2 },
-                        w - 46.0,
-                    );
-                    p.galley(
-                        pos2(r.left() + 34.0, r.center().y - g.size().y / 2.0),
-                        g,
-                        if sel { t.text } else { t.text2 },
-                    );
-                    if resp.clicked() {
-                        pick = Some(id);
-                    }
+        for (id, name, colour) in rows {
+            let w = ui.available_width();
+            let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+            let title = if name.is_empty() {
+                tr("Untitled whiteboard").to_string()
+            } else {
+                name
+            };
+            name_it(&resp, &title);
+            let sel = open == Some(id);
+            let mut bg = if sel {
+                Some(t.row_selected)
+            } else if resp.hovered() {
+                Some(t.hover)
+            } else {
+                None
+            };
+            if let Some((_, since)) = lit.filter(|l| l.0 == id) {
+                let k = ((now - since) / 1.4).clamp(0.0, 1.0) as f32;
+                if k < 1.0 {
+                    let base = bg.unwrap_or(t.sidebar);
+                    bg = Some(mix(mix(t.sidebar, t.primary, 0.28), base, k * k));
+                    ui.ctx().request_repaint();
                 }
-            });
+            }
+            let p = ui.painter();
+            if let Some(bg) = bg {
+                p.rect_filled(r, 7.0, bg);
+            }
+            let sw = Rect::from_center_size(r.left_center() + vec2(16.0, 0.0), vec2(14.0, 14.0));
+            p.rect_filled(sw, 3.5, colour.map_or(t.bg, |c| note_fill(t, c)));
+            p.rect_stroke(
+                sw,
+                3.5,
+                Stroke::new(1.0_f32, colour.map_or(t.border, rgb)),
+                egui::StrokeKind::Inside,
+            );
+            let g = elided(
+                p,
+                &title,
+                FontId::proportional(14.0),
+                if sel { t.text } else { t.text2 },
+                w - 46.0,
+            );
+            p.galley(
+                pos2(r.left() + 34.0, r.center().y - g.size().y / 2.0),
+                g,
+                if sel { t.text } else { t.text2 },
+            );
+            if resp.clicked() {
+                pick = Some(id);
+            }
+        }
         if let Some(id) = pick {
             self.wb_open = Some(id);
         }

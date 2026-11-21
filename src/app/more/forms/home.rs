@@ -61,187 +61,80 @@ impl App {
     }
 
     /// The hub's sidebar: a search, All / My / Favorites, and every form
-    /// with its tile; « closes it, as on the other hubs.
+    /// with its tile; « closes it, as on the other hubs. The other hubs'
+    /// sidebars are laid out as this one, from the same pieces
+    /// (hubs/side.rs).
     fn forms_sidebar(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        if self.sidebar_collapsed {
-            self.collapsed_sidebar(ui);
-            return;
-        }
-        // the same id as the other sidebars, so one dragged width applies everywhere
-        egui::SidePanel::left("sidebar")
-            .resizable(true)
-            .default_width(255.0)
-            .width_range(200.0..=400.0)
-            .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
-            .show_inside(ui, |ui| {
-                let w = ui.available_width();
-                let (hr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
-                ui.painter().text(
-                    hr.left_center() + vec2(6.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    tr("Forms"),
-                    FontId::proportional(17.0),
-                    t.text,
-                );
-                let cr = Rect::from_center_size(
-                    pos2(hr.right() - 14.0, hr.center().y),
-                    vec2(28.0, 28.0),
-                );
-                let close = ui.interact(cr, ui.id().with("forms_collapse"), Sense::click());
-                name_it(&close, "Close sidebar");
-                if close.hovered() {
-                    ui.painter().rect_filled(cr, 6.0, t.row_selected);
-                }
-                ui.painter().text(
-                    cr.center(),
-                    Align2::CENTER_CENTER,
-                    "\u{00AB}",
-                    FontId::proportional(16.0),
-                    t.text2,
-                );
-                // like the other hubs' sidebars: it closes the sidebar
-                if close.on_hover_text(tr("Close sidebar")).clicked() {
-                    self.sidebar_collapsed = true;
-                }
-                ui.add_space(4.0);
-                // search, with its icon inside the field
-                let r = ui.add(
-                    field(&mut self.sweep.forms.search)
-                        .margin(egui::Margin {
-                            left: 28,
-                            right: 8,
-                            top: 5,
-                            bottom: 5,
-                        })
-                        .hint_text(tr("Find a form"))
-                        .desired_width(f32::INFINITY),
-                );
-                name_field(&r, "Find a form");
-                line_icon_scaled(
-                    ui.painter(),
-                    "search",
-                    // (a text field's response is its text area, inside the margin)
-                    pos2(r.rect.left() - 13.0, r.rect.center().y),
-                    t.text3,
-                    0.85,
-                );
-                ui.add_space(6.0);
-                let shown: Vec<Form> = self
-                    .data
-                    .extra
-                    .forms
-                    .iter()
-                    .filter(|f| self.form_shown(f))
-                    .cloned()
-                    .collect();
-                let on_home = self.form_open.is_none();
-                for (i, (icon, label)) in [
-                    ("forms", "All forms"),
-                    ("@me", "My forms"),
-                    ("star", "Favorites"),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    let n = shown
+        use crate::app::hubs::side::{
+            side_empty, side_heading, side_rule, side_search, SideFilter,
+        };
+        self.hub_side_panel(ui, |app, ui| {
+            let t = app.t();
+            app.side_title(ui, tr("Forms"));
+            side_search(
+                ui,
+                &t,
+                &mut app.sweep.forms.search,
+                tr("Find a form"),
+                "Find a form",
+            );
+            let shown: Vec<Form> = app
+                .data
+                .extra
+                .forms
+                .iter()
+                .filter(|f| app.form_shown(f))
+                .cloned()
+                .collect();
+            let filters: Vec<SideFilter> = [
+                ("forms", "All forms"),
+                ("@me", "My forms"),
+                ("star", "Favorites"),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (icon, label))| SideFilter {
+                key: i as u8,
+                icon,
+                label,
+                count: Some(
+                    shown
                         .iter()
-                        .filter(|f| self.form_in_filter(f, i as u8))
-                        .count();
-                    let sel = on_home && self.hub_filter.min(2) == i as u8;
-                    let w = ui.available_width();
-                    let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                    name_it(&resp, label);
-                    if sel {
-                        ui.painter().rect_filled(r, 7.0, t.row_selected);
-                    } else if resp.hovered() {
-                        ui.painter().rect_filled(r, 7.0, t.hover);
-                    }
-                    let ic = r.left_center() + vec2(16.0, 0.0);
-                    match icon {
-                        "@me" => {
-                            if let Some(m) = self.data.member(self.data.me) {
-                                paint_avatar(ui.painter(), ic, 8.0, m, t.sidebar);
-                            }
-                        }
-                        "star" => {
-                            ui.painter().text(
-                                ic,
-                                Align2::CENTER_CENTER,
-                                "\u{2606}",
-                                FontId::proportional(15.0),
-                                t.text2,
-                            );
-                        }
-                        _ => {
-                            line_icon(ui.painter(), icon, ic, t.text2);
-                        }
-                    }
-                    ui.painter().text(
-                        r.left_center() + vec2(34.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        tr(label),
-                        FontId::proportional(14.0),
-                        if sel { t.text } else { t.text2 },
-                    );
-                    ui.painter().text(
-                        r.right_center() - vec2(10.0, 0.0),
-                        Align2::RIGHT_CENTER,
-                        n.to_string(),
-                        FontId::proportional(12.0),
-                        t.text3,
-                    );
-                    if resp.clicked() {
-                        self.hub_filter = i as u8;
-                        self.form_open = None;
-                    }
-                }
-                ui.add_space(6.0);
-                let r = ui.available_rect_before_wrap();
-                ui.painter().hline(
-                    r.left() + 6.0..=r.right() - 6.0,
-                    r.top(),
-                    Stroke::new(1.0_f32, t.border),
-                );
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(tr("Forms"))
-                            .size(12.0)
-                            .strong()
-                            .color(t.text2),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if icon_button(ui, &t, "plus", "", "Add a form", false)
-                            .on_hover_text(tr("New form"))
-                            .clicked()
-                        {
-                            self.new_form_from(None);
-                        }
-                    });
-                });
-                let listed = self.forms_listed();
-                if listed.is_empty() {
-                    let text = if self.sweep.forms.search.trim().is_empty() {
+                        .filter(|f| app.form_in_filter(f, i as u8))
+                        .count(),
+                ),
+            })
+            .collect();
+            let sel = app.form_open.is_none().then_some(app.hub_filter.min(2));
+            if let Some(i) = app.side_filters(ui, &filters, sel) {
+                app.hub_filter = i;
+                app.form_open = None;
+            }
+            side_rule(ui, &t);
+            if side_heading(ui, &t, tr("Forms"), Some(("Add a form", tr("New form")))) {
+                app.new_form_from(None);
+            }
+            let listed = app.forms_listed();
+            if listed.is_empty() {
+                side_empty(
+                    ui,
+                    &t,
+                    if app.sweep.forms.search.trim().is_empty() {
                         tr("No forms yet")
                     } else {
                         tr("No form has that name")
-                    };
-                    ui.horizontal(|ui| {
-                        ui.add_space(10.0);
-                        ui.label(RichText::new(text).size(13.0).color(t.text3));
-                    });
-                }
-                egui::ScrollArea::vertical()
-                    .id_salt("forms_side_list")
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        for f in &listed {
-                            self.form_side_row(ui, &t, f);
-                        }
-                    });
-            });
+                    },
+                );
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("forms_side_list")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for f in &listed {
+                        app.form_side_row(ui, &t, f);
+                    }
+                });
+        });
     }
 
     /// A form in the sidebar: its tile and name, "New" when made this

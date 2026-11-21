@@ -9,9 +9,7 @@ use crate::i18n::{tr, DateText};
 use crate::model::*;
 use crate::theme::{rgb, Theme};
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
-use egui::{
-    pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Response, RichText, Sense, Stroke, Ui,
-};
+use egui::{pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui};
 
 mod date_picker;
 mod format;
@@ -616,23 +614,6 @@ pub fn hover_ring(ui: &Ui, resp: &Response, rect: Rect, radius: f32) {
             egui::StrokeKind::Outside,
         );
     }
-}
-
-/// A bordered card saying a section is empty: a yellow glyph over a line of
-/// grey text.
-pub fn empty_card(ui: &mut Ui, t: &Theme, glyph: &str, text: &str) {
-    egui::Frame::new()
-        .fill(t.bg)
-        .stroke(Stroke::new(1.0_f32, t.border))
-        .corner_radius(10)
-        .inner_margin(egui::Margin::symmetric(10, 14))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new(glyph).size(16.0).color(STAR_YELLOW));
-                ui.label(RichText::new(text).size(13.0).color(t.text2));
-            });
-        });
 }
 
 /// A list kept at its bottom (`stick_to_bottom`) catches up with new content

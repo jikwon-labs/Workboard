@@ -62,7 +62,7 @@ fn doc_slash_command_and_sub_page() {
 #[test]
 fn my_docs_badge_counts_docs_not_sub_pages() {
     let mut h = Ui1::new();
-    let before = h.app.my_docs_count();
+    let before = h.app.docs_count(1);
     h.app.new_doc(None);
     h.settle();
     let id = h.app.doc_open.unwrap();
@@ -72,7 +72,7 @@ fn my_docs_badge_counts_docs_not_sub_pages() {
         "a sub page was made"
     );
     assert_eq!(
-        h.app.my_docs_count(),
+        h.app.docs_count(1),
         before + 1,
         "the sub page is not counted"
     );
@@ -881,11 +881,11 @@ fn sidebar_width_is_shared_by_chat_docs_and_dashboards() {
     let mut h = Ui1::new();
     h.click("Rail More");
     h.click("Docs");
-    let before = h.rect("Create in Docs");
-    // the panel's edge sits just right of the Create button (8 px margin)
+    let before = h.rect("Close sidebar");
+    // the panel's edge sits just right of the "«" (8 px margin)
     let edge = pos2(before.right() + 8.0, before.center().y + 200.0);
     h.drag_by(edge, edge + vec2(100.0, 0.0));
-    let after = h.rect("Create in Docs");
+    let after = h.rect("Close sidebar");
     assert!(
         (after.right() - before.right() - 100.0).abs() < 4.0,
         "the sidebar got wider: {:?} -> {:?}",
@@ -895,7 +895,7 @@ fn sidebar_width_is_shared_by_chat_docs_and_dashboards() {
     h.click("Rail More");
     h.click("Dashboards");
     assert_eq!(h.app.section, Section::Dashboards);
-    let dash = h.rect("Create in Dashboards");
+    let dash = h.rect("Close sidebar");
     assert!(
         (dash.right() - after.right()).abs() < 1.0,
         "Dashboards uses the same width: {:?} vs {:?}",
@@ -909,7 +909,7 @@ fn sidebar_width_is_shared_by_chat_docs_and_dashboards() {
     h.drag_by(edge, edge - vec2(150.0, 0.0));
     h.click("Rail More");
     h.click("Docs");
-    let docs = h.rect("Create in Docs");
+    let docs = h.rect("Close sidebar");
     assert!(
         (after.right() - docs.right() - 150.0).abs() < 4.0,
         "Docs follows the width set in Chat: {:?} -> {:?}",
@@ -923,10 +923,11 @@ fn meetings_list_can_be_dragged_wider() {
     let mut h = Ui1::new();
     h.app.section = Section::Meetings;
     h.settle();
-    let before = h.rect("+ Meeting");
-    let edge = pos2(before.right() + 10.0, before.center().y + 200.0);
+    let before = h.rect("Add a meeting");
+    // the panel's edge sits just right of the heading's + (8 px margin)
+    let edge = pos2(before.right() + 8.0, before.center().y + 200.0);
     h.drag_by(edge, edge + vec2(80.0, 0.0));
-    let after = h.rect("+ Meeting");
+    let after = h.rect("Add a meeting");
     assert!(
         (after.right() - before.right() - 80.0).abs() < 4.0,
         "the list got wider: {:?} -> {:?}",

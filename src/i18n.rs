@@ -813,7 +813,7 @@ mod tests {
     /// a control for screen readers and tests stay English and are not listed.
     #[test]
     fn helper_text_is_wrapped_in_tr() {
-        const HELPERS: [(&str, &[usize]); 21] = [
+        const HELPERS: [(&str, &[usize]); 26] = [
             ("icon_button", &[3]),
             ("icon_button_ex", &[3]),
             ("menu_item", &[3, 4]),
@@ -835,6 +835,11 @@ mod tests {
             ("check", &[2]),
             ("radio", &[2]),
             ("gallery", &[1, 2]),
+            ("side_title", &[1]),
+            ("side_title_row", &[2]),
+            ("side_search", &[3]),
+            ("side_heading", &[2]),
+            ("side_empty", &[2]),
         ];
         let mut bare = vec![];
         for (name, src) in interface_sources() {

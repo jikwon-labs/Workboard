@@ -710,25 +710,21 @@ fn hub_sidebar_close_button_closes_it_and_the_strip_opens_it() {
 }
 
 /// Whiteboards has no "+ Create" button by its title any more: boards are
-/// made from the "+" by the "Boards" heading above the list. A board
-/// just made shows it was made: its row is in the list, its name is ready
-/// to type over, and a card offers ways to start until one is picked.
+/// made from the "+" at the end of the "Boards" heading above the list, as
+/// on every hub sidebar. A board just made shows it was made: its row is in
+/// the list, its name is ready to type over, and a card offers ways to
+/// start until one is picked.
 #[test]
 fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
     let mut h = Ui1::new();
     open_whiteboards(&mut h);
     assert!(!h.has("Create in Whiteboards"));
     assert!(!h.has("New in Whiteboards"));
-    // a small "+" by the "Boards" heading, not a whole row
-    let plus = h
-        .tree
-        .iter()
-        .filter(|(n, _)| n == "New whiteboard")
-        .map(|(_, r)| *r)
-        .min_by(|a, b| a.left().total_cmp(&b.left()))
-        .unwrap();
-    assert!(plus.width() <= 24.0 && plus.height() <= 24.0);
-    h.click("New whiteboard");
+    // a small "+" at the end of the "Boards" heading, not a whole row
+    let plus = h.rect("Add a whiteboard");
+    let side = crate::widgets::CONTROL_H + 0.5;
+    assert!(plus.width() <= side && plus.height() <= side);
+    h.click("Add a whiteboard");
     let wid = h.app.wb_open.expect("a board was made and opened");
     let made = board_of(&h, wid).name;
     assert!(h.has(&made), "its row is in the sidebar");
@@ -749,7 +745,7 @@ fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
     assert!(!h.has("Draw with the pen"), "the card has gone");
 
     // an untouched name takes the template's
-    h.click("New whiteboard");
+    h.click("Add a whiteboard");
     let wid2 = h.app.wb_open.unwrap();
     assert_ne!(wid, wid2);
     h.click("Flow Chart");
@@ -758,7 +754,7 @@ fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
     assert_eq!(b.notes.len(), 4);
 
     // picking a way to draw puts the card away and chooses the tool
-    h.click("New whiteboard");
+    h.click("Add a whiteboard");
     h.app.wb_tool = 2;
     h.settle();
     h.click("Draw with the pen");

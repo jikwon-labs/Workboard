@@ -1,25 +1,48 @@
 // App "hubs" as the person's ClickUp shows them: each app (Docs, Dashboards,
 // Whiteboards, Teams) has its own sidebar (All / My / Shared / Private,
-// Favorites) and a template gallery (Forms has its own, in more/forms); Goals has a start page; Timesheets has
+// Favorites, laid out as Forms' in hubs/side.rs) and a template gallery
+// (Forms has its own, in more/forms); Goals has a start page; Timesheets has
 // tabs (My timesheet, All timesheets) and editable hours.
+
+pub(crate) mod side;
 
 use super::icons::{icon_button, icon_button_ex, line_icon, line_icon_scaled};
 use super::*;
+use side::{side_empty, side_heading, side_row, side_row_text, side_rule, side_search, SideFilter};
 
 /// `dash_open` for the built-in Workspace overview (not a saved dashboard).
 pub(super) const WORKSPACE_OVERVIEW: u64 = 0;
 
-/// What a hub sidebar offers beside its title for making something new.
-#[derive(Clone, Copy, PartialEq)]
-enum HubNew {
-    /// A filled "+ Create" button.
-    Create,
-    /// A small framed "+".
-    Plus,
-    /// Nothing there: the hub makes new things from its own rows
-    /// (Whiteboards has a "+" by its "Boards" heading).
-    None,
+/// What a hub's sidebar holds; `hub_sidebar` lays it out.
+struct HubSide<'a> {
+    /// "docs", "dash", "wb" or "teams": which items its list holds.
+    id: &'static str,
+    /// The hub's name, translated.
+    title: &'a str,
+    /// The search's name for screen readers and tests, and its hint
+    /// (translated).
+    find: (&'a str, &'a str),
+    filters: &'a [SideFilter<'a>],
+    /// The filter shown; none while an item is open.
+    selected: Option<u8>,
+    /// The heading over the items (translated) and, when this person may
+    /// make one, its + (name, translated tip).
+    heading: &'a str,
+    add: Option<(&'a str, &'a str)>,
 }
+
+/// The Docs filters in the sidebar's order: (value of `hub_filter`, icon,
+/// name). Favorites came last, so it keeps the last value.
+const DOC_FILTERS: [(u8, &str, &str); 8] = [
+    (0, "docs", "All Docs"),
+    (1, "@me", "My Docs"),
+    (7, "star", "Favorites"),
+    (2, "teams", "Shared with me"),
+    (3, "lock", "Private"),
+    (4, "edit", "Meeting Notes"),
+    (5, "notebook", "Wikis"),
+    (6, "archive", "Archived"),
+];
 
 /// A template card as in the galleries: round coloured icon (`glyph` is a
 /// line icon kind, or "+"), title, description.
@@ -137,332 +160,182 @@ impl App {
         self.dirty = true;
     }
 
-    /// The sidebar used by every app hub. Returns (clicked item, plus clicked).
-    /// Closed (its "«", or Cmd+\), it leaves the same "»" strip as Home's.
-    fn hub_sidebar(
-        &mut self,
-        ui: &mut Ui,
-        id: &str,
-        title: &str,
-        items: &[(&str, &str, Option<usize>)],
-        selected: u8,
-        new: HubNew,
-    ) -> (Option<u8>, bool) {
-        let t = self.t();
+    /// The sidebar of Docs, Dashboards, Whiteboards and Teams, laid out as
+    /// Forms' (hubs/side.rs): the name and «, a search, the filters with
+    /// counts, a line, then a heading with + over every item, narrowed by
+    /// the search. Returns (the filter clicked, the + clicked). Closed (its
+    /// "«", or Cmd+\), it leaves the same "»" strip as Home's.
+    fn hub_sidebar(&mut self, ui: &mut Ui, s: HubSide) -> (Option<u8>, bool) {
         let mut clicked = None;
-        let mut plus = false;
-        if self.sidebar_collapsed {
-            self.collapsed_sidebar(ui);
-            return (None, false);
-        }
-        // The same id as the Home and Chat sidebar (`sidebar` in
-        // shell/sidebar.rs), so one dragged width applies everywhere.
-        egui::SidePanel::left("sidebar")
-            .resizable(true)
-            .default_width(255.0)
-            .width_range(200.0..=400.0)
-            .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
-            .show_inside(ui, |ui| {
-                let w = ui.available_width();
-                let (hr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
-                ui.painter().text(
-                    hr.left_center() + vec2(6.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    tr(title),
-                    FontId::proportional(17.0),
-                    t.text,
-                );
-                if new == HubNew::Create {
-                    let br = Rect::from_min_size(
-                        pos2(hr.right() - 80.0, hr.center().y - 14.0),
-                        vec2(80.0, 28.0),
-                    );
-                    let b = ui.interact(br, ui.id().with("hub_create"), Sense::click());
-                    name_it(&b, &format!("Create in {}", title));
-                    ui.painter().rect_filled(
-                        br,
-                        7.0,
-                        if b.hovered() {
-                            t.primary_hover
-                        } else {
-                            t.primary
-                        },
-                    );
-                    ui.painter().text(
-                        br.center(),
-                        Align2::CENTER_CENTER,
-                        tr("+  Create"),
-                        FontId::proportional(14.0),
-                        t.on_primary,
-                    );
-                    plus |= b.clicked();
-                } else if new == HubNew::Plus {
-                    let br = Rect::from_center_size(
-                        pos2(hr.right() - 14.0, hr.center().y),
-                        vec2(28.0, 28.0),
-                    );
-                    let b = ui.interact(br, ui.id().with("hub_plus"), Sense::click());
-                    name_it(&b, &format!("New in {}", title));
-                    ui.painter()
-                        .rect_filled(br, 7.0, if b.hovered() { t.hover } else { t.bg });
-                    ui.painter().rect_stroke(
-                        br,
-                        7.0,
-                        Stroke::new(1.0_f32, t.border),
-                        egui::StrokeKind::Inside,
-                    );
-                    crate::app::icons::paint_plus(ui.painter(), br.center(), 18.0, t.text);
-                    plus |= b.clicked();
-                }
-                let cr = Rect::from_center_size(
-                    pos2(
-                        hr.right()
-                            - match new {
-                                HubNew::Create => 100.0,
-                                HubNew::Plus => 44.0,
-                                HubNew::None => 14.0,
-                            },
-                        hr.center().y,
-                    ),
-                    vec2(24.0, 24.0),
-                );
-                let c = ui.interact(cr, ui.id().with("hub_collapse"), Sense::click());
-                name_it(&c, "Close sidebar");
-                if c.hovered() {
-                    ui.painter().rect_filled(cr, 5.0, t.row_selected);
-                }
-                ui.painter().text(
-                    cr.center(),
-                    Align2::CENTER_CENTER,
-                    "\u{00AB}",
-                    FontId::proportional(16.0),
-                    t.text2,
-                );
-                // it looks like closing the sidebar, so it does that (it
-                // used to go back Home, which the rail already does)
-                if c.on_hover_text(tr("Close sidebar")).clicked() {
-                    self.sidebar_collapsed = true;
-                }
-                ui.add_space(4.0);
-                for (i, (icon, label, count)) in items.iter().enumerate() {
-                    let sel = selected == i as u8;
-                    let w = ui.available_width();
-                    let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                    name_it(&resp, label);
-                    if sel {
-                        ui.painter().rect_filled(r, 7.0, t.row_selected);
-                    } else if resp.hovered() {
-                        ui.painter().rect_filled(r, 7.0, t.hover);
-                    }
-                    if *icon == "@me" {
-                        if let Some(m) = self.data.member(self.data.me) {
-                            paint_avatar(
-                                ui.painter(),
-                                r.left_center() + vec2(16.0, 0.0),
-                                9.0,
-                                m,
-                                t.sidebar,
-                            );
-                        }
-                    } else {
-                        line_icon(
-                            ui.painter(),
-                            icon,
-                            r.left_center() + vec2(16.0, 0.0),
-                            t.text2,
-                        );
-                    }
-                    ui.painter().text(
-                        r.left_center() + vec2(34.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        tr(label),
-                        FontId::proportional(14.0),
-                        if sel { t.text } else { t.text2 },
-                    );
-                    if let Some(n) = count {
-                        if *n > 0 {
-                            ui.painter().text(
-                                r.right_center() - vec2(12.0, 0.0),
-                                Align2::RIGHT_CENTER,
-                                n.to_string(),
-                                FontId::proportional(12.0),
-                                t.text3,
-                            );
-                        }
-                    }
-                    if resp.clicked() {
-                        clicked = Some(i as u8);
-                    }
-                }
-                ui.add_space(6.0);
-                let r = ui.available_rect_before_wrap();
-                ui.painter().hline(
-                    r.left() + 6.0..=r.right() - 6.0,
-                    r.top(),
-                    Stroke::new(1.0_f32, t.border),
-                );
-                ui.add_space(10.0);
-                ui.label(RichText::new(tr("  Favorites")).size(13.0).color(t.text2));
-                let prefix = match id {
-                    "docs" => "doc:",
-                    "wb" => "wb:",
-                    "dash" => "dash:",
-                    _ => "",
-                };
-                let stars: Vec<String> = self
-                    .data
-                    .extra
-                    .starred
-                    .iter()
-                    .filter(|s| !prefix.is_empty() && s.starts_with(prefix))
-                    .cloned()
-                    .collect();
-                if stars.is_empty() {
-                    let text = match id {
-                        "docs" => tr("Star a Doc to see it here"),
-                        "wb" => tr("Star a Whiteboard to see it here"),
-                        _ => tr("Star a Dashboard to see it here"),
-                    };
-                    if id != "teams" {
-                        empty_card(ui, &t, "\u{2605}", text);
-                    }
+        let mut add = false;
+        self.hub_side_panel(ui, |app, ui| {
+            let t = app.t();
+            app.side_title(ui, s.title);
+            let mut q = app.sweep.side_find.remove(s.id).unwrap_or_default();
+            side_search(ui, &t, &mut q, s.find.1, s.find.0);
+            clicked = app.side_filters(ui, s.filters, s.selected);
+            side_rule(ui, &t);
+            add = side_heading(ui, &t, s.heading, s.add);
+            let ql = q.trim().to_lowercase();
+            egui::ScrollArea::vertical()
+                .id_salt(("hub_side_list", s.id))
+                .auto_shrink([false, true])
+                .show(ui, |ui| match s.id {
+                    "docs" => app.docs_side_list(ui, &t, &ql),
+                    "dash" => app.dash_side_list(ui, &t, &ql),
+                    "wb" => app.wb_sidebar_boards(ui, &t, &ql),
+                    _ => app.teams_side_list(ui, &t, &ql),
+                });
+            app.sweep.side_find.insert(s.id, q);
+        });
+        (clicked, add)
+    }
+
+    /// The Docs sidebar's list: every doc (not its sub pages), last edited
+    /// first, then the Popular Wikis.
+    fn docs_side_list(&mut self, ui: &mut Ui, t: &Theme, q: &str) {
+        let mut docs: Vec<(u64, String, bool, i64)> = self
+            .data
+            .docs
+            .iter()
+            .filter(|d| d.parent.is_none() && self.doc_shown(d))
+            .filter(|d| q.is_empty() || d.title.to_lowercase().contains(q))
+            .map(|d| (d.id, d.title.clone(), d.is_wiki(), d.updated))
+            .collect();
+        docs.sort_by(|a, b| b.3.cmp(&a.3).then(a.0.cmp(&b.0)));
+        if docs.is_empty() {
+            side_empty(
+                ui,
+                t,
+                if q.is_empty() {
+                    tr("No docs yet")
                 } else {
-                    for st in stars {
-                        let oid: u64 = st[prefix.len()..].parse().unwrap_or(0);
-                        let name = match id {
-                            "docs" => self
-                                .data
-                                .docs
-                                .iter()
-                                .find(|d| d.id == oid)
-                                .map(|d| d.title.clone()),
-                            "wb" => self
-                                .data
-                                .extra
-                                .whiteboards
-                                .iter()
-                                .find(|d| d.id == oid)
-                                .map(|d| d.name.clone()),
-                            _ => self
-                                .data
-                                .extra
-                                .dashboards
-                                .iter()
-                                .find(|d| d.id == oid)
-                                .map(|d| d.name.clone()),
-                        };
-                        if let Some(n) = name {
-                            if ui
-                                .add(ghost(egui::Button::new(format!("\u{2605}  {}", n))))
-                                .clicked()
-                            {
-                                match id {
-                                    "docs" => self.doc_open = Some(oid),
-                                    "wb" => self.wb_open = Some(oid),
-                                    _ => self.dash_open = Some(oid),
-                                }
-                            }
-                        }
-                    }
-                }
-                if id == "wb" {
-                    self.wb_sidebar_boards(ui);
-                }
-                if id == "docs" {
-                    ui.add_space(14.0);
-                    ui.label(
-                        RichText::new(tr("  Popular Wikis"))
-                            .size(13.0)
-                            .color(t.text2),
-                    );
-                    let wikis = self.popular_wikis(now_ts());
-                    if wikis.is_empty() {
-                        empty_card(
-                            ui,
-                            &t,
-                            "\u{2714}",
-                            tr("Most viewed and active Wikis appear here"),
-                        );
-                    }
-                    for (wid, title, views) in wikis.into_iter().take(5) {
-                        let w = ui.available_width();
-                        let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-                        name_it(&resp, &format!("Popular Wiki {}", title));
-                        if self.doc_open == Some(wid) {
-                            ui.painter().rect_filled(r, 7.0, t.row_selected);
-                        } else if resp.hovered() {
-                            ui.painter().rect_filled(r, 7.0, t.hover);
-                        }
-                        line_icon(
-                            ui.painter(),
-                            "notebook",
-                            r.left_center() + vec2(16.0, 0.0),
-                            t.text2,
-                        );
-                        let p = ui.painter().with_clip_rect(r.shrink2(vec2(50.0, 0.0)));
-                        p.text(
-                            r.left_center() + vec2(34.0, 0.0),
-                            Align2::LEFT_CENTER,
-                            &title,
-                            FontId::proportional(13.5),
-                            t.text,
-                        );
-                        ui.painter().text(
-                            r.right_center() - vec2(10.0, 0.0),
-                            Align2::RIGHT_CENTER,
-                            views.to_string(),
-                            FontId::proportional(12.0),
-                            t.text3,
-                        );
-                        let resp = resp.on_hover_text(trf!("{} views in the last 30 days", views));
-                        if resp.clicked() {
-                            self.doc_open = Some(wid);
-                        }
-                    }
-                }
-                if id == "teams" {
-                    ui.add_space(4.0);
-                    let teams = self.data.extra.teams.clone();
-                    if teams.is_empty() {
-                        empty_card(
-                            ui,
-                            &t,
-                            "\u{1F465}",
-                            tr("Once you join or create a team, you will see it here"),
-                        );
-                    }
-                    for tm in teams {
-                        let sel = self.team_open == Some(tm.id);
-                        let w = ui.available_width();
-                        let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                        if sel {
-                            ui.painter().rect_filled(r, 7.0, t.row_selected);
-                        } else if resp.hovered() {
-                            ui.painter().rect_filled(r, 7.0, t.hover);
-                        }
-                        ui.painter().rect_filled(
-                            Rect::from_center_size(
-                                r.left_center() + vec2(16.0, 0.0),
-                                vec2(16.0, 16.0),
-                            ),
-                            4.0,
-                            rgb(tm.color),
-                        );
-                        ui.painter().text(
-                            r.left_center() + vec2(34.0, 0.0),
-                            Align2::LEFT_CENTER,
-                            &tm.name,
-                            FontId::proportional(14.0),
-                            t.text,
-                        );
-                        if resp.clicked() {
-                            self.team_open = Some(tm.id);
-                            self.hub_filter = 9;
-                        }
-                    }
-                }
-            });
-        (clicked, plus)
+                    tr("No doc has that name")
+                },
+            );
+        }
+        for (id, title, wiki, _) in docs {
+            let title = if title.is_empty() {
+                tr("Untitled").to_string()
+            } else {
+                title
+            };
+            let sel = self.doc_open == Some(id);
+            let (r, resp) = side_row(ui, t, &format!("Open doc {}", title), sel, 30.0);
+            line_icon(
+                ui.painter(),
+                if wiki { "notebook" } else { "docs" },
+                r.left_center() + vec2(16.0, 0.0),
+                t.text2,
+            );
+            side_row_text(ui, t, r, &title, sel, r.right() - 8.0);
+            if resp.clicked() {
+                self.doc_open = Some(id);
+            }
+        }
+        ui.add_space(10.0);
+        side_heading(ui, t, tr("Popular Wikis"), None);
+        let wikis = self.popular_wikis(now_ts());
+        if wikis.is_empty() {
+            side_empty(ui, t, tr("Most viewed and active Wikis appear here"));
+        }
+        for (wid, title, views) in wikis.into_iter().take(5) {
+            let sel = self.doc_open == Some(wid);
+            let (r, resp) = side_row(ui, t, &format!("Popular Wiki {}", title), sel, 30.0);
+            line_icon(
+                ui.painter(),
+                "notebook",
+                r.left_center() + vec2(16.0, 0.0),
+                t.text2,
+            );
+            side_row_text(ui, t, r, &title, sel, r.right() - 40.0);
+            ui.painter().text(
+                r.right_center() - vec2(10.0, 0.0),
+                Align2::RIGHT_CENTER,
+                views.to_string(),
+                FontId::proportional(12.0),
+                t.text3,
+            );
+            let resp = resp.on_hover_text(trf!("{} views in the last 30 days", views));
+            if resp.clicked() {
+                self.doc_open = Some(wid);
+            }
+        }
+    }
+
+    /// The Dashboards sidebar's list: every dashboard I can see.
+    fn dash_side_list(&mut self, ui: &mut Ui, t: &Theme, q: &str) {
+        let rows: Vec<(u64, String)> = self
+            .data
+            .extra
+            .dashboards
+            .iter()
+            .filter(|d| self.dash_shown(d))
+            .filter(|d| q.is_empty() || d.name.to_lowercase().contains(q))
+            .map(|d| (d.id, d.name.clone()))
+            .collect();
+        if rows.is_empty() {
+            side_empty(
+                ui,
+                t,
+                if q.is_empty() {
+                    tr("No dashboards yet")
+                } else {
+                    tr("No dashboard has that name")
+                },
+            );
+        }
+        for (id, name) in rows {
+            let sel = self.dash_open == Some(id);
+            let (r, resp) = side_row(ui, t, &format!("Open dashboard {}", name), sel, 30.0);
+            line_icon(
+                ui.painter(),
+                "dashboards",
+                r.left_center() + vec2(16.0, 0.0),
+                t.text2,
+            );
+            side_row_text(ui, t, r, &name, sel, r.right() - 8.0);
+            if resp.clicked() {
+                self.dash_open = Some(id);
+            }
+        }
+    }
+
+    /// The Teams sidebar's list: every team, with its colour.
+    fn teams_side_list(&mut self, ui: &mut Ui, t: &Theme, q: &str) {
+        let teams: Vec<Team> = self
+            .data
+            .extra
+            .teams
+            .iter()
+            .filter(|tm| q.is_empty() || tm.name.to_lowercase().contains(q))
+            .cloned()
+            .collect();
+        if teams.is_empty() {
+            side_empty(
+                ui,
+                t,
+                if q.is_empty() {
+                    tr("No teams yet")
+                } else {
+                    tr("No team has that name")
+                },
+            );
+        }
+        for tm in teams {
+            let sel = self.hub_filter == 9 && self.team_open == Some(tm.id);
+            let (r, resp) = side_row(ui, t, &format!("Open team {}", tm.name), sel, 30.0);
+            ui.painter().rect_filled(
+                Rect::from_center_size(r.left_center() + vec2(16.0, 0.0), vec2(14.0, 14.0)),
+                3.5,
+                rgb(tm.color),
+            );
+            side_row_text(ui, t, r, &tm.name, sel, r.right() - 8.0);
+            if resp.clicked() {
+                self.team_open = Some(tm.id);
+                self.hub_filter = 9;
+            }
+        }
     }
 
     pub(super) fn page_bar(
@@ -493,40 +366,65 @@ impl App {
 
     // ---------------------------------------------------------------- docs
 
-    /// The "My Docs" badge: top-level docs only, as the list shows them
+    /// Whether a doc is under a Docs filter (`hub_filter`): someone's
+    /// Private docs are for them alone, and docs in archived spaces or other
+    /// people's Personal spaces stay out, as in the sidebar.
+    pub(super) fn doc_in_filter(&self, d: &Doc, filter: u8) -> bool {
+        let me = self.data.me;
+        let fits = match filter {
+            1 => d.owner == me && !d.archived,
+            2 => d.owner != me && !d.private && !d.archived,
+            3 => d.private && !d.archived,
+            4 => d.meeting_note && !d.archived,
+            5 => d.is_wiki() && !d.archived,
+            6 => d.archived,
+            7 => !d.archived && self.data.extra.starred.contains(&format!("doc:{}", d.id)),
+            _ => !d.archived,
+        };
+        fits && self.doc_reachable(d)
+    }
+
+    /// A Docs filter's count: top-level docs only, as the list shows them
     /// (sub pages are counted with their doc).
-    pub(super) fn my_docs_count(&self) -> usize {
+    pub(super) fn docs_count(&self, filter: u8) -> usize {
         self.data
             .docs
             .iter()
-            .filter(|d| d.owner == self.data.me && !d.archived && d.parent.is_none())
+            .filter(|d| d.parent.is_none() && self.doc_in_filter(d, filter))
             .count()
     }
 
     pub(super) fn docs_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         let me = self.data.me;
-        let items: [(&str, &str, Option<usize>); 7] = [
-            ("docs", "All Docs", None),
-            ("@me", "My Docs", Some(self.my_docs_count())),
-            ("teams", "Shared with me", None),
-            ("lock", "Private", None),
-            ("edit", "Meeting Notes", None),
-            ("notebook", "Wikis", None),
-            ("archive", "Archived", None),
-        ];
-        let sel = if self.doc_open.is_some() {
-            99
-        } else {
-            self.hub_filter.min(6)
-        };
+        let filters: Vec<SideFilter> = DOC_FILTERS
+            .iter()
+            .map(|&(key, icon, label)| SideFilter {
+                key,
+                icon,
+                label,
+                count: Some(self.docs_count(key)),
+            })
+            .collect();
+        let sel = self.doc_open.is_none().then_some(self.hub_filter);
         if self.doc_open != self.doc_viewed {
             self.doc_viewed = self.doc_open;
             if let Some(id) = self.doc_open {
                 self.count_doc_view(id, now_ts());
             }
         }
-        let (clicked, plus) = self.hub_sidebar(ui, "docs", "Docs", &items, sel, HubNew::Create);
+        let (clicked, plus) = self.hub_sidebar(
+            ui,
+            HubSide {
+                id: "docs",
+                title: tr("Docs"),
+                find: ("Find a doc", tr("Find a doc")),
+                filters: &filters,
+                selected: sel,
+                heading: tr("Docs"),
+                add: Some(("Add a doc", tr("New Doc"))),
+            },
+        );
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.doc_open = None;
@@ -541,7 +439,10 @@ impl App {
                     self.doc_editor(ui);
                     return;
                 }
-                let title = items[self.hub_filter.min(6) as usize].1;
+                let title = DOC_FILTERS
+                    .iter()
+                    .find(|f| f.0 == self.hub_filter)
+                    .map_or("All Docs", |f| f.2);
                 self.page_bar(ui, title, |s, ui| {
                     let tt = s.t();
                     if primary_button(ui, &tt, tr("New Doc")).clicked() {
@@ -748,19 +649,7 @@ impl App {
                                     .data
                                     .docs
                                     .iter()
-                                    .filter(|d| match filter.min(6) {
-                                        1 => d.owner == me && !d.archived,
-                                        2 => d.owner != me && !d.private && !d.archived,
-                                        3 => d.private && !d.archived,
-                                        4 => d.meeting_note && !d.archived,
-                                        5 => d.is_wiki() && !d.archived,
-                                        6 => d.archived,
-                                        _ => !d.archived,
-                                    })
-                                    // someone's Private docs are for them alone, and
-                                    // docs in archived spaces or other people's
-                                    // Personal spaces stay out, as in the sidebar
-                                    .filter(|d| self.doc_reachable(d))
+                                    .filter(|d| self.doc_in_filter(d, filter))
                                     .filter(|d| d.parent.is_none())
                                     .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
                                     .filter(|d| !mine_only || d.owner == me)
@@ -1083,20 +972,56 @@ impl App {
 
     // ---------------------------------------------------------------- dashboards
 
+    /// Whether a dashboard I can see is under a Dashboards filter: 1 the ones
+    /// I made (older ones without a maker show in both), 2 the starred ones.
+    fn dash_in_filter(&self, d: &Dashboard, filter: u8) -> bool {
+        self.dash_shown(d)
+            && match filter {
+                1 => d.owner == self.data.me || d.owner == 0,
+                2 => self.data.extra.starred.contains(&format!("dash:{}", d.id)),
+                _ => true,
+            }
+    }
+
     pub(super) fn dashboards_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let me = self.data.me;
-        let items: [(&str, &str, Option<usize>); 2] = [
-            ("dashboards", "All Dashboards", None),
-            ("@me", "My Dashboards", None),
-        ];
-        let sel = if self.dash_open.is_some() {
-            99
-        } else {
-            self.hub_filter.min(1)
+        let n = |f: u8| {
+            let dashes = &self.data.extra.dashboards;
+            Some(dashes.iter().filter(|d| self.dash_in_filter(d, f)).count())
         };
-        let (clicked, plus) =
-            self.hub_sidebar(ui, "dash", "Dashboards", &items, sel, HubNew::Create);
+        let filters = [
+            SideFilter {
+                key: 0,
+                icon: "dashboards",
+                label: "All Dashboards",
+                count: n(0),
+            },
+            SideFilter {
+                key: 1,
+                icon: "@me",
+                label: "My Dashboards",
+                count: n(1),
+            },
+            SideFilter {
+                key: 2,
+                icon: "star",
+                label: "Favorites",
+                count: n(2),
+            },
+        ];
+        let sel = self.dash_open.is_none().then_some(self.hub_filter.min(2));
+        let (clicked, plus) = self.hub_sidebar(
+            ui,
+            HubSide {
+                id: "dash",
+                title: tr("Dashboards"),
+                find: ("Find a dashboard", tr("Find a dashboard")),
+                filters: &filters,
+                selected: sel,
+                heading: tr("Dashboards"),
+                add: Some(("Add a dashboard", tr("New Dashboard"))),
+            },
+        );
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.dash_open = None;
@@ -1106,7 +1031,8 @@ impl App {
                 name: tr("New Dashboard").into(),
             });
         }
-        let mine_only = self.hub_filter.min(1) == 1;
+        let me = self.data.me;
+        let filter = self.hub_filter.min(2);
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
             if self.dash_open.is_some() {
                 self.dashboard_content(ui);
@@ -1116,10 +1042,9 @@ impl App {
                 if !self.data.extra.dashboards.is_empty() {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 16)).show(ui, |ui| {
                         ui.label(RichText::new(tr("Your Dashboards")).size(15.0));
-                        // My: the ones I made (older ones without a maker show in both)
                         // someone else's private dashboard stays out of the list
-                        let shown: Vec<Dashboard> = self.data.extra.dashboards.iter().filter(|d| self.dash_shown(d)).cloned().collect();
-                        for d in shown.into_iter().filter(|d| !mine_only || d.owner == me || d.owner == 0) {
+                        let shown: Vec<Dashboard> = self.data.extra.dashboards.iter().filter(|d| self.dash_in_filter(d, filter)).cloned().collect();
+                        for d in shown {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("dash:{}", d.id));
                                 if icon_button_ex(ui, &t, "dashboards", &d.name, &d.name, false, 0.0, t.text, t.text2).clicked() {
@@ -1226,28 +1151,61 @@ impl App {
 
     // ---------------------------------------------------------------- whiteboards
 
+    /// Whether a whiteboard is under a Whiteboards filter: 1 the ones I made
+    /// (older ones without a maker count as mine too), 2 the starred ones.
+    pub(super) fn wb_in_filter(&self, w: &Whiteboard, filter: u8) -> bool {
+        match filter {
+            1 => w.owner == self.data.me || w.owner == 0,
+            2 => self.data.extra.starred.contains(&format!("wb:{}", w.id)),
+            _ => true,
+        }
+    }
+
     pub(super) fn whiteboards_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let me = self.data.me;
-        let boards = &self.data.extra.whiteboards;
-        // My: the ones I made (older ones without a maker count as mine too)
-        let mine = boards
-            .iter()
-            .filter(|w| w.owner == me || w.owner == 0)
-            .count();
-        let items: [(&str, &str, Option<usize>); 2] = [
-            ("whiteboards", "All Whiteboards", Some(boards.len())),
-            ("@me", "My Whiteboards", Some(mine)),
-        ];
-        let sel = if self.wb_open.is_some() {
-            99
-        } else {
-            self.hub_filter.min(1)
+        let n = |f: u8| {
+            let boards = &self.data.extra.whiteboards;
+            Some(boards.iter().filter(|w| self.wb_in_filter(w, f)).count())
         };
-        let (clicked, _) = self.hub_sidebar(ui, "wb", "Whiteboards", &items, sel, HubNew::None);
+        let filters = [
+            SideFilter {
+                key: 0,
+                icon: "whiteboards",
+                label: "All Whiteboards",
+                count: n(0),
+            },
+            SideFilter {
+                key: 1,
+                icon: "@me",
+                label: "My Whiteboards",
+                count: n(1),
+            },
+            SideFilter {
+                key: 2,
+                icon: "star",
+                label: "Favorites",
+                count: n(2),
+            },
+        ];
+        let sel = self.wb_open.is_none().then_some(self.hub_filter.min(2));
+        let (clicked, plus) = self.hub_sidebar(
+            ui,
+            HubSide {
+                id: "wb",
+                title: tr("Whiteboards"),
+                find: ("Find a whiteboard", tr("Find a whiteboard")),
+                filters: &filters,
+                selected: sel,
+                heading: tr("Boards"),
+                add: Some(("Add a whiteboard", tr("New whiteboard"))),
+            },
+        );
         if let Some(i) = clicked {
             self.hub_filter = i;
             self.wb_open = None;
+        }
+        if plus {
+            self.new_whiteboard();
         }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
@@ -1282,27 +1240,53 @@ impl App {
             .iter()
             .filter(|x| x.members.contains(&self.data.me))
             .count();
-        let items: [(&str, &str, Option<usize>); 5] = [
-            ("teams", "All Teams", None),
-            ("person", "All People", Some(people)),
-            ("subtasks", "Org Chart", None),
-            ("chart", "Analytics", None),
-            ("@me", "My Teams", Some(mine)),
+        let filters = [
+            SideFilter {
+                key: 0,
+                icon: "teams",
+                label: "All Teams",
+                count: Some(self.data.extra.teams.len()),
+            },
+            SideFilter {
+                key: 1,
+                icon: "person",
+                label: "All People",
+                count: Some(people),
+            },
+            SideFilter {
+                key: 2,
+                icon: "subtasks",
+                label: "Org Chart",
+                count: None,
+            },
+            SideFilter {
+                key: 3,
+                icon: "chart",
+                label: "Analytics",
+                count: None,
+            },
+            SideFilter {
+                key: 4,
+                icon: "@me",
+                label: "My Teams",
+                count: Some(mine),
+            },
         ];
-        let sel = if self.hub_filter == 9 {
-            99
-        } else {
-            self.hub_filter.min(4)
-        };
-        // teams are made and changed by the owner and admins on a server
+        let sel = (self.hub_filter != 9).then_some(self.hub_filter.min(4));
+        // teams are made and changed by the owner and admins on a server,
+        // so the + is theirs alone
         let may = self.may_manage();
         let (clicked, plus) = self.hub_sidebar(
             ui,
-            "teams",
-            "Teams",
-            &items,
-            sel,
-            if may { HubNew::Create } else { HubNew::Plus },
+            HubSide {
+                id: "teams",
+                title: tr("Teams"),
+                find: ("Find a team", tr("Find a team")),
+                filters: &filters,
+                selected: sel,
+                heading: tr("Teams"),
+                add: may.then_some(("Add a team", tr("New team"))),
+            },
         );
         if let Some(i) = clicked {
             self.hub_filter = i;

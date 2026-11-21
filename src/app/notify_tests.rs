@@ -473,7 +473,7 @@ fn owners_hear_when_someone_joins() {
     assert_eq!(kinds(&a), vec![Kind::Member]);
     // a plain member doesn't
     let mut b = app();
-    b.data.members.iter_mut().find(|m| m.id == 1).unwrap().role = "Member".into();
+    b.data.members.iter_mut().find(|m| m.id == 1).unwrap().role = MemberRole::Member;
     let id = b.data.new_id();
     b.data.members.push(Member {
         id,

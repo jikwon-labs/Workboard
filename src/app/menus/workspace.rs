@@ -458,7 +458,7 @@ impl App {
                     RichText::new(if m.invited {
                         tr("Invited")
                     } else {
-                        role_text(&m.role)
+                        role_text(m.role.name())
                     })
                     .small()
                     .color(t.text3),

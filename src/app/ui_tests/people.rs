@@ -734,7 +734,7 @@ fn an_admin_has_no_controls_for_another_admin_but_the_owner_does() {
         .data
         .members
         .iter()
-        .filter(|m| m.id != me && m.role != "Owner")
+        .filter(|m| m.id != me && m.role != MemberRole::Owner)
         .map(|m| m.id)
         .take(2)
         .collect();

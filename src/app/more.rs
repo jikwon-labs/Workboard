@@ -216,7 +216,7 @@ impl App {
                 let mut remove = None;
                 for m in &members {
                     // another admin is the owner's to change or remove (as the server)
-                    let manages = manages && (owner || m.role != "Admin" || m.id == me);
+                    let manages = manages && (owner || m.role != MemberRole::Admin || m.id == me);
                     let (r, _) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
                     paint_avatar(ui.painter(), pos2(r.left() + 22.0, r.center().y), 13.0, m, t.bg);
@@ -232,20 +232,20 @@ impl App {
                     let role_w = w * (sx - rx) - 8.0;
                     let role_rect = Rect::from_min_size(pos2(r.left() + w * rx, r.center().y - 13.0), vec2(role_w, 26.0));
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(role_rect).layout(Layout::left_to_right(Align::Center)));
-                    let mut role = if m.role.is_empty() { "Member".to_string() } else { m.role.clone() };
-                    if m.role == "Owner" || !manages || (server && m.id == me) {
-                        child.label(super::menus::role_text(&role));
+                    let mut role = m.role.counted();
+                    if m.role == MemberRole::Owner || !manages || (server && m.id == me) {
+                        child.label(super::menus::role_text(role.name()));
                     } else {
                         // Guest isn't offered: nothing limits what a guest can see yet
-                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(super::menus::role_text(&role).to_string()).width(role_w.min(100.0)).show_ui(&mut child, |ui| {
+                        egui::ComboBox::from_id_salt(("role", m.id)).selected_text(super::menus::role_text(role.name()).to_string()).width(role_w.min(100.0)).show_ui(&mut child, |ui| {
                             for (n, _) in ROLES.iter().take(2) {
-                                ui.selectable_value(&mut role, n.to_string(), super::menus::role_text(n));
+                                ui.selectable_value(&mut role, MemberRole::of(n), super::menus::role_text(n));
                             }
                         });
-                        if role != m.role && !(m.role.is_empty() && role == "Member") {
+                        if role != m.role.counted() {
                             if server {
                                 // the server changes the role and everyone's copy follows
-                                let r = if role == "Admin" { wb_net::Role::Admin } else { wb_net::Role::Member };
+                                let r = if role == MemberRole::Admin { wb_net::Role::Admin } else { wb_net::Role::Member };
                                 self.access_request(wb_net::Msg::SetRole { member: m.id, role: r });
                             } else if let Some(mm) = self.data.members.iter_mut().find(|x| x.id == m.id) {
                                 mm.role = role;
@@ -256,7 +256,7 @@ impl App {
                     let (st, col) = if m.invited { ("Invited", WARN_ORANGE) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
                     let st = if st == "Active" { crate::i18n::tr_ctx("Active (member)", st) } else { tr(st) };
                     paint_fit(ui, pos2(r.left() + w * sx + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col, w * (1.0 - sx) - 8.0 - 108.0);
-                    if m.id != me && m.role != "Owner" && manages {
+                    if m.id != me && m.role != MemberRole::Owner && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
                         // someone who hasn't joined yet has an invite to take back
                         let (label, kind) = if m.invited { ("Cancel invite", "invite") } else { ("Remove", "person") };

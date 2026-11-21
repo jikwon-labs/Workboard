@@ -1604,13 +1604,7 @@ impl App {
                                 .data
                                 .members
                                 .iter()
-                                .filter(|m| {
-                                    (if m.role.is_empty() {
-                                        "Member"
-                                    } else {
-                                        m.role.as_str()
-                                    }) == role
-                                })
+                                .filter(|m| m.role.counted().name() == role)
                                 .cloned()
                                 .collect();
                             if people.is_empty() {

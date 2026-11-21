@@ -393,7 +393,7 @@ impl App {
                     "person",
                     m.shown().to_string(),
                     if m.email.is_empty() {
-                        super::menus::role_text(&m.role).to_string()
+                        super::menus::role_text(m.role.name()).to_string()
                     } else {
                         m.email.clone()
                     },

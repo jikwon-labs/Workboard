@@ -49,7 +49,7 @@ fn new_workspace_on_this_computer_is_a_name_and_apps() {
     );
     assert_eq!(h.app.data.members.len(), 1, "only me in the new one");
     let me = h.app.data.member(h.app.data.me).unwrap();
-    assert_eq!(me.role, "Owner");
+    assert_eq!(me.role, MemberRole::Owner);
     // the workspace menu lists both
     let list = Data::workspaces();
     assert!(list.iter().any(|w| w.file == before));

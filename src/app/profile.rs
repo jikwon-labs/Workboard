@@ -173,7 +173,7 @@ impl App {
                 ui.add_space(6.0);
                 for (label, value) in [
                     ("Email", m.email.trim().to_string()),
-                    ("Role", super::menus::role_text(&m.role).to_string()),
+                    ("Role", super::menus::role_text(m.role.name()).to_string()),
                 ] {
                     if value.is_empty() {
                         continue;

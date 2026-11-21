@@ -636,8 +636,8 @@ pub(super) fn member_choices(members: &[Member]) -> Vec<(u64, String)> {
             let name = m.name.trim();
             let label = if !m.email.trim().is_empty() {
                 format!("{} ({})", name, m.email.trim())
-            } else if shared(m) && !m.role.trim().is_empty() {
-                format!("{} ({})", name, tr(m.role.trim()))
+            } else if shared(m) && !m.role.name().trim().is_empty() {
+                format!("{} ({})", name, tr(m.role.name().trim()))
             } else {
                 name.to_string()
             };
@@ -858,7 +858,7 @@ impl App {
                         name: u.shown(),
                         color,
                         email: u.email.trim().to_string(),
-                        role: "Member".into(),
+                        role: MemberRole::Member,
                         invited: false,
                         status_text: String::new(),
                         slack: vec![],

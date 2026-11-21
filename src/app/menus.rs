@@ -1714,7 +1714,7 @@ impl App {
         let file = format!("workspace-{}.json", now_ts());
         let mut owner = self.data.member(self.data.me).cloned().unwrap_or_default();
         owner.id = 1;
-        owner.role = "Owner".into();
+        owner.role = MemberRole::Owner;
         let mut d = Data::blank(name, owner);
         d.extra.rail_items = apps.to_vec();
         d.save_file(&file);
@@ -1769,7 +1769,7 @@ impl App {
                 name,
                 color,
                 email: e.to_string(),
-                role: role.to_string(),
+                role: MemberRole::of(role),
                 invited: true,
                 status_text: String::new(),
                 slack: vec![],

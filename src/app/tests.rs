@@ -445,7 +445,7 @@ fn invite_adds_people_once_and_joins_general() {
     assert_eq!(a.data.members.len(), n + 1);
     let m = a.data.members.last().unwrap();
     assert_eq!(m.name, "Kim Minji");
-    assert_eq!(m.role, "Guest");
+    assert_eq!(m.role, MemberRole::Guest);
     assert!(m.invited);
     let general = a
         .data
@@ -3092,4 +3092,24 @@ fn goal_history_survives_save_and_load_and_old_files_load() {
     let old = r#"{"id":1,"name":"Old","color":[1,2,3],"due":null,"owner":1,"targets":[]}"#;
     let g: Goal = serde_json::from_str(old).unwrap();
     assert!(g.start.is_none() && g.log.is_empty() && g.reached == 0);
+}
+
+#[test]
+fn member_roles_are_saved_as_the_same_names() {
+    // "" (members from before roles) counts as Member but stays "", and a
+    // role from a newer app comes back as it was
+    for name in ["", "Owner", "Admin", "Member", "Guest", "Reviewer"] {
+        let m: Member = serde_json::from_value(serde_json::json!({
+            "id": 7, "name": "Sam", "color": [1, 2, 3], "role": name
+        }))
+        .unwrap();
+        assert_eq!(serde_json::to_value(&m).unwrap()["role"], name);
+    }
+    assert_eq!(MemberRole::of("").counted(), MemberRole::Member);
+    assert!(!Member::default().manages());
+    let m: Member = serde_json::from_value(serde_json::json!({
+        "id": 7, "name": "Sam", "color": [1, 2, 3]
+    }))
+    .unwrap();
+    assert_eq!(m.role, MemberRole::Unset);
 }

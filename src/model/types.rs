@@ -209,9 +209,8 @@ pub struct Member {
     pub photo: Option<Attachment>,
     #[serde(default)]
     pub email: String,
-    /// Owner, Admin, Member or Guest.
     #[serde(default)]
-    pub role: String,
+    pub role: MemberRole,
     /// Invited by email and not joined yet.
     #[serde(default)]
     pub invited: bool,
@@ -247,10 +246,76 @@ pub fn mentioned_ids(text: &str, members: &[Member], picked: &[u64]) -> Vec<u64>
     wb_sync::mentions::mentioned_ids(text, &people, picked)
 }
 
+/// A member's role in People. Saved as its name ("Owner", "Admin",
+/// "Member", "Guest"); "" from members made before roles counts as Member
+/// and is saved as "" again, and a role from a newer app is kept as it is.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum MemberRole {
+    /// "": counts as Member.
+    #[default]
+    Unset,
+    Owner,
+    Admin,
+    Member,
+    Guest,
+    Other(String),
+}
+
+impl MemberRole {
+    pub fn of(name: &str) -> MemberRole {
+        match name {
+            "" => MemberRole::Unset,
+            "Owner" => MemberRole::Owner,
+            "Admin" => MemberRole::Admin,
+            "Member" => MemberRole::Member,
+            "Guest" => MemberRole::Guest,
+            _ => MemberRole::Other(name.to_string()),
+        }
+    }
+
+    /// The name saved for it.
+    pub fn name(&self) -> &str {
+        match self {
+            MemberRole::Unset => "",
+            MemberRole::Owner => "Owner",
+            MemberRole::Admin => "Admin",
+            MemberRole::Member => "Member",
+            MemberRole::Guest => "Guest",
+            MemberRole::Other(s) => s,
+        }
+    }
+
+    /// What it counts as: Member for "".
+    pub fn counted(&self) -> MemberRole {
+        match self {
+            MemberRole::Unset => MemberRole::Member,
+            r => r.clone(),
+        }
+    }
+}
+
+impl From<&str> for MemberRole {
+    fn from(name: &str) -> Self {
+        MemberRole::of(name)
+    }
+}
+
+impl Serialize for MemberRole {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.name())
+    }
+}
+
+impl<'de> Deserialize<'de> for MemberRole {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(MemberRole::of(&String::deserialize(d)?))
+    }
+}
+
 impl Member {
     /// An owner or admin, by the role in People.
     pub fn manages(&self) -> bool {
-        self.role == "Owner" || self.role == "Admin"
+        matches!(self.role, MemberRole::Owner | MemberRole::Admin)
     }
 
     /// The name others see: the display name when there is one, else the

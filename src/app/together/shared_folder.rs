@@ -519,7 +519,7 @@ impl App {
                     name: name.trim().to_string(),
                     color,
                     email: email.trim().to_string(),
-                    role: "Member".into(),
+                    role: MemberRole::Member,
                     ..Default::default()
                 });
                 id

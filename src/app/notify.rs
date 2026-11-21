@@ -442,6 +442,11 @@ impl App {
                             None => mine.iter().any(|f| f.name == name),
                         };
                         if to_me {
+                            let name = if name.trim().is_empty() {
+                                tr("Untitled form")
+                            } else {
+                                name
+                            };
                             let title = trf!("New answer to {}", name);
                             let body = trf!("{} answered: {}", self.who(a.author), t.name);
                             add(

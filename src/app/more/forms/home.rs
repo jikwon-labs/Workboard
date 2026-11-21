@@ -39,11 +39,11 @@ impl App {
             .forms
             .iter()
             .filter(|f| self.form_shown(f))
-            .filter(|f| q.is_empty() || f.name.to_lowercase().contains(&q))
+            .filter(|f| q.is_empty() || form_title(f).to_lowercase().contains(&q))
             .cloned()
             .collect();
         if self.sweep.forms.by_name {
-            v.sort_by_key(|f| f.name.to_lowercase());
+            v.sort_by_key(|f| form_title(f).to_lowercase());
         } else {
             v.sort_by(|a, b| b.updated.cmp(&a.updated).then(a.name.cmp(&b.name)));
         }
@@ -142,7 +142,8 @@ impl App {
     fn form_side_row(&mut self, ui: &mut Ui, t: &Theme, f: &Form) {
         let w = ui.available_width();
         let (r, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
-        name_it(&resp, &format!("Open form {}", f.name));
+        let title = form_title(f);
+        name_it(&resp, &format!("Open form {}", title));
         let open = self.form_open == Some(f.id);
         if open {
             ui.painter().rect_filled(r, 7.0, t.row_selected);
@@ -181,7 +182,7 @@ impl App {
         }
         let font = FontId::proportional(14.0);
         let left = tile.right() + 10.0;
-        let shown = fit_text(ui.painter(), &f.name, &font, (right - left).max(10.0));
+        let shown = fit_text(ui.painter(), &title, &font, (right - left).max(10.0));
         ui.painter().text(
             pos2(left, r.center().y),
             Align2::LEFT_CENTER,
@@ -356,7 +357,8 @@ impl App {
         name_w: f32,
     ) -> Rect {
         let (r, row) = ui.allocate_exact_size(vec2(w, 60.0), Sense::click());
-        name_it(&row, &format!("Form {}", f.name));
+        let title = form_title(f);
+        name_it(&row, &format!("Form {}", title));
         let p = ui.painter().clone();
         let just_made = self.sweep.forms.made.contains(&f.id);
         if row.hovered() {
@@ -371,7 +373,7 @@ impl App {
         let tresp = ui
             .interact(tile, ui.id().with(("form_tile", f.id)), Sense::click())
             .on_hover_text(tr("Change icon"));
-        name_it(&tresp, &format!("Change icon {}", f.name));
+        name_it(&tresp, &format!("Change icon {}", title));
         hover_ring(ui, &tresp, tile, 8.0);
         paint_tile(&p, tile, form_look(f, t));
         let picked = popup(
@@ -391,7 +393,7 @@ impl App {
         let left = tile.right() + 12.0;
         let room = (r.left() + name_w - 12.0 - left).max(20.0);
         let font = FontId::proportional(14.0);
-        let name = fit_text(&p, &f.name, &font, room);
+        let name = fit_text(&p, &title, &font, room);
         let g = p.layout_no_wrap(name, font, t.text);
         let name_end = left + g.size().x;
         p.galley(pos2(left, cy - 9.0 - g.size().y / 2.0), g, t.text);
@@ -453,7 +455,7 @@ impl App {
                 let cr =
                     Rect::from_min_size(pos2(x + 10.0, cy - 12.0), vec2(g.size().x + 34.0, 24.0));
                 let c = ui.interact(cr, ui.id().with(("form_pick_list", f.id)), Sense::click());
-                name_it(&c, &format!("Choose a List for {}", f.name));
+                name_it(&c, &format!("Choose a List for {}", title));
                 p.rect_filled(
                     cr,
                     6.0,
@@ -526,7 +528,7 @@ impl App {
             ui.id().with(("form_row_fill", f.id)),
             Sense::click(),
         );
-        name_it(&fill, &format!("Fill out {}", f.name));
+        name_it(&fill, &format!("Fill out {}", title));
         if fill.hovered() {
             p.rect_filled(fill_r, 6.0, hover_fill(ui));
         }
@@ -579,7 +581,7 @@ impl App {
             ui.id().with(("form_row_more", f.id)),
             Sense::click(),
         );
-        name_it(&more, &format!("Form menu {}", f.name));
+        name_it(&more, &format!("Form menu {}", title));
         if more.hovered() {
             p.rect_filled(more_r, 6.0, hover_fill(ui));
         }
@@ -614,7 +616,7 @@ impl App {
                     self.modal = Some(Modal::ConfirmRemove {
                         kind: "form",
                         id: f.id,
-                        name: f.name.clone(),
+                        name: title.clone(),
                     });
                     close_popup(ui);
                 }

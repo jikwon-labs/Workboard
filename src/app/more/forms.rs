@@ -578,7 +578,8 @@ impl App {
                 paint_tile(left.painter(), tile, form_look(&f, &t));
                 left.add_space(2.0);
                 let room = (row.width() * 0.3).max(80.0);
-                let shown = fit_text(left.painter(), &f.name, &FontId::proportional(14.0), room);
+                let title = form_title(&f);
+                let shown = fit_text(left.painter(), &title, &FontId::proportional(14.0), room);
                 left.label(RichText::new(shown).size(14.0).color(t.text));
                 let left_end = left.min_rect().right();
                 // the tabs, in the middle when there is room

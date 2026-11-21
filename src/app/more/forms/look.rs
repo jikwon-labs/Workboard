@@ -45,6 +45,16 @@ pub(crate) const FORM_ICONS: [&str; 24] = [
     "tag",
 ];
 
+/// A form's name as the pages show it: "Untitled form" when it has none,
+/// as an unnamed doc shows "Untitled".
+pub(super) fn form_title(f: &Form) -> String {
+    if f.name.trim().is_empty() {
+        tr("Untitled form").into()
+    } else {
+        f.name.clone()
+    }
+}
+
 /// A form's tile as (icon, icon colour, fill). Older forms (no icon or
 /// colour saved) show the forms icon in a colour taken from their id; an
 /// icon a newer app saved that this one doesn't draw falls back the same way.
@@ -87,7 +97,7 @@ pub(super) fn icon_picker(ui: &mut Ui, t: &Theme, f: &mut Form) -> bool {
         paint_tile(ui.painter(), r, form_look(f, t));
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.label(RichText::new(&f.name).size(14.0).color(t.text));
+            ui.label(RichText::new(form_title(f)).size(14.0).color(t.text));
             ui.label(
                 RichText::new(tr("Changes in the table and the sidebar too"))
                     .size(12.0)

@@ -1010,3 +1010,33 @@ fn a_form_answer_tells_only_that_forms_owner() {
     assert_eq!(a.notify_rt.sent.len(), 2);
     assert_eq!(a.notify_rt.sent[1].body, "Alex Kim answered: Old app answer");
 }
+
+/// An answer to a form whose name was cleared says "Untitled form", as the
+/// form shows in the app, not "New answer to ".
+#[test]
+fn an_answer_to_an_unnamed_form_says_untitled() {
+    let mut a = app();
+    let list = a.data.first_list().unwrap();
+    let fid = a.data.new_id();
+    a.data.extra.forms.push(Form {
+        id: fid,
+        list_id: list,
+        owner: 1,
+        ..Default::default()
+    });
+    a.pending.form = Some(fid);
+    a.apply(Action::Add {
+        list,
+        name: "Printer".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    let tid = a.data.tasks.iter().find(|t| t.name == "Printer").unwrap().id;
+    teammate_line(&mut a, tid, 2, "submitted the form ", false);
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent[0].title, "New answer to Untitled form");
+}

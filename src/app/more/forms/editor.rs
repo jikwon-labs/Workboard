@@ -832,7 +832,7 @@ impl App {
                     self.modal = Some(Modal::ConfirmRemove {
                         kind: "form",
                         id: f.id,
-                        name: f.name.clone(),
+                        name: form_title(&f),
                     });
                 }
                 ui.label(

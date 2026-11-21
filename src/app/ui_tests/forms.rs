@@ -477,3 +477,27 @@ fn a_ticked_checkbox_is_written_in_the_interface_language() {
     crate::i18n::set_lang(crate::i18n::Lang::En);
     assert_eq!(d, "자세한 내용: 예");
 }
+
+/// A form whose name was cleared shows as "Untitled form" in the sidebar,
+/// the table and its header (as an unnamed doc shows "Untitled"), not as
+/// an empty row nobody can tell apart.
+#[test]
+fn a_form_without_a_name_shows_as_untitled() {
+    let mut h = Ui1::new();
+    let fid = blank_form(&mut h);
+    h.click("Form name");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.settle();
+    assert_eq!(form(&h, fid).name, "");
+    assert!(h.has("Open form Untitled form"), "the sidebar");
+    assert!(
+        h.painted_text("Untitled form").len() >= 2,
+        "the sidebar and the header"
+    );
+    h.click("Back to all forms");
+    assert!(h.has("Form Untitled form"), "the table");
+    h.click("Find a form");
+    h.type_text("untitled");
+    assert!(h.has("Form Untitled form"), "found by what it shows");
+}

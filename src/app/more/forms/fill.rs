@@ -85,7 +85,7 @@ impl App {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 6.0;
-                ui.label(RichText::new(&f.name).size(22.0).color(t.text));
+                ui.label(RichText::new(form_title(f)).size(22.0).color(t.text));
                 if !f.description.trim().is_empty() {
                     ui.label(RichText::new(&f.description).size(14.0).color(t.text2));
                 }
@@ -358,7 +358,7 @@ impl App {
             Ok(a) => {
                 // in the language of the person submitting, like a new task's name
                 let name = if a.name.trim().is_empty() {
-                    trf!("{} submission", f.name)
+                    trf!("{} submission", form_title(f))
                 } else {
                     a.name
                 };

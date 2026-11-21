@@ -26,7 +26,7 @@ pub use forms::form_answers;
 pub(crate) use forms::old_answer_form;
 pub use forms::FormTab;
 pub(crate) use goal_dialogs::GoalDraft;
-pub(crate) use goals::pct_of;
+pub(crate) use goals::{pct_of, GoalFilter};
 // for tests that move goals the way the page does
 #[cfg(test)]
 pub(crate) use goals::GoalAct;

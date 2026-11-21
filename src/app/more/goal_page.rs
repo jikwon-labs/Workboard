@@ -10,7 +10,7 @@ use egui::Pos2;
 /// What a target shows on the page, worked out before drawing.
 struct TargetView {
     name: String,
-    kind: u8,
+    kind: TargetType,
     st: TargetState,
     start: f64,
     target: f64,
@@ -41,8 +41,17 @@ impl App {
                         target,
                         current,
                         unit,
-                    } => (0, *start, *target, *current, unit.clone(), vec![]),
-                    TargetKind::TrueFalse { .. } => (1, 0.0, 0.0, 0.0, String::new(), vec![]),
+                    } => (
+                        TargetType::Number,
+                        *start,
+                        *target,
+                        *current,
+                        unit.clone(),
+                        vec![],
+                    ),
+                    TargetKind::TrueFalse { .. } => {
+                        (TargetType::Done, 0.0, 0.0, 0.0, String::new(), vec![])
+                    }
                     TargetKind::Tasks { ids } => {
                         let tasks = ids
                             .iter()
@@ -56,7 +65,7 @@ impl App {
                                 )
                             })
                             .collect();
-                        (2, 0.0, 0.0, 0.0, String::new(), tasks)
+                        (TargetType::Tasks, 0.0, 0.0, 0.0, String::new(), tasks)
                     }
                 };
                 TargetView {
@@ -558,7 +567,8 @@ impl App {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let r = icons::icon_button(ui, t, "plus", tr("Target"), "Add target", true);
                         popup(ui, &r, ui.id().with(("add target", gid)), 200.0, |ui| {
-                            for (k, label) in [(0u8, "Number"), (1, "Done or not"), (2, "Tasks")] {
+                            for k in TargetType::ALL {
+                                let label = k.label();
                                 let b = menu_row_plain(ui, t, tr(label), false);
                                 name_it(&b, &format!("Add {} target", label));
                                 if b.clicked() {
@@ -630,13 +640,13 @@ impl App {
         let right_w = 28.0
             + gap
             + match v.kind {
-                1 => done_toggle_width(ui, t),
+                TargetType::Done => done_toggle_width(ui, t),
                 _ => width_of(&v.st.value, FontId::proportional(value_size)).ceil() + unit_w,
             };
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
             ui.painter().rect_filled(r, 10.0, accent.0);
-            let icon = ["hash", "check", "list"][v.kind as usize];
+            let icon = v.kind.icon();
             icons::line_icon(ui.painter(), icon, r.center(), accent.1);
             let name_w = (ui.available_width() - right_w - gap).max(80.0);
             ui.vertical(|ui| {
@@ -658,7 +668,7 @@ impl App {
                     self.dirty = true;
                 }
                 let sub = match v.kind {
-                    0 => trf!(
+                    TargetType::Number => trf!(
                         "Number · {} to {} {}",
                         fmt_num(v.start),
                         fmt_num(v.target),
@@ -666,8 +676,8 @@ impl App {
                     )
                     .trim_end()
                     .to_string(),
-                    1 => tr("Done or not").into(),
-                    _ => trf!("Tasks · {} picked", v.tasks.len()),
+                    TargetType::Done => tr("Done or not").into(),
+                    TargetType::Tasks => trf!("Tasks · {} picked", v.tasks.len()),
                 };
                 ui.add(egui::Label::new(RichText::new(sub).size(12.5).color(t.text2)).truncate());
             });
@@ -678,7 +688,7 @@ impl App {
                     act = Some(PageAct::RemoveTarget(i));
                 }
                 match v.kind {
-                    1 => {
+                    TargetType::Done => {
                         let b = done_toggle(ui, t, v.st.done, color);
                         name_it(&b, &format!("Done {}", v.name));
                         if b.clicked() {
@@ -694,14 +704,14 @@ impl App {
                 }
             });
         });
-        if v.kind == 1 {
+        if v.kind == TargetType::Done {
             return act;
         }
         ui.add_space(8.0);
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 10.0), Sense::hover());
         paint_bar(ui.painter(), bar, v.st.frac, color, t.hover);
         ui.add_space(8.0);
-        if v.kind == 0 {
+        if v.kind == TargetType::Number {
             ui.horizontal(|ui| {
                 for (label, d, name) in [
                     ("\u{2212}", -1.0, "Minus 1"),
@@ -1157,7 +1167,7 @@ impl App {
 
 enum PageAct {
     Goal(GoalAct),
-    AddTarget(u8),
+    AddTarget(TargetType),
     RemoveTarget(usize),
     /// a number target's start and target values, each when it changed
     SetRange(usize, Option<f64>, Option<f64>),
@@ -1182,11 +1192,10 @@ pub(crate) const GOAL_COLORS: [[u8; 3]; 8] = [
     [0xee, 0x5e, 0x99],
 ];
 
-/// A new target of kind 0 number, 1 done or not, 2 tasks, named in the
-/// screen's language.
-pub(crate) fn new_target(kind: u8) -> GoalTarget {
+/// A new target of a kind, named in the screen's language.
+pub(crate) fn new_target(kind: TargetType) -> GoalTarget {
     match kind {
-        0 => GoalTarget {
+        TargetType::Number => GoalTarget {
             id: 0,
             name: tr("Target").into(),
             kind: TargetKind::Number {
@@ -1196,12 +1205,12 @@ pub(crate) fn new_target(kind: u8) -> GoalTarget {
                 unit: String::new(),
             },
         },
-        1 => GoalTarget {
+        TargetType::Done => GoalTarget {
             id: 0,
             name: tr("Target").into(),
             kind: TargetKind::TrueFalse { done: false },
         },
-        _ => GoalTarget {
+        TargetType::Tasks => GoalTarget {
             id: 0,
             name: tr("Finish tasks").into(),
             kind: TargetKind::Tasks { ids: vec![] },

@@ -13,6 +13,82 @@
 use super::*;
 use egui::{Pos2, Response};
 
+/// A kind of goal target without its values: what New goal and "+ Target"
+/// pick, and the word a target is labelled with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TargetType {
+    Number,
+    /// Done or not.
+    Done,
+    Tasks,
+}
+
+impl TargetType {
+    /// In the order they are offered.
+    pub(crate) const ALL: [TargetType; 3] =
+        [TargetType::Number, TargetType::Done, TargetType::Tasks];
+
+    pub(crate) fn of(kind: &TargetKind) -> TargetType {
+        match kind {
+            TargetKind::Number { .. } => TargetType::Number,
+            TargetKind::TrueFalse { .. } => TargetType::Done,
+            TargetKind::Tasks { .. } => TargetType::Tasks,
+        }
+    }
+
+    /// Its name, in English (drawn through `tr`).
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            TargetType::Number => "Number",
+            TargetType::Done => "Done or not",
+            TargetType::Tasks => "Tasks",
+        }
+    }
+
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            TargetType::Number => "hash",
+            TargetType::Done => "check",
+            TargetType::Tasks => "list",
+        }
+    }
+}
+
+/// Which goals the Goals page shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum GoalFilter {
+    #[default]
+    All,
+    Mine,
+    /// Only the Achieved shelf.
+    Achieved,
+}
+
+/// How the Goals page lists goals. Saved in `Extra::goals_view` as "" for
+/// cards and "list" for rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GoalsView {
+    Cards,
+    List,
+}
+
+impl GoalsView {
+    pub(crate) fn of(saved: &str) -> GoalsView {
+        if saved == "list" {
+            GoalsView::List
+        } else {
+            GoalsView::Cards
+        }
+    }
+
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            GoalsView::Cards => "",
+            GoalsView::List => "list",
+        }
+    }
+}
+
 /// A goal's progress as a whole percent, rounded, but 100 only once it is
 /// all done: 99.5% reads 99, since everything that goes by "100%" (the
 /// Achieved shelf, the achieved day, Goal achieved, the 100% milestone)
@@ -623,7 +699,7 @@ impl App {
         let filter = self.goal_filter;
         let shown: Vec<&GoalRow> = rows
             .iter()
-            .filter(|r| filter != 1 || r.g.owner == me)
+            .filter(|r| filter != GoalFilter::Mine || r.g.owner == me)
             .collect();
         let mut active: Vec<&GoalRow> = shown.iter().copied().filter(|r| r.pct < 100).collect();
         // the most urgent first: far behind, a little behind, on track, then
@@ -637,7 +713,7 @@ impl App {
         active.sort_by_key(|r| (rank(r), r.g.due.unwrap_or(NaiveDate::MAX)));
         let mut achieved: Vec<&GoalRow> = shown.iter().copied().filter(|r| r.pct >= 100).collect();
         achieved.sort_by_key(|r| std::cmp::Reverse(r.g.done_on));
-        let list_view = self.data.extra.goals_view == "list";
+        let list_view = GoalsView::of(&self.data.extra.goals_view) == GoalsView::List;
         let mut head_act: Option<GoalAct> = None;
         let mut act: Option<GoalAct> = None;
         goals_frame(
@@ -670,7 +746,7 @@ impl App {
                     act = Some(a);
                 }
                 ui.add_space(24.0);
-                if filter != 2 {
+                if filter != GoalFilter::Achieved {
                     section_title(ui, &t, tr("In progress"), active.len());
                     ui.add_space(10.0);
                     if active.is_empty() {
@@ -700,7 +776,7 @@ impl App {
                         .iter()
                         .copied()
                         .max_by_key(|r| r.pct)
-                        .filter(|_| filter != 2);
+                        .filter(|_| filter != GoalFilter::Achieved);
                     if let Some(a) = achieved_shelf(ui, &t, &achieved, next) {
                         act = Some(a);
                     }
@@ -1474,11 +1550,7 @@ impl App {
                             let (tr_, _) = ui.allocate_exact_size(vec2(w, 36.0), Sense::hover());
                             let p = ui.painter();
                             let cy = tr_.center().y;
-                            let kind = match tg.kind {
-                                TargetKind::Number { .. } => tr("Number"),
-                                TargetKind::TrueFalse { .. } => tr("Done or not"),
-                                TargetKind::Tasks { .. } => tr("Tasks"),
-                            };
+                            let kind = tr(TargetType::of(&tg.kind).label());
                             let kg = p.layout_no_wrap(
                                 kind.to_string(),
                                 FontId::proportional(11.5),
@@ -1583,7 +1655,7 @@ impl App {
             // in the next colour, as from the empty page and Goal achieved
             GoalAct::NewGoal => self.open_new_goal(None),
             GoalAct::View(v) => {
-                self.data.extra.goals_view = v.into();
+                self.data.extra.goals_view = v.key().into();
                 self.dirty = true;
             }
             GoalAct::Filter(f) => self.goal_filter = f,
@@ -1686,8 +1758,8 @@ pub(crate) enum GoalAct {
     Open(u64),
     Back,
     NewGoal,
-    View(&'static str),
-    Filter(u8),
+    View(GoalsView),
+    Filter(GoalFilter),
     ExpandRow(Option<u64>),
     ToggleDone { g: u64, i: usize },
     SetNumber { g: u64, i: usize, to: f64 },
@@ -1955,7 +2027,7 @@ fn section_title(ui: &mut Ui, t: &Theme, text: &str, n: usize) {
 }
 
 /// All / Mine / Achieved, each with how many.
-fn filter_tabs(ui: &mut Ui, t: &Theme, on: u8, counts: [usize; 3]) -> Option<u8> {
+fn filter_tabs(ui: &mut Ui, t: &Theme, on: GoalFilter, counts: [usize; 3]) -> Option<GoalFilter> {
     let mut picked = None;
     let labels = ["All", "Mine", "Achieved"];
     egui::Frame::new()
@@ -1971,7 +2043,8 @@ fn filter_tabs(ui: &mut Ui, t: &Theme, on: u8, counts: [usize; 3]) -> Option<u8>
                 let order: Vec<usize> = if rtl { vec![2, 1, 0] } else { vec![0, 1, 2] };
                 for i in order {
                     let l = &labels[i];
-                    let sel = on as usize == i;
+                    let f = [GoalFilter::All, GoalFilter::Mine, GoalFilter::Achieved][i];
+                    let sel = on == f;
                     let text = format!("{} {}", tr(l), counts[i]);
                     let b = egui::Button::new(RichText::new(text).size(13.0).color(if sel {
                         t.text
@@ -1985,7 +2058,7 @@ fn filter_tabs(ui: &mut Ui, t: &Theme, on: u8, counts: [usize; 3]) -> Option<u8>
                     let r = ui.add(b);
                     name_it(&r, &format!("Show {}", l));
                     if r.clicked() {
-                        picked = Some(i as u8);
+                        picked = Some(f);
                     }
                 }
             });
@@ -1994,7 +2067,7 @@ fn filter_tabs(ui: &mut Ui, t: &Theme, on: u8, counts: [usize; 3]) -> Option<u8>
 }
 
 /// Cards / rows.
-fn view_switch(ui: &mut Ui, t: &Theme, list: bool) -> Option<&'static str> {
+fn view_switch(ui: &mut Ui, t: &Theme, list: bool) -> Option<GoalsView> {
     let mut picked = None;
     egui::Frame::new()
         .fill(t.hover)
@@ -2004,8 +2077,8 @@ fn view_switch(ui: &mut Ui, t: &Theme, list: bool) -> Option<&'static str> {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let mut both = vec![
-                    ("", "apps", "Show as cards", !list),
-                    ("list", "list", "Show as list", list),
+                    (GoalsView::Cards, "apps", "Show as cards", !list),
+                    (GoalsView::List, "list", "Show as list", list),
                 ];
                 if ui.layout().prefer_right_to_left() {
                     both.reverse();

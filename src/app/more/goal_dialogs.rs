@@ -6,16 +6,34 @@ use super::goals::*;
 use super::*;
 use egui::{Response, Vec2};
 
+/// When a goal set up in New goal is due.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DueChoice {
+    MonthEnd,
+    QuarterEnd,
+    NextQuarterEnd,
+    /// A day picked from the calendar.
+    Picked,
+}
+
+impl DueChoice {
+    /// In the order they are offered.
+    const ALL: [DueChoice; 4] = [
+        DueChoice::MonthEnd,
+        DueChoice::QuarterEnd,
+        DueChoice::NextQuarterEnd,
+        DueChoice::Picked,
+    ];
+}
+
 /// A goal being set up in the New goal dialog.
 #[derive(Clone, Debug)]
 pub(crate) struct GoalDraft {
     pub name: String,
-    /// 0 end of this month, 1 end of this quarter, 2 end of next quarter,
-    /// 3 a day picked
-    pub when: u8,
+    pub when: DueChoice,
     pub due: Option<NaiveDate>,
-    /// the target being set up: 0 number, 1 done or not, 2 tasks
-    pub kind: u8,
+    /// the kind of the target being set up
+    pub kind: TargetType,
     pub target_name: String,
     pub from: f64,
     pub to: f64,
@@ -31,9 +49,9 @@ impl GoalDraft {
     pub(crate) fn new(owner: u64) -> Self {
         Self {
             name: String::new(),
-            when: 1,
-            due: Some(due_preset(1, today())),
-            kind: 0,
+            when: DueChoice::QuarterEnd,
+            due: Some(due_preset(DueChoice::QuarterEnd, today())),
+            kind: TargetType::Number,
             target_name: String::new(),
             from: 0.0,
             to: 100.0,
@@ -81,16 +99,17 @@ impl GoalDraft {
 /// The number target being set up starts where it ends: there is nothing
 /// to measure, so it can't be added (it would read as met from the start).
 fn same_range(d: &GoalDraft) -> bool {
-    d.kind == 0 && (d.from - d.to).abs() < f64::EPSILON
+    d.kind == TargetType::Number && (d.from - d.to).abs() < f64::EPSILON
 }
 
-/// The last day of this month (0), this quarter (1) or next quarter (2).
-fn due_preset(which: u8, day: NaiveDate) -> NaiveDate {
+/// The last day of this month, this quarter or next quarter (a picked
+/// day has no preset; it is taken as next quarter).
+fn due_preset(which: DueChoice, day: NaiveDate) -> NaiveDate {
     let (y, m) = (day.year(), day.month());
     let last_month = match which {
-        0 => m,
-        1 => (m - 1) / 3 * 3 + 3,
-        _ => (m - 1) / 3 * 3 + 6,
+        DueChoice::MonthEnd => m,
+        DueChoice::QuarterEnd => (m - 1) / 3 * 3 + 3,
+        DueChoice::NextQuarterEnd | DueChoice::Picked => (m - 1) / 3 * 3 + 6,
     };
     let (y, last_month) = if last_month > 12 {
         (y + 1, last_month - 12)
@@ -171,14 +190,14 @@ impl App {
                         unit,
                         ..
                     } => {
-                        d.kind = 0;
+                        d.kind = TargetType::Number;
                         d.from = start;
                         d.to = target;
                         d.unit = unit;
                     }
-                    TargetKind::TrueFalse { .. } => d.kind = 1,
+                    TargetKind::TrueFalse { .. } => d.kind = TargetType::Done,
                     TargetKind::Tasks { ids } => {
-                        d.kind = 2;
+                        d.kind = TargetType::Tasks;
                         d.tasks = ids;
                     }
                 }
@@ -210,21 +229,22 @@ impl App {
         ui.add_space(14.0);
         label(ui, "Due date");
         ui.horizontal_wrapped(|ui| {
-            for i in 0..4u8 {
-                let (title, sub) = match i {
-                    0 => (tr("End of this month"), due_preset(0, day).text("%b %-d")),
-                    1 => (tr("End of this quarter"), due_preset(1, day).text("%b %-d")),
-                    2 => (tr("End of next quarter"), due_preset(2, day).text("%b %-d")),
-                    _ => (
+            for (i, choice) in DueChoice::ALL.into_iter().enumerate() {
+                let preset = || due_preset(choice, day).text("%b %-d");
+                let (title, sub) = match choice {
+                    DueChoice::MonthEnd => (tr("End of this month"), preset()),
+                    DueChoice::QuarterEnd => (tr("End of this quarter"), preset()),
+                    DueChoice::NextQuarterEnd => (tr("End of next quarter"), preset()),
+                    DueChoice::Picked => (
                         tr("Pick a date"),
-                        if d.when == 3 {
+                        if d.when == DueChoice::Picked {
                             d.due.map(|x| x.text("%b %-d")).unwrap_or_default()
                         } else {
                             String::new()
                         },
                     ),
                 };
-                let sel = d.when == i;
+                let sel = d.when == choice;
                 let resp = choice_box(ui, t, title, &sub, sel, vec2(0.0, 46.0));
                 name_it(
                     &resp,
@@ -235,21 +255,21 @@ impl App {
                             "end of quarter",
                             "end of next quarter",
                             "picked"
-                        ][i as usize]
+                        ][i]
                     ),
                 );
-                if i < 3 && resp.clicked() {
-                    d.when = i;
-                    d.due = Some(due_preset(i, day));
+                if choice != DueChoice::Picked && resp.clicked() {
+                    d.when = choice;
+                    d.due = Some(due_preset(choice, day));
                 }
-                if i == 3 {
+                if choice == DueChoice::Picked {
                     let mut pick = d.due;
                     if let Some(true) =
                         popup(ui, &resp, ui.id().with("new goal due"), DATE_MENU_W, |ui| {
                             date_menu(ui, t, ui.id().with("new goal cal"), &mut pick)
                         })
                     {
-                        d.when = 3;
+                        d.when = DueChoice::Picked;
                         d.due = pick;
                     }
                 }
@@ -267,16 +287,13 @@ impl App {
         label(ui, "Measured by");
         ui.horizontal(|ui| {
             let bw = (w - 16.0) / 3.0;
-            for (k, title, ex, icon) in [
-                (0u8, "Number", "For example: revenue, customers", "hash"),
-                (
-                    1,
-                    "Done or not",
-                    "For example: contract signed, review passed",
-                    "check",
-                ),
-                (2, "Tasks", "For example: the launch tasks", "list"),
-            ] {
+            for k in TargetType::ALL {
+                let (title, icon) = (k.label(), k.icon());
+                let ex = match k {
+                    TargetType::Number => "For example: revenue, customers",
+                    TargetType::Done => "For example: contract signed, review passed",
+                    TargetType::Tasks => "For example: the launch tasks",
+                };
                 let (r, resp) = ui.allocate_exact_size(vec2(bw, 92.0), Sense::click());
                 let sel = d.kind == k;
                 let p = ui.painter();
@@ -384,7 +401,7 @@ impl App {
                 };
                 let hint = new_target(d.kind).name;
                 match d.kind {
-                    0 => {
+                    TargetType::Number => {
                         // a column each: its label over its box
                         ui.horizontal_top(|ui| {
                             let name_w = (ui.available_width() - 250.0).max(140.0);
@@ -439,7 +456,7 @@ impl App {
                             );
                         }
                     }
-                    1 => {
+                    TargetType::Done => {
                         small(ui, "Target name");
                         let r = ui.add(
                             field(&mut d.target_name)
@@ -453,7 +470,7 @@ impl App {
                                 .color(t.text2),
                         );
                     }
-                    _ => {
+                    TargetType::Tasks => {
                         small(ui, "Target name");
                         ui.horizontal(|ui| {
                             let r = ui.add(
@@ -781,11 +798,7 @@ impl App {
                             p.text(pos2(r.left() + 36.0, r.top() + 24.0), Align2::LEFT_CENTER, tr(name), FontId::proportional(15.0), t.text);
                             for (k, tg) in targets.iter().enumerate() {
                                 let y = r.top() + 54.0 + k as f32 * 24.0;
-                                let kind = match tg.kind {
-                                    TargetKind::Number { .. } => tr("Number"),
-                                    TargetKind::TrueFalse { .. } => tr("Done or not"),
-                                    TargetKind::Tasks { .. } => tr("Tasks"),
-                                };
+                                let kind = tr(TargetType::of(&tg.kind).label());
                                 let kg = p.layout_no_wrap(kind.to_string(), FontId::proportional(11.5), t.text2);
                                 let kr = Rect::from_min_size(pos2(r.left() + 18.0, y - 9.0), vec2(kg.size().x + 10.0, 18.0));
                                 p.rect_filled(kr, 5.0, t.hover);
@@ -964,11 +977,29 @@ mod tests {
     #[test]
     fn due_presets_end_months_and_quarters() {
         let d = |y, m, day| NaiveDate::from_ymd_opt(y, m, day).unwrap();
-        assert_eq!(due_preset(0, d(2026, 2, 10)), d(2026, 2, 28));
-        assert_eq!(due_preset(1, d(2026, 2, 10)), d(2026, 3, 31));
-        assert_eq!(due_preset(2, d(2026, 2, 10)), d(2026, 6, 30));
-        assert_eq!(due_preset(1, d(2026, 11, 21)), d(2026, 12, 31));
-        assert_eq!(due_preset(2, d(2026, 11, 21)), d(2027, 3, 31));
-        assert_eq!(due_preset(0, d(2026, 12, 5)), d(2026, 12, 31));
+        assert_eq!(
+            due_preset(DueChoice::MonthEnd, d(2026, 2, 10)),
+            d(2026, 2, 28)
+        );
+        assert_eq!(
+            due_preset(DueChoice::QuarterEnd, d(2026, 2, 10)),
+            d(2026, 3, 31)
+        );
+        assert_eq!(
+            due_preset(DueChoice::NextQuarterEnd, d(2026, 2, 10)),
+            d(2026, 6, 30)
+        );
+        assert_eq!(
+            due_preset(DueChoice::QuarterEnd, d(2026, 11, 21)),
+            d(2026, 12, 31)
+        );
+        assert_eq!(
+            due_preset(DueChoice::NextQuarterEnd, d(2026, 11, 21)),
+            d(2027, 3, 31)
+        );
+        assert_eq!(
+            due_preset(DueChoice::MonthEnd, d(2026, 12, 5)),
+            d(2026, 12, 31)
+        );
     }
 }

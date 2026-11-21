@@ -555,7 +555,7 @@ pub struct App {
     meeting_open: Option<u64>,
     goal_open: Option<u64>,
     /// Goals page: 0 all, 1 mine, 2 achieved
-    goal_filter: u8,
+    goal_filter: more::GoalFilter,
     /// the goal whose targets show under its row in the rows view
     goal_list_open: Option<u64>,
     /// a milestone just reached on a goal's page: (goal, 25/50/75, when);
@@ -1102,7 +1102,7 @@ impl App {
             dash_open: None,
             meeting_open: None,
             goal_open: None,
-            goal_filter: 0,
+            goal_filter: more::GoalFilter::All,
             goal_list_open: None,
             goal_banner: None,
             goal_show_done: None,

@@ -1002,24 +1002,40 @@ fn a_form_answer_tells_only_that_forms_owner() {
         a.notify_scan();
     };
     answer(&mut a, "Login fails", Some(theirs));
-    assert!(a.notify_rt.sent.is_empty(), "an answer to someone else's form");
+    assert!(
+        a.notify_rt.sent.is_empty(),
+        "an answer to someone else's form"
+    );
     answer(&mut a, "Crash on save", Some(mine));
     assert_eq!(kinds(&a), vec![Kind::Form]);
     assert_eq!(a.notify_rt.sent[0].body, "Alex Kim answered: Crash on save");
     answer(&mut a, "Old app answer", None);
     assert_eq!(a.notify_rt.sent.len(), 2);
-    assert_eq!(a.notify_rt.sent[1].body, "Alex Kim answered: Old app answer");
+    assert_eq!(
+        a.notify_rt.sent[1].body,
+        "Alex Kim answered: Old app answer"
+    );
     // with the two forms in different Lists, an older app's answer is told
     // to the owner of the form whose List it went to
     let other = a
         .data
         .spaces
         .iter()
-        .flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())))
+        .flat_map(|s| {
+            s.lists
+                .iter()
+                .chain(s.folders.iter().flat_map(|f| f.lists.iter()))
+        })
         .map(|l| l.id)
         .find(|l| *l != list)
         .unwrap();
-    a.data.extra.forms.iter_mut().find(|f| f.id == theirs).unwrap().list_id = other;
+    a.data
+        .extra
+        .forms
+        .iter_mut()
+        .find(|f| f.id == theirs)
+        .unwrap()
+        .list_id = other;
     a.pending.log = None;
     a.apply(Action::Add {
         list: other,
@@ -1031,7 +1047,13 @@ fn a_form_answer_tells_only_that_forms_owner() {
         parent: None,
         open: false,
     });
-    let tid = a.data.tasks.iter().find(|t| t.name == "To their List").unwrap().id;
+    let tid = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.name == "To their List")
+        .unwrap()
+        .id;
     teammate_line(&mut a, tid, 2, "submitted the form Bug report", false);
     a.notify_scan();
     assert_eq!(a.notify_rt.sent.len(), 2, "not told about theirs");
@@ -1061,7 +1083,13 @@ fn an_answer_to_an_unnamed_form_says_untitled() {
         parent: None,
         open: false,
     });
-    let tid = a.data.tasks.iter().find(|t| t.name == "Printer").unwrap().id;
+    let tid = a
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.name == "Printer")
+        .unwrap()
+        .id;
     teammate_line(&mut a, tid, 2, "submitted the form ", false);
     a.notify_scan();
     assert_eq!(a.notify_rt.sent[0].title, "New answer to Untitled form");

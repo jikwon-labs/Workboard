@@ -726,7 +726,10 @@ fn forms_go_between_teammates_through_a_server() {
     });
     send(&mut a);
     receive(&mut b, "A's later task at B", |x| {
-        x.data.tasks.iter().any(|t| t.name == "After the private form")
+        x.data
+            .tasks
+            .iter()
+            .any(|t| t.name == "After the private form")
     });
     assert!(b.app.data.extra.forms.iter().all(|f| f.id != private));
 }
@@ -846,7 +849,10 @@ fn a_form_made_from_a_spaces_plus_goes_to_that_space() {
     let fid = h.app.form_open.expect("the form opens");
     assert_eq!(h.app.section, Section::Forms);
     assert_eq!(
-        h.app.data.space_of_list(form(&h, fid).list_id).map(|s| s.id),
+        h.app
+            .data
+            .space_of_list(form(&h, fid).list_id)
+            .map(|s| s.id),
         Some(side)
     );
     assert_eq!(form(&h, fid).list_id, ideas);
@@ -876,7 +882,13 @@ fn every_kind_of_answer_lands_on_the_task() {
     // ("Made the form" would cover Add question once it is low on the page)
     h.app.toast = None;
     for k in [
-        "Priority", "Due date", "Assignee", "Short text", "Dropdown", "Number", "Email",
+        "Priority",
+        "Due date",
+        "Assignee",
+        "Short text",
+        "Dropdown",
+        "Number",
+        "Email",
         "Checkbox",
     ] {
         h.click("Add question");
@@ -945,7 +957,11 @@ fn every_kind_of_answer_lands_on_the_task() {
 fn the_forms_table_sorts_by_last_edited_or_name() {
     let mut h = Ui1::new();
     open_forms(&mut h);
-    for (tpl, edited) in [("Order Form", 300), ("Feedback Form", 100), ("Job Application", 200)] {
+    for (tpl, edited) in [
+        ("Order Form", 300),
+        ("Feedback Form", 100),
+        ("Job Application", 200),
+    ] {
         h.click(tpl);
         let id = h.app.form_open.unwrap();
         h.app
@@ -968,11 +984,20 @@ fn the_forms_table_sorts_by_last_edited_or_name() {
         rows.sort_by(|a, b| a.0.total_cmp(&b.0));
         rows.into_iter().map(|x| x.1).collect::<Vec<_>>()
     };
-    assert_eq!(order(&h), ["Order Form", "Job Application", "Feedback Form"]);
+    assert_eq!(
+        order(&h),
+        ["Order Form", "Job Application", "Feedback Form"]
+    );
     h.click("Sort forms");
-    assert_eq!(order(&h), ["Feedback Form", "Job Application", "Order Form"]);
+    assert_eq!(
+        order(&h),
+        ["Feedback Form", "Job Application", "Order Form"]
+    );
     h.click("Sort forms");
-    assert_eq!(order(&h), ["Order Form", "Job Application", "Feedback Form"]);
+    assert_eq!(
+        order(&h),
+        ["Order Form", "Job Application", "Feedback Form"]
+    );
 }
 
 /// Delete form in the editor asks first, takes the form to Trash and back
@@ -994,7 +1019,9 @@ fn a_deleted_form_comes_back_from_trash_as_it_was() {
     h.click("Edit");
     let before = serde_json::to_string(&form(&h, fid)).unwrap();
     h.click("Delete form");
-    assert!(!h.painted_text("Delete the form \"Job Application\"? It goes to Trash.").is_empty());
+    assert!(!h
+        .painted_text("Delete the form \"Job Application\"? It goes to Trash.")
+        .is_empty());
     confirm_delete(&mut h);
     assert!(h.app.data.extra.forms.iter().all(|f| f.id != fid));
     assert_eq!(h.app.form_open, None);
@@ -1054,7 +1081,13 @@ fn answers_follow_their_tasks() {
     let kb = task_named(&h, "Keyboard").id;
     h.app.apply(Action::DeleteTask(kb));
     let wc = task_named(&h, "Webcam").id;
-    h.app.data.tasks.iter_mut().find(|t| t.id == wc).unwrap().archived = true;
+    h.app
+        .data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == wc)
+        .unwrap()
+        .archived = true;
     h.app.dirty = true;
     h.settle();
     assert_eq!(rows(&h), ["Mouse"]);
@@ -1086,13 +1119,21 @@ fn the_forms_search_takes_korean_case_and_spaces() {
     h.settle();
     let korean = (h.has("Form 피드백 양식"), h.has("Form IT 요청"));
     crate::i18n::set_lang(crate::i18n::Lang::En);
-    assert_eq!(korean, (true, false), "narrowed while the syllable is unfinished");
+    assert_eq!(
+        korean,
+        (true, false),
+        "narrowed while the syllable is unfinished"
+    );
     h.app.sweep.forms.search = "  it  ".into();
     h.settle();
     assert!(h.has("Form IT 요청") && !h.has("Form 피드백 양식"));
     h.app.sweep.forms.search = "zzz".into();
     h.settle();
-    assert_eq!(h.painted_text("No form has that name").len(), 2, "sidebar and table");
+    assert_eq!(
+        h.painted_text("No form has that name").len(),
+        2,
+        "sidebar and table"
+    );
 }
 
 /// An answer from an app that doesn't record its form (0.1.21 and older):
@@ -1197,7 +1238,11 @@ fn an_older_form_opens_and_takes_answers() {
         r#"{{"id":4242,"name":"Old one","list_id":{},"description":"d","fields":[{{"label":"T","map":"name"}}]}}"#,
         list
     );
-    h.app.data.extra.forms.push(serde_json::from_str(&old).unwrap());
+    h.app
+        .data
+        .extra
+        .forms
+        .push(serde_json::from_str(&old).unwrap());
     open_forms(&mut h);
     assert!(h.has("Form Old one") && h.has("Open form Old one"));
     h.click("My forms");

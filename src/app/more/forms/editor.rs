@@ -725,170 +725,170 @@ impl App {
             ));
         }
         ui.scope(|ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                panel_heading(ui, &t, tr("List for new tasks"));
-                let cur = lists.iter().find(|l| l.0 == f.list_id).map(|l| l.1.clone());
-                let (text, color) = match &cur {
-                    Some(c) => (c.clone(), t.text),
-                    None => (tr("Choose a List").to_string(), WARN_ORANGE),
-                };
-                let w = ui.available_width();
-                let r = select_button(
-                    ui,
-                    &t,
-                    "list",
-                    t.text2,
-                    &text,
-                    color,
-                    vec2(w, 34.0),
-                    "Pick the List for new tasks",
-                );
-                let picked = popup(ui, &r, ui.id().with(("form_list", f.id)), w, |ui| {
-                    let mut pick = None;
-                    for (id, n) in &lists {
-                        if menu_row_plain(ui, &t, n, *id == f.list_id).clicked() {
-                            pick = Some(*id);
-                            close_popup(ui);
-                        }
+            ui.spacing_mut().item_spacing.y = 8.0;
+            panel_heading(ui, &t, tr("List for new tasks"));
+            let cur = lists.iter().find(|l| l.0 == f.list_id).map(|l| l.1.clone());
+            let (text, color) = match &cur {
+                Some(c) => (c.clone(), t.text),
+                None => (tr("Choose a List").to_string(), WARN_ORANGE),
+            };
+            let w = ui.available_width();
+            let r = select_button(
+                ui,
+                &t,
+                "list",
+                t.text2,
+                &text,
+                color,
+                vec2(w, 34.0),
+                "Pick the List for new tasks",
+            );
+            let picked = popup(ui, &r, ui.id().with(("form_list", f.id)), w, |ui| {
+                let mut pick = None;
+                for (id, n) in &lists {
+                    if menu_row_plain(ui, &t, n, *id == f.list_id).clicked() {
+                        pick = Some(*id);
+                        close_popup(ui);
                     }
-                    pick
-                });
-                if let Some(Some(id)) = picked {
-                    self.data.extra.forms[fi].list_id = id;
-                    self.form_touched(f.id);
                 }
-                ui.label(
-                    RichText::new(tr("Each answer adds one task to this List."))
-                        .size(12.0)
-                        .color(t.text2),
-                );
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-                panel_heading(ui, &t, tr("Will be created"));
-                egui::Frame::new()
-                    .stroke(Stroke::new(1.0_f32, t.border))
-                    .corner_radius(10)
-                    .inner_margin(egui::Margin::symmetric(12, 8))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        for (k, label) in [
-                            ("name", "Task name"),
-                            ("priority", "Priority"),
-                            ("description", "Description"),
-                            ("due", "Due date"),
-                            ("assignee", "Assignee"),
-                        ] {
-                            ui.horizontal_top(|ui| {
-                                let (r, _) =
-                                    ui.allocate_exact_size(vec2(72.0, 20.0), Sense::hover());
-                                ui.painter().text(
-                                    r.left_center(),
-                                    Align2::LEFT_CENTER,
-                                    tr(label),
-                                    FontId::proportional(12.0),
-                                    t.text2,
-                                );
-                                let qs: Vec<(usize, &FormField)> = f
-                                    .fields
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, q)| {
-                                        q.map == k
-                                            || (k == "description" && !fills_task_field(&q.map))
-                                    })
-                                    .collect();
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                                    if qs.is_empty() {
-                                        ui.label(
-                                            RichText::new(tr("No question"))
-                                                .size(12.0)
-                                                .color(t.text3),
-                                        );
-                                    }
-                                    for (qi, q) in qs {
-                                        let own = q.map == k;
-                                        let label = format!(
-                                            "{} \u{00B7} {}",
-                                            qi + 1,
-                                            crate::widgets::one_line(&q.label)
-                                        );
-                                        egui::Frame::new()
-                                            .fill(if own { t.accent_bg } else { t.hover })
-                                            .corner_radius(6)
-                                            .inner_margin(egui::Margin::symmetric(7, 2))
-                                            .show(ui, |ui| {
-                                                ui.label(RichText::new(label).size(12.0).color(
-                                                    if own { t.accent_text } else { t.text2 },
-                                                ));
-                                            });
-                                    }
-                                });
-                            });
-                        }
-                    });
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-                panel_heading(ui, &t, tr("Notifications"));
-                let owner = self.data.member(f.owner);
-                let text = if f.owner == self.data.me {
-                    tr("New answers notify you, the form's maker.").to_string()
-                } else if let Some(m) = owner {
-                    trf!("New answers notify {}, who made this form.", m.shown())
-                } else {
-                    tr("New answers notify the form's maker.").to_string()
-                };
-                ui.horizontal_top(|ui| {
-                    let (r, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
-                    line_icon(ui.painter(), "bell", r.center(), t.text2);
-                    ui.add(egui::Label::new(RichText::new(text).size(13.0).color(t.text)).wrap());
-                });
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-                panel_heading(ui, &t, tr("Made by"));
-                ui.horizontal(|ui| match owner {
-                    Some(m) => {
-                        let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
-                        paint_avatar(ui.painter(), r.center(), 10.0, m, t.bg);
-                        let name = if f.owner == self.data.me {
-                            trf!("{} (you)", m.shown())
-                        } else {
-                            m.shown().to_string()
-                        };
-                        ui.label(RichText::new(name).size(13.0).color(t.text));
-                    }
-                    None => {
-                        ui.label(RichText::new("\u{2014}").size(13.0).color(t.text3));
-                    }
-                });
-                ui.add_space(20.0);
-                if icon_button_ex(
-                    ui,
-                    &t,
-                    "trash",
-                    tr("Delete form"),
-                    "Delete form",
-                    false,
-                    0.0,
-                    t.danger,
-                    t.danger,
-                )
-                .clicked()
-                {
-                    self.modal = Some(Modal::ConfirmRemove {
-                        kind: "form",
-                        id: f.id,
-                        name: form_title(&f),
-                    });
-                }
-                ui.label(
-                    RichText::new(tr("It goes to Trash. The tasks it made stay."))
-                        .size(12.0)
-                        .color(t.text3),
-                );
+                pick
             });
+            if let Some(Some(id)) = picked {
+                self.data.extra.forms[fi].list_id = id;
+                self.form_touched(f.id);
+            }
+            ui.label(
+                RichText::new(tr("Each answer adds one task to this List."))
+                    .size(12.0)
+                    .color(t.text2),
+            );
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
+            panel_heading(ui, &t, tr("Will be created"));
+            egui::Frame::new()
+                .stroke(Stroke::new(1.0_f32, t.border))
+                .corner_radius(10)
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    for (k, label) in [
+                        ("name", "Task name"),
+                        ("priority", "Priority"),
+                        ("description", "Description"),
+                        ("due", "Due date"),
+                        ("assignee", "Assignee"),
+                    ] {
+                        ui.horizontal_top(|ui| {
+                            let (r, _) = ui.allocate_exact_size(vec2(72.0, 20.0), Sense::hover());
+                            ui.painter().text(
+                                r.left_center(),
+                                Align2::LEFT_CENTER,
+                                tr(label),
+                                FontId::proportional(12.0),
+                                t.text2,
+                            );
+                            let qs: Vec<(usize, &FormField)> = f
+                                .fields
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, q)| {
+                                    q.map == k || (k == "description" && !fills_task_field(&q.map))
+                                })
+                                .collect();
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                                if qs.is_empty() {
+                                    ui.label(
+                                        RichText::new(tr("No question")).size(12.0).color(t.text3),
+                                    );
+                                }
+                                for (qi, q) in qs {
+                                    let own = q.map == k;
+                                    let label = format!(
+                                        "{} \u{00B7} {}",
+                                        qi + 1,
+                                        crate::widgets::one_line(&q.label)
+                                    );
+                                    egui::Frame::new()
+                                        .fill(if own { t.accent_bg } else { t.hover })
+                                        .corner_radius(6)
+                                        .inner_margin(egui::Margin::symmetric(7, 2))
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                RichText::new(label).size(12.0).color(if own {
+                                                    t.accent_text
+                                                } else {
+                                                    t.text2
+                                                }),
+                                            );
+                                        });
+                                }
+                            });
+                        });
+                    }
+                });
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
+            panel_heading(ui, &t, tr("Notifications"));
+            let owner = self.data.member(f.owner);
+            let text = if f.owner == self.data.me {
+                tr("New answers notify you, the form's maker.").to_string()
+            } else if let Some(m) = owner {
+                trf!("New answers notify {}, who made this form.", m.shown())
+            } else {
+                tr("New answers notify the form's maker.").to_string()
+            };
+            ui.horizontal_top(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
+                line_icon(ui.painter(), "bell", r.center(), t.text2);
+                ui.add(egui::Label::new(RichText::new(text).size(13.0).color(t.text)).wrap());
+            });
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
+            panel_heading(ui, &t, tr("Made by"));
+            ui.horizontal(|ui| match owner {
+                Some(m) => {
+                    let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                    paint_avatar(ui.painter(), r.center(), 10.0, m, t.bg);
+                    let name = if f.owner == self.data.me {
+                        trf!("{} (you)", m.shown())
+                    } else {
+                        m.shown().to_string()
+                    };
+                    ui.label(RichText::new(name).size(13.0).color(t.text));
+                }
+                None => {
+                    ui.label(RichText::new("\u{2014}").size(13.0).color(t.text3));
+                }
+            });
+            ui.add_space(20.0);
+            if icon_button_ex(
+                ui,
+                &t,
+                "trash",
+                tr("Delete form"),
+                "Delete form",
+                false,
+                0.0,
+                t.danger,
+                t.danger,
+            )
+            .clicked()
+            {
+                self.modal = Some(Modal::ConfirmRemove {
+                    kind: "form",
+                    id: f.id,
+                    name: form_title(&f),
+                });
+            }
+            ui.label(
+                RichText::new(tr("It goes to Trash. The tasks it made stay."))
+                    .size(12.0)
+                    .color(t.text3),
+            );
+        });
     }
 }

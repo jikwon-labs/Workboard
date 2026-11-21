@@ -438,7 +438,11 @@ impl App {
                         // the form the task says it answers; by its name for
                         // answers from apps that didn't keep that
                         let to_me = match t.form.or_else(|| {
-                            crate::app::more::old_answer_form(&self.data.extra.forms, name, t.list_id)
+                            crate::app::more::old_answer_form(
+                                &self.data.extra.forms,
+                                name,
+                                t.list_id,
+                            )
                         }) {
                             Some(id) => mine.iter().any(|f| f.id == id),
                             // two of that name in one List: any of them of mine

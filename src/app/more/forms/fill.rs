@@ -262,7 +262,9 @@ impl App {
                     popup(ui, &b, ui.id().with(("form_dd", fid, i)), w, |ui| {
                         if !fld.options.iter().any(|o| !o.trim().is_empty()) {
                             ui.label(
-                                RichText::new(tr("No choices yet")).size(13.0).color(t.text3),
+                                RichText::new(tr("No choices yet"))
+                                    .size(13.0)
+                                    .color(t.text3),
                             );
                         }
                         for o in fld.options.iter().filter(|o| !o.trim().is_empty()) {

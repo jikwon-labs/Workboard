@@ -1377,13 +1377,18 @@ fn form_answers_check_required_number_and_email() {
 fn an_older_form_loads_and_saves_back_as_it_was() {
     let old = r#"{"id":4242,"name":"Old one","list_id":7,"description":"d","fields":[{"label":"T","map":"name"},{"label":"Link","map":"url"}]}"#;
     let f: Form = serde_json::from_str(old).unwrap();
-    assert_eq!((f.owner, f.icon.as_str(), f.color.as_str(), f.updated), (0, "", "", 0));
+    assert_eq!(
+        (f.owner, f.icon.as_str(), f.color.as_str(), f.updated),
+        (0, "", "", 0)
+    );
     assert_eq!(serde_json::to_string(&f).unwrap(), old);
     // its answers: the unknown kind goes into the description like short text
-    let fill: HashMap<usize, String> =
-        [(0, "Hi".to_string()), (1, "http://x".to_string())].into();
+    let fill: HashMap<usize, String> = [(0, "Hi".to_string()), (1, "http://x".to_string())].into();
     let a = super::more::form_answers(&f, &fill).unwrap();
-    assert_eq!((a.name.as_str(), a.description.as_str()), ("Hi", "\nLink: http://x"));
+    assert_eq!(
+        (a.name.as_str(), a.description.as_str()),
+        ("Hi", "\nLink: http://x")
+    );
 }
 
 /// An Email question takes an address (something before the @, a dot
@@ -1424,7 +1429,10 @@ fn form_answers_check_email_and_number_strictly() {
         assert!(check(good, "a@b.co").is_ok(), "{good}");
     }
     for bad in ["inf", "-infinity", "NaN", "1e400", "twelve"] {
-        assert!(check(bad, "a@b.co").unwrap_err().contains("number"), "{bad}");
+        assert!(
+            check(bad, "a@b.co").unwrap_err().contains("number"),
+            "{bad}"
+        );
     }
 }
 

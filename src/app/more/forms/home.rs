@@ -237,8 +237,8 @@ impl App {
                                 } else {
                                     trf!("{} forms", forms.len())
                                 })
-                                    .size(13.0)
-                                    .color(t.text2),
+                                .size(13.0)
+                                .color(t.text2),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 let label = if self.sweep.forms.by_name {

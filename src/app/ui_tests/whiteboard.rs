@@ -1945,3 +1945,38 @@ fn a_new_note_takes_the_typing() {
         .collect();
     assert_eq!(texts, ["Hello", "World"]);
 }
+
+// ------------------------------------------------------------ QA round 2
+
+/// In the smallest window the bar along the bottom stays on the page for
+/// every tool, in English and Korean: the Shape and Line tools' hint ran
+/// past the window's edge, cut off mid-sentence. The hint goes when there
+/// isn't room for it.
+#[test]
+fn the_tool_options_bar_stays_on_the_page_in_a_small_window() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        let mut h = Ui1::sized(900.0, 560.0);
+        template_board(&mut h, "Flow Chart");
+        crate::i18n::set_lang(lang);
+        for tool in [2u8, 0, 3, 1, 4, 5] {
+            h.app.wb_tool = tool;
+            h.settle();
+            let canvas = h.rect("Whiteboard canvas");
+            let mut off = vec![];
+            each_text(&h.shapes, |ts, _| {
+                let r = Rect::from_min_size(ts.pos, ts.galley.size());
+                if r.top() > canvas.bottom() - 70.0 && r.right() > canvas.right() - 16.0 {
+                    off.push(ts.galley.text().to_string());
+                }
+            });
+            assert!(off.is_empty(), "tool {tool}: {off:?} runs off the page");
+        }
+        crate::i18n::set_lang(crate::i18n::Lang::En);
+    }
+    // in a usual window the hint is there
+    let mut h = Ui1::new();
+    template_board(&mut h, "Flow Chart");
+    h.app.wb_tool = 5;
+    h.settle();
+    assert!(!h.painted_text("Drag from one shape to another").is_empty());
+}

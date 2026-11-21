@@ -623,10 +623,22 @@ impl App {
         if let Some(g) = &width_label {
             w += SEP + g.size().x + 8.0 + SLIDER + 8.0 + 30.0 + 26.0;
         }
+        let hint_w = |g: &std::sync::Arc<egui::Galley>| {
+            (if swatches.is_empty() { 0.0 } else { SEP }) + g.size().x + 4.0
+        };
+        let mut hint = hint;
         if let Some(g) = &hint {
-            w += if swatches.is_empty() { 0.0 } else { SEP } + g.size().x + 4.0;
+            w += hint_w(g);
         }
         w += 12.0;
+        // in a narrow window the hint goes before the bar runs off the page
+        // (the Shape and Line tools' was cut off at the window's edge)
+        let room = rect.right() - EDGE - (tools.right() + 12.0);
+        if w > room {
+            if let Some(g) = hint.take() {
+                w -= hint_w(&g);
+            }
+        }
         // centred under the board, but clear of the tool bar
         let left = (rect.center().x - w / 2.0).max(tools.right() + 12.0);
         let bar = Rect::from_min_size(

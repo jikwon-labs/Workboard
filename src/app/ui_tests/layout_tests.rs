@@ -1495,3 +1495,26 @@ fn small_window_thread_beside_a_channel_does_not_overlap() {
     h.click("Pinned messages");
     assert_eq!(h.app.channel_panel, 1);
 }
+
+/// Inbox and Replies rows in the smallest window shorten long task names
+/// and comments with an ellipsis (they were cut mid-letter), and a Replies
+/// row's text ends before its Mark read button (it ran under it).
+#[test]
+fn small_window_inbox_and_replies_rows_shorten_their_text() {
+    for loc in [Location::Inbox, Location::Replies] {
+        let mut h = Ui1::sized(900.0, 560.0);
+        heavy(&mut h);
+        h.app.section = Section::Home;
+        h.app.loc = loc;
+        h.settle();
+        let page = Rect::from_min_max(pos2(320.0, 40.0), h.size.to_pos2());
+        assert!(
+            h.cut_texts(page).is_empty(),
+            "{:?}: {:?}",
+            loc,
+            h.cut_texts(page)
+        );
+        let over = overlapping(&h.texts_in(page));
+        assert!(over.is_empty(), "{:?}: {:?}", loc, over);
+    }
+}

@@ -4934,26 +4934,33 @@ impl App {
                                     t.bg,
                                 );
                             }
+                            // the text ends, with an ellipsis, before what's on the
+                            // right: the time, Resolve, or Mark read (which it ran under)
+                            let right = if feed == CommentsPage::Replies && tab == 0 {
+                                236.0
+                            } else if feed == CommentsPage::Assigned {
+                                140.0
+                            } else {
+                                100.0
+                            };
+                            let text_w = (r.width() - 48.0 - right).max(40.0);
+                            let font = FontId::proportional(13.5);
                             ui.painter().text(
                                 r.left_top() + vec2(48.0, 16.0),
                                 Align2::LEFT_CENTER,
-                                &tname,
-                                FontId::proportional(13.5),
+                                fit_text(ui.painter(), &tname, &font, text_w),
+                                font,
                                 t.text,
                             );
                             let line = self.inbox_line(a.author, &a.text, a.comment, src, false);
-                            ui.painter()
-                                .with_clip_rect(Rect::from_min_max(
-                                    r.min,
-                                    pos2(r.right() - 140.0, r.bottom()),
-                                ))
-                                .text(
-                                    r.left_top() + vec2(48.0, 38.0),
-                                    Align2::LEFT_CENTER,
-                                    line,
-                                    FontId::proportional(12.5),
-                                    t.text2,
-                                );
+                            let font = FontId::proportional(12.5);
+                            ui.painter().text(
+                                r.left_top() + vec2(48.0, 38.0),
+                                Align2::LEFT_CENTER,
+                                fit_text(ui.painter(), &line, &font, text_w),
+                                font,
+                                t.text2,
+                            );
                             ui.painter().text(
                                 r.right_center() - vec2(12.0, 0.0),
                                 Align2::RIGHT_CENTER,

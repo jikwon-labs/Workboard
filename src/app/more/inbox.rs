@@ -350,28 +350,31 @@ impl App {
                             // time and the buttons on the right
                             let text_clip =
                                 Rect::from_min_max(r.min, pos2(r.right() - 190.0, r.bottom()));
-                            ui.painter().with_clip_rect(text_clip).text(
+                            // shortened with an ellipsis there, not cut mid-letter
+                            let text_w = text_clip.width() - 56.0;
+                            let title = if archived {
+                                trf!("{} (archived)", tname)
+                            } else {
+                                tname.clone()
+                            };
+                            let font = FontId::proportional(14.0);
+                            ui.painter().text(
                                 r.left_top() + vec2(48.0, 18.0),
                                 Align2::LEFT_CENTER,
-                                if archived {
-                                    trf!("{} (archived)", tname)
-                                } else {
-                                    tname.clone()
-                                },
-                                FontId::proportional(14.0),
+                                fit_text(ui.painter(), &title, &font, text_w),
+                                font,
                                 if archived { t.text2 } else { t.text },
                             );
                             let line = self
                                 .inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
-                            ui.painter()
-                                .with_clip_rect(text_clip)
-                                .text(
-                                    r.left_top() + vec2(48.0, 40.0),
-                                    Align2::LEFT_CENTER,
-                                    line,
-                                    FontId::proportional(13.0),
-                                    t.text2,
-                                );
+                            let font = FontId::proportional(13.0);
+                            ui.painter().text(
+                                r.left_top() + vec2(48.0, 40.0),
+                                Align2::LEFT_CENTER,
+                                fit_text(ui.painter(), &line, &font, text_w),
+                                font,
+                                t.text2,
+                            );
                             // under the pointer the row's buttons take the time's place: a
                             // long time ("Oct 17 at 4:19 PM") would show through them
                             let buttons = resp.hovered() || ui.rect_contains_pointer(r);

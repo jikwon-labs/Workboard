@@ -254,10 +254,15 @@ fn a_chat_row_shows_the_message_without_its_formatting_marks() {
 }
 
 /// Where the text `text` was painted and the rectangle it was clipped to.
+/// The text drawn as `text`, or shortened from it with an ellipsis.
 fn text_and_clip(h: &Ui1, text: &str) -> Option<(Rect, Rect)> {
     let mut found = None;
     each_text(&h.shapes, |ts, clip| {
-        if ts.galley.text() == text {
+        let shown = ts.galley.text();
+        let cut = shown
+            .strip_suffix('\u{2026}')
+            .is_some_and(|s| !s.is_empty() && text.starts_with(s));
+        if shown == text || cut {
             found = Some((ts.visual_bounding_rect(), clip));
         }
     });

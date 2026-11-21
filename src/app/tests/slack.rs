@@ -358,7 +358,7 @@ fn imported_mentions_and_replies_are_not_news_in_anyones_inbox() {
     assert_eq!(a.inbox_badge(), badge, "the badge doesn't move");
     a.notify_rt.seeded = true;
     let keys: Vec<String> = a
-        .notify_candidates(&crate::model::NotifySettings::everything())
+        .notify_candidates(&crate::model::NotifySettings::everything(), true)
         .into_iter()
         .map(|(_, n)| n.key)
         .collect();

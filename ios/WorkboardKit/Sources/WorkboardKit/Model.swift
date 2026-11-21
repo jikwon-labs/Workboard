@@ -157,6 +157,9 @@ public struct TaskView: Identifiable, Hashable, Sendable {
     public let startTime: String?
     /// People following the task besides its assignees.
     public let watchers: [UInt64]
+    /// Assignees and the maker who turned the task's updates off
+    /// (Task::unwatched in src/model/task.rs).
+    public let unwatched: [UInt64]
     /// Tasks this one waits on (Blocking is the other side, worked out in
     /// WorkspaceView.relations).
     public let waitingOn: [UInt64]
@@ -173,11 +176,23 @@ public struct TaskView: Identifiable, Hashable, Sendable {
     public let milestone: Bool
     public let attachments: [AttachmentView]
 
+    /// Task::watched_by in src/model/task.rs: whether `id` gets the task's
+    /// comments and changes (assignees and the maker unless they turned
+    /// that off, and the people who chose to watch).
+    public func watchedBy(_ id: UInt64) -> Bool {
+        if unwatched.contains(id) { return false }
+        if watchers.contains(id) || assignees.contains(id) { return true }
+        return activity.contains { a in
+            a.author == id && !a.comment && (a.text == "created this task" || a.text.hasPrefix("duplicated this task from "))
+        }
+    }
+
     init(_ j: JSON) {
         created = j["created"]?.int ?? 0
         start = j["start"]?.string
         startTime = start == nil ? nil : j["start_time"]?.string.flatMap(TaskView.hhmm)
         watchers = (j["watchers"]?.array ?? []).compactMap(\.uint)
+        unwatched = (j["unwatched"]?.array ?? []).compactMap(\.uint)
         waitingOn = (j["waiting_on"]?.array ?? []).compactMap(\.uint)
         linked = (j["linked"]?.array ?? []).compactMap(\.uint)
         recur = j["recur"]?.string

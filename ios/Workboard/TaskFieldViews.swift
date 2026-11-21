@@ -105,12 +105,13 @@ struct TaskDetailsSection: View {
                     Button {
                         client.edit { d, _ in Edits.toggleWatcher(&d, task: task.id, member: m.id, ts: nowTs()) }
                     } label: {
-                        CheckedLabel(m.name, checked: task.watchers.contains(m.id))
+                        CheckedLabel(m.name, checked: task.watchedBy(m.id))
                     }
                 }
             } label: {
                 LabeledContent("Watchers") {
-                    Text(task.watchers.isEmpty ? String(localized: "None") : task.watchers.compactMap { v.member($0)?.name }.joined(separator: ", ")).lineLimit(1)
+                    let watching = v.activeMembers.filter { task.watchedBy($0.id) }
+                    Text(watching.isEmpty ? String(localized: "None") : watching.map(\.name).joined(separator: ", ")).lineLimit(1)
                 }
             }
             .disabled(!can)

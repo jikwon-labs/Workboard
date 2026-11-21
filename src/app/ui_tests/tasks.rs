@@ -1115,18 +1115,68 @@ fn watch_toggle_and_watchers_menu() {
     let mut h = Ui1::new();
     let id = open_design_task(&mut h);
     let me = h.app.data.me;
-    h.click("Watch task");
+    // I made the task, so I get its updates until I turn them off
+    assert!(h.app.task(id).unwrap().watched_by(me));
+    h.click("Stop watching");
     h.app.apply_actions();
-    assert!(h.app.task(id).unwrap().watchers.contains(&me));
-    assert!(h.has("Stop watching"));
+    assert_eq!(h.app.task(id).unwrap().unwatched, Some(vec![me]));
     h.click("Watchers");
     h.click("Watcher Sam Lee");
     h.app.apply_actions();
     assert!(h.app.task(id).unwrap().watchers.contains(&3));
     h.key(egui::Key::Escape);
+    h.click("Watch task");
+    h.app.apply_actions();
+    let t = h.app.task(id).unwrap();
+    assert_eq!(t.watchers, vec![3], "my own task needs no watcher entry");
+    assert!(t.watched_by(me) && t.watched_by(3));
+}
+
+#[test]
+fn turning_off_my_own_task_stops_its_notifications() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    h.app
+        .data
+        .tasks
+        .iter_mut()
+        .find(|t| t.name == "Design new homepage layout")
+        .unwrap()
+        .assignees
+        .push(me);
+    let id = open_design_task(&mut h);
+    assert!(h.has("Stop watching"), "an assignee gets updates at first");
+    h.click("Watchers");
+    assert!(h.has("Watcher Me"));
+    h.key(egui::Key::Escape);
+    h.app.notify_scan();
+    h.app.notify_rt.sent.clear();
     h.click("Stop watching");
     h.app.apply_actions();
-    assert_eq!(h.app.task(id).unwrap().watchers, vec![3]);
+    let t = h.app.task(id).unwrap();
+    assert!(!t.watched_by(me) && !t.watchers.contains(&me));
+    assert!(h.has("Watch task"));
+    let comment = |h: &mut Ui1, text: &str| {
+        let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.activity.push(Activity {
+            ts: now_ts(),
+            author: 2,
+            text: text.into(),
+            comment: true,
+            ..Default::default()
+        });
+        // the task window is open; with the app in the background it's news
+        h.app.notify_rt.away = true;
+        h.app.notify_scan();
+    };
+    comment(&mut h, "Moved the hero up");
+    assert!(h.app.notify_rt.sent.is_empty(), "turned off: no notice");
+    h.click("Watch task");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().watched_by(me));
+    assert_eq!(h.app.task(id).unwrap().unwatched, Some(vec![]));
+    comment(&mut h, "And the footer");
+    assert_eq!(h.app.notify_rt.sent.len(), 1, "back on: told again");
 }
 
 #[test]

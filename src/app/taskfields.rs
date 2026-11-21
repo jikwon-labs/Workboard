@@ -389,7 +389,9 @@ impl App {
         );
     }
 
-    /// Header: watchers' avatars (click to choose) and a Watch toggle for me.
+    /// Header: the avatars of who gets the task's updates (click to choose)
+    /// and a Watch toggle for me. Assignees and the maker get them until
+    /// they turn them off (`Task::watched_by`).
     pub(super) fn watchers_header(
         &mut self,
         ui: &mut Ui,
@@ -398,7 +400,7 @@ impl App {
         task: &mut Task,
     ) {
         let me = self.data.me;
-        let on = task.watchers.contains(&me);
+        let on = task.watched_by(me);
         let b = super::icons::icon_button_ex(
             ui,
             t,
@@ -417,24 +419,27 @@ impl App {
         }))
         .clicked()
         {
-            if on {
-                task.watchers.retain(|w| *w != me);
-            } else {
-                task.watchers.push(me);
-            }
+            task.set_watching(me, !on);
         }
-        let n = task.watchers.len().min(4) as f32;
+        let watching: Vec<u64> = self
+            .data
+            .members
+            .iter()
+            .filter(|m| !m.invited && task.watched_by(m.id))
+            .map(|m| m.id)
+            .collect();
+        let n = watching.len().min(4) as f32;
         let w = if n == 0.0 { 22.0 } else { 14.0 * n + 12.0 };
         let (r, resp) = ui.allocate_exact_size(vec2(w, 24.0), Sense::click());
         name_it(&resp, "Watchers");
         if resp.hovered() {
             ui.painter().rect_filled(r, 6.0, t.hover);
         }
-        if task.watchers.is_empty() {
+        if watching.is_empty() {
             // a person, not a second eye beside the Watch button's
             super::icons::line_icon_scaled(ui.painter(), "person", r.center(), t.text3, 0.8);
         } else {
-            let shown: Vec<u64> = task.watchers.iter().take(4).copied().collect();
+            let shown: Vec<u64> = watching.iter().take(4).copied().collect();
             paint_avatars(
                 ui.painter(),
                 r.left_center() + vec2(2.0, 0.0),
@@ -444,12 +449,12 @@ impl App {
                 t.card,
             );
         }
-        let resp = resp.on_hover_text(trf!("{} watching", task.watchers.len()));
+        let resp = resp.on_hover_text(trf!("{} watching", watching.len()));
         let data = &self.data;
         popup(ui, &resp, id.with("watchers"), 220.0, |ui| {
             ui.label(RichText::new(tr("Watchers")).small().color(t.text3));
             for m in data.members.iter().filter(|m| !m.invited) {
-                let sel = task.watchers.contains(&m.id);
+                let sel = task.watched_by(m.id);
                 let ring = t.card;
                 let r = menu_row_named(
                     ui,
@@ -469,11 +474,7 @@ impl App {
                     );
                 }
                 if r.clicked() {
-                    if sel {
-                        task.watchers.retain(|x| *x != m.id);
-                    } else {
-                        task.watchers.push(m.id);
-                    }
+                    task.set_watching(m.id, !sel);
                 }
             }
         });

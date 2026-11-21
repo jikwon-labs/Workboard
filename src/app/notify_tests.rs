@@ -262,6 +262,40 @@ fn assignments_comments_and_changes_on_my_tasks() {
 }
 
 #[test]
+fn a_task_whose_updates_i_turned_off_stays_quiet() {
+    let mut a = app();
+    let id = my_task(&mut a, "Ship the site");
+    a.data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == id)
+        .unwrap()
+        .set_watching(1, false);
+    a.notify_scan();
+    a.notify_rt.sent.clear();
+    teammate_line(&mut a, id, 2, "Looks good to me", true);
+    teammate_line(&mut a, id, 2, "changed due date to Dec 1", false);
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty(), "{:?}", kinds(&a));
+    // a mention still reaches me
+    teammate_line(&mut a, id, 2, "@Me can you check?", true);
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Mention]);
+    // a teammate's task I chose to watch tells me
+    a.notify_rt.sent.clear();
+    let theirs = a.data.tasks.iter().find(|t| !t.watched_by(1)).unwrap().id;
+    a.data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == theirs)
+        .unwrap()
+        .set_watching(1, true);
+    teammate_line(&mut a, theirs, 2, "Started on it", true);
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Comment]);
+}
+
+#[test]
 fn paused_notifications_announce_nothing() {
     let mut a = app();
     a.data.extra.muted_until = now_ts() + 3600;

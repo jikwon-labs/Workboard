@@ -165,7 +165,7 @@ final class Notifier {
         // worked out once for both lists and the icon's number
         let inbox = client.inboxItems(me: me)
         let found = Notify.candidates(data, prefs: prefs, me: me, manager: manager, inbox: inbox)
-        let all = Notify.candidates(data, prefs: .everything, me: me, manager: manager, inbox: inbox).map(\.key)
+        let all = Notify.candidates(data, prefs: .everything, me: me, manager: manager, inbox: inbox, everyTask: true).map(\.key)
         if !seeded {
             seen = Set(all).union(found.map(\.key))
             seeded = true

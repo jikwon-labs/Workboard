@@ -214,6 +214,13 @@ pub struct Task {
     /// People following the task besides its assignees.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub watchers: Vec<u64>,
+    /// Assignees and the maker who turned the task's updates off (see
+    /// `watched_by`). None until someone first does; after that it stays in
+    /// the file even when empty, so taking the last one off reaches the
+    /// other copies without a sync format change (a missing field is kept
+    /// from the other copies, see `DEFAULT_WHEN_MISSING` in wb-sync).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unwatched: Option<Vec<u64>>,
     /// Tasks this one waits on. The other side shows it as Blocking, so
     /// only this side is stored.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -257,6 +264,37 @@ pub fn fix_task_activity_ids(t: &mut Task) {
 }
 
 impl Task {
+    /// Whether `id` made the task (or duplicated it from another).
+    pub fn made_by(&self, id: u64) -> bool {
+        self.activity.iter().any(|a| {
+            a.author == id
+                && !a.comment
+                && (a.text == "created this task"
+                    || a.text.starts_with("duplicated this task from "))
+        })
+    }
+
+    /// Whether `id` gets the task's comments and changes: its assignees and
+    /// maker unless they turned that off, and the people who chose to watch.
+    pub fn watched_by(&self, id: u64) -> bool {
+        let off = self.unwatched.as_ref().is_some_and(|u| u.contains(&id));
+        !off && (self.watchers.contains(&id) || self.assignees.contains(&id) || self.made_by(id))
+    }
+
+    /// Turn the task's updates on or off for `id`.
+    pub fn set_watching(&mut self, id: u64, on: bool) {
+        self.watchers.retain(|w| *w != id);
+        if let Some(u) = self.unwatched.as_mut() {
+            u.retain(|w| *w != id);
+        }
+        let own = self.assignees.contains(&id) || self.made_by(id);
+        match (on, own) {
+            (true, false) => self.watchers.push(id),
+            (false, true) => self.unwatched.get_or_insert_with(Vec::new).push(id),
+            _ => {}
+        }
+    }
+
     /// The time of day on the start date, if it has both.
     pub fn start_at(&self) -> Option<NaiveTime> {
         self.start.and(self.start_time.flatten())

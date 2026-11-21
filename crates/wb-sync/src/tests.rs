@@ -1860,3 +1860,38 @@ fn goal_ids_are_the_same_on_the_phone() {
 }
 
 const GOAL_ID_SAMPLE: u64 = 5095967436815532327;
+
+#[test]
+fn turning_task_updates_back_on_reaches_every_copy_and_older_apps_keep_it() {
+    // `unwatched` is not in DEFAULT_WHEN_MISSING: the apps keep it in the
+    // file, empty, once written, so emptying it is a change like any other
+    let mut ma = SyncMeta::default();
+    let mut a = ws(json!([{"id": 1, "name": "t"}]), json!([]), &ma);
+    save(&mut a, &mut ma, 10);
+    let (mut b, mut mb) = (a.clone(), ma.clone());
+    a["tasks"][0]["unwatched"] = json!([1]);
+    save(&mut a, &mut ma, 20);
+    swap(&mut a, &mut b);
+    let (mut ma, mut mb2) = (meta_of(&a), meta_of(&b));
+    a["tasks"][0]["unwatched"] = json!([]);
+    save(&mut a, &mut ma, 30);
+    b["tasks"][0]["name"] = json!("renamed");
+    save(&mut b, &mut mb2, 40);
+    swap(&mut a, &mut b);
+    for v in [&a, &b] {
+        assert_eq!(v["tasks"][0]["name"], "renamed");
+        assert_eq!(v["tasks"][0]["unwatched"], json!([]), "{}", v["tasks"][0]);
+    }
+    // an app from before the field drops it from its copy: that is not a removal
+    let mut old = b.clone();
+    mb = meta_of(&old);
+    a["tasks"][0]["unwatched"] = json!([1]);
+    save(&mut a, &mut ma, 50);
+    merge(&mut old, &[a.clone()]);
+    old["tasks"][0].as_object_mut().unwrap().remove("unwatched");
+    old["tasks"][0]["name"] = json!("renamed again");
+    save(&mut old, &mut mb, 60);
+    merge(&mut a, &[old]);
+    assert_eq!(a["tasks"][0]["name"], "renamed again");
+    assert_eq!(a["tasks"][0]["unwatched"], json!([1]));
+}

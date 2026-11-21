@@ -96,13 +96,22 @@ extension Edits {
 
     // MARK: watchers
 
-    /// Someone follows the task, or stops (no history line, as on the Mac).
+    /// Someone turns the task's updates on or off (Task::set_watching; no
+    /// history line, as on the Mac). Assignees and the maker get them until
+    /// they turn them off, which puts them in `unwatched`; anyone else is
+    /// added to `watchers`. `unwatched` stays once written, even empty, so
+    /// taking the last one off reaches the other copies.
     @discardableResult
     public static func toggleWatcher(_ data: inout JSON, task: UInt64, member: UInt64, ts: Int64) -> Bool {
         data.updateItem(at: "tasks", id: task) { j in
-            var w = (j["watchers"]?.array ?? []).compactMap(\.uint)
-            if let i = w.firstIndex(of: member) { w.remove(at: i) } else { w.append(member) }
+            let on = !Inbox.watches(j, me: member)
+            let own = Inbox.isMine(j, me: member)
+            var w = (j["watchers"]?.array ?? []).compactMap(\.uint).filter { $0 != member }
+            var u = j["unwatched"]?.array.map { $0.compactMap(\.uint).filter { $0 != member } }
+            if on && !own { w.append(member) }
+            if !on && own { u = (u ?? []) + [member] }
             j["watchers"] = .array(w.map(JSON.id))
+            if let u { j["unwatched"] = .array(u.map(JSON.id)) }
             j["updated"] = .int(ts)
         }
     }

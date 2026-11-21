@@ -2061,6 +2061,7 @@ impl App {
                     closed_at: None,
                     milestone: false,
                     watchers: vec![],
+                    unwatched: None,
                     waiting_on: vec![],
                     linked: vec![],
                     attachments: vec![],
@@ -6087,6 +6088,7 @@ fn task_changed(a: &Task, b: &Task) -> bool {
             .ne(b.time_entries.iter().map(|e| (e.start, e.end)))
         || a.milestone != b.milestone
         || a.watchers != b.watchers
+        || a.unwatched != b.unwatched
         || a.waiting_on != b.waiting_on
         || a.linked != b.linked
         || a.attachments != b.attachments

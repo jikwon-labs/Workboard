@@ -257,7 +257,7 @@ impl App {
     }
 
     /// The Inbox rows (all four tabs). Primary holds what the notification
-    /// settings ask for: comments on tasks I'm assigned to or created,
+    /// settings ask for: comments on tasks I watch (`my_task`),
     /// @mentions of me (task comments and chat), tasks assigned to me and
     /// chat replies in threads I'm in. My own actions are left out.
     /// Mentions and assignments are matched by member id; entries written
@@ -427,17 +427,10 @@ impl App {
     }
 
     /// A task whose comments are for me (the Inbox's Primary tab and
-    /// desktop notifications): one I'm assigned to, or one I made, as new
-    /// or as a copy of another.
+    /// desktop notifications): one I'm assigned to or made, unless I turned
+    /// its updates off, or one I chose to watch (`Task::watched_by`).
     pub(super) fn my_task(&self, t: &Task) -> bool {
-        let me = self.data.me;
-        t.assignees.contains(&me)
-            || t.activity.iter().any(|a| {
-                a.author == me
-                    && !a.comment
-                    && (a.text == "created this task"
-                        || a.text.starts_with("duplicated this task from "))
-            })
+        t.watched_by(self.data.me)
     }
 
     /// The Inbox badge: the Primary rows (not cleared, not saved for later)

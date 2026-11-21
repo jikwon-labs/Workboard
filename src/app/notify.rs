@@ -135,8 +135,13 @@ fn goal_key(k: &str) -> Option<u64> {
 
 impl App {
     /// Everything that is news for me in the data as it is, with when it
-    /// happened (i64::MAX: not known). Turned-off kinds are left out.
-    pub(super) fn notify_candidates(&self, n: &NotifySettings) -> Vec<(i64, Note)> {
+    /// happened (i64::MAX: not known). Turned-off kinds are left out, and
+    /// comments and changes on tasks I don't watch unless `every_task`.
+    pub(super) fn notify_candidates(
+        &self,
+        n: &NotifySettings,
+        every_task: bool,
+    ) -> Vec<(i64, Note)> {
         let me = self.data.me;
         let mut out = vec![];
         let mut keys = HashSet::new();
@@ -340,7 +345,7 @@ impl App {
                 InboxSrc::Task(id) => self.task(id),
                 _ => None,
             };
-            let mine = task.is_some_and(|t| self.my_task(t));
+            let mine = every_task || task.is_some_and(|t| self.my_task(t));
             let (kind, title, body) = if it.mention {
                 if !n.mentions {
                     continue;
@@ -510,11 +515,11 @@ impl App {
     pub(super) fn notify_scan(&mut self) {
         let now = now_ts();
         let mine = self.data.extra.notify.clone();
-        let found = self.notify_candidates(&mine);
-        // every key, whatever the settings: turning a kind on later must not
-        // bring back old things as news
+        let found = self.notify_candidates(&mine, false);
+        // every key, whatever the settings and watched tasks: turning a kind
+        // or a task's updates on later must not bring back old things as news
         let all: Vec<String> = self
-            .notify_candidates(&NotifySettings::everything())
+            .notify_candidates(&NotifySettings::everything(), true)
             .into_iter()
             .map(|(_, n)| n.key)
             .collect();

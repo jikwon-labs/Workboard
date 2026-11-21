@@ -53,6 +53,23 @@ final class NotifyTests: XCTestCase {
         XCTAssertTrue(Notify.candidates(d, prefs: p, me: 1, manager: false).filter { [.assigned, .comment, .taskChange].contains($0.kind) }.isEmpty)
     }
 
+    func testATaskWhoseUpdatesITurnedOffStaysQuiet() {
+        var d = SampleWorkspace.make()
+        let comments = { (d: JSON, every: Bool) in
+            Notify.candidates(d, prefs: NotifyPrefs(), me: 1, manager: false, everyTask: every).filter { $0.kind == .comment }.count
+        }
+        XCTAssertTrue(WorkspaceView(d).tasks.first { $0.id == 201 }!.watchedBy(1), "my own task tells me at first")
+        Edits.toggleWatcher(&d, task: 201, member: 1, ts: 10)
+        XCTAssertEqual(d["tasks"]?.array?.first { $0["id"]?.uint == 201 }?["unwatched"], [1])
+        XCTAssertFalse(WorkspaceView(d).tasks.first { $0.id == 201 }!.watchedBy(1))
+        Edits.addComment(&d, task: 201, text: "nice", me: 2, ts: 11)
+        XCTAssertEqual(comments(d, false), 0)
+        XCTAssertEqual(comments(d, true), 1, "its keys are still remembered as seen")
+        Edits.toggleWatcher(&d, task: 201, member: 1, ts: 12)
+        XCTAssertEqual(d["tasks"]?.array?.first { $0["id"]?.uint == 201 }?["unwatched"], [], "stays, empty")
+        XCTAssertEqual(comments(d, false), 1)
+    }
+
     func testHuddlesReactionsFormsAndJoins() {
         var d = SampleWorkspace.make()
         Edits.postHuddle(&d, channel: 303, me: 2, id: 900, ts: 10)

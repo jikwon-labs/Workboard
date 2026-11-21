@@ -215,7 +215,9 @@ public enum Notify {
     /// notify_candidates: everything the choices ask to be told about.
     /// `manager`: I'm an owner or admin (people joining). `inbox`: the
     /// Inbox rows when the caller has them already (SyncClient.inboxItems).
-    public static func candidates(_ data: JSON, prefs n: NotifyPrefs, me: UInt64, manager: Bool, inbox: [InboxItem]? = nil) -> [Note] {
+    /// `everyTask`: comments and changes on tasks I don't watch too (the
+    /// keys that must not become news when I turn a task's updates on).
+    public static func candidates(_ data: JSON, prefs n: NotifyPrefs, me: UInt64, manager: Bool, inbox: [InboxItem]? = nil, everyTask: Bool = false) -> [Note] {
         let all = data["members"]?.array ?? []
         let who = { (id: UInt64) -> String in
             let n = all.first { $0["id"]?.uint == id }.map(Mentions.shownName) ?? ""
@@ -316,7 +318,7 @@ public enum Notify {
                 key = it.key
                 target = .channel(ch, thread: thread)
             }
-            let mine = task.map { Inbox.isMine($0, me: me) } ?? false
+            let mine = everyTask || (task.map { Inbox.watches($0, me: me) } ?? false)
             let note: Note
             if it.mention {
                 guard n.mentions else { continue }

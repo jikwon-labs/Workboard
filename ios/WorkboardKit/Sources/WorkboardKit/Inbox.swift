@@ -35,8 +35,16 @@ public struct InboxItem: Identifiable, Hashable, Sendable {
 }
 
 public enum Inbox {
-    /// my_task in src/app/nav.rs: one I'm assigned to, or one I made (new or
-    /// as a copy).
+    /// Task::watched_by in src/model/task.rs (my_task in src/app/nav.rs):
+    /// a task whose comments and changes are for me.
+    static func watches(_ t: JSON, me: UInt64) -> Bool {
+        if (t["unwatched"]?.array ?? []).contains(where: { $0.uint == me }) { return false }
+        if (t["watchers"]?.array ?? []).contains(where: { $0.uint == me }) { return true }
+        return isMine(t, me: me)
+    }
+
+    /// One I'm assigned to, or one I made (new or as a copy): I get its
+    /// updates until I turn them off.
     static func isMine(_ t: JSON, me: UInt64) -> Bool {
         if (t["assignees"]?.array ?? []).contains(where: { $0.uint == me }) { return true }
         return (t["activity"]?.array ?? []).contains { a in
@@ -67,7 +75,7 @@ public enum Inbox {
         var out: [InboxItem] = []
         for t in data["tasks"]?.array ?? [] {
             guard let tid = t["id"]?.uint else { continue }
-            let mine = isMine(t, me: me)
+            let mine = watches(t, me: me)
             for a in t["activity"]?.array ?? [] {
                 let author = a["author"]?.uint ?? 0
                 guard author != me else { continue }

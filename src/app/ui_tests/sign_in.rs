@@ -431,3 +431,78 @@ fn password_boxes_show_on_the_eye_and_take_english_only() {
         2
     );
 }
+
+#[test]
+fn the_ipad_keyboard_leaves_the_name_and_start_in_view() {
+    // an iPad mini on its side; its keyboard covers the bottom 390 points
+    let mut h = Ui1::sized(1133.0, 744.0);
+    sign_in_screen(&mut h, "");
+    h.click(alone_button());
+    let above = 744.0 - 390.0;
+    assert!(h.rect("Start").bottom() > above, "under the keyboard-to-be");
+    h.click("Your name entry");
+    crate::os::fake_keyboard(390.0);
+    for _ in 0..10 {
+        h.frame(vec![]);
+    }
+    let name = h.rect("Your name entry");
+    let start = h.rect("Start");
+    crate::os::fake_keyboard(0.0);
+    assert!(
+        name.bottom() <= above,
+        "the name shows over the keyboard: {name:?}"
+    );
+    assert!(start.bottom() <= above, "so does Start: {start:?}");
+    h.frame(vec![]);
+}
+
+#[test]
+fn the_ipad_keyboard_lifts_a_dialog_and_its_button_still_works() {
+    let mut h = Ui1::sized(1133.0, 744.0);
+    let before = h.app.data.tasks.len();
+    h.click("Add Task");
+    h.type_text("Over the keyboard");
+    crate::os::fake_keyboard(390.0);
+    h.settle();
+    // the button, right of the heading with the same words
+    let button = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Create Task")
+        .map(|(_, r)| *r)
+        .max_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap();
+    let ok = button.bottom() <= 744.0 - 390.0;
+    if ok {
+        h.click_side("Create Task", true);
+    }
+    crate::os::fake_keyboard(0.0);
+    assert!(ok, "the button shows over the keyboard: {button:?}");
+    assert_eq!(h.app.data.tasks.len(), before + 1);
+    assert!(h
+        .app
+        .data
+        .tasks
+        .iter()
+        .any(|t| t.name == "Over the keyboard"));
+}
+
+#[test]
+fn the_ipad_keyboard_leaves_the_message_box_in_view() {
+    let mut h = Ui1::sized(1133.0, 744.0);
+    h.click("general");
+    h.click("Message composer");
+    crate::os::fake_keyboard(390.0);
+    h.settle();
+    let above = 744.0 - 390.0;
+    // the channel's list on the right is taller than what is left: it
+    // scrolls instead of pushing the box down
+    let send = h.rect("Send");
+    let box_rect = h.rect("Message composer");
+    crate::os::fake_keyboard(0.0);
+    assert!(send.bottom() <= above, "Send over the keyboard: {send:?}");
+    assert!(box_rect.bottom() <= above, "{box_rect:?}");
+    h.type_text("over the keyboard");
+    h.click("Send");
+    assert!(h.has("over the keyboard"));
+}

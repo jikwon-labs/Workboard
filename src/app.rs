@@ -581,6 +581,8 @@ pub struct App {
     pasted: Option<crate::media::Pasted>,
     /// egui pasted text for the Cmd+V being held.
     paste_text_seen: bool,
+    /// What the iPad's on-screen keyboard covered last frame (files.rs)
+    keyboard_cover: f32,
     /// Cmd was held since the last key typed: a V let go after Cmd is still
     /// the end of a Cmd+V.
     paste_cmd: bool,
@@ -1103,6 +1105,7 @@ impl App {
             file_saves: vec![],
             pasted: None,
             paste_text_seen: false,
+            keyboard_cover: 0.0,
             paste_cmd: false,
             v_typed: false,
             ime: Default::default(),

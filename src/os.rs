@@ -557,6 +557,122 @@ mod mac_emoji {
     }
 }
 
+/// iPad: how many egui points at the bottom of the window the on-screen
+/// keyboard (or a hardware keyboard's shortcut bar) covers, so the app lays
+/// itself out above it. 0 elsewhere, and for a floating keyboard.
+pub fn keyboard_cover(ctx: &egui::Context, native_ppp: f32) -> f32 {
+    #[cfg(target_os = "ios")]
+    {
+        ios::keyboard_cover(ctx) * native_ppp / ctx.pixels_per_point()
+    }
+    #[cfg(all(not(target_os = "ios"), test))]
+    {
+        let _ = (ctx, native_ppp);
+        FAKE_KEYBOARD.with(|k| k.get())
+    }
+    #[cfg(all(not(target_os = "ios"), not(test)))]
+    {
+        let _ = (ctx, native_ppp);
+        0.0
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAKE_KEYBOARD: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// Tests: an iPad keyboard covering this many points (0: none).
+#[cfg(test)]
+pub fn fake_keyboard(cover: f32) {
+    FAKE_KEYBOARD.with(|k| k.set(cover));
+}
+
+// objc 0.2's macros check a cfg this crate doesn't declare
+#[cfg(target_os = "ios")]
+#[allow(unexpected_cfgs)]
+mod ios {
+    use block::ConcreteBlock;
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    use std::ptr::null_mut;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Once, OnceLock};
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CGRect {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    }
+
+    #[link(name = "UIKit", kind = "framework")]
+    extern "C" {
+        static UIKeyboardWillChangeFrameNotification: *mut Object;
+        static UIKeyboardWillHideNotification: *mut Object;
+        static UIKeyboardFrameEndUserInfoKey: *mut Object;
+    }
+
+    /// The covered height in UIKit points, as f32 bits.
+    static COVER: AtomicU32 = AtomicU32::new(0);
+    static CTX: OnceLock<egui::Context> = OnceLock::new();
+    static WATCH: Once = Once::new();
+
+    pub fn keyboard_cover(ctx: &egui::Context) -> f32 {
+        WATCH.call_once(|| {
+            let _ = CTX.set(ctx.clone());
+            // SAFETY: called on the main thread (egui's input hook); the
+            // observers and their blocks stay for as long as the app runs
+            unsafe { watch() }
+        });
+        f32::from_bits(COVER.load(Ordering::Relaxed))
+    }
+
+    fn set(cover: f64) {
+        COVER.store((cover as f32).to_bits(), Ordering::Relaxed);
+        if let Some(ctx) = CTX.get() {
+            ctx.request_repaint();
+        }
+    }
+
+    unsafe fn watch() {
+        let center: *mut Object = msg_send![class!(NSNotificationCenter), defaultCenter];
+        let queue: *mut Object = msg_send![class!(NSOperationQueue), mainQueue];
+        let changed = ConcreteBlock::new(|note: *mut Object| {
+            // SAFETY: a keyboard notification's userInfo holds the end frame
+            // as an NSValue of a CGRect, in screen coordinates
+            unsafe {
+                let info: *mut Object = msg_send![note, userInfo];
+                let value: *mut Object =
+                    msg_send![info, objectForKey: UIKeyboardFrameEndUserInfoKey];
+                if value.is_null() {
+                    return;
+                }
+                let kb: CGRect = msg_send![value, CGRectValue];
+                let screen: *mut Object = msg_send![class!(UIScreen), mainScreen];
+                let s: CGRect = msg_send![screen, bounds];
+                // a floating keyboard, narrower than the screen, sits over
+                // the app wherever it is dragged: nothing to make room for
+                let cover = if kb.w < s.w * 0.9 {
+                    0.0
+                } else {
+                    (s.y + s.h - kb.y).clamp(0.0, s.h)
+                };
+                set(cover);
+            }
+        })
+        .copy();
+        let hidden = ConcreteBlock::new(|_note: *mut Object| set(0.0)).copy();
+        let none = null_mut::<Object>();
+        let _: *mut Object = msg_send![center, addObserverForName: UIKeyboardWillChangeFrameNotification object: none queue: queue usingBlock: &*changed];
+        let _: *mut Object = msg_send![center, addObserverForName: UIKeyboardWillHideNotification object: none queue: queue usingBlock: &*hidden];
+        std::mem::forget(changed);
+        std::mem::forget(hidden);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

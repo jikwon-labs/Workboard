@@ -1413,6 +1413,9 @@ impl App {
             let icons_only = ui.available_width() < 560.0;
             let panel_w = if icons_only { 46.0 } else { (ui.available_width() * 0.3).clamp(170.0, 230.0) };
             egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(panel_w).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
+                // it scrolls when the window is short (an iPad's keyboard up),
+                // instead of making the messages beside it as tall as it is
+                egui::ScrollArea::vertical().id_salt(("chan_panel_scroll", cid)).auto_shrink([false, true]).show(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let rows: [(&str, &str, u8); 9] = [("person", "Followers", 10), ("search", "Find in channel", 11), ("reply", "Replies", 2), ("pin", "Pinned messages", 1), ("bookmark", "Saved", 4), ("attach", "Files", 5), ("link", "Links", 6), ("task", "Turned into tasks", 3), ("settings", "Settings", 12)];
@@ -1450,6 +1453,7 @@ impl App {
                             }
                         }
                     }
+                });
                 });
             });
             // the chips start under the Channel tab and clear the line above,

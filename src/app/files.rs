@@ -1491,6 +1491,8 @@ impl Viewer {
 }
 
 pub(super) const CHAT_BOX: &str = "chat_composer_text";
+/// Set (egui temp data) for the one frame the iPad's keyboard comes up.
+pub(super) const KEYBOARD_ROSE: &str = "keyboard_rose";
 pub(super) const THREAD_BOX: &str = "thread_composer_text";
 
 impl App {
@@ -1894,6 +1896,22 @@ impl App {
             self.ime.drop_wake = self.ime.woken;
         }
         self.catch_paste(ctx, raw);
+        self.make_room_for_keyboard(ctx, raw);
+    }
+
+    /// iPad: the on-screen keyboard covers the bottom of the window, so egui
+    /// lays everything out in the part above it (a dialog's buttons, the
+    /// message box). The frame it comes up, a sign-in page's main button
+    /// scrolls into view (login::big_button). Nothing changes elsewhere.
+    fn make_room_for_keyboard(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let native = raw.viewport().native_pixels_per_point.unwrap_or(1.0);
+        let cover = crate::os::keyboard_cover(ctx, native);
+        let rose = cover > 0.0 && self.keyboard_cover <= 0.0;
+        self.keyboard_cover = cover;
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(KEYBOARD_ROSE), rose));
+        if let Some(r) = raw.screen_rect.as_mut() {
+            *r = keyboard_room(*r, cover);
+        }
     }
 
     /// Before egui sees the input: a Cmd+V in a message box with files or a
@@ -3431,4 +3449,30 @@ fn upload_bar(painter: &egui::Painter, rect: Rect, f: f32) {
         2.0,
         Color32::WHITE,
     );
+}
+
+/// The window less what the keyboard covers at the bottom, keeping at least
+/// a little of it (a keyboard taller than the window leaves 120 points).
+pub(super) fn keyboard_room(screen: egui::Rect, cover: f32) -> egui::Rect {
+    if cover <= 0.0 {
+        return screen;
+    }
+    let mut r = screen;
+    r.max.y = (r.max.y - cover).max(r.min.y + 120.0f32.min(r.height()));
+    r
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::*;
+
+    #[test]
+    fn the_layout_stops_above_the_keyboard() {
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1133.0, 744.0));
+        assert_eq!(keyboard_room(screen, 0.0), screen);
+        assert_eq!(keyboard_room(screen, 390.0).max.y, 354.0);
+        assert_eq!(keyboard_room(screen, 390.0).width(), 1133.0);
+        // a keyboard taller than the window still leaves a strip to show
+        assert_eq!(keyboard_room(screen, 2000.0).height(), 120.0);
+    }
 }

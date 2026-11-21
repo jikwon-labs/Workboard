@@ -95,15 +95,25 @@ fn field_line(t: &Theme) -> Color32 {
 }
 
 /// The screen's main button: as wide as the column, in the accent.
+/// When the iPad's keyboard comes up it scrolls into view, so the field
+/// above it and the button both show over the keyboard.
 pub(super) fn big_button(ui: &mut Ui, t: &Theme, text: &str) -> Response {
-    wide_button(
+    let r = wide_button(
         ui,
         text,
         17.0,
         (t.primary, t.primary_hover),
         Stroke::NONE,
         t.on_primary,
-    )
+    );
+    let rose = ui.ctx().data(|d| {
+        d.get_temp::<bool>(egui::Id::new(super::files::KEYBOARD_ROSE))
+            .unwrap_or(false)
+    });
+    if rose {
+        r.scroll_to_me(None);
+    }
+    r
 }
 
 /// A second way in, under the main one: outlined, as wide as the column.

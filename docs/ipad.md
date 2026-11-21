@@ -20,6 +20,8 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
       -destination 'platform=iOS Simulator,name=iPad mini (A17 Pro)' \
       -only-testing:WorkboardUITests/DeskUITests test
 
+시뮬레이터 주의: 화면 키보드의 내리기 키를 누르거나 `type:` 으로 글자를 보내면 그 시뮬레이터는 "외부 키보드 연결" 상태가 되어, 다시 켜도 어느 앱에서도 화면 키보드가 안 뜬다(설정 앱도 같다). 키보드를 시험할 때는 새 시뮬레이터를 만들고(`xcrun simctl create`) 화면 자판을 `tap` 으로 누른다.
+
 걸음: `tap:x,y`, `drag:x1,y1,x2,y2`, `type:글자`, `portrait`, `landscape`, `wait:초`. 좌표는 가로 화면 기준 포인트(1133 x 744). 스크린샷은 `xcrun xcresulttool export attachments` 로 꺼낸다.
 
 ## 시험에서 확인한 것 (iPad mini 시뮬레이터)
@@ -28,10 +30,11 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 - 한국어 표시(시스템 언어를 따름), 가로·세로 돌리기.
 - 글자 칸을 누르면 화면 키보드가 뜨고, 한글 자판을 눌러 조합한 글자("가나")와 붙여 넣은 한글이 들어간다.
 - 앱을 다시 열어도 데이터가 남는다.
+- 화면 키보드가 뜨면 앱이 키보드 위 영역만 쓴다(2026-11-22). iOS 의 키보드 알림으로 높이를 받아(`src/os.rs` `keyboard_cover`) egui 화면 높이를 줄인다(`src/app/files.rs` `make_room_for_keyboard`). 로그인 화면은 키보드가 뜰 때 시작·계속 버튼까지 스크롤하고, 채널 오른쪽 목록은 짧은 화면에서 스크롤된다. 가로 iPad mini 에서 키보드는 744pt 중 390pt 를 가린다. 맥에서는 `os::fake_keyboard` 로 같은 상황을 만들어 시험한다(`src/app/ui_tests/sign_in.rs` 의 `the_ipad_keyboard_*`).
 
 ## 아직 안 되는 것
 
-- **키보드가 화면을 가린다:** 화면 키보드가 뜨면 아래쪽(작업 만들기 창의 버튼 등)이 가려진다. 키보드 높이만큼 앱 영역을 줄여야 한다.
+- **iOS 27 에서 바로 꺼진다:** iOS 27 은 UIScene 방식으로 화면을 띄우지 않는 앱을 시작하자마자 끈다(`UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`). winit 0.30 은 그 방식을 쓰지 않는다. 시험은 iOS 26.5 시뮬레이터로 했다. winit 을 UIScene 을 쓰는 판으로 올리거나 고쳐야 한다.
 - **단축키:** iPad 하드웨어 키보드의 Cmd 는 egui 명령 키로 잡히지 않고 Ctrl 이 그 역할을 한다(egui-winit 이 macOS 에서만 Cmd 를 쓴다). 표기도 "Ctrl+J".
 - **마우스 올리기 전용 UI:** 올려야 보이는 버튼은 손가락으로 열 수 없다. 트랙패드에서는 된다. 버튼이 손가락에 작다.
 - **맥 전용 기능:** 사진 고르기·붙여 넣기, 알림, 카메라, 화면 공유(`crates/wb-voice/src/screen.rs` 에서 iOS 는 "아직 안 됨"), 업데이트 확인, 파일 열기.

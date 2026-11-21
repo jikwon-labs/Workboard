@@ -1869,8 +1869,10 @@ impl App {
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
                 let w = ui.available_width();
-                let col = 92.0;
-                let name_w = (w - col * 8.0).max(200.0);
+                // the day columns narrow before the names go under 200 (in
+                // the smallest window the grid ran past the right edge)
+                let col = ((w - 200.0) / 8.0).clamp(60.0, 92.0);
+                let name_w = (w - col * 8.0).max(120.0);
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
                 ui.painter().text(
                     hr.left_center() + vec2(8.0, 0.0),
@@ -1935,15 +1937,16 @@ impl App {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         let (nr, nresp) =
                             ui.allocate_exact_size(vec2(name_w, 34.0), Sense::click());
-                        ui.painter()
-                            .with_clip_rect(Rect::from_min_max(nr.min, nr.max - vec2(26.0, 0.0)))
-                            .text(
-                                nr.left_center() + vec2(8.0, 0.0),
-                                Align2::LEFT_CENTER,
-                                &shown,
-                                FontId::proportional(14.0),
-                                if archived { t.text3 } else { t.text },
-                            );
+                        // shortened with an ellipsis before the row's ×
+                        let font = FontId::proportional(14.0);
+                        let fit = fit_text(ui.painter(), &shown, &font, name_w - 34.0);
+                        ui.painter().text(
+                            nr.left_center() + vec2(8.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            fit,
+                            font,
+                            if archived { t.text3 } else { t.text },
+                        );
                         // take the row off (and my time on it this week)
                         let xr = Rect::from_center_size(
                             nr.right_center() - vec2(14.0, 0.0),

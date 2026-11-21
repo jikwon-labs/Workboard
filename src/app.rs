@@ -3403,11 +3403,14 @@ impl App {
                     );
                     let st = self.data.status_of(task);
                     paint_status_circle(ui.painter(), r.left_center() + vec2(14.0, 0.0), 6.0, &st);
-                    ui.painter().with_clip_rect(r.shrink(2.0)).text(
+                    // shortened with an ellipsis, not cut at the card's edge
+                    let font = FontId::proportional(12.5);
+                    let fit = fit_text(ui.painter(), &task.name, &font, r.width() - 38.0);
+                    ui.painter().text(
                         r.left_center() + vec2(28.0, 0.0),
                         Align2::LEFT_CENTER,
-                        &task.name,
-                        FontId::proportional(12.5),
+                        fit,
+                        font,
                         t.text,
                     );
                     name_it(&resp, &format!("Unscheduled {}", task.name));

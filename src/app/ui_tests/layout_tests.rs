@@ -1376,3 +1376,66 @@ fn small_window_view_tabs_and_add_view_fit() {
         crate::i18n::set_lang(crate::i18n::Lang::En);
     }
 }
+
+/// The Timesheet fits the smallest window (the day columns narrow), and a
+/// long task name is shortened with an ellipsis instead of cut mid-letter;
+/// the calendar's "Unscheduled" cards shorten theirs the same way.
+#[test]
+fn timesheet_and_calendar_side_shorten_long_names() {
+    for (w, hh) in [(1440.0, 900.0), (900.0, 560.0)] {
+        let mut h = Ui1::sized(w, hh);
+        heavy(&mut h);
+        let id = h
+            .app
+            .data
+            .tasks
+            .iter()
+            .find(|x| x.name == LONG_TASK)
+            .unwrap()
+            .id;
+        h.app.set_day_time(id, today(), 1.5);
+        h.app.section = Section::Timesheets;
+        h.settle();
+        let page = Rect::from_min_max(pos2(60.0, 40.0), h.size.to_pos2());
+        assert!(
+            h.cut_texts(page).is_empty(),
+            "{}x{}: {:?}",
+            w,
+            hh,
+            h.cut_texts(page)
+        );
+        assert!(
+            h.past_right_edge().is_empty(),
+            "{}x{}: {:?}",
+            w,
+            hh,
+            h.past_right_edge()
+        );
+        // the calendar's side list: a task without dates, with a long name
+        let mut x = h
+            .app
+            .data
+            .tasks
+            .iter()
+            .find(|x| x.id == id)
+            .unwrap()
+            .clone();
+        x.id = 31_000;
+        x.due = None;
+        x.start = None;
+        x.time_entries.clear();
+        h.app.data.tasks.push(x);
+        h.app.section = Section::Home;
+        h.app.loc = Location::List(list_id(&h, LONG_LIST));
+        h.app.view = ViewKind::Calendar;
+        h.settle();
+        let side = h.rect(&format!("Unscheduled {}", LONG_TASK));
+        assert!(
+            h.cut_texts(side).is_empty(),
+            "{}x{}: {:?}",
+            w,
+            hh,
+            h.cut_texts(side)
+        );
+    }
+}

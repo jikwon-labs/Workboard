@@ -310,3 +310,42 @@ fn the_row_buttons_do_not_sit_on_top_of_a_long_time() {
     h.hover(pos2(700.0, 80.0));
     assert_eq!(h.painted_text(&when).len(), 1);
 }
+
+#[test]
+fn rows_from_someone_who_left_say_someone_instead_of_nothing() {
+    let mut h = inbox(|d| {
+        let me = d.me;
+        // member 99 left the team: no longer in members
+        let id = d.new_id();
+        let mut m = crate::app::slack::new_message(
+            id,
+            99,
+            "@Me a message before I left".into(),
+            now_ts() - 60,
+        );
+        m.mentions = vec![me];
+        let dm = d.new_id();
+        d.channels.push(Channel {
+            id: dm,
+            kind: ChannelKind::Direct,
+            members: vec![me, 99],
+            messages: vec![m],
+            ..Default::default()
+        });
+        comment_on(d, CASE, "A comment before I left", 120);
+        let t = d.tasks.iter_mut().find(|t| t.name == CASE).unwrap();
+        t.activity.last_mut().unwrap().author = 99;
+    });
+    assert!(h.has("Someone"), "the direct message row is named");
+    assert!(!h.has(""), "no row without a name");
+    assert_eq!(
+        h.painted_text("Someone mentioned you: @Me a message before I left")
+            .len(),
+        1
+    );
+    assert_eq!(
+        h.painted_text("Someone commented: A comment before I left")
+            .len(),
+        1
+    );
+}

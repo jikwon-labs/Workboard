@@ -103,6 +103,8 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(v.myTasks(me: 1).map(\.id).sorted(), [201, 202, 204])
         XCTAssertEqual(v.channels.first { $0.id == 301 }!.unread(me: 1), 1)
         XCTAssertEqual(v.title(of: v.channels.first { $0.id == 303 }!, me: 1), "Alex Kim")
+        XCTAssertEqual(v.place(of: v.channels.first { $0.id == 303 }!, me: 1), "Alex Kim")
+        XCTAssertEqual(v.place(of: v.channels.first { $0.id == 301 }!, me: 1), "#" + v.channels.first { $0.id == 301 }!.name)
         XCTAssertEqual(v.statuses(forList: 112).map(\.name), ["to do", "in progress", "review", "complete"])
         XCTAssertEqual(v.tasks(inList: 111).count, 2)
     }

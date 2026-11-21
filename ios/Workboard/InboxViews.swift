@@ -270,7 +270,7 @@ struct SearchResults: View {
             Section {
                 ForEach(convs) { c in
                     NavigationLink(value: Nav.Route.channel(c.id)) {
-                        Label(c.kind == .channel ? "#\(c.name)" : v.title(of: c, me: me), systemImage: c.kind == .channel ? "number" : "person.2")
+                        Label(v.place(of: c, me: me), systemImage: c.kind == .channel ? "number" : "person.2")
                     }
                 }
             } header: {
@@ -282,7 +282,7 @@ struct SearchResults: View {
                 ForEach(Array(messages), id: \.1.id) { c, m in
                     NavigationLink(value: Nav.Route.channel(c.id)) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(v.member(m.author)?.name ?? String(localized: "Someone")) in \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))")
+                            Text("\(v.member(m.author)?.name ?? String(localized: "Someone")) in \(v.place(of: c, me: me))")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text(m.text).lineLimit(2)
                         }

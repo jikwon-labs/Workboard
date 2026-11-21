@@ -171,7 +171,7 @@ struct NewItemSheet: View {
                     }
                 }
             } label: {
-                let title = channel.flatMap { id in convs.first { $0.id == id } }.map { $0.kind == .channel ? "#\($0.name)" : v.title(of: $0, me: me) }
+                let title = channel.flatMap { id in convs.first { $0.id == id } }.map { v.place(of: $0, me: me) }
                     ?? person.flatMap { v.member($0)?.name }
                 chip(icon: "number", text: title.map { Text(verbatim: $0) } ?? Text("To"))
             }

@@ -319,7 +319,7 @@ struct ConversationView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     TypingLine(channelId: c.id)
-                    Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files, picked in
+                    Composer(placeholder: "Message \(v.place(of: c, me: me))", attachments: true) { text, files, picked in
                         sendChannelMessage(client, notifier: notifier, channel: c.id, text: text, files: files, picked: picked)
                     }
                     .onTyping { client.typingNow(channel: c.id) }
@@ -327,7 +327,7 @@ struct ConversationView: View {
                     .onSchedule { text, picked, at in client.schedule(channel: c.id, text: text, picked: picked, at: at) }
                 }
             }
-            .navigationTitle(c.kind == .channel ? "#\(c.name)" : v.title(of: c, me: me))
+            .navigationTitle(v.place(of: c, me: me))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -507,7 +507,7 @@ struct ThreadView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     Toggle(isOn: $alsoToChannel) {
-                        Text("Also send to \(c.kind == .channel ? "#" + c.name : client.view.title(of: c, me: client.me ?? 0))").font(.footnote)
+                        Text("Also send to \(client.view.place(of: c, me: client.me ?? 0))").font(.footnote)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
@@ -1535,7 +1535,7 @@ struct DraftsSheet: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             let c = v.channels.first { $0.id == ch }
-                            let place = c.map { $0.kind == .channel ? "#" + $0.name : v.title(of: $0, me: me) } ?? ""
+                            let place = c.map { v.place(of: $0, me: me) } ?? ""
                             Text(thread == nil ? place : String(localized: "Thread in \(place)")).font(.caption).foregroundStyle(.secondary)
                             Text(text).lineLimit(2).foregroundStyle(.primary)
                         }
@@ -1568,7 +1568,7 @@ struct ScheduledSheet: View {
                 ForEach(items) { item in
                     VStack(alignment: .leading, spacing: 6) {
                         let c = v.channels.first { $0.id == item.channel }
-                        let place = c.map { $0.kind == .channel ? "#" + $0.name : v.title(of: $0, me: me) } ?? ""
+                        let place = c.map { v.place(of: $0, me: me) } ?? ""
                         Text("\(Fmt.time(item.at)) · \(place)").font(.caption).foregroundStyle(.secondary)
                         Text(item.text).lineLimit(3)
                         HStack(spacing: 16) {
@@ -1625,7 +1625,7 @@ struct ForwardSheet: View {
                             to = c.id
                         } label: {
                             HStack {
-                                Text(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me)).foregroundStyle(.primary)
+                                Text(v.place(of: c, me: me)).foregroundStyle(.primary)
                                 Spacer()
                                 if to == c.id { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
                             }
@@ -1677,7 +1677,7 @@ struct ForwardedCard: View {
                 ChatText(text: forwarded.text)
                 if let c = from {
                     NavigationLink(value: Nav.Route.channel(c.id)) {
-                        Text("Forwarded from \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))").font(.caption).foregroundStyle(.secondary)
+                        Text("Forwarded from \(v.place(of: c, me: me))").font(.caption).foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("forwardedFrom")

@@ -617,6 +617,12 @@ public struct WorkspaceView: Sendable {
         return others.joined(separator: ", ")
     }
 
+    /// A conversation as a line of text names it: "#general" for a channel,
+    /// the other people for a direct message.
+    public func place(of c: ChannelView, me: UInt64) -> String {
+        c.kind == .channel ? "#" + c.name : title(of: c, me: me)
+    }
+
     /// Tasks this one waits on, tasks waiting on it, and linked tasks (both
     /// directions); missing tasks are left out (relations in
     /// src/app/taskfields.rs).

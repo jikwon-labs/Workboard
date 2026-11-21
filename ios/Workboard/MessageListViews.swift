@@ -21,7 +21,7 @@ struct MessageListView: View {
             ForEach(rows, id: \.message.id) { c, m in
                 NavigationLink(value: Nav.Route.channel(c.id)) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("\(v.member(m.author)?.name ?? String(localized: "Someone")) in \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me)) · \(Fmt.time(m.ts))")
+                        Text("\(v.member(m.author)?.name ?? String(localized: "Someone")) in \(v.place(of: c, me: me)) · \(Fmt.time(m.ts))")
                             .font(.caption).foregroundStyle(.secondary)
                         if let t = shownPostTitle(m) { Text(verbatim: t).font(.headline) }
                         if !m.text.isEmpty { Text(m.text).lineLimit(4) }

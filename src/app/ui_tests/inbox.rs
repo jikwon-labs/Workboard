@@ -231,3 +231,19 @@ fn a_comment_on_several_lines_shows_on_one_line_under_its_title() {
         1
     );
 }
+
+#[test]
+fn a_chat_row_shows_the_message_without_its_formatting_marks() {
+    let mut h = inbox(|d| {
+        mention_in_general(d, 2, "@Me please read **this** and `that` ~~now~~", 60);
+        // a task comment keeps its text as written: comments show no formatting
+        comment_on(d, CASE, "2 * 3 = 6", 120);
+    });
+    assert_eq!(
+        h.painted_text("Alex Kim mentioned you: @Me please read this and that now")
+            .len(),
+        1,
+        "the message as Chat shows it, without ** ` ~~"
+    );
+    assert_eq!(h.painted_text("Alex Kim commented: 2 * 3 = 6").len(), 1);
+}

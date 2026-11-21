@@ -460,6 +460,12 @@ impl App {
             .member(author)
             .map(|m| m.shown().to_string())
             .unwrap_or_default();
+        // a message as Chat shows it, without its formatting marks (task
+        // comments show no formatting, so they keep theirs)
+        let text = match src {
+            InboxSrc::Chat { .. } => super::chatfmt::plain(text),
+            InboxSrc::Task(_) => text.to_string(),
+        };
         // one line under the title: a text written on several lines runs on
         let text = text
             .split(['\n', '\r'])

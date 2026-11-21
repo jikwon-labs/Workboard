@@ -145,11 +145,7 @@ impl App {
                                                 continue;
                                             };
                                             let resp = self.board_card_by_id(ui, tid, col_w - 16.0);
-                                            name_it(&resp, &name);
-                                            resp.context_menu(|ui| self.task_menu(ui, tid));
-                                            if resp.clicked() {
-                                                self.actions.push(Action::Open(tid));
-                                            }
+                                            self.task_hit(&resp, tid, &name);
                                         }
                                         if hidden > 0 {
                                             let label = if hidden == 1 {

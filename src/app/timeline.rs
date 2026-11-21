@@ -220,7 +220,6 @@ impl App {
                     );
                     let (r, resp) =
                         ui.allocate_exact_size(vec2(g.size().x + 34.0, 26.0), Sense::click());
-                    name_it(&resp, &format!("Undated {}", name));
                     let fill = if resp.hovered() { t.hover } else { t.column_bg };
                     ui.painter().rect_filled(r, 6.0, fill);
                     ui.painter().rect_stroke(
@@ -240,10 +239,7 @@ impl App {
                         g,
                         t.text,
                     );
-                    resp.context_menu(|ui| self.task_menu(ui, tid));
-                    if resp.clicked() {
-                        self.actions.push(Action::Open(tid));
-                    }
+                    self.task_hit(&resp, tid, &format!("Undated {}", name));
                 }
             });
         }

@@ -2164,6 +2164,17 @@ impl App {
         }
     }
 
+    /// A task drawn as a chip, card or bar (`resp`): `name` for screen
+    /// readers and tests, the task's menu on a right click, and a click
+    /// opens it.
+    pub(super) fn task_hit(&mut self, resp: &egui::Response, tid: u64, name: &str) {
+        name_it(resp, name);
+        resp.context_menu(|ui| self.task_menu(ui, tid));
+        if resp.clicked() {
+            self.actions.push(Action::Open(tid));
+        }
+    }
+
     fn apply(&mut self, a: Action) {
         // a space shared with me to view or comment only (the server would put it back)
         if let Some(why) = self.refused_here(&a) {
@@ -3381,12 +3392,7 @@ impl App {
                     let name = fit_text(&p, &task.name, &font, room.right() - 4.0 - label_x);
                     labels.push((room, label_x, name, font, t.text));
                 }
-                name_it(&resp, &format!("Calendar {} {}", task.name, d));
-                let tid = task.id;
-                resp.context_menu(|ui| self.task_menu(ui, tid));
-                if resp.clicked() {
-                    self.actions.push(Action::Open(task.id));
-                }
+                self.task_hit(&resp, task.id, &format!("Calendar {} {}", task.name, d));
             }
         }
         for (room, x, text, font, color) in labels {
@@ -3468,12 +3474,7 @@ impl App {
                         font,
                         t.text,
                     );
-                    name_it(&resp, &format!("Unscheduled {}", task.name));
-                    let tid = task.id;
-                    resp.context_menu(|ui| self.task_menu(ui, tid));
-                    if resp.clicked() {
-                        self.actions.push(Action::Open(task.id));
-                    }
+                    self.task_hit(&resp, task.id, &format!("Unscheduled {}", task.name));
                     ui.add_space(4.0);
                 }
             });

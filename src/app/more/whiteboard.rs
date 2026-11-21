@@ -292,9 +292,13 @@ impl App {
                 let wid = self.data.extra.whiteboards[wi].id;
                 // Cmd+Z takes back my last change on the board, as the Undo
                 // button does; typing in a note or the board's name, it
-                // undoes the typing instead (Cmd+Shift+Z is not an undo)
+                // undoes the typing instead (Cmd+Shift+Z is not an undo).
+                // It waits while a button is held: in the middle of dragging
+                // a note or a shape it took back the move before the drag
+                // ended, and the move could not be undone after
                 if self.modal.is_none()
                     && !ui.ctx().wants_keyboard_input()
+                    && !ui.input(|i| i.pointer.any_down())
                     && ui.input_mut(|i| {
                         let redo = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
                         !i.consume_key(redo, egui::Key::Z)

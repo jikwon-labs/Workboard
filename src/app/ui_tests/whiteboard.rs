@@ -1883,3 +1883,42 @@ fn the_name_bar_stays_clear_of_the_zoom_bar_in_a_small_window() {
         "{menu:?} {zoom:?}"
     );
 }
+
+/// Cmd+Z waits while a note is being dragged: it took back the move before
+/// it ended, so the move could not be undone after.
+#[test]
+fn cmd_z_waits_while_a_note_is_dragged() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
+    let grab = on_screen(&h, [180.0, 109.0]);
+    h.hover(grab);
+    h.frame(vec![button(grab, true)]);
+    for k in 1..=10 {
+        h.frame(vec![egui::Event::PointerMoved(
+            grab + vec2(20.0 * k as f32, 0.0),
+        )]);
+    }
+    let cmd = egui::Modifiers {
+        command: true,
+        mac_cmd: true,
+        ..Default::default()
+    };
+    for pressed in [true, false] {
+        h.frame(vec![egui::Event::Key {
+            key: egui::Key::Z,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: cmd,
+        }]);
+    }
+    h.frame(vec![button(grab + vec2(200.0, 0.0), false)]);
+    h.settle();
+    assert_eq!(board_of(&h, wid).notes[0].pos, [300.0, 100.0]);
+    h.click("Undo");
+    assert_eq!(
+        board_of(&h, wid).notes[0].pos,
+        [100.0, 100.0],
+        "Undo puts it back"
+    );
+}

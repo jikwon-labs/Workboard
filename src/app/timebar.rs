@@ -295,31 +295,34 @@ impl App {
         let font = FontId::proportional(BAR_NAME_SIZE);
         let view = p.clip_rect();
         if r.right() < view.left() || r.left() > view.right() {
-            // the bar is out of sight: say which way and when, at that edge,
-            // so the row doesn't look like a task without dates
-            let (txt, pos, align) = if r.right() < view.left() {
-                (
-                    format!("\u{2039} {}", fmt_date(e)),
-                    pos2(view.left() + 6.0, r.center().y),
-                    Align2::LEFT_CENTER,
-                )
-            } else {
-                (
-                    format!("{} \u{203a}", fmt_date(s)),
-                    pos2(view.right() - 6.0, r.center().y),
-                    Align2::RIGHT_CENTER,
-                )
-            };
-            let g = p.layout_no_wrap(txt.clone(), font.clone(), Color32::WHITE);
-            let lr = align.anchor_size(pos, g.size());
-            p.rect_filled(lr.expand(3.0), 4.0, t.bg);
-            p.text(
-                pos,
-                align,
-                txt,
-                font,
-                if overdue { t.danger } else { t.text3 },
-            );
+            // another bar in the row speaks for this edge (timeline.rs)
+            if !self.timeline.quiet_edge.contains(&task.id) {
+                // the bar is out of sight: say which way and when, at that edge,
+                // so the row doesn't look like a task without dates
+                let (txt, pos, align) = if r.right() < view.left() {
+                    (
+                        format!("\u{2039} {}", fmt_date(e)),
+                        pos2(view.left() + 6.0, r.center().y),
+                        Align2::LEFT_CENTER,
+                    )
+                } else {
+                    (
+                        format!("{} \u{203a}", fmt_date(s)),
+                        pos2(view.right() - 6.0, r.center().y),
+                        Align2::RIGHT_CENTER,
+                    )
+                };
+                let g = p.layout_no_wrap(txt.clone(), font.clone(), Color32::WHITE);
+                let lr = align.anchor_size(pos, g.size());
+                p.rect_filled(lr.expand(3.0), 4.0, t.bg);
+                p.text(
+                    pos,
+                    align,
+                    txt,
+                    font,
+                    if overdue { t.danger } else { t.text3 },
+                );
+            }
         } else if r.width() > NAME_INSIDE_W {
             let name = fit_text(p, &task.name, &font, r.width() - 12.0);
             p.with_clip_rect(r).text(

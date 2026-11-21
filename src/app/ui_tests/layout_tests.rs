@@ -1328,3 +1328,22 @@ fn org_chart_cards_wrap_inside_the_window() {
         assert!(right <= w, "{}x{}: a card's name reaches {}", w, hh, right);
     }
 }
+
+/// The Timeline packs several bars into a row: with many of them out of
+/// sight to the left, each row shows one "‹ date" at the edge, not one per
+/// bar drawn over each other and over the names, and in the smallest window
+/// "without dates" doesn't run over the lane choices.
+#[test]
+fn timeline_edge_marks_and_toolbar_do_not_overlap() {
+    for (w, hh) in [(1440.0, 900.0), (900.0, 560.0)] {
+        let mut h = Ui1::sized(w, hh);
+        heavy(&mut h);
+        let list = list_id(&h, "Website Redesign");
+        h.app.loc = Location::List(list);
+        h.app.view = ViewKind::Timeline;
+        h.settle();
+        let page = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
+        let over = overlapping(&h.texts_in(page));
+        assert!(over.is_empty(), "{}x{}: {:?}", w, hh, over);
+    }
+}

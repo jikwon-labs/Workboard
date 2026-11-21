@@ -27,6 +27,9 @@ pub(super) struct TimelineState {
     pub jump: bool,
     /// The tray of tasks without dates is open.
     pub tray: bool,
+    /// Bars out of sight that leave the "‹ date" / "date ›" at the edge to
+    /// another in their row (worked out each frame while the bars are drawn)
+    pub quiet_edge: std::collections::HashSet<u64>,
 }
 
 impl Default for TimelineState {
@@ -36,6 +39,7 @@ impl Default for TimelineState {
             zoom: 0,
             jump: true,
             tray: false,
+            quiet_edge: Default::default(),
         }
     }
 }
@@ -154,7 +158,8 @@ impl App {
             .iter()
             .filter(|x| bar_range(x.start, x.due).is_none())
             .collect();
-        ui.horizontal(|ui| {
+        // wraps in a small window: "without dates" ran over the lane choices
+        ui.horizontal_wrapped(|ui| {
             if timebar::zoom_buttons(ui, &mut self.timeline.zoom) {
                 self.timeline.jump = true;
             }
@@ -166,6 +171,15 @@ impl App {
                 if r.clicked() {
                     self.timeline.by = by;
                 }
+            }
+            if !undated.is_empty() {
+                let label = format!("\u{25B8} {}", trf!("{} without dates", undated.len()));
+                let w = ui
+                    .painter()
+                    .layout_no_wrap(label, egui::TextStyle::Button.resolve(ui.style()), t.text)
+                    .size()
+                    .x;
+                crate::widgets::wrap_unless_room(ui, w + 24.0);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if !undated.is_empty() {
@@ -320,6 +334,55 @@ impl App {
                             ui.allocate_exact_size(vec2(sc.width(), total_h), Sense::hover());
                         let p = ui.painter().clone();
                         timebar::paint_axis(&p, &t, area, head, &sc, td);
+                        // a row holds several bars: one "‹ date" at each edge,
+                        // for the nearest bar out of sight, and none where a bar
+                        // in view already reaches that edge (they were drawn over
+                        // each other and over the bar's name)
+                        let view = ui.clip_rect();
+                        let mut quiet = std::collections::HashSet::new();
+                        for lane in &lanes {
+                            let rows: std::collections::BTreeSet<usize> =
+                                lane.bars.iter().map(|b| b.2).collect();
+                            for row in rows {
+                                let bars: Vec<(u64, f32, f32, NaiveDate, NaiveDate)> = lane
+                                    .bars
+                                    .iter()
+                                    .filter(|b| b.2 == row)
+                                    .map(|(tid, (s, e), _)| {
+                                        let x0 = sc.x_of(area.left(), *s) + 1.0;
+                                        let x1 =
+                                            (sc.x_of(area.left(), *e) + sc.cw - 1.0).max(x0 + 8.0);
+                                        (*tid, x0, x1, *s, *e)
+                                    })
+                                    .collect();
+                                let shown = |b: &&(u64, f32, f32, NaiveDate, NaiveDate)| {
+                                    b.2 >= view.left() && b.1 <= view.right()
+                                };
+                                let near_left =
+                                    bars.iter().filter(shown).any(|b| b.1 < view.left() + 90.0);
+                                let near_right = bars
+                                    .iter()
+                                    .filter(shown)
+                                    .any(|b| b.2 + 160.0 > view.right() - 90.0);
+                                let left: Vec<_> =
+                                    bars.iter().filter(|b| b.2 < view.left()).collect();
+                                let keep_l = left.iter().max_by_key(|b| b.4).map(|b| b.0);
+                                for b in &left {
+                                    if near_left || Some(b.0) != keep_l {
+                                        quiet.insert(b.0);
+                                    }
+                                }
+                                let right: Vec<_> =
+                                    bars.iter().filter(|b| b.1 > view.right()).collect();
+                                let keep_r = right.iter().min_by_key(|b| b.3).map(|b| b.0);
+                                for b in &right {
+                                    if near_right || Some(b.0) != keep_r {
+                                        quiet.insert(b.0);
+                                    }
+                                }
+                            }
+                        }
+                        self.timeline.quiet_edge = quiet;
                         let mut y = area.top() + head;
                         for lane in &lanes {
                             for (tid, range, row) in &lane.bars {
@@ -343,6 +406,8 @@ impl App {
                             y += lane_h(lane);
                             p.hline(area.x_range(), y, Stroke::new(1.0_f32, t.border));
                         }
+                        // the Gantt view draws its bars with the same code, one a row
+                        self.timeline.quiet_edge.clear();
                     });
                 });
             });

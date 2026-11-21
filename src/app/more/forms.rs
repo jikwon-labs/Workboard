@@ -43,6 +43,9 @@ pub struct FormsUi {
     pub drag: Option<usize>,
     /// The Answers tab's filter: 0 all, 1 not done, 2 done.
     pub answers_filter: u8,
+    /// The open form's questions as (text, kind) when `form_fill` and
+    /// `error_at` were last fitted to them (`App::fit_form_fill`).
+    fill_shape: Vec<(String, String)>,
     /// Answers per form, and the workspace state they were counted for.
     answers: (u64, usize, usize, HashMap<u64, Vec<u64>>),
 }
@@ -446,12 +449,61 @@ impl App {
             self.sweep.forms.drag = None;
             self.form_fill.clear();
         }
+        self.fit_form_fill(fi);
         self.form_header(ui, fi);
         match self.form_tab {
             FormTab::Edit => self.form_editor(ui, fi),
             FormTab::Fill => self.form_fill_page(ui, fi),
             FormTab::Answers => self.form_answers_page(ui, fi),
         }
+    }
+
+    /// Keeps what was typed on Fill out, and the problem Submit found, with
+    /// their questions when the questions change (moved, copied, deleted or
+    /// given another kind on Edit, or by a teammate): answers are kept by
+    /// the question's place, so they would land on another question. A
+    /// question is found again by its text and kind, or at the same place
+    /// with the same kind when only its text changed; an answer whose
+    /// question is gone or asks for another kind now is dropped.
+    fn fit_form_fill(&mut self, fi: usize) {
+        let now: Vec<(String, String)> = self.data.extra.forms[fi]
+            .fields
+            .iter()
+            .map(|q| (q.label.clone(), q.map.clone()))
+            .collect();
+        let was = std::mem::take(&mut self.sweep.forms.fill_shape);
+        if was != now {
+            let mut used = vec![false; now.len()];
+            let mut to: Vec<Option<usize>> = vec![None; was.len()];
+            for (i, q) in was.iter().enumerate() {
+                if let Some(j) = (0..now.len()).find(|&j| !used[j] && now[j] == *q) {
+                    used[j] = true;
+                    to[i] = Some(j);
+                }
+            }
+            // the problem says the question's text: kept only when that is the same
+            let error_at = self
+                .sweep
+                .forms
+                .error_at
+                .and_then(|i| to.get(i).copied().flatten());
+            for (i, q) in was.iter().enumerate() {
+                if to[i].is_none() && i < now.len() && !used[i] && now[i].1 == q.1 {
+                    used[i] = true;
+                    to[i] = Some(i);
+                }
+            }
+            for (i, v) in std::mem::take(&mut self.form_fill) {
+                if let Some(Some(j)) = to.get(i) {
+                    self.form_fill.insert(*j, v);
+                }
+            }
+            self.sweep.forms.error_at = error_at;
+            if error_at.is_none() {
+                self.sweep.form_error = None;
+            }
+        }
+        self.sweep.forms.fill_shape = now;
     }
 
     /// The bar over an open form: back to the list and the form's name on the

@@ -300,3 +300,112 @@ fn forms_dont_take_another_hubs_filter() {
     h.click("Favorites");
     assert!(!h.has("Form Feedback Form"));
 }
+
+/// A blank form (Title, Details) open on its Edit tab, the pointer on the
+/// window as it is for a person (the harness drops a first click otherwise).
+fn blank_form(h: &mut Ui1) -> u64 {
+    h.app.new_form();
+    h.settle();
+    h.hover(pos2(700.0, 450.0));
+    h.app.form_open.expect("the new form opens")
+}
+
+/// Answers typed on Fill out stay with their question when the questions
+/// change on Edit: moved up, deleted. Before, they stayed at their place in
+/// the list, so the task name went into the description and the other way.
+#[test]
+fn answers_stay_with_their_question_when_questions_move() {
+    let mut h = Ui1::new();
+    let fid = blank_form(&mut h);
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("Desk lamp");
+    h.click("Answer 2");
+    h.type_text("Flickers at night");
+    h.click("Edit");
+    h.click("Question 2 menu");
+    h.click("Move question 2 up");
+    assert_eq!(form(&h, fid).fields[0].map, "description");
+    h.click("Fill out");
+    h.click("Submit");
+    let t = task_named(&h, "Desk lamp");
+    assert_eq!(t.description, "Flickers at night");
+    // deleting the first question (now Details) leaves the name's answer
+    // with the name question
+    h.click("Answer 1");
+    h.type_text("Too dim");
+    h.click("Answer 2");
+    h.type_text("Lamp two");
+    h.click("Edit");
+    h.click("Question 1 menu");
+    h.click("Delete question 1");
+    assert_eq!(form(&h, fid).fields.len(), 1);
+    h.click("Fill out");
+    h.click("Submit");
+    assert_eq!(task_named(&h, "Lamp two").description, "");
+    assert!(!h.app.data.tasks.iter().any(|t| t.name == "Too dim"));
+}
+
+/// The same when a teammate turns the questions around while this person
+/// is filling the form out.
+#[test]
+fn answers_stay_with_their_question_when_a_teammate_moves_it() {
+    let mut h = Ui1::new();
+    let fid = blank_form(&mut h);
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("Chair");
+    h.click("Answer 2");
+    h.type_text("Wobbly leg");
+    let f = h
+        .app
+        .data
+        .extra
+        .forms
+        .iter_mut()
+        .find(|f| f.id == fid)
+        .unwrap();
+    f.fields.reverse();
+    h.settle();
+    h.click("Submit");
+    assert_eq!(task_named(&h, "Chair").description, "Wobbly leg");
+}
+
+/// A question's kind changed on Edit drops what was typed for it (a
+/// checkbox doesn't show the old text but would have sent it); a problem
+/// found on Submit moves with its question.
+#[test]
+fn a_kind_change_drops_the_answer_and_the_problem_moves_along() {
+    let mut h = Ui1::new();
+    let fid = blank_form(&mut h);
+    h.click("Fill out");
+    h.click("Answer 2");
+    h.type_text("hello");
+    h.click("Edit");
+    h.click("Question 2 kind");
+    h.click("Kind Checkbox");
+    assert_eq!(form(&h, fid).fields[1].map, "checkbox");
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("Checked nothing");
+    h.click("Submit");
+    assert_eq!(task_named(&h, "Checked nothing").description, "");
+    // the problem with the first question, which then moves down
+    h.click("Edit");
+    h.click("Required 1");
+    h.click("Fill out");
+    h.click("Submit");
+    assert_eq!(h.app.sweep.forms.error_at, Some(0));
+    h.click("Edit");
+    h.click("Question 1 menu");
+    h.click("Move question 1 down");
+    h.click("Fill out");
+    assert_eq!(h.app.sweep.forms.error_at, Some(1), "still under Title");
+    assert!(!h.painted_text("Please answer \"Title\".").is_empty());
+    // answered, it goes away
+    h.click("Answer 2");
+    h.type_text("Lamp");
+    h.click("Submit");
+    assert_eq!(h.app.sweep.forms.error_at, None);
+    assert!(h.painted_text("Please answer \"Title\".").is_empty());
+}

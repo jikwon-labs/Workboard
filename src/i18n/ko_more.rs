@@ -304,6 +304,7 @@ pub const T: &[(&str, &str)] = &[
     ("Pen", "펜"),
     ("Sticky note", "스티커 메모"),
     ("Undo", "실행 취소"),
+    ("Redo", "다시 실행"),
     ("Untitled whiteboard", "제목 없는 화이트보드"),
     ("Untitled form", "제목 없는 양식"),
     ("Untitled question", "제목 없는 질문"),

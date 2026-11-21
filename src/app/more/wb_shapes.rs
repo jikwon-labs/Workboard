@@ -649,7 +649,7 @@ impl App {
             self.dirty = true;
         }
         if let Some(old) = grab {
-            self.sweep.wb_undo.push((wid, WbUndo::ShapeWas(old)));
+            self.sweep.wb_did(wid, WbUndo::ShapeWas(old));
         }
         self.sweep.wb_edit = editing.filter(|e| e.1 != 0);
         if let Some(id) = pick {
@@ -844,7 +844,7 @@ impl App {
                 });
             }
             if h.drag_started_by(egui::PointerButton::Primary) {
-                self.sweep.wb_undo.push((wid, WbUndo::ShapeWas(s.clone())));
+                self.sweep.wb_did(wid, WbUndo::ShapeWas(s.clone()));
             }
             if h.dragged_by(egui::PointerButton::Primary) {
                 if let Some(at) = h.interact_pointer_pos() {
@@ -940,7 +940,7 @@ impl App {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
             }
             if h.drag_started_by(egui::PointerButton::Primary) {
-                self.sweep.wb_undo.push((wid, WbUndo::LineWas(l.clone())));
+                self.sweep.wb_did(wid, WbUndo::LineWas(l.clone()));
             }
             if h.dragged_by(egui::PointerButton::Primary) {
                 if let Some(at) = h.interact_pointer_pos() {
@@ -1111,7 +1111,7 @@ impl App {
             .iter_mut()
             .find(|s| s.id == id)
         {
-            self.sweep.wb_undo.push((wid, WbUndo::ShapeWas(s.clone())));
+            self.sweep.wb_did(wid, WbUndo::ShapeWas(s.clone()));
             f(s);
             self.dirty = true;
         }
@@ -1124,7 +1124,7 @@ impl App {
             .iter_mut()
             .find(|l| l.id == id)
         {
-            self.sweep.wb_undo.push((wid, WbUndo::LineWas(l.clone())));
+            self.sweep.wb_did(wid, WbUndo::LineWas(l.clone()));
             f(l);
             // what the next line drawn with the Line tool looks like
             self.sweep.wb_line_style = WbLineStyle {
@@ -1180,8 +1180,7 @@ impl App {
             arrow: like.arrow,
         });
         self.sweep
-            .wb_undo
-            .push((wid, WbUndo::Added(vec![new_id], vec![line_id])));
+            .wb_did(wid, WbUndo::Added(vec![new_id], vec![line_id]));
         self.sweep.wb_sel = Some((wid, WbSel::Shape(new_id)));
         self.sweep.wb_edit = Some((wid, new_id, true));
         self.dirty = true;
@@ -1201,9 +1200,7 @@ impl App {
             color: self.wb_color,
             filled: false,
         });
-        self.sweep
-            .wb_undo
-            .push((wid, WbUndo::Added(vec![id], vec![])));
+        self.sweep.wb_did(wid, WbUndo::Added(vec![id], vec![]));
         self.wb_tool = 2;
         self.sweep.wb_sel = Some((wid, WbSel::Shape(id)));
         self.sweep.wb_edit = Some((wid, id, true));
@@ -1254,9 +1251,7 @@ impl App {
             dashed: style.dashed,
             arrow: style.arrow,
         });
-        self.sweep
-            .wb_undo
-            .push((wid, WbUndo::Added(vec![], vec![id])));
+        self.sweep.wb_did(wid, WbUndo::Added(vec![], vec![id]));
         self.dirty = true;
     }
 
@@ -1315,66 +1310,70 @@ impl App {
             }
         }
         if !shapes.is_empty() || !lines.is_empty() {
-            self.sweep
-                .wb_undo
-                .push((wid, WbUndo::Removed(shapes, lines)));
+            self.sweep.wb_did(wid, WbUndo::Removed(shapes, lines));
             self.dirty = true;
         }
     }
 }
 
-/// Takes back one of the shape and line steps on `wb`; true when anything
-/// changed. By id, like the rest of the board's Undo: what a teammate
-/// changed or took away meanwhile is left alone.
-pub(crate) fn undo_shapes(wb: &mut Whiteboard, op: WbUndo) -> bool {
+/// Takes back one of the shape and line steps on `wb`, giving the step that
+/// puts it back again, or None when nothing changed. By id, like the rest of
+/// the board's Undo: what a teammate changed or took away meanwhile is left
+/// alone.
+pub(crate) fn undo_shapes(wb: &mut Whiteboard, op: WbUndo) -> Option<WbUndo> {
     match op {
         WbUndo::Added(shapes, lines) => {
-            let (ns, nl) = (wb.shapes.len(), wb.lines.len());
-            wb.shapes.retain(|s| !shapes.contains(&s.id));
-            wb.lines.retain(|l| !lines.contains(&l.id));
-            ns != wb.shapes.len() || nl != wb.lines.len()
+            // each kept with its place at the moment it was taken out, so
+            // putting them back in the opposite order lands each where it was
+            let mut gone_s = Vec::new();
+            while let Some(i) = wb.shapes.iter().position(|s| shapes.contains(&s.id)) {
+                gone_s.push((i, wb.shapes.remove(i)));
+            }
+            let mut gone_l = Vec::new();
+            while let Some(i) = wb.lines.iter().position(|l| lines.contains(&l.id)) {
+                gone_l.push((i, wb.lines.remove(i)));
+            }
+            (!gone_s.is_empty() || !gone_l.is_empty()).then(|| WbUndo::Removed(gone_s, gone_l))
         }
         WbUndo::Removed(shapes, lines) => {
-            let mut back = false;
+            let (mut back_s, mut back_l) = (Vec::new(), Vec::new());
             // put back in the opposite order they were taken out, so each
             // lands where it was
             for (i, s) in shapes.into_iter().rev() {
                 if !wb.shapes.iter().any(|x| x.id == s.id) {
+                    back_s.push(s.id);
                     wb.shapes.insert(i.min(wb.shapes.len()), s);
-                    back = true;
                 }
             }
             for (i, l) in lines.into_iter().rev() {
                 if !wb.lines.iter().any(|x| x.id == l.id) {
+                    back_l.push(l.id);
                     wb.lines.insert(i.min(wb.lines.len()), l);
-                    back = true;
                 }
             }
-            back
+            (!back_s.is_empty() || !back_l.is_empty()).then(|| WbUndo::Added(back_s, back_l))
         }
-        WbUndo::ShapeWas(old) => match wb.shapes.iter_mut().find(|s| s.id == old.id) {
-            Some(s) => {
-                // the text typed since stays
-                let text = std::mem::take(&mut s.text);
-                *s = WbShape { text, ..old };
-                true
-            }
-            None => false,
-        },
-        WbUndo::LineWas(old) => match wb.lines.iter_mut().find(|l| l.id == old.id) {
-            Some(l) => {
-                *l = old;
-                true
-            }
-            None => false,
-        },
-        WbUndo::NoteResized(id, size) => match wb.notes.iter_mut().find(|n| n.id == id) {
-            Some(n) => {
-                n.size = size;
-                true
-            }
-            None => false,
-        },
-        _ => false,
+        WbUndo::ShapeWas(old) => {
+            let s = wb.shapes.iter_mut().find(|s| s.id == old.id)?;
+            // the text typed since stays
+            let now = s.clone();
+            *s = WbShape {
+                text: now.text.clone(),
+                ..old
+            };
+            Some(WbUndo::ShapeWas(now))
+        }
+        WbUndo::LineWas(old) => {
+            let l = wb.lines.iter_mut().find(|l| l.id == old.id)?;
+            Some(WbUndo::LineWas(std::mem::replace(l, old)))
+        }
+        WbUndo::NoteResized(id, size) => {
+            let n = wb.notes.iter_mut().find(|n| n.id == id)?;
+            Some(WbUndo::NoteResized(
+                id,
+                std::mem::replace(&mut n.size, size),
+            ))
+        }
+        _ => None,
     }
 }

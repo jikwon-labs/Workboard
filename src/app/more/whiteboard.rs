@@ -309,21 +309,29 @@ impl App {
                 };
                 let wid = self.data.extra.whiteboards[wi].id;
                 // Cmd+Z takes back my last change on the board, as the Undo
-                // button does; typing in a note or the board's name, it
-                // undoes the typing instead (Cmd+Shift+Z is not an undo).
-                // It waits while a button is held: in the middle of dragging
-                // a note or a shape it took back the move before the drag
+                // button does, and Cmd+Shift+Z (Ctrl+Y too on Windows) puts
+                // it back, as Redo does; typing in a note or the board's
+                // name, they act on the typing instead.
+                // They wait while a button is held: in the middle of dragging
+                // a note or a shape Cmd+Z took back the move before the drag
                 // ended, and the move could not be undone after
                 if self.modal.is_none()
                     && !ui.ctx().wants_keyboard_input()
                     && !ui.input(|i| i.pointer.any_down())
-                    && ui.input_mut(|i| {
-                        let redo = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
-                        !i.consume_key(redo, egui::Key::Z)
-                            && i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)
-                    })
                 {
-                    self.wb_undo(wid);
+                    let (undo, redo) = ui.input_mut(|i| {
+                        let shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+                        let redo = i.consume_key(shift, egui::Key::Z)
+                            || (!cfg!(target_os = "macos")
+                                && i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y));
+                        let undo = !redo && i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z);
+                        (undo, redo)
+                    });
+                    if undo {
+                        self.wb_undo(wid);
+                    } else if redo {
+                        self.wb_redo(wid);
+                    }
                 }
                 if self.sweep.wb_width <= 0.0 {
                     self.sweep.wb_width = 2.5;
@@ -728,7 +736,7 @@ impl App {
                     }
                 }
                 if let Some((id, was)) = size_from {
-                    self.sweep.wb_undo.push((wid, WbUndo::NoteResized(id, was)));
+                    self.sweep.wb_did(wid, WbUndo::NoteResized(id, was));
                 }
                 if let Some((i, wh)) = size_note {
                     let size = [wh[0].clamp(100.0, 800.0), wh[1].clamp(70.0, 800.0)];
@@ -740,9 +748,7 @@ impl App {
                 if let Some((i, c)) = recolor {
                     let n = &mut wb.notes[i];
                     if n.color != c {
-                        self.sweep
-                            .wb_undo
-                            .push((wid, WbUndo::NoteColour(n.id, n.color)));
+                        self.sweep.wb_did(wid, WbUndo::NoteColour(n.id, n.color));
                         n.color = c;
                         self.dirty = true;
                     }
@@ -750,11 +756,11 @@ impl App {
                 if let Some(i) = drop_note {
                     // Undo brings it back
                     let n = wb.notes.remove(i);
-                    self.sweep.wb_undo.push((wid, WbUndo::NoteGone(i, n)));
+                    self.sweep.wb_did(wid, WbUndo::NoteGone(i, n));
                     self.dirty = true;
                 }
                 if let Some((id, at)) = move_from {
-                    self.sweep.wb_undo.push((wid, WbUndo::NoteMoved(id, at)));
+                    self.sweep.wb_did(wid, WbUndo::NoteMoved(id, at));
                     self.sweep.wb_note_drag = Some((wid, id, at));
                     ui.ctx().request_repaint();
                 }
@@ -816,7 +822,7 @@ impl App {
                                     points,
                                 });
                                 self.sweep.wb_drawing = Some((wid, id));
-                                self.sweep.wb_undo.push((wid, WbUndo::Stroke(id)));
+                                self.sweep.wb_did(wid, WbUndo::Stroke(id));
                                 self.dirty = true;
                             } else if resp.dragged() {
                                 // the stroke being drawn, wherever a merge put
@@ -846,7 +852,7 @@ impl App {
                                     color: super::wb_panels::sticky_color(self.wb_color),
                                     ..Default::default()
                                 });
-                                self.sweep.wb_undo.push((wid, WbUndo::Note(id)));
+                                self.sweep.wb_did(wid, WbUndo::Note(id));
                                 self.dirty = true;
                                 // it takes the typing, as a shape put down
                                 // does (what was typed right after went nowhere)
@@ -877,7 +883,7 @@ impl App {
                                 let wb = &mut self.data.extra.whiteboards[wi];
                                 while let Some(i) = wb.strokes.iter().position(hit) {
                                     let s = wb.strokes.remove(i);
-                                    self.sweep.wb_undo.push((wid, WbUndo::StrokeGone(i, s)));
+                                    self.sweep.wb_did(wid, WbUndo::StrokeGone(i, s));
                                     self.dirty = true;
                                 }
                             }
@@ -932,65 +938,81 @@ impl App {
     }
 
     /// Takes back my last step on a board: a stroke, note, shape or line
-    /// added, deleted, moved, resized or restyled, or an erasing.
+    /// added, deleted, moved, resized or restyled, or an erasing. Redo can
+    /// put it back.
     pub(crate) fn wb_undo(&mut self, wid: u64) {
         let Some(k) = self.sweep.wb_undo.iter().rposition(|u| u.0 == wid) else {
             return;
         };
         let (_, op) = self.sweep.wb_undo.remove(k);
-        let Some(wb) = self.data.extra.whiteboards.iter_mut().find(|w| w.id == wid) else {
+        if let Some(back) = self.wb_apply(wid, op) {
+            self.sweep.wb_redo.push((wid, back));
+        }
+    }
+
+    /// Puts back the last step Undo took back on a board; Undo can take it
+    /// back again.
+    pub(crate) fn wb_redo(&mut self, wid: u64) {
+        let Some(k) = self.sweep.wb_redo.iter().rposition(|u| u.0 == wid) else {
             return;
         };
+        let (_, op) = self.sweep.wb_redo.remove(k);
+        if let Some(back) = self.wb_apply(wid, op) {
+            self.sweep.wb_undo.push((wid, back));
+        }
+    }
+
+    /// Turns a board back by one step and gives the step that turns it
+    /// forward again (Undo and Redo are each other's opposite), or None
+    /// when nothing changed.
+    fn wb_apply(&mut self, wid: u64, op: WbUndo) -> Option<WbUndo> {
+        let wb = self
+            .data
+            .extra
+            .whiteboards
+            .iter_mut()
+            .find(|w| w.id == wid)?;
         // by id: a stroke or note a teammate took away meanwhile is left
         // alone (nothing happens), and theirs are never touched
-        let done = match op {
-            WbUndo::Stroke(id) => match wb.strokes.iter().position(|s| s.id == id) {
-                Some(i) => {
-                    wb.strokes.remove(i);
-                    true
-                }
-                None => false,
-            },
-            WbUndo::Note(id) => match wb.notes.iter().position(|n| n.id == id) {
-                Some(i) => {
-                    wb.notes.remove(i);
-                    true
-                }
-                None => false,
-            },
+        let back = match op {
+            WbUndo::Stroke(id) => {
+                let i = wb.strokes.iter().position(|s| s.id == id)?;
+                Some(WbUndo::StrokeGone(i, wb.strokes.remove(i)))
+            }
+            WbUndo::Note(id) => {
+                let i = wb.notes.iter().position(|n| n.id == id)?;
+                Some(WbUndo::NoteGone(i, wb.notes.remove(i)))
+            }
             WbUndo::NoteGone(i, n) => {
-                let back = !wb.notes.iter().any(|x| x.id == n.id);
-                if back {
-                    wb.notes.insert(i.min(wb.notes.len()), n);
+                if wb.notes.iter().any(|x| x.id == n.id) {
+                    return None;
                 }
-                back
+                let id = n.id;
+                wb.notes.insert(i.min(wb.notes.len()), n);
+                Some(WbUndo::Note(id))
             }
             WbUndo::StrokeGone(i, s) => {
-                let back = !wb.strokes.iter().any(|x| x.id == s.id);
-                if back {
-                    wb.strokes.insert(i.min(wb.strokes.len()), s);
+                if wb.strokes.iter().any(|x| x.id == s.id) {
+                    return None;
                 }
-                back
+                let id = s.id;
+                wb.strokes.insert(i.min(wb.strokes.len()), s);
+                Some(WbUndo::Stroke(id))
             }
-            WbUndo::NoteMoved(id, at) => match wb.notes.iter_mut().find(|n| n.id == id) {
-                Some(n) => {
-                    n.pos = at;
-                    true
-                }
-                None => false,
-            },
-            WbUndo::NoteColour(id, c) => match wb.notes.iter_mut().find(|n| n.id == id) {
-                Some(n) => {
-                    n.color = c;
-                    true
-                }
-                None => false,
-            },
+            WbUndo::NoteMoved(id, at) => {
+                let n = wb.notes.iter_mut().find(|n| n.id == id)?;
+                Some(WbUndo::NoteMoved(id, std::mem::replace(&mut n.pos, at)))
+            }
+            WbUndo::NoteColour(id, c) => {
+                let n = wb.notes.iter_mut().find(|n| n.id == id)?;
+                Some(WbUndo::NoteColour(id, std::mem::replace(&mut n.color, c)))
+            }
             op => super::wb_shapes::undo_shapes(wb, op),
         };
-        if done {
+        if back.is_some() {
             self.dirty = true;
         }
+        back
     }
 }
 

@@ -410,8 +410,7 @@ impl App {
         // Undo takes it back, as anything else added to the board
         if !sids.is_empty() {
             self.sweep
-                .wb_undo
-                .push((wid, super::whiteboard::WbUndo::Added(sids, lids)));
+                .wb_did(wid, super::whiteboard::WbUndo::Added(sids, lids));
         }
         self.dirty = true;
     }

@@ -1170,7 +1170,7 @@ fn a_click_on_a_note_types_in_it_with_any_tool() {
 
 /// Cmd+Z takes back my last change on the board, as the Undo button does
 /// (its tip says so); typing in a note it is the note's own undo, and
-/// Cmd+Shift+Z is not an undo.
+/// Cmd+Shift+Z is not an undo (it is Redo).
 #[test]
 fn cmd_z_takes_back_on_the_board_but_not_while_typing() {
     let mut h = Ui1::new();
@@ -1182,13 +1182,18 @@ fn cmd_z_takes_back_on_the_board_but_not_while_typing() {
     assert_eq!(board_of(&h, wid).strokes.len(), 1);
     cmd_key(&mut h, egui::Key::Z);
     assert!(board_of(&h, wid).strokes.is_empty(), "Cmd+Z took it back");
-    h.drag_by(c, c + vec2(80.0, 30.0));
     let shift_cmd = egui::Modifiers {
         command: true,
         mac_cmd: true,
         shift: true,
         ..Default::default()
     };
+    h.key_with(egui::Key::Z, shift_cmd);
+    assert_eq!(
+        board_of(&h, wid).strokes.len(),
+        1,
+        "Cmd+Shift+Z puts it back"
+    );
     h.key_with(egui::Key::Z, shift_cmd);
     assert_eq!(board_of(&h, wid).strokes.len(), 1, "Cmd+Shift+Z is no undo");
     h.click_at(on_screen(&h, [140.0, 150.0]));
@@ -2163,4 +2168,99 @@ fn black_ink_shows_on_a_dark_board() {
     seen(fill, "the pick bar's black");
     // stored as it was: black, for a teammate on a light page
     assert_eq!(board_of(&h, wid).strokes[0].color, black);
+}
+
+/// Redo puts back what Undo took back, by its button and by Cmd+Shift+Z
+/// (Ctrl+Y too on Windows), step by step in the order they were taken
+/// back; a new step on the board leaves nothing to redo.
+#[test]
+fn redo_puts_back_what_undo_took_back() {
+    let mut h = Ui1::new();
+    let wid = template_board(&mut h, "Flow Chart");
+    let step = shape(&board_of(&h, wid), "Step").clone();
+    let lines = board_of(&h, wid).lines.len();
+    assert!(!can_redo(&h, wid), "nothing to redo yet");
+
+    // move the shape, then delete it with its line
+    let at = h.rect("Shape Step").center();
+    h.drag_by(at, at + vec2(100.0, 50.0));
+    let moved = shape(&board_of(&h, wid), "Step").pos;
+    h.key(egui::Key::Delete);
+    assert!(board_of(&h, wid).shapes.iter().all(|s| s.id != step.id));
+
+    h.click("Undo");
+    h.click("Undo");
+    assert_eq!(shape(&board_of(&h, wid), "Step").pos, step.pos);
+    assert!(can_redo(&h, wid));
+
+    h.click("Redo");
+    assert_eq!(shape(&board_of(&h, wid), "Step").pos, moved, "moved again");
+    cmd_shift_z(&mut h);
+    let b = board_of(&h, wid);
+    assert!(b.shapes.iter().all(|s| s.id != step.id), "deleted again");
+    assert_eq!(b.lines.len(), lines - 1, "with its line");
+    assert!(!can_redo(&h, wid), "all put back");
+
+    // and Undo takes it all back once more, in the same order
+    h.click("Undo");
+    assert_eq!(board_of(&h, wid).lines.len(), lines);
+    cmd_key(&mut h, egui::Key::Z);
+    assert_eq!(shape(&board_of(&h, wid), "Step").pos, step.pos);
+
+    // a new step forgets what Undo took back
+    h.app.wb_tool = 0;
+    h.settle();
+    let c = on_screen(&h, [900.0, 700.0]);
+    h.drag_by(c, c + vec2(60.0, 20.0));
+    assert!(!can_redo(&h, wid), "a new stroke leaves nothing to redo");
+    cmd_shift_z(&mut h);
+    assert_eq!(shape(&board_of(&h, wid), "Step").pos, step.pos);
+}
+
+/// Redo puts back a note taken away, its move and its colour, and a stroke
+/// erased by Undo of its drawing.
+#[test]
+fn redo_puts_back_notes_and_strokes() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
+    let id = board_of(&h, wid).notes[0].id;
+    h.app.wb_tool = 0;
+    h.settle();
+    let c = on_screen(&h, [500.0, 500.0]);
+    h.drag_by(c, c + vec2(80.0, 30.0));
+    let stroke = board_of(&h, wid).strokes[0].clone();
+    h.click("Undo");
+    assert!(board_of(&h, wid).strokes.is_empty());
+    h.click("Redo");
+    let back = &board_of(&h, wid).strokes;
+    assert_eq!(back.len(), 1);
+    assert_eq!(
+        (back[0].id, &back[0].points),
+        (stroke.id, &stroke.points),
+        "the same stroke"
+    );
+
+    // a note moved by its top strip
+    let top = on_screen(&h, [140.0, 104.0]);
+    h.drag_by(top, top + vec2(200.0, 0.0));
+    let moved = note_pos(&h, wid, id);
+    assert_ne!(moved, [100.0, 100.0]);
+    h.click("Undo");
+    assert_eq!(note_pos(&h, wid, id), [100.0, 100.0]);
+    h.click("Redo");
+    assert_eq!(note_pos(&h, wid, id), moved);
+}
+
+fn cmd_shift_z(h: &mut Ui1) {
+    let m = egui::Modifiers {
+        command: true,
+        mac_cmd: true,
+        shift: true,
+        ..Default::default()
+    };
+    h.key_with(egui::Key::Z, m);
+}
+
+fn can_redo(h: &Ui1, wid: u64) -> bool {
+    h.app.sweep.wb_redo.iter().any(|u| u.0 == wid)
 }

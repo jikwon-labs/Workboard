@@ -155,6 +155,7 @@ impl App {
                         "Back / forward",
                     ),
                     ("\u{2318}Z", "Undo on a whiteboard"),
+                    ("\u{2318}\u{21E7}Z", "Redo on a whiteboard"),
                     ("\u{2318},", "Settings"),
                     ("Enter", "Send a message or save a new task"),
                     ("Shift+Enter", "New line in a message"),

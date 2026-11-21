@@ -104,6 +104,7 @@ pub(super) const KINDS: &[&str] = &[
     "plus",
     "login",
     "undo",
+    "redo",
     "fit",
     "at",
     "volume",
@@ -1284,17 +1285,20 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(0.0, -6.5), vec2(0.0, 6.5));
             line(vec2(-6.5, 0.0), vec2(6.5, 0.0));
         }
-        "undo" => {
-            // a hook from the left arrow head round to the bottom
-            let mut pts = vec![c + vec2(-6.5, -2.5)];
+        "undo" | "redo" => {
+            // a hook from the left arrow head round to the bottom; Redo's
+            // is the same turned to face right
+            let m = if kind == "redo" { -1.0 } else { 1.0 };
+            let v = |x: f32, y: f32| vec2(x * m, y);
+            let mut pts = vec![c + v(-6.5, -2.5)];
             for i in 0..=10 {
                 let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 10.0;
-                pts.push(c + vec2(1.5, 1.5) + vec2(a.cos(), a.sin()) * 4.0 * vec2(1.25, 1.0));
+                pts.push(c + v(1.5 + a.cos() * 5.0, 1.5 + a.sin() * 4.0));
             }
-            pts.push(c + vec2(-1.5, 5.5));
+            pts.push(c + v(-1.5, 5.5));
             p.add(egui::Shape::line(pts, s));
-            line(vec2(-6.5, -2.5), vec2(-3.0, -6.0));
-            line(vec2(-6.5, -2.5), vec2(-3.0, 1.0));
+            line(v(-6.5, -2.5), v(-3.0, -6.0));
+            line(v(-6.5, -2.5), v(-3.0, 1.0));
         }
         "fit" => {
             // four corners: the whole board in view

@@ -363,6 +363,7 @@ impl App {
                                 self.sweep.wb_sel = None;
                                 self.sweep.wb_edit = None;
                                 self.sweep.wb_undo.retain(|u| u.0 != wid);
+                                self.sweep.wb_redo.retain(|u| u.0 != wid);
                                 self.sweep.confirm = None;
                                 self.dirty = true;
                                 close_popup(ui);
@@ -516,9 +517,9 @@ impl App {
         }
     }
 
-    /// Down the left: the tools and Undo. Returns the bar's place.
+    /// Down the left: the tools, Undo and Redo. Returns the bar's place.
     fn wb_tool_bar(&mut self, ui: &mut Ui, t: &Theme, rect: Rect, wid: u64) -> Rect {
-        let h = 6.0 + TOOLS.len() as f32 * (TOOL + 4.0) + 9.0 + TOOL + 6.0;
+        let h = 6.0 + TOOLS.len() as f32 * (TOOL + 4.0) + 9.0 + TOOL + 4.0 + TOOL + 6.0;
         // in a short window it stays under the name bar
         let top = (rect.center().y - h / 2.0).max(rect.top() + EDGE + BAR_H + 12.0);
         let bar = Rect::from_min_size(pos2(rect.left() + EDGE, top), vec2(TOOL + 12.0, h));
@@ -575,6 +576,32 @@ impl App {
         .clicked()
         {
             self.wb_undo(wid);
+        }
+        y += TOOL + 4.0;
+        let can_redo = self.sweep.wb_redo.iter().any(|u| u.0 == wid);
+        let r = Rect::from_min_size(pos2(bar.left() + 6.0, y), vec2(TOOL, TOOL));
+        let redo_keys = if cfg!(target_os = "macos") {
+            crate::os::keys("\u{2318}\u{21E7}Z")
+        } else {
+            "Ctrl+Y".to_string()
+        };
+        let tip = format!("{}  {}", tr("Redo"), redo_keys);
+        if bar_button(
+            ui,
+            t,
+            r,
+            ui.id().with(("wb_redo", wid)),
+            "Redo",
+            &tip,
+            false,
+            can_redo,
+            |p, c, fg| {
+                line_icon(p, "redo", c, fg);
+            },
+        )
+        .clicked()
+        {
+            self.wb_redo(wid);
         }
         bar
     }

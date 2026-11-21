@@ -44,6 +44,15 @@ pub(crate) use whiteboard::GUIDE as WB_GUIDE;
 #[cfg(test)]
 pub use whiteboard::{WB_COLORS, WB_ORIGIN};
 
+impl SweepUi {
+    /// Keeps a step I took on board `wid` for Undo. Redo can no longer
+    /// put back what Undo took there, as in any editor.
+    pub fn wb_did(&mut self, wid: u64, op: WbUndo) {
+        self.wb_undo.push((wid, op));
+        self.wb_redo.retain(|u| u.0 != wid);
+    }
+}
+
 /// Screen state of the app pages (not saved).
 #[derive(Default)]
 pub struct SweepUi {
@@ -64,6 +73,9 @@ pub struct SweepUi {
     /// Whiteboard pen width (0 = the standard 2.5).
     pub wb_width: f32,
     pub wb_undo: Vec<(u64, WbUndo)>,
+    /// What the whiteboard's Redo puts back: the steps Undo took back,
+    /// newest last. A new step on that board forgets them.
+    pub wb_redo: Vec<(u64, WbUndo)>,
     /// The pen stroke being drawn: (whiteboard, stroke id).
     pub wb_drawing: Option<(u64, u64)>,
     /// The note being dragged: (whiteboard, note id, where it was when the
@@ -1033,6 +1045,7 @@ impl App {
         }
         if kind == "whiteboard" {
             self.sweep.wb_undo.retain(|u| u.0 != id);
+            self.sweep.wb_redo.retain(|u| u.0 != id);
         }
         let x = &mut self.data.extra;
         match kind {

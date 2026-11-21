@@ -6,9 +6,8 @@
 // Before, a template laid out sticky notes standing in for the boxes of its
 // picture; now it lays out the picture itself, and people grow it from there.
 
-use super::wb_library::mix;
 use super::wb_panels::{bar_sep, card};
-use super::whiteboard::{ink, WbUndo, WbView, WB_COLORS};
+use super::whiteboard::{WbUndo, WbView, WB_COLORS};
 use super::*;
 use crate::app::icons::paint_plus;
 use egui::{Pos2, Response};

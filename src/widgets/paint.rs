@@ -382,6 +382,45 @@ pub fn paint_fit(
     rect
 }
 
+/// `a` moved toward `b` by `k` (0 = a, 1 = b), both taken as opaque.
+pub fn mix(a: Color32, b: Color32, k: f32) -> Color32 {
+    let k = k.clamp(0.0, 1.0);
+    let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
+    Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
+}
+
+/// What to write or draw on a colour (a goal's): white, or near-black on a
+/// colour too light for white to read (white below 3:1 against it, the
+/// yellow among the goal colours).
+pub fn ink_on(c: Color32) -> Color32 {
+    let lin = |v: u8| {
+        let v = v as f32 / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let l = 0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b());
+    if 1.05 / (l + 0.05) < 3.0 {
+        Color32::from_rgb(26, 26, 26)
+    } else {
+        Color32::WHITE
+    }
+}
+
+/// The colour whiteboard ink `c` is drawn in: black (the pen's first
+/// colour, which is the dark page's own colour) shows light on a dark page,
+/// where it vanished. The board keeps it black, for teammates on a light
+/// page.
+pub fn ink(t: &Theme, c: [u8; 3]) -> Color32 {
+    if t.dark && c.iter().all(|&v| v < 64) {
+        t.text
+    } else {
+        rgb(c)
+    }
+}
+
 /// A chip's text colour on a dark theme: the colour mixed halfway to white,
 /// so a dark green or purple tag stays readable on its tinted background.
 pub fn chip_text_on_dark(c: Color32) -> Color32 {

@@ -30,17 +30,6 @@ pub struct WbNew {
     pub renamed: bool,
 }
 
-/// The colour board ink `c` is drawn in: black (the pen's first colour,
-/// which is the dark page's own colour) shows light on a dark page, where it
-/// vanished. The board keeps it black, for teammates on a light page.
-pub(crate) fn ink(t: &Theme, c: [u8; 3]) -> Color32 {
-    if t.dark && c.iter().all(|&v| v < 64) {
-        t.text
-    } else {
-        rgb(c)
-    }
-}
-
 /// Where the board's 0,0 sits in the canvas at the starting view: clear of
 /// the tool bar down the left and the name bar at the top, which float over
 /// the board.
@@ -49,13 +38,7 @@ pub const WB_ORIGIN: egui::Vec2 = egui::Vec2::new(88.0, 84.0);
 /// A sticky note's paper: its colour as a tint of the page, so the dark
 /// text on it reads (a full blue or green behind black text did not).
 pub(crate) fn note_fill(t: &Theme, c: [u8; 3]) -> Color32 {
-    let k = if t.dark { 0.42 } else { 0.32 };
-    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * k).round() as u8;
-    Color32::from_rgb(
-        mix(t.bg.r(), c[0]),
-        mix(t.bg.g(), c[1]),
-        mix(t.bg.b(), c[2]),
-    )
+    mix(t.bg, rgb(c), if t.dark { 0.42 } else { 0.32 })
 }
 
 /// What the whiteboard's Undo takes back, newest last. Only my own actions

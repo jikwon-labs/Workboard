@@ -190,13 +190,7 @@ impl App {
         let done = row.pct >= 100;
         // an achieved goal's box takes a light wash of its colour
         let fill = if done {
-            let a = if t.dark { 0.18 } else { 0.07 };
-            let mix = |c: u8, k: u8| (c as f32 * (1.0 - a) + k as f32 * a).round() as u8;
-            Color32::from_rgb(
-                mix(t.card.r(), color.r()),
-                mix(t.card.g(), color.g()),
-                mix(t.card.b(), color.b()),
-            )
+            mix(t.card, color, if t.dark { 0.18 } else { 0.07 })
         } else {
             t.card
         };

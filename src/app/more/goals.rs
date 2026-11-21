@@ -217,26 +217,6 @@ pub(crate) fn fmt_num(v: f64) -> String {
     }
 }
 
-/// What to write or draw on a goal's colour: white, or near-black on a
-/// colour too light for white to read (white below 3:1 against it, the
-/// yellow among the goal colours).
-pub(crate) fn ink_on(c: Color32) -> Color32 {
-    let lin = |v: u8| {
-        let v = v as f32 / 255.0;
-        if v <= 0.04045 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    let l = 0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b());
-    if 1.05 / (l + 0.05) < 3.0 {
-        Color32::from_rgb(26, 26, 26)
-    } else {
-        Color32::WHITE
-    }
-}
-
 /// A progress ring: the track all round, the share `frac` from the top,
 /// clockwise, with round ends.
 pub(crate) fn paint_ring(

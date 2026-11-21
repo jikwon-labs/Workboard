@@ -3,7 +3,7 @@
 // hub's sidebar, and filling a board from a template.
 
 use super::wb_shapes::{line_path, paint_line, paint_shape_body, shape_rect, GAP};
-use super::whiteboard::{ink, note_fill};
+use super::whiteboard::note_fill;
 use super::*;
 use egui::Pos2;
 
@@ -158,12 +158,6 @@ fn template_items(name: &str) -> (Vec<TplShape>, Vec<TplLine>) {
         ),
         _ => (vec![], vec![]),
     }
-}
-
-/// `a` moved toward `b` by `k` (0 = a, 1 = b), both taken as opaque.
-pub(super) fn mix(a: Color32, b: Color32, k: f32) -> Color32 {
-    let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
-    Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
 }
 
 /// `text` on one line, cut with "…" to fit `max_w`.

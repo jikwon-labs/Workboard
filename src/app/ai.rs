@@ -1454,12 +1454,6 @@ pub(super) const AI_BOX: &str = "ai_question_box";
 pub(super) const AI_VIOLET: Color32 = Color32::from_rgb(112, 82, 236);
 pub(super) const AI_PINK: Color32 = Color32::from_rgb(214, 70, 158);
 
-fn mix(a: Color32, b: Color32, k: f32) -> Color32 {
-    let k = k.clamp(0.0, 1.0);
-    let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
-    Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
-}
-
 /// A rounded square filled with the AI's colours (top left to bottom
 /// right), edges smoothed.
 fn gradient_square(p: &egui::Painter, r: Rect, rad: f32) {

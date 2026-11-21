@@ -7,7 +7,7 @@
 // with Clear and Delete next to the zoom buttons.
 
 use super::wb_shapes::{paint_kind_icon, paint_style_icon, SHAPE_KINDS, STYLE_TOGGLES};
-use super::whiteboard::{ink, note_fill, WB_COLORS};
+use super::whiteboard::{note_fill, WB_COLORS};
 use super::*;
 use crate::app::icons::{paint_minus, paint_plus};
 use egui::{Pos2, Response};

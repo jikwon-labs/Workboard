@@ -398,3 +398,42 @@ fn open_in_channel_closes_a_thread_left_open() {
         "no thread beside the post's channel"
     );
 }
+
+/// In the narrowest window the app allows, and in Korean, the filter row
+/// keeps the Sort drop-down on the page: it sits at the end of the row
+/// when there is room and goes under the filters when there isn't. It
+/// used to run off the right edge.
+#[test]
+fn the_sort_drop_down_stays_on_the_page_in_a_narrow_window() {
+    for ko in [false, true] {
+        let mut h = Ui1::sized(900.0, 560.0);
+        if ko {
+            crate::i18n::set_lang(crate::i18n::Lang::Ko);
+        }
+        h.app.section = Section::Posts;
+        h.settle();
+        let sort = h.rect("Sort posts");
+        let ty = h.rect("Post type filter");
+        crate::i18n::set_lang(crate::i18n::Lang::En);
+        assert!(
+            sort.right() <= 900.0 - 8.0,
+            "on the page (ko {ko}): {sort:?}"
+        );
+        assert!(
+            !sort.intersects(ty),
+            "clear of the filters: {sort:?} {ty:?}"
+        );
+    }
+    // a wide window: at the end of the filters' row, lined up with the cards
+    let mut h = posts_page();
+    write_post(&mut h, "general", "Office move", "Monday");
+    h.click("Post");
+    let sort = h.rect("Sort posts");
+    let ty = h.rect("Post type filter");
+    let open = h.rect("Open in channel");
+    assert!((sort.center().y - ty.center().y).abs() < 4.0, "one row");
+    assert!(
+        (sort.right() - open.right()).abs() < 24.0,
+        "at the right like the cards: {sort:?} {open:?}"
+    );
+}

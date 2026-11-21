@@ -244,8 +244,11 @@ impl Backup {
 /// takes. Older apps would erase fields they don't know when their copy
 /// wins, or (format 3 and before) note a whole time entry list or custom
 /// field map as one field, so a change of theirs would undo a teammate's
-/// entry or value in it (see `UPDATE_NEEDED`).
-pub const OLDEST_SYNC: u32 = 4;
+/// entry or value in it (see `UPDATE_NEEDED`). Format 4 apps drop the ids
+/// of goal targets and history lines and, merging the team's copy into
+/// theirs, keep both the copies with ids and their own without, so every
+/// round trip doubled a goal's targets.
+pub const OLDEST_SYNC: u32 = 5;
 
 /// Said to an app older than `OLDEST_SYNC` when it sends changes. It goes
 /// with `CODE_DENIED`, which every app shows and stays connected for.

@@ -6,7 +6,7 @@ use super::*;
 /// The `SyncMeta::v` this version writes. A copy of an older one is
 /// upgraded when stamped: fingerprints that still match are carried over
 /// (see `upgrade_split_hashes`), so the new format alone isn't an edit.
-pub const META_V: u32 = 4;
+pub const META_V: u32 = 5;
 
 /// After the app changed how items are written (`legacy` is the workspace as
 /// the old way wrote it, `current` the new way): fingerprints that still

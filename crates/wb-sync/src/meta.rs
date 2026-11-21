@@ -128,7 +128,9 @@ pub struct SyncMeta {
     /// app's `legacy_shape`); 3 = also `fields` is kept; 4 = time entries
     /// and custom field values are each a field of their own in `fields`
     /// ("time_entries/<member>/<start>", "custom/<field id>"), not one for
-    /// the whole list or map.
+    /// the whole list or map; 5 = goal targets and history lines have ids
+    /// and merge one by one (`fill_goal_ids`). Nothing in the file changes
+    /// from 4: the number only tells the server an app keeps those ids.
     pub v: u32,
     /// id -> when it last moved into another item (a list into another space
     /// or folder). Where an item sits follows this, not `stamps`, so someone

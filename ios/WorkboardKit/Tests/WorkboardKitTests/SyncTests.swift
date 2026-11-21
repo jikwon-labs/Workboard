@@ -346,7 +346,7 @@ final class RustPortTests2: XCTestCase {
     func testHelloSaysTheAppVersionAndSyncFormat() {
         let h = Hello(device: "d1", app: "1.0", sync: UInt64(Sync.metaV))
         let text = ClientMessage.hello(h).text
-        XCTAssertTrue(text.contains(#""app":"1.0""#) && text.contains(#""sync":4"#), text)
+        XCTAssertTrue(text.contains(#""app":"1.0""#) && text.contains(#""sync":5"#), text)
         XCTAssertEqual(ClientMessage(text: text), .hello(h))
     }
 
@@ -931,7 +931,7 @@ final class FieldMergeTests: XCTestCase {
             let before = (m.stamps, m.fields)
             Sync.stamp(v, &m, now: 20)
             XCTAssertEqual(m.v, Sync.metaV)
-            XCTAssertEqual(Sync.metaV, 4, "the same as wb_sync::META_V")
+            XCTAssertEqual(Sync.metaV, 5, "the same as wb_sync::META_V")
             XCTAssertEqual(m.stamps, before.0, "the new format alone is no change")
             XCTAssertEqual(m.fields, before.1)
             let parts = m.fieldHashes[1]!

@@ -5172,7 +5172,7 @@ fn a_slack_import_of_the_last_day_sends_no_iphone_pushes() {
 fn an_app_on_sync_format_3_is_told_to_update_and_its_changes_are_not_taken() {
     // format 3 notes a whole time entry list or custom field map as one
     // field, so its copy could undo a teammate's entry
-    assert_eq!(wb_net::OLDEST_SYNC, 4);
+    assert_eq!(wb_net::OLDEST_SYNC, 5);
     assert_eq!(wb_sync::META_V, wb_net::OLDEST_SYNC);
     let home = temp_home("sync-3");
     let server = Server::start_at(&home, 0);
@@ -5206,6 +5206,61 @@ fn an_app_on_sync_format_3_is_told_to_update_and_its_changes_are_not_taken() {
     assert_eq!(
         a.data["tasks"][0]["name"], "Plan",
         "the round-3 app's change was not taken"
+    );
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn an_app_on_sync_format_4_cannot_double_a_goals_targets() {
+    // format 4 (0.1.21 and before) drops target ids and keeps both the
+    // team's targets and its own id-less ones, so each round trip doubled them
+    let home = temp_home("sync-4");
+    let server = Server::start_at(&home, 0);
+    let (mut a, b) = two_apps(server.port);
+    a.change(|d| {
+        d["extra"]["goals"] = json!([{"id": 70, "name": "QA", "color": [0, 0, 0], "due": null, "owner": 1,
+            "targets": [{"name": "Home", "kind": {"TrueFalse": {"done": false}}}], "log": []}]);
+    });
+    let token = b.token.clone();
+    let device = b.device.clone();
+    drop(b);
+    let mut old = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            token,
+            device,
+            app: Some("0.1.21".into()),
+            sync: Some(4),
+            ..Default::default()
+        },
+    );
+    old.wait("the format-4 app gets the goal", |d| {
+        d["extra"]["goals"][0]["targets"]
+            .as_array()
+            .is_some_and(|t| !t.is_empty())
+    });
+    old.change(|d| {
+        let t = d["extra"]["goals"][0]["targets"][0].clone();
+        let mut bare = t.clone();
+        bare.as_object_mut().unwrap().remove("id");
+        d["extra"]["goals"][0]["targets"] = json!([t, bare]);
+    });
+    old.until("the format-4 app is told to update", |o| {
+        o.denied.iter().any(|d| d == wb_net::UPDATE_NEEDED)
+    });
+    a.change(|d| d["tasks"][0]["name"] = json!("Plan (A)"));
+    old.wait("A's change at the format-4 app", |d| {
+        d["tasks"][0]["name"] == "Plan (A)"
+    });
+    a.wait("A's copy", |d| d["tasks"][0]["name"] == "Plan (A)");
+    assert_eq!(
+        a.data["extra"]["goals"][0]["targets"]
+            .as_array()
+            .map(|t| t.len()),
+        Some(1),
+        "the format-4 app's id-less copy of the target was not taken"
     );
     server.stop();
     let _ = std::fs::remove_dir_all(&home);

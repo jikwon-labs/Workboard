@@ -34,10 +34,11 @@ public enum Sync {
     /// counts in its fingerprint, 2 = `moved` is kept and fields at their
     /// default may be left out, 3 = field stamps are kept, 4 = time entries
     /// and custom field values each have field stamps of their own
-    /// ("time_entries/<member>/<start>", "custom/<field id>"). Sent in the
+    /// ("time_entries/<member>/<start>", "custom/<field id>"), 5 = goal
+    /// targets and history lines keep their ids (`fillGoalIds`). Sent in the
     /// hello as `sync`; the server takes no changes below
-    /// wb_net::OLDEST_SYNC (4).
-    public static let metaV: UInt32 = 4
+    /// wb_net::OLDEST_SYNC (5).
+    public static let metaV: UInt32 = 5
     /// Single settings that belong to the whole team (SHARED_VALUES).
     public static let sharedValues: [String] = ["workspace", "extra.workspace_color", "extra.apps"]
     /// Shared maps merged entry by entry, newest change per key wins

@@ -1493,7 +1493,7 @@ fn a_format_3_copy_becomes_format_4_without_counting_as_an_edit() {
         let before = (m.stamps.clone(), m.fields.clone());
         stamp(&v, &mut m, 20);
         assert_eq!(m.v, META_V);
-        assert_eq!(META_V, 4);
+        assert_eq!(META_V, 5);
         assert_eq!(
             (m.stamps.clone(), m.fields.clone()),
             before,

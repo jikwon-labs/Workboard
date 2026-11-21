@@ -320,21 +320,7 @@ struct ConversationView: View {
                 VStack(spacing: 0) {
                     TypingLine(channelId: c.id)
                     Composer(placeholder: "Message \(c.kind == .channel ? "#" + c.name : v.title(of: c, me: me))", attachments: true) { text, files, picked in
-                        var text = text
-                        switch runSlash(client, notifier: notifier, text: text, channel: c.id, parent: nil, hasFiles: !files.isEmpty) {
-                        case .notCommand: break
-                        case .done: return true
-                        case .keep: return false
-                        case .post(let t): text = t
-                        }
-                        let id = client.newId()
-                        let sent = client.edit { d, me in
-                            Edits.sendMessage(&d, channel: c.id, text: text, attachments: files, picked: picked, online: client.online, me: me, id: id, ts: nowTs())
-                            // workflows this message starts (ChatCommands.swift)
-                            Edits.runWorkflows(&d, channel: c.id, message: id, me: me, ts: nowTs()) { client.newId() }
-                        }
-                        if sent { fetchPreview(client, channel: c.id, message: id, text: text) }
-                        return sent
+                        sendChannelMessage(client, notifier: notifier, channel: c.id, text: text, files: files, picked: picked)
                     }
                     .onTyping { client.typingNow(channel: c.id) }
                     .draft("\(c.id)|0")
@@ -1739,6 +1725,29 @@ func runSlash(_ client: SyncClient, notifier: Notifier, text: String, channel: U
         }
         return client.runCommand(name, text: rest, channel: channel, parent: parent) ? .done : .keep
     }
+}
+
+/// Send `text` (and `files`) to `channel` as its message box does: a "/"
+/// command runs instead, workflows the message starts run, and its first
+/// web address gets a preview. True when the box can be cleared. The quick
+/// New message sheet sends through here too, so it works the same.
+@MainActor
+func sendChannelMessage(_ client: SyncClient, notifier: Notifier, channel: UInt64, text: String, files: [JSON] = [], picked: [UInt64] = []) -> Bool {
+    var text = text
+    switch runSlash(client, notifier: notifier, text: text, channel: channel, parent: nil, hasFiles: !files.isEmpty) {
+    case .notCommand: break
+    case .done: return true
+    case .keep: return false
+    case .post(let t): text = t
+    }
+    let id = client.newId()
+    let sent = client.edit { d, me in
+        Edits.sendMessage(&d, channel: channel, text: text, attachments: files, picked: picked, online: client.online, me: me, id: id, ts: nowTs())
+        // workflows this message starts (ChatCommands.swift)
+        Edits.runWorkflows(&d, channel: channel, message: id, me: me, ts: nowTs()) { client.newId() }
+    }
+    if sent { fetchPreview(client, channel: channel, message: id, text: text) }
+    return sent
 }
 
 /// Workflows that start from this channel's messages, and a new one.

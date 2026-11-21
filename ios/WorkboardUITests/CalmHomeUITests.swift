@@ -44,6 +44,33 @@ final class CalmHomeUITests: WorkboardUITestCase {
         XCTAssertTrue(a.buttons["newDMButton"].waitForExistence(timeout: 5), "back in Chat")
     }
 
+    /// A message from the plus goes out as the channel's message box sends
+    /// one: "/shrug" adds the shrug instead of posting the command.
+    func testPlusSendsAMessageAsTheChannelBoxDoes() {
+        let a = home()
+        let plus = a.buttons["newItemButton"]
+        waitEnabled(plus)
+        plus.tap()
+        let name = a.textFields["newItemName"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        a.segmentedControls["newKind"].buttons["Message"].tap()
+        let tag = "\(Int.random(in: 1000...9999))"
+        name.tap()
+        name.typeText("/shrug plus \(tag)")
+        a.buttons["newItemTo"].tap()
+        a.buttons["#general"].firstMatch.tap()
+        let save = a.buttons["newItemSave"]
+        waitEnabled(save)
+        save.tap()
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 5), "the sheet closed")
+        a.buttons["place-chats"].tap()
+        let general = a.buttons["channel-301"]
+        XCTAssertTrue(general.waitForExistence(timeout: 5))
+        general.tap()
+        XCTAssertTrue(a.staticTexts["plus \(tag) ¯\\_(ツ)_/¯"].waitForExistence(timeout: 5), "the command ran")
+        XCTAssertFalse(a.staticTexts["/shrug plus \(tag)"].exists, "not posted as typed")
+    }
+
     func testPlusMakesATaskDueToday() {
         let a = home()
         let plus = a.buttons["newItemButton"]

@@ -6,6 +6,7 @@ struct NewItemSheet: View {
     enum Kind: Hashable { case task, message, doc }
 
     @Environment(SyncClient.self) private var client
+    @Environment(Notifier.self) private var notifier
     @Environment(Nav.self) private var nav
     @Environment(\.dismiss) private var dismiss
     @State var kind: Kind = .task
@@ -229,8 +230,8 @@ struct NewItemSheet: View {
                 client.edit { d, me in to = Edits.openDM(&d, with: person, me: me, id: newId, ts: nowTs()) }
             }
             guard let to else { return }
-            let id = client.newId()
-            if client.edit({ d, me in Edits.sendMessage(&d, channel: to, text: text, online: client.online, me: me, id: id, ts: nowTs()) }) {
+            // as the channel's message box sends: "/" commands, workflows, link previews
+            if sendChannelMessage(client, notifier: notifier, channel: to, text: text) {
                 dismiss()
             }
         case .doc:

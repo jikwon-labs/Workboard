@@ -2863,6 +2863,60 @@ fn goal_milestones_follow_progress_and_old_goals_start_quietly() {
     assert_eq!(times, 1);
 }
 
+/// A goal whose tasks are partly in a space closed to me looks further back
+/// here than it is. My app leaves the milestones a teammate's app recorded
+/// alone; it used to take them back, the other app recorded them again,
+/// and the two kept rewriting the history.
+#[test]
+fn milestones_stay_when_some_of_the_goals_tasks_are_not_here() {
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let open = add_task(&mut a, list, "Open here");
+    let hidden = 987_654_321; // in a space I can't see
+    let now = now_ts();
+    a.data.extra.goals = vec![Goal {
+        id: 1,
+        name: "G".into(),
+        owner: 1,
+        targets: vec![GoalTarget {
+            name: "t".into(),
+            kind: TargetKind::Tasks {
+                ids: vec![open, hidden],
+            },
+        }],
+        // a teammate who sees both found the hidden one done: 50%
+        reached: 50,
+        log: vec![
+            GoalEvent {
+                ts: now - 60,
+                who: 0,
+                what: GoalChange::Tracked,
+                pct: 0,
+            },
+            GoalEvent {
+                ts: now - 30,
+                who: 0,
+                what: GoalChange::Milestone(50),
+                pct: 50,
+            },
+        ],
+        ..Default::default()
+    }];
+    a.goal_watch(now);
+    let g = &a.data.extra.goals[0];
+    assert_eq!(g.reached, 50, "kept, though it shows 0% here");
+    assert!(g.log.iter().any(|e| e.what == GoalChange::Milestone(50)));
+
+    // with every task here, going back below takes the milestone off
+    if let TargetKind::Tasks { ids } = &mut a.data.extra.goals[0].targets[0].kind {
+        ids.retain(|id| *id != hidden);
+    }
+    a.goal_watch(now);
+    let g = &a.data.extra.goals[0];
+    assert_eq!(g.reached, 0);
+    assert!(!g.log.iter().any(|e| e.what == GoalChange::Milestone(50)));
+}
+
 #[test]
 fn goal_history_survives_save_and_load_and_old_files_load() {
     let g = Goal {

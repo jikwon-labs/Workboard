@@ -333,6 +333,16 @@ impl App {
         sum / g.targets.len() as f32
     }
 
+    /// Whether every task picked for the goal's targets is here: one
+    /// missing is in a space closed to me (or deleted), so the progress
+    /// seen here may be short of what others see.
+    pub(crate) fn goal_seen_whole(&self, g: &Goal) -> bool {
+        g.targets.iter().all(|tg| match &tg.kind {
+            TargetKind::Tasks { ids } => ids.iter().all(|id| self.task(*id).is_some()),
+            _ => true,
+        })
+    }
+
     pub(crate) fn target_state(&self, tg: &GoalTarget) -> TargetState {
         match &tg.kind {
             TargetKind::Number {
@@ -395,6 +405,11 @@ impl App {
     pub(crate) fn goal_settle(&mut self, gi: usize, who: u64, now: i64) -> Option<u8> {
         let p = self.goal_progress(&self.data.extra.goals[gi]);
         let pct = pct_of(p);
+        // a target's tasks this app can't see (a space closed to me) make
+        // the goal look further back here than it is; milestones are only
+        // taken back from what the whole goal shows, or by the person
+        // undoing a target, else each app would undo the other's history
+        let may_drop = who != 0 || self.goal_seen_whole(&self.data.extra.goals[gi]);
         let day = local(now).map(|l| l.date_naive()).unwrap_or_else(today);
         let g = &mut self.data.extra.goals[gi];
         let mut changed = false;
@@ -424,7 +439,7 @@ impl App {
                 });
                 reached = Some(m);
                 changed = true;
-            } else if m < g.reached {
+            } else if m < g.reached && may_drop {
                 // dropped back (a target undone): the milestones above
                 // aren't reached any more and leave the history; crossing
                 // again records them anew (notify tells people only once)

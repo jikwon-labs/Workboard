@@ -264,14 +264,7 @@ fn dark_theme_post_chip_and_ai_hint_read() {
 #[test]
 fn frameless_buttons_show_the_hand_and_a_hover_fill() {
     let mut h = Ui1::new();
-    let g = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let g = h.channel_id("general");
     h.app.section = Section::Chat;
     h.app.chat.open = Some(g);
     h.settle();

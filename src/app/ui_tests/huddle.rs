@@ -32,14 +32,7 @@ fn calls_say_why_there_is_no_huddle_when_the_server_is_down_and_when_nobody_else
     let alone_note = "You're the only one in this conversation, so nobody else gets the Join button. Invite people first.";
     let down_note = "The team's server can't be reached, so a huddle in the app isn't available. This call opens in the browser instead, and the others see its Join button once you're connected again.";
     let mut h = Ui1::new();
-    let general = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let general = h.channel_id("general");
     h.app.section = Section::Chat;
     h.app.chat.open = Some(general);
     // a team in #general, no server: the browser call, no extra words

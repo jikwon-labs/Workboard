@@ -1102,6 +1102,16 @@ pub(super) fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
     );
 }
 
+/// The id of the channel (not a direct message) named `name`.
+pub(super) fn channel_id(a: &App, name: &str) -> u64 {
+    a.data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Channel && c.name == name)
+        .unwrap_or_else(|| panic!("no channel {:?}", name))
+        .id
+}
+
 /// `a` brings its workspace to the empty `server` and becomes its owner;
 /// returns once the server has saved it.
 pub(super) fn share_on(a: &mut App, server: &TestServer) {

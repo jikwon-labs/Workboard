@@ -57,13 +57,7 @@ fn a_picture_goes_through_the_server_to_the_other_computer() {
     } = ServerTeam::start();
 
     // A puts a picture in the message box: it's checked, then sent to the server
-    let ch = a
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let ch = channel_id(&a, "general");
     let pic = picture_file("sunset.png", 320, 200);
     a.add_media(false, Some(pic.clone()), None);
     let files = until_ready(&mut a, false);
@@ -138,13 +132,7 @@ fn a_pdf_goes_through_the_server_and_the_other_computer_saves_it() {
         mut b,
     } = ServerTeam::start();
 
-    let ch = a
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let ch = channel_id(&a, "general");
     let dir = temp_home("pdf");
     std::fs::create_dir_all(&dir).unwrap();
     let pdf = dir.join("Quarterly plan.pdf");

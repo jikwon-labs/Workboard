@@ -433,14 +433,7 @@ fn an_achieved_goal_is_shared_to_chat_as_a_card_that_opens_it() {
         panic!("Share to team chat opens")
     };
     let channel = *channel;
-    let general = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .expect("the general channel")
-        .id;
+    let general = h.channel_id("general");
     assert_eq!(channel, general, "it starts on the general channel");
     // the message's box reaches its 4 px margin past the text area named here
     let (to, msg) = (
@@ -990,14 +983,7 @@ fn deleting_a_goal_closes_its_page_and_unlinks_its_chat_card() {
     assert!(h.app.data.extra.trash.iter().any(|x| x.kind == "Goal"));
 
     // its card in the channel stays, without the way to open it
-    let general = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let general = h.channel_id("general");
     h.app.section = Section::Chat;
     h.app.chat.open = Some(general);
     h.settle();

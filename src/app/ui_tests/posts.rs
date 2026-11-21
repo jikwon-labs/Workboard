@@ -12,16 +12,6 @@ fn posts_page() -> Ui1 {
     h
 }
 
-fn channel_id(h: &Ui1, name: &str) -> u64 {
-    h.app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.kind == ChannelKind::Channel && c.name == name)
-        .unwrap()
-        .id
-}
-
 /// Every post in the workspace (title, text), oldest first.
 fn all_posts(h: &Ui1) -> Vec<Message> {
     let mut v: Vec<Message> = h
@@ -118,7 +108,7 @@ fn a_post_from_the_posts_page_mentions_as_the_channel_does() {
 fn a_post_being_written_stays_when_its_channel_goes_away() {
     let mut h = posts_page();
     write_post(&mut h, "website-redesign", "Launch", "Next week");
-    let id = channel_id(&h, "website-redesign");
+    let id = h.channel_id("website-redesign");
     h.app.data.channels.retain(|c| c.id != id);
     h.settle();
     assert!(
@@ -132,7 +122,7 @@ fn a_post_being_written_stays_when_its_channel_goes_away() {
 
     // a private channel I leave while writing
     let mut h = posts_page();
-    let id = channel_id(&h, "website-redesign");
+    let id = h.channel_id("website-redesign");
     let c = h.app.data.channels.iter_mut().find(|c| c.id == id).unwrap();
     c.private = true;
     h.settle();
@@ -195,7 +185,7 @@ fn a_filter_on_a_channel_or_person_that_is_gone_lets_go() {
     h.click("Post");
     pick_filter(&mut h, "#  Channel", "# website-redesign");
     assert!(h.painted_text("Office move").is_empty(), "filtered out");
-    let id = channel_id(&h, "website-redesign");
+    let id = h.channel_id("website-redesign");
     h.app.data.channels.retain(|c| c.id != id);
     h.settle();
     assert!(h.has("#  Channel"));
@@ -288,7 +278,7 @@ fn search_finds_a_post_by_its_title() {
     assert!(h.has("Quarterly kickoff"), "the post is a result");
     h.click("Quarterly kickoff");
     assert_eq!(h.app.section, Section::Chat);
-    assert_eq!(h.app.chat.open, Some(channel_id(&h, "general")));
+    assert_eq!(h.app.chat.open, Some(h.channel_id("general")));
 }
 
 /// A title is one line: text pasted into it with line breaks goes out with
@@ -337,7 +327,7 @@ fn a_post_card_shows_the_texts_formatting_not_its_marks() {
 #[test]
 fn a_post_without_a_title_shows_the_default_title() {
     let mut h = posts_page();
-    let id = channel_id(&h, "general");
+    let id = h.channel_id("general");
     for (n, title) in [(9001, ""), (9002, "  ")] {
         let mut m = crate::app::slack::new_message(n, 2, format!("From my phone {n}"), now_ts());
         m.post_title = Some(title.into());
@@ -356,7 +346,7 @@ fn a_post_without_a_title_shows_the_default_title() {
 #[test]
 fn a_post_by_someone_who_left_names_them_as_someone() {
     let mut h = posts_page();
-    let id = channel_id(&h, "general");
+    let id = h.channel_id("general");
     let mut m = crate::app::slack::new_message(9001, 77, "Bye all".into(), now_ts());
     m.post_title = Some("Farewell".into());
     let c = h.app.data.channels.iter_mut().find(|c| c.id == id).unwrap();
@@ -481,7 +471,7 @@ fn the_post_button_tooltip_only_asks_for_a_channel() {
 #[test]
 fn a_minute_old_post_reads_one_min_ago() {
     let mut h = posts_page();
-    let id = channel_id(&h, "general");
+    let id = h.channel_id("general");
     let mut m = crate::app::slack::new_message(9001, 2, "Coffee".into(), now_ts() - 90);
     m.post_title = Some("Break".into());
     let c = h.app.data.channels.iter_mut().find(|c| c.id == id).unwrap();
@@ -526,8 +516,8 @@ fn listed(h: &Ui1, titles: &[&str]) -> Vec<String> {
 #[test]
 fn the_filters_narrow_the_posts_together_and_sort_turns_them_around() {
     let mut h = posts_page();
-    let gen = channel_id(&h, "general");
-    let web = channel_id(&h, "website-redesign");
+    let gen = h.channel_id("general");
+    let web = h.channel_id("website-redesign");
     add_post(&mut h, gen, 3, "Old one", "line one\nline two", "", 400);
     add_post(&mut h, web, 2, "Web news", "Mockups", "Question", 300);
     add_post(&mut h, gen, 2, "Lunch", "Pizza", "Idea", 200);
@@ -618,7 +608,7 @@ fn new_post_puts_the_cursor_in_the_title_and_keeps_what_was_written() {
     h.type_text("Hello");
     assert_eq!(h.app.post.title, "Hello", "typing goes into the title");
 
-    let gen = channel_id(&h, "general");
+    let gen = h.channel_id("general");
     for i in 0..20 {
         add_post(
             &mut h,
@@ -728,8 +718,8 @@ fn the_post_box_buttons_work_as_in_a_channels_box() {
 #[test]
 fn a_post_starts_the_channels_workflows() {
     let mut h = posts_page();
-    let gen = channel_id(&h, "general");
-    let web = channel_id(&h, "website-redesign");
+    let gen = h.channel_id("general");
+    let web = h.channel_id("website-redesign");
     h.app.data.extra.automations.push(Automation {
         id: 77_001,
         enabled: true,
@@ -796,7 +786,7 @@ fn a_post_starts_the_channels_workflows() {
 #[test]
 fn a_post_card_shows_its_pictures_and_opens_them() {
     let mut h = posts_page();
-    let gen = channel_id(&h, "general");
+    let gen = h.channel_id("general");
     add_post(&mut h, gen, 2, "Update", "", "Announcement", 60);
     let c = h
         .app
@@ -830,8 +820,8 @@ fn a_post_card_shows_its_pictures_and_opens_them() {
 #[test]
 fn the_default_post_title_starts_no_workflow() {
     let mut h = posts_page();
-    let gen = channel_id(&h, "general");
-    let web = channel_id(&h, "website-redesign");
+    let gen = h.channel_id("general");
+    let web = h.channel_id("website-redesign");
     let list = h.app.data.first_list().unwrap();
     for (id, keyword, action, value) in [
         (
@@ -922,7 +912,7 @@ fn the_default_post_title_starts_no_workflow() {
 #[test]
 fn search_leaves_out_the_default_post_title() {
     let mut h = posts_page();
-    let gen = channel_id(&h, "general");
+    let gen = h.channel_id("general");
     add_post(
         &mut h,
         gen,
@@ -1002,7 +992,7 @@ fn logging_out_starts_the_posts_page_channel_and_filters_over() {
 #[test]
 fn open_in_channel_goes_to_the_post_and_lights_it_up() {
     let mut h = posts_page();
-    let gen = channel_id(&h, "general");
+    let gen = h.channel_id("general");
     add_post(
         &mut h,
         gen,
@@ -1160,7 +1150,7 @@ fn a_name_on_a_message_opens_that_persons_profile() {
 #[test]
 fn a_posts_author_opens_their_profile_and_mine_can_be_edited() {
     let mut h = posts_page();
-    let gen = channel_id(&h, "general");
+    let gen = h.channel_id("general");
     add_post(&mut h, gen, 2, "Office move", "Monday", "Announcement", 60);
     h.settle();
     let cards = Rect::from_min_max(pos2(330.0, 440.0), pos2(1440.0, 900.0));
@@ -1195,7 +1185,7 @@ fn a_posts_author_opens_their_profile_and_mine_can_be_edited() {
 #[test]
 fn a_long_post_title_keeps_the_conversation_inside_the_window() {
     let mut h = Ui1::new();
-    let gen = channel_id(&h, "general");
+    let gen = h.channel_id("general");
     let long = format!("https://example.com/{}", "a".repeat(140));
     add_post(&mut h, gen, 2, &long, "See the plan", "Idea", 60);
     h.click("general");

@@ -80,13 +80,7 @@ fn two_computers_work_in_one_shared_folder() {
     let bora = b.data.me;
 
     // both work at the same time
-    let ch = b
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let ch = channel_id(&b, "general");
     b.apply_chat(vec![ChatAction::Send {
         ch,
         text: "hi from Bora".into(),
@@ -300,13 +294,7 @@ fn two_computers_work_through_a_server() {
     let bora = b.data.me;
 
     // chat from B reaches A
-    let ch = b
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let ch = channel_id(&b, "general");
     b.apply_chat(vec![ChatAction::Send {
         ch,
         text: "hi through the server".into(),
@@ -1612,13 +1600,7 @@ fn posts_reach_the_team_through_a_server() {
     web.private = true;
     web.members = vec![1, 2];
     let web = web.id;
-    let gen = a
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let gen = channel_id(&a, "general");
     share_on(&mut a, &server);
     let code = invite_code_for_sam(&mut a, &server);
     let mut b = join_with(&addr, &code.to_lowercase());

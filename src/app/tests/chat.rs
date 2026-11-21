@@ -6,13 +6,7 @@ use super::*;
 #[test]
 fn chat_send_react_pin_thread_post_and_task() {
     let mut a = app();
-    let cid = a
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let cid = channel_id(&a, "general");
     let before = a
         .data
         .channels
@@ -193,13 +187,7 @@ fn a_teammates_message_through_the_server_becomes_a_notification() {
         .find(|c| c.kind == ChannelKind::Direct && c.members.contains(&1) && c.members.contains(&3))
         .unwrap()
         .id;
-    let g = b
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let g = channel_id(&b, "general");
     b.apply_chat(vec![ChatAction::Send {
         ch: dm,
         text: "are you free at 3?".into(),
@@ -319,13 +307,7 @@ fn a_huddle_on_the_server_connects_two_computers() {
     } = ServerTeam::on(server, wb_net::Role::Member);
     b.sync_note_change();
     b.write_shared();
-    let ch = a
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let ch = channel_id(&a, "general");
     net_until(&mut a, "Sam is in #general on the server", |a| {
         a.data
             .channels
@@ -521,13 +503,7 @@ fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
 fn private_channels_and_dms_show_only_to_their_members() {
     let mut a = app();
     let secret = a.create_channel("secret plans", true, false);
-    let public = a
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let public = channel_id(&a, "general");
     let dm_me_alex = a
         .data
         .channels
@@ -1097,13 +1073,7 @@ fn an_older_servers_unnamed_refusal_ends_a_waiting_huddle() {
 #[test]
 fn a_late_message_or_one_from_a_clock_behind_counts_as_unread() {
     let mut a = app();
-    let cid = a
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let cid = channel_id(&a, "general");
     a.mark_read(cid);
     let get = |a: &App| {
         a.data

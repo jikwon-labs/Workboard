@@ -3,6 +3,7 @@
 // decide what to announce. `notify_rt.sent` records every announcement.
 
 use super::notify::Kind;
+use super::tests::channel_id;
 use super::*;
 
 fn app() -> App {
@@ -22,15 +23,6 @@ fn dm_with_alex(a: &App) -> u64 {
         .channels
         .iter()
         .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
-        .unwrap()
-        .id
-}
-
-fn general(a: &App) -> u64 {
-    a.data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
         .unwrap()
         .id
 }
@@ -123,7 +115,7 @@ fn my_own_messages_are_never_news() {
 #[test]
 fn channels_notify_mentions_by_default_and_follow_their_bell() {
     let mut a = app();
-    let g = general(&a);
+    let g = channel_id(&a, "general");
     post(&mut a, g, 3, "Lunch at noon");
     a.notify_scan();
     assert!(
@@ -152,7 +144,7 @@ fn channels_notify_mentions_by_default_and_follow_their_bell() {
 #[test]
 fn a_reply_in_my_thread_is_announced_with_the_thread() {
     let mut a = app();
-    let g = general(&a);
+    let g = channel_id(&a, "general");
     let mine = post(&mut a, g, 1, "Who has the slides?");
     a.notify_scan();
     let rid = a.data.new_id();
@@ -593,7 +585,7 @@ fn a_dropped_server_connection_is_announced_after_a_while_and_when_back() {
 #[test]
 fn reactions_are_off_until_turned_on() {
     let mut a = app();
-    let g = general(&a);
+    let g = channel_id(&a, "general");
     let mine = post(&mut a, g, 1, "Shipped!");
     a.notify_scan();
     let react = |a: &mut App, user: u64, emoji: &str| {
@@ -721,7 +713,7 @@ fn notify_settings_stay_on_this_computer() {
 #[test]
 fn a_mention_picked_from_the_list_is_announced_by_member_not_name() {
     let mut a = app();
-    let g = general(&a);
+    let g = channel_id(&a, "general");
     // picked from the mention list: kept by id, whatever the text says
     let id = a.data.new_id();
     let m: Message = serde_json::from_value(serde_json::json!({"id": id, "author": 2, "text": "@Boss please review", "ts": now_ts(), "mentions": [1]})).unwrap();
@@ -804,7 +796,7 @@ fn the_dock_count_follows_the_sidebar_seen_rule() {
 #[test]
 fn keywords_notify_like_a_mention_but_not_in_quiet_channels() {
     let mut a = app();
-    let g = general(&a);
+    let g = channel_id(&a, "general");
     a.data.extra.notify.keywords = "deploy, 배포 ,".into();
     post(&mut a, g, 3, "Lunch at noon");
     a.notify_scan();

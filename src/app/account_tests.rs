@@ -2,7 +2,7 @@
 // when setting up the server, signs in on a second computer with it, invites
 // someone (the code goes out by mail) who joins with the code and a password.
 
-use super::tests::{blank_as, net_until, net_until_saved, wait_invite};
+use super::tests::{blank_as, channel_id, net_until, net_until_saved, wait_invite};
 use super::together::How;
 use super::*;
 use workboard_server::testing::{temp_home, TestServer};
@@ -257,13 +257,7 @@ fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back
             .iter()
             .any(|c| c.messages.iter().any(|m| m.text == said))
     };
-    let ch = b
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let ch = channel_id(&b, "general");
     b.apply_chat(vec![super::chat::ChatAction::Send {
         ch,
         text: said.into(),

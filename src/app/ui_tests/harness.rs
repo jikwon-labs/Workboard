@@ -749,6 +749,11 @@ impl Ui1 {
         out
     }
 
+    /// The id of the channel (not a direct message) named `name`.
+    pub(super) fn channel_id(&self, name: &str) -> u64 {
+        crate::app::tests::channel_id(&self.app, name)
+    }
+
     pub(super) fn count_named(&self, name: &str) -> usize {
         self.tree.iter().filter(|(n, _)| n == name).count()
     }

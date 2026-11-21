@@ -220,13 +220,7 @@ fn a_private_slack_channel_never_pours_into_a_public_one_or_goes_to_everyone() {
     a.apply_chat(vec![crate::app::chat::ChatAction::NewChannel(
         "design".into(),
     )]);
-    let public = a
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "design")
-        .unwrap()
-        .id;
+    let public = channel_id(&a, "design");
     let (users, channels) = slack_from(&[
         (
             "users.json",

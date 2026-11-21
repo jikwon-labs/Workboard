@@ -578,14 +578,7 @@ fn new_message_window_searches_people_and_channels() {
     h.type_text("website");
     assert!(!h.has("# general"), "search narrows the list");
     h.click("# website-redesign");
-    let ch = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "website-redesign")
-        .unwrap()
-        .id;
+    let ch = h.channel_id("website-redesign");
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.app.chat.open, Some(ch));
     assert!(!h.app.new_message_open);
@@ -1019,14 +1012,7 @@ fn replies_show_chat_replies_and_mark_one_read() {
     m.replies = vec![r];
     c.messages.push(m);
     h.app.data.extra.replies_seen = now_ts() - 100;
-    let ch = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let ch = h.channel_id("general");
     h.click("Replies");
     assert!(h.has("Mark read I do"));
     h.click("Mark read I do");
@@ -1145,14 +1131,7 @@ fn a_message_from_a_clock_ahead_is_read_once() {
 #[test]
 fn delete_channel_asks_first_and_close_conversation_only_hides() {
     let mut h = Ui1::new();
-    let cid = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "website-redesign")
-        .unwrap()
-        .id;
+    let cid = h.channel_id("website-redesign");
     h.app.modal = Some(Modal::ChannelSettings(cid));
     h.settle();
     h.click("Delete channel");
@@ -1190,14 +1169,7 @@ fn delete_channel_asks_first_and_close_conversation_only_hides() {
 #[test]
 fn channel_settings_open_workflows_from_a_row_and_keep_delete_apart() {
     let mut h = Ui1::new();
-    let cid = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "website-redesign")
-        .unwrap()
-        .id;
+    let cid = h.channel_id("website-redesign");
     h.app.modal = Some(Modal::ChannelSettings(cid));
     crate::i18n::set_lang(crate::i18n::Lang::Ko);
     h.settle();
@@ -1288,14 +1260,7 @@ fn a_mention_is_tinted_while_it_is_typed() {
 #[test]
 fn a_deleted_channel_goes_to_trash_and_comes_back_with_its_messages() {
     let mut h = Ui1::new();
-    let cid = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "website-redesign")
-        .unwrap()
-        .id;
+    let cid = h.channel_id("website-redesign");
     let messages = h
         .app
         .data
@@ -1333,14 +1298,7 @@ fn a_deleted_channel_goes_to_trash_and_comes_back_with_its_messages() {
 #[test]
 fn someone_elses_channel_can_be_joined_but_not_deleted_or_its_people_changed() {
     let mut h = Ui1::new();
-    let cid = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "website-redesign")
-        .unwrap()
-        .id;
+    let cid = h.channel_id("website-redesign");
     h.app
         .data
         .channels
@@ -1380,14 +1338,7 @@ fn someone_elses_channel_can_be_joined_but_not_deleted_or_its_people_changed() {
 #[test]
 fn saved_messages_from_every_channel_open_from_the_sidebar() {
     let mut h = Ui1::new();
-    let cid = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "website-redesign")
-        .unwrap()
-        .id;
+    let cid = h.channel_id("website-redesign");
     h.app
         .data
         .channels
@@ -1446,14 +1397,7 @@ fn add_channel_doesnt_open_someone_elses_private_channel() {
 #[test]
 fn click_the_channel_bell_to_choose_what_it_notifies() {
     let mut h = Ui1::new();
-    let g = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let g = h.channel_id("general");
     h.app.section = Section::Chat;
     h.app.chat.open = Some(g);
     h.settle();
@@ -1503,14 +1447,7 @@ fn click_a_notification_toast_to_open_the_conversation() {
 #[test]
 fn an_owner_without_a_server_manages_someone_elses_channel() {
     let mut h = Ui1::new();
-    let cid = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "website-redesign")
-        .unwrap()
-        .id;
+    let cid = h.channel_id("website-redesign");
     h.app
         .data
         .channels
@@ -2349,14 +2286,7 @@ fn group_mentions_from_the_list_keep_their_people() {
 #[test]
 fn a_channel_set_to_nothing_shows_no_unread_count() {
     let mut h = Ui1::new();
-    let g = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let g = h.channel_id("general");
     h.app.section = Section::Home;
     let unread = h
         .app
@@ -2878,14 +2808,7 @@ fn integrations_show_webhook_addresses_and_commands() {
     if let Some(m) = h.app.data.members.iter_mut().find(|m| m.id == me) {
         m.role = "Owner".into();
     }
-    let cid = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let cid = h.channel_id("general");
     h.app.sync_rt.integrations = Some((
         vec![wb_net::HookInfo {
             token: "tok123".into(),
@@ -2939,20 +2862,10 @@ fn messages_from_others(h: &mut Ui1, cid: u64, texts: &[String], secs: i64) {
     }
 }
 
-fn general_id(h: &Ui1) -> u64 {
-    h.app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.kind == ChannelKind::Channel && c.name == "general")
-        .unwrap()
-        .id
-}
-
 /// A long, read #general open and down at its newest message.
 fn long_general_open() -> (Ui1, u64) {
     let mut h = Ui1::new();
-    let cid = general_id(&h);
+    let cid = h.channel_id("general");
     let old: Vec<String> = (0..30).map(|i| format!("older note {}", i)).collect();
     messages_from_others(&mut h, cid, &old, -3000);
     h.app.mark_read(cid);
@@ -2965,7 +2878,7 @@ fn long_general_open() -> (Ui1, u64) {
 #[test]
 fn opening_a_channel_draws_a_red_line_above_the_first_unread_message() {
     let mut h = Ui1::new();
-    let cid = general_id(&h);
+    let cid = h.channel_id("general");
     let texts = vec!["first new one".to_string(), "second new one".to_string()];
     messages_from_others(&mut h, cid, &texts, 10);
     h.click("general");
@@ -3450,7 +3363,7 @@ fn the_default_post_title_is_shown_in_the_readers_language() {
 #[test]
 fn a_message_that_comes_in_while_reading_at_the_bottom_takes_the_red_line_away() {
     let mut h = Ui1::new();
-    let cid = general_id(&h);
+    let cid = h.channel_id("general");
     h.app.mark_read(cid);
     h.click("general");
     h.settle();

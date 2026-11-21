@@ -852,14 +852,7 @@ fn goal_screens_have_no_english_left() {
     h.settle();
     shown.extend(h.texts());
     // the card in the conversation
-    let general = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "general")
-        .unwrap()
-        .id;
+    let general = h.channel_id("general");
     h.app.modal = None;
     h.app.share_goal(general, 802, "", false);
     h.app.section = Section::Chat;

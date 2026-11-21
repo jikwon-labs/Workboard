@@ -435,14 +435,7 @@ fn every_sidebar_section_folds_from_its_heading() {
     // a new message in #general, so Channels has a count to carry
     let me = h.app.data.me;
     let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().id;
-    let gid = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.kind == ChannelKind::Channel && c.name == "general")
-        .unwrap()
-        .id;
+    let gid = h.channel_id("general");
     h.app.mark_read(gid);
     let id = h.app.data.new_id();
     let m: Message = serde_json::from_value(serde_json::json!(
@@ -1513,14 +1506,7 @@ fn option_t_while_typing_and_enter_in_search() {
     assert_eq!(h.app.open_task, Some(tid));
     // Enter on a search that only finds a channel opens the channel
     h.app.open_task = None;
-    let ch = h
-        .app
-        .data
-        .channels
-        .iter()
-        .find(|c| c.name == "website-redesign")
-        .unwrap()
-        .id;
+    let ch = h.channel_id("website-redesign");
     h.app.palette = Some("website-redesign".into());
     h.settle();
     h.key(egui::Key::Enter);

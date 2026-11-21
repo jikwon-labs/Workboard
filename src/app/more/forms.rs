@@ -355,6 +355,24 @@ impl App {
         ));
     }
 
+    /// A blank form made from a space's + menu: its answers go to the first
+    /// List of that space that isn't archived, or to none yet (it asks for
+    /// one) when the space has no List, never to a List of another space.
+    pub(crate) fn new_form_in_space(&mut self, sid: u64) {
+        self.new_form_from(None);
+        let list = self
+            .data
+            .lists_in(Location::Space(sid))
+            .and_then(|v| v.into_iter().find(|l| !self.data.list_archived(*l)))
+            .unwrap_or(0);
+        if let Some(f) = self
+            .form_open
+            .and_then(|id| self.data.extra.forms.iter_mut().find(|f| f.id == id))
+        {
+            f.list_id = list;
+        }
+    }
+
     /// For screenshots (`--form home|edit|fill|answers`): an IT Requests
     /// form with a dropdown question and two answers, a feedback form and
     /// one with no List, and that page shown.

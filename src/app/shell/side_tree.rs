@@ -365,7 +365,7 @@ impl App {
                         }
                         "Folder" => self.actions.push(Action::NewFolder(sid)),
                         "Doc" => self.new_doc(Some(sid)),
-                        "Form" => self.new_form(),
+                        "Form" => self.new_form_in_space(sid),
                         "Dashboard" => {
                             self.modal = Some(Modal::NewDashboard {
                                 name: tr("New Dashboard").into(),

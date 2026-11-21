@@ -829,3 +829,37 @@ fn the_editor_fits_the_smallest_window() {
     h.click("Pick the List for new tasks");
     assert!(h.has(&h.app.all_list_paths()[0].1.clone()));
 }
+
+/// Form in a space's + menu ("Create in <space>") sends the form's answers
+/// to a List of that space, as Doc there makes the doc in it: not to the
+/// List shown at the time, which may be in another space (even a team one,
+/// for a + on my Personal space).
+#[test]
+fn a_form_made_from_a_spaces_plus_goes_to_that_space() {
+    let mut h = Ui1::new();
+    h.hover(pos2(700.0, 450.0));
+    let ideas = list_id(&h, "Ideas");
+    let side = h.app.data.space_of_list(ideas).unwrap().id;
+    assert_ne!(h.app.current_space(), Some(side), "somewhere else now");
+    h.click("Create in Side Projects");
+    h.click("Form");
+    let fid = h.app.form_open.expect("the form opens");
+    assert_eq!(h.app.section, Section::Forms);
+    assert_eq!(
+        h.app.data.space_of_list(form(&h, fid).list_id).map(|s| s.id),
+        Some(side)
+    );
+    assert_eq!(form(&h, fid).list_id, ideas);
+    // a space with no List yet: the form asks for one
+    h.app.data.spaces.push(Space {
+        id: 9100,
+        name: "Empty space".into(),
+        statuses: default_statuses(),
+        ..Default::default()
+    });
+    h.click("Rail Home");
+    h.click("Create in Empty space");
+    h.click("Form");
+    let fid = h.app.form_open.unwrap();
+    assert_eq!(form(&h, fid).list_id, 0);
+}

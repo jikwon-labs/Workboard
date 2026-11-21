@@ -466,10 +466,19 @@ impl App {
     }
 
     /// Keeps every goal's milestones, achieved day and daily progress up to
-    /// date (tasks closed anywhere move them). Run on the notification clock.
+    /// date (tasks closed anywhere move them). Run on the notification clock
+    /// and as the team's changes come in: what it finds is credited to
+    /// nobody in particular (0), so the owner is told.
     pub(crate) fn goal_watch(&mut self, now: i64) {
+        self.goal_watch_by(0, now);
+    }
+
+    /// `goal_watch` crediting `who`: right after my own actions (a task I
+    /// closed in a list, say), so a milestone I reach that way is mine and
+    /// nobody tells me about it.
+    pub(crate) fn goal_watch_by(&mut self, who: u64, now: i64) {
         for gi in 0..self.data.extra.goals.len() {
-            self.goal_settle(gi, 0, now);
+            self.goal_settle(gi, who, now);
         }
     }
 

@@ -1733,8 +1733,15 @@ impl App {
             // a new delete: the Undo bar offers this one only
             self.undo_trash = Some((vec![], now_ts()));
         }
+        let any = !actions.is_empty();
         for a in actions {
             self.apply(a);
+        }
+        // goals my actions moved (tasks closed or reopened) are settled
+        // now, in my name, not later by the clock as if someone else had
+        if any && !self.data.extra.goals.is_empty() {
+            let me = self.data.me;
+            self.goal_watch_by(me, now_ts());
         }
     }
 

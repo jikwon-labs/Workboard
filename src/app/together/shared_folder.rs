@@ -189,6 +189,9 @@ impl App {
             Ok(d) => {
                 self.data = d;
                 self.data_changed();
+                // goals the team's changes moved are settled now, credited
+                // to nobody, before anything I do next could be taken for it
+                self.goal_watch(now_ts());
                 self.data.note_carried_slack(&slack_before);
                 // fingerprints of what the app writes, which can differ a
                 // little from what came in (fields an older app left out)

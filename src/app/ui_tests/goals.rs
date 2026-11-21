@@ -1640,3 +1640,71 @@ fn a_goal_achieved_after_its_deadline_says_how_late() {
         "and its page"
     );
 }
+
+#[test]
+fn a_milestone_i_reach_by_closing_a_task_anywhere_is_mine() {
+    let (mut h, _, _) = two_goals();
+    let me = h.app.data.me;
+    let open: Vec<Task> = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .filter(|t| t.parent.is_none() && !h.app.data.is_closed(t) && !t.archived)
+        .take(2)
+        .cloned()
+        .collect();
+    let id = add_goal_with(
+        &mut h,
+        "Ship it",
+        vec![GoalTarget {
+            name: "Launch tasks".into(),
+            kind: TargetKind::Tasks {
+                ids: open.iter().map(|t| t.id).collect(),
+            },
+        }],
+    );
+    h.app.goal_watch(now_ts());
+    let milestone = |h: &Ui1, m: u8| {
+        goal(h, id)
+            .log
+            .iter()
+            .find(|e| e.what == GoalChange::Milestone(m))
+            .map(|e| e.who)
+    };
+    // I close one in a list, not on the goal's page: half done, by me
+    h.app.toggle_done(open[0].id);
+    h.settle();
+    assert!(h.app.data.is_closed(h.app.task(open[0].id).unwrap()));
+    assert_eq!(milestone(&h, 50), Some(me));
+    h.app.notify_clock(now_ts());
+    let about = format!("goal:{}", id);
+    assert!(
+        h.app.notify_rt.sent.iter().all(|n| n.target != about),
+        "not told what I did: {:?}",
+        h.app.notify_rt.sent
+    );
+
+    // a teammate closes the other: it comes in from the team, and I'm told
+    let mut theirs = serde_json::to_value(&h.app.data).unwrap();
+    let tasks = theirs["tasks"].as_array_mut().unwrap();
+    let t = tasks
+        .iter_mut()
+        .find(|t| t["id"].as_u64() == Some(open[1].id))
+        .unwrap();
+    t["status"] = serde_json::json!("complete");
+    theirs["extra"]["sync"]["stamps"][open[1].id.to_string()] = serde_json::json!(i64::MAX / 2);
+    h.app.merge_in(&[theirs], &[]);
+    assert!(h.app.data.is_closed(h.app.task(open[1].id).unwrap()));
+    assert_eq!(milestone(&h, 100), Some(0), "noticed, not mine");
+    h.app.notify_clock(now_ts());
+    assert!(
+        h.app
+            .notify_rt
+            .sent
+            .iter()
+            .any(|n| n.title == "Goal achieved: Ship it"),
+        "{:?}",
+        h.app.notify_rt.sent
+    );
+}

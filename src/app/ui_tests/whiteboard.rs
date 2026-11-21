@@ -1212,7 +1212,7 @@ fn cmd_z_takes_back_on_the_board_but_not_while_typing() {
     // in this computer's own words: Ctrl+Z on Windows
     let keys = crate::os::keys("\u{2318}Z");
     assert!(
-        drawn_texts(&h.shapes).iter().any(|t| t.contains(&keys)),
+        h.texts().iter().any(|t| t.contains(&keys)),
         "the tip shows the keys"
     );
 }
@@ -1880,7 +1880,7 @@ fn a_board_card_counts_its_notes_and_shapes() {
     assert!(swatch, "the row's swatch has the shapes' colour");
     push_note(&mut h, wid, [100.0, 400.0], "Mine");
     h.click("All Whiteboards");
-    let texts = drawn_texts(&h.shapes);
+    let texts = h.texts();
     assert!(!texts.iter().any(|t| t == "Empty"), "{texts:?}");
     assert!(
         texts.iter().any(|t| t == "1 note \u{b7} 3 shapes"),

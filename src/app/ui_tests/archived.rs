@@ -161,12 +161,9 @@ fn time_on_archived_tasks_counts_on_the_dashboard_and_is_marked_in_timesheets() 
         title: String::new(),
     }]);
     h.settle();
-    fn texts(h: &Ui1) -> Vec<String> {
-        drawn_texts(&h.shapes)
-    }
     // (the seed has some time of its own today too)
     assert!(
-        texts(&h).iter().any(|x| x.starts_with("2h")),
+        h.texts().iter().any(|x| x.starts_with("2h")),
         "the dashboard counts the time Timesheets shows"
     );
     h.app.section = Section::Timesheets;
@@ -198,7 +195,7 @@ fn dashboard_time_this_week_follows_monday_weeks() {
     h.settle();
     let ws = h.app.data.week_start(today());
     assert_eq!(ws.weekday(), chrono::Weekday::Mon);
-    let texts = drawn_texts(&h.shapes);
+    let texts = h.texts();
     let day = |d: NaiveDate| d.format("%a %-d").to_string();
     for i in 0..7 {
         let d = ws + Duration::days(i);

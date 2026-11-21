@@ -3298,7 +3298,7 @@ fn a_post_card_stacks_its_title_and_text_and_names_where_it_went() {
         "the title is not beside the link: {t:?} {open:?}"
     );
 
-    let texts = drawn_texts(&h.shapes);
+    let texts = h.texts();
     assert!(
         texts
             .iter()
@@ -3669,11 +3669,7 @@ fn an_empty_direct_message_is_a_chat_with_someone() {
     h.app.chat.open = Some(id);
     h.settle();
     let head = trf!("Chat with {}", other.shown());
-    assert!(
-        !h.painted_text(&head).is_empty(),
-        "{:?}",
-        drawn_texts(&h.shapes)
-    );
+    assert!(!h.painted_text(&head).is_empty(), "{:?}", h.texts());
 }
 
 /// The tabs over a channel are dragged into a new order (the Channel tab
@@ -3829,7 +3825,7 @@ fn files_shows_the_conversations_files_in_one_place() {
         h.size = size;
         h.settle();
         let page = Rect::from_min_max(pos2(320.0, 40.0), h.size.to_pos2());
-        let over = super::layout_tests::overlapping(&h.texts_in(page));
+        let over = super::layout_tests::overlapping(&h.texts_in(page, Seen::Visible));
         assert!(over.is_empty(), "{:?}: {:?}", size, over);
         assert!(
             h.cut_texts(page).is_empty(),

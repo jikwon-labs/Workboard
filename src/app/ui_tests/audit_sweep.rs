@@ -40,7 +40,7 @@ fn layout_sweep() {
                 let tag = format!("{}x{} {:?} [{}]", w, hh, lang, name);
                 let modal = h.app.modal.is_some() || h.app.login.is_some();
                 if !modal {
-                    let mut over = overlapping(&h.texts_in(page));
+                    let mut over = overlapping(&h.texts_in(page, Seen::Visible));
                     over.sort();
                     over.dedup();
                     for (a, b) in over {

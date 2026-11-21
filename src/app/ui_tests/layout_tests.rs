@@ -46,19 +46,6 @@ impl Ui1 {
         out.dedup();
         out
     }
-
-    /// Every painted text shape with its rect (inside its clip rect).
-    pub(super) fn texts_in(&self, area: Rect) -> Vec<(String, Rect)> {
-        let mut out = vec![];
-        each_text(&self.shapes, |ts, clip| {
-            let r = ts.visual_bounding_rect().intersect(clip);
-            let text = ts.galley.text().trim();
-            if !text.is_empty() && r.is_positive() && area.contains(r.center()) {
-                out.push((text.to_string(), r));
-            }
-        });
-        out
-    }
 }
 
 /// Pairs of painted texts in `area` whose visible rects overlap.
@@ -149,7 +136,7 @@ fn small_window_settings_people_columns_do_not_overlap() {
     h.app.open_settings("People");
     h.settle();
     let body = Rect::from_min_max(pos2(300.0, 40.0), h.size.to_pos2());
-    let texts = h.texts_in(body);
+    let texts = h.texts_in(body, Seen::Visible);
     let over = overlapping(&texts);
     assert!(over.is_empty(), "overlapping texts: {:?}", over);
     // the role picker stays left of the status column
@@ -339,7 +326,7 @@ fn home_fits(w: f32, hh: f32) {
     h.app.actions.push(Action::Go(Location::Home));
     h.settle();
     let page = Rect::from_min_max(pos2(60.0, 40.0), h.size.to_pos2());
-    let over = overlapping(&h.texts_in(page));
+    let over = overlapping(&h.texts_in(page, Seen::Visible));
     assert!(over.is_empty(), "{}x{}: overlapping {:?}", w, hh, over);
     let cut = h.cut_texts(page);
     assert!(cut.is_empty(), "{}x{}: cut {:?}", w, hh, cut);
@@ -634,7 +621,7 @@ fn list_rows_show_tags_that_fit_and_count_the_rest() {
     // a long name keeps room for the first tag and a count of the others
     assert!(in_row(&h, LONG_TASK, "+2") || in_row(&h, LONG_TASK, "+3"));
     let page = Rect::from_min_max(pos2(320.0, 40.0), h.size.to_pos2());
-    let over = overlapping(&h.texts_in(page));
+    let over = overlapping(&h.texts_in(page, Seen::Visible));
     assert!(over.is_empty(), "overlapping {:?}", over);
 }
 
@@ -762,8 +749,10 @@ fn sidebar_shortens_long_names_with_an_ellipsis() {
     );
     let r = h.rect(LONG_LIST);
     assert!(
-        h.texts_in(r).iter().any(|(t, _)| t.ends_with('\u{2026}')
-            && LONG_LIST.starts_with(t.trim_end_matches('\u{2026}'))),
+        h.texts_in(r, Seen::Visible)
+            .iter()
+            .any(|(t, _)| t.ends_with('\u{2026}')
+                && LONG_LIST.starts_with(t.trim_end_matches('\u{2026}'))),
         "shortened with an ellipsis"
     );
 }
@@ -812,7 +801,7 @@ fn search_shortens_a_long_path_before_its_kind() {
     let path = format!("Team Space / {}", LONG_LIST);
     assert!(h.has(&path), "the long list is found");
     let row = h.rect(&path);
-    let texts = h.texts_in(row);
+    let texts = h.texts_in(row, Seen::Visible);
     assert!(
         texts
             .iter()
@@ -869,7 +858,7 @@ fn search_keeps_a_message_of_several_lines_on_its_row() {
     let row = h.rect(title);
     // everything painted around the row stays inside it, on one line
     let near = row.expand2(vec2(0.0, 30.0));
-    let texts = h.texts_in(near);
+    let texts = h.texts_in(near, Seen::Visible);
     let ours: Vec<_> = texts
         .iter()
         .filter(|(t, _)| t.contains("Pizza") || t.contains("Lunch"))
@@ -927,7 +916,7 @@ fn chip_clear(h: &Ui1) {
     let page = Rect::from_min_max(pos2(chip.left() - 20.0, chip.top()), h.size.to_pos2());
     // the messages are cut a little below the chip, not right at its edge
     let below = chip.expand2(vec2(0.0, 4.0));
-    for (t, r) in h.texts_in(page) {
+    for (t, r) in h.texts_in(page, Seen::Visible) {
         if t != tr("Add bookmarks, notes, and more") && r.intersects(below) {
             panic!("{:?} at {:?} under the chip {:?}", t, r, chip);
         }
@@ -1383,7 +1372,7 @@ fn timeline_edge_marks_and_toolbar_do_not_overlap() {
         h.app.view = ViewKind::Timeline;
         h.settle();
         let page = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
-        let over = overlapping(&h.texts_in(page));
+        let over = overlapping(&h.texts_in(page, Seen::Visible));
         assert!(over.is_empty(), "{}x{}: {:?}", w, hh, over);
     }
 }
@@ -1528,7 +1517,7 @@ fn small_window_doc_header_and_toolbar_fit() {
         h.app.doc_open = Some(doc);
         h.settle();
         let top = Rect::from_min_max(pos2(320.0, 40.0), pos2(h.size.x, 140.0));
-        let over = overlapping(&h.texts_in(top));
+        let over = overlapping(&h.texts_in(top, Seen::Visible));
         assert!(over.is_empty(), "{:?}: {:?}", lang, over);
         for n in ["Link", "Checklist", "Doc options"] {
             let r = h.rect(n);
@@ -1551,7 +1540,10 @@ fn small_window_thread_beside_a_channel_does_not_overlap() {
     h.size = vec2(900.0, 560.0);
     h.settle();
     assert!(h.has("Close thread"));
-    let texts = h.texts_in(Rect::from_min_max(pos2(320.0, 40.0), pos2(900.0, 560.0)));
+    let texts = h.texts_in(
+        Rect::from_min_max(pos2(320.0, 40.0), pos2(900.0, 560.0)),
+        Seen::Visible,
+    );
     let over = overlapping(&texts);
     assert!(over.is_empty(), "{:?}", over);
     // the hover toolbar over a message starts inside the conversation
@@ -1589,7 +1581,7 @@ fn small_window_inbox_and_replies_rows_shorten_their_text() {
             loc,
             h.cut_texts(page)
         );
-        let over = overlapping(&h.texts_in(page));
+        let over = overlapping(&h.texts_in(page, Seen::Visible));
         assert!(over.is_empty(), "{:?}: {:?}", loc, over);
     }
 }
@@ -1604,7 +1596,7 @@ fn small_window_docs_list_headers_and_form_footer_fit() {
     h.app.doc_open = None;
     h.settle();
     let page = Rect::from_min_max(pos2(320.0, 40.0), h.size.to_pos2());
-    let over = overlapping(&h.texts_in(page));
+    let over = overlapping(&h.texts_in(page, Seen::Visible));
     assert!(over.is_empty(), "Docs: {:?}", over);
     h.app.new_form();
     h.app.form_tab = crate::app::more::FormTab::Fill;
@@ -1614,7 +1606,7 @@ fn small_window_docs_list_headers_and_form_footer_fit() {
     h.scroll_into_view("Submit");
     h.app.toast = None;
     h.settle();
-    let over = overlapping(&h.texts_in(page));
+    let over = overlapping(&h.texts_in(page, Seen::Visible));
     assert!(over.is_empty(), "Fill out: {:?}", over);
 }
 

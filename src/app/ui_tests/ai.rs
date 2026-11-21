@@ -81,9 +81,7 @@ fn click_text(h: &mut Ui1, within: &str, part: &str) {
 }
 
 fn shown_containing(h: &Ui1, part: &str) -> Option<String> {
-    drawn_texts(&h.shapes)
-        .into_iter()
-        .find(|t| t.contains(part))
+    h.texts().into_iter().find(|t| t.contains(part))
 }
 
 /// Without a team server the AI page says where AI works and offers to
@@ -234,7 +232,7 @@ fn a_conversation_is_summed_up_and_a_closed_summary_stops() {
     assert!(
         shown_containing(&h, "Alex asked about the launch").is_some(),
         "{:?}",
-        drawn_texts(&h.shapes)
+        h.texts()
     );
     h.click("Copy");
     assert_eq!(h.app.toast.as_ref().map(|t| t.0.as_str()), Some("Copied"));

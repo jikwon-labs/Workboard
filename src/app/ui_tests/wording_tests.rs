@@ -7,11 +7,7 @@ use crate::i18n::{set_lang, Lang};
 
 /// Every text painted in the last frame.
 fn painted(h: &Ui1) -> Vec<(String, Rect)> {
-    let mut out = vec![];
-    each_text(&h.shapes, |t, _| {
-        out.push((t.galley.text().to_string(), t.visual_bounding_rect()))
-    });
-    out
+    h.texts_in(Rect::EVERYTHING, Seen::All)
 }
 
 fn shows(h: &Ui1, text: &str) -> bool {

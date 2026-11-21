@@ -470,7 +470,7 @@ fn history_lines_show_before_the_first_comment() {
     });
     h.settle();
     assert!(
-        drawn_texts(&h.shapes)
+        h.texts()
             .iter()
             .any(|x| x.contains("set priority to Urgent")),
         "a change shows in the feed without a comment"

@@ -488,11 +488,7 @@ fn a_minute_old_post_reads_one_min_ago() {
     c.messages.push(m);
     h.settle();
     let line = "Announcement in # general \u{2022} 1 min ago";
-    assert!(
-        !h.painted_text(line).is_empty(),
-        "{:?}",
-        drawn_texts(&h.shapes)
-    );
+    assert!(!h.painted_text(line).is_empty(), "{:?}", h.texts());
     crate::i18n::set_lang(crate::i18n::Lang::Ko);
     h.settle();
     let ko = h.painted_text("# general의 공지 \u{2022} 1분 전").len();
@@ -542,7 +538,8 @@ fn the_filters_narrow_the_posts_together_and_sort_turns_them_around() {
         ["Lunch", "Web news", "Old one"],
         "newest first"
     );
-    assert!(drawn_texts(&h.shapes)
+    assert!(h
+        .texts()
         .iter()
         .any(|t| t.starts_with("Announcement in # general")));
 

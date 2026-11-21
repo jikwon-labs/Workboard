@@ -650,6 +650,39 @@ impl Ui1 {
         self.settle();
     }
 
+    /// Every text painted in the last frame.
+    pub(super) fn texts(&self) -> Vec<String> {
+        let mut out = vec![];
+        each_text(&self.shapes, |ts, _| out.push(ts.galley.text().to_string()));
+        out
+    }
+
+    /// The texts painted in `area` in the last frame, picked as `seen` says:
+    /// (what it says, where).
+    pub(super) fn texts_in(&self, area: Rect, seen: Seen) -> Vec<(String, Rect)> {
+        let mut out = vec![];
+        each_text(&self.shapes, |ts, clip| {
+            let text = ts.galley.text();
+            let r = ts.visual_bounding_rect();
+            match seen {
+                Seen::All => out.push((text.to_string(), r)),
+                Seen::Touching => {
+                    if area.intersects(r) && !text.trim().is_empty() {
+                        out.push((text.to_string(), r));
+                    }
+                }
+                Seen::Visible => {
+                    let r = r.intersect(clip);
+                    let text = text.trim();
+                    if !text.is_empty() && r.is_positive() && area.contains(r.center()) {
+                        out.push((text.to_string(), r));
+                    }
+                }
+            }
+        });
+        out
+    }
+
     /// What `pick` takes from the shapes painted in the last frame (nested
     /// ones included), in paint order.
     pub(super) fn shapes_where<T>(
@@ -828,11 +861,16 @@ pub(super) fn each_text(
     });
 }
 
-/// Every text painted in the last frame.
-pub(super) fn drawn_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
-    let mut out = vec![];
-    each_text(shapes, |ts, _| out.push(ts.galley.text().to_string()));
-    out
+/// Which painted texts `Ui1::texts_in` takes, and how.
+pub(super) enum Seen {
+    /// Every text, blank ones too, as painted with its whole rect, wherever
+    /// it is (the area isn't looked at).
+    All,
+    /// Texts that aren't blank whose whole rect touches the area, as painted.
+    Touching,
+    /// Texts that aren't blank, trimmed, with the part their clip rect shows,
+    /// whose shown middle is in the area.
+    Visible,
 }
 
 // a server workspace whose server can't be reached, waited on until the

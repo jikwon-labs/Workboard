@@ -33,11 +33,6 @@ fn with(data: Data, w: f32, h: f32) -> Ui1 {
 }
 
 impl Ui1 {
-    /// Every text painted in the last frame.
-    fn texts(&self) -> Vec<String> {
-        drawn_texts(&self.shapes)
-    }
-
     /// Clicks the lowest control with this name (a dialog's button, not
     /// its title).
     fn click_lowest(&mut self, name: &str) {

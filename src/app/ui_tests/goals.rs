@@ -1059,18 +1059,6 @@ fn a_goal_or_target_name_cant_be_left_empty() {
     assert!(h.has("Target name Beta testers"), "the box shows it again");
 }
 
-/// Every text painted inside `area`: (what it says, where).
-fn texts_in(h: &Ui1, area: Rect) -> Vec<(String, Rect)> {
-    let mut out = vec![];
-    super::harness::each_text(&h.shapes, |ts, _| {
-        let r = ts.visual_bounding_rect();
-        if area.intersects(r) && !ts.galley.text().trim().is_empty() {
-            out.push((ts.galley.text().to_string(), r));
-        }
-    });
-    out
-}
-
 /// No two of these texts overlap, and all are inside `area`.
 fn assert_apart(texts: &[(String, Rect)], area: Rect, what: &str) {
     for (i, (a, ra)) in texts.iter().enumerate() {
@@ -1104,14 +1092,14 @@ fn a_long_owner_name_fits_in_a_card_and_a_row() {
     assert!(card.width() < 500.0, "two to a row: {card:?}");
     let band = Rect::from_min_max(pos2(card.left(), card.bottom() - 50.0), card.max);
     assert_apart(
-        &texts_in(&h, band),
+        &h.texts_in(band, Seen::Touching),
         band.shrink2(vec2(19.0, 0.0)),
         "card footer",
     );
 
     h.click("Show as list");
     let row = h.rect("Goal row Beta launch");
-    assert_apart(&texts_in(&h, row), row, "row");
+    assert_apart(&h.texts_in(row, Seen::Touching), row, "row");
 }
 
 #[test]
@@ -1158,7 +1146,7 @@ fn a_goals_page_fits_the_narrowest_window_with_big_numbers() {
     let overview = h.rect("Goal overview");
     assert!(overview.right() <= edge + 0.5, "{overview:?} past {edge}");
     // (below the window's own top bar)
-    let page = texts_in(&h, window.expand(2000.0));
+    let page = h.texts_in(window.expand(2000.0), Seen::Touching);
     let past: Vec<_> = page
         .iter()
         .filter(|(_, r)| r.top() > 60.0 && r.right() > edge + 0.5)
@@ -1191,13 +1179,18 @@ fn the_goals_page_fits_the_narrowest_window() {
     let card = h.rect("Goal Beta launch");
     assert!(card.right() <= edge + 0.5, "{card:?} past {edge}");
     let window = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 900.0));
-    let past: Vec<_> = texts_in(&h, window.expand(2000.0))
+    let past: Vec<_> = h
+        .texts_in(window.expand(2000.0), Seen::Touching)
         .into_iter()
         .filter(|(_, r)| r.top() > 60.0 && r.right() > edge + 0.5)
         .collect();
     assert!(past.is_empty(), "past the page's edge: {past:?}");
     for b in &boxes {
-        assert_apart(&texts_in(&h, *b), b.shrink(1.0), "summary box");
+        assert_apart(
+            &h.texts_in(*b, Seen::Touching),
+            b.shrink(1.0),
+            "summary box",
+        );
     }
     // 38 - 26 and 0 - 26 points: down 7 on average, beside the big number
     assert!(!h.painted_text("Down 7 points this week").is_empty());

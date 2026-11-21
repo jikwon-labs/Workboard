@@ -1992,7 +1992,7 @@ fn shortcuts_list_names_cmd_arrows_for_back_and_forward() {
     h.settle();
     let keys = crate::os::keys("\u{2318}\u{2190}");
     assert!(
-        drawn_texts(&h.shapes).iter().any(|s| s.contains(&keys)),
+        h.texts().iter().any(|s| s.contains(&keys)),
         "{:?} is listed",
         keys
     );

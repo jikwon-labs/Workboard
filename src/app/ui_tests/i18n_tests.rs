@@ -6,10 +6,6 @@
 use super::*;
 use crate::i18n::{set_lang, Lang};
 
-fn texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
-    out.extend(drawn_texts(shapes));
-}
-
 /// All strings in the workspace data (lower case), for telling data from interface.
 fn data_strings(d: &Data) -> Vec<String> {
     fn walk(v: &serde_json::Value, out: &mut Vec<String>) {
@@ -701,7 +697,7 @@ fn korean_screens_have_no_english_left() {
         // names of things a screen made (a new team, form...) are workspace data
         let data = data_strings(&h.app.data);
         let mut shown = vec![];
-        texts(&h.shapes, &mut shown);
+        shown.extend(h.texts());
         for s in shown {
             if english_left(&s, &data) {
                 left.push(format!("[{}] {:?}", name, s));
@@ -754,7 +750,7 @@ fn filter_lead_reads_as_a_condition_in_korean() {
     h.click("+ 필터 추가");
     h.settle();
     let mut shown = vec![];
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     set_lang(Lang::En);
     assert!(shown.iter().any(|s| s == "조건"), "{:?}", shown);
     assert!(!shown.iter().any(|s| s == "위치"));
@@ -832,29 +828,29 @@ fn goal_screens_have_no_english_left() {
     h.click("Goals");
     h.settle();
     let mut shown = vec![];
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     h.click("Show as list");
     h.click("Show targets of Launch");
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     h.click("Goal row Launch");
     h.settle();
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     // a milestone floating over the page, and the settings dialog
     h.app.goal_banner = Some((801, 50, now_ts()));
     h.settle();
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     h.app.modal = Some(Modal::GoalSettings { id: 801 });
     h.settle();
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     h.app.modal = Some(Modal::NewGoal(Box::new(super::more::GoalDraft::new(me))));
     h.settle();
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     h.app.modal = Some(Modal::GoalAchieved { id: 802 });
     h.settle();
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     h.app.open_goal_share(802);
     h.settle();
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     // the card in the conversation
     let general = h
         .app
@@ -869,13 +865,13 @@ fn goal_screens_have_no_english_left() {
     h.app.section = Section::Chat;
     h.app.chat.open = Some(general);
     h.settle();
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     h.app.section = Section::Goals;
     h.app.modal = None;
     h.app.goal_open = None;
     h.app.data.extra.goals.clear();
     h.settle();
-    texts(&h.shapes, &mut shown);
+    shown.extend(h.texts());
     set_lang(Lang::En);
     data.extend(data_strings(&h.app.data));
     let mut left: Vec<&String> = shown.iter().filter(|s| english_left(s, &data)).collect();

@@ -59,6 +59,8 @@ pub enum WbUndo {
     NoteMoved(u64, [f32; 2]),
     /// I resized this note from this size.
     NoteResized(u64, [f32; 2]),
+    /// I gave this note another colour; this is the one it had.
+    NoteColour(u64, [u8; 3]),
     /// I added these shapes and lines (by id).
     Added(Vec<u64>, Vec<u64>),
     /// I deleted these shapes and lines; each sat at this place in its
@@ -714,8 +716,14 @@ impl App {
                     }
                 }
                 if let Some((i, c)) = recolor {
-                    wb.notes[i].color = c;
-                    self.dirty = true;
+                    let n = &mut wb.notes[i];
+                    if n.color != c {
+                        self.sweep
+                            .wb_undo
+                            .push((wid, WbUndo::NoteColour(n.id, n.color)));
+                        n.color = c;
+                        self.dirty = true;
+                    }
                 }
                 if let Some(i) = drop_note {
                     // Undo brings it back
@@ -939,6 +947,13 @@ impl App {
             WbUndo::NoteMoved(id, at) => match wb.notes.iter_mut().find(|n| n.id == id) {
                 Some(n) => {
                     n.pos = at;
+                    true
+                }
+                None => false,
+            },
+            WbUndo::NoteColour(id, c) => match wb.notes.iter_mut().find(|n| n.id == id) {
+                Some(n) => {
+                    n.color = c;
                     true
                 }
                 None => false,

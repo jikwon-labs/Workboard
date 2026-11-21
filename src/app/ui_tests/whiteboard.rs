@@ -1757,3 +1757,29 @@ fn undo_takes_back_a_template() {
         "the template is gone"
     );
 }
+
+/// Undo puts back a note's colour, as it does a shape's.
+#[test]
+fn undo_puts_a_notes_colour_back() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
+    h.hover(h.rect("Whiteboard canvas").center());
+    h.click("Note colour 1");
+    // the popup's first colour, red
+    let red = rgb(crate::app::more::WB_COLORS[1]);
+    let at = h
+        .shapes
+        .iter()
+        .find_map(|c| match &c.shape {
+            egui::Shape::Circle(ci) if ci.fill == red && ci.radius == 8.0 => Some(ci.center),
+            _ => None,
+        })
+        .expect("the colours are shown");
+    h.click_at(at);
+    assert_eq!(
+        board_of(&h, wid).notes[0].color,
+        crate::app::more::WB_COLORS[1]
+    );
+    h.click("Undo");
+    assert_eq!(board_of(&h, wid).notes[0].color, [0xf8, 0xae, 0x00]);
+}

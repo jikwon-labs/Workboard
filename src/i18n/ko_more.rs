@@ -31,6 +31,9 @@ pub const T: &[(&str, &str)] = &[
     ("Use Later on an item to come back to it.", "항목에서 나중에를 누르면 다시 볼 수 있습니다."),
     ("Nothing cleared yet", "아직 정리한 항목이 없습니다"),
     ("Cleared items show up here.", "정리한 항목이 여기에 표시됩니다."),
+    ("Nothing matches this filter", "이 필터에 맞는 항목이 없습니다"),
+    ("This tab has items the filter hides.", "이 탭의 다른 항목은 필터에 가려져 있습니다."),
+    ("Show everything", "전체 보기"),
     // posts
     ("New Post", "새 게시물"),
     ("Channel:", "채널:"),

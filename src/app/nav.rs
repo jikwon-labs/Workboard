@@ -342,10 +342,8 @@ impl App {
             let title = if c.kind == ChannelKind::Channel {
                 format!("#{}", c.name)
             } else {
-                self.data
-                    .member(c.members.iter().copied().find(|m| *m != me).unwrap_or(me))
-                    .map(|m| m.shown().to_string())
-                    .unwrap_or_default()
+                // "Someone" for a person who left, as Chat says it
+                self.who(c.members.iter().copied().find(|m| *m != me).unwrap_or(me))
             };
             for m in &c.messages {
                 // (the channel's copy of a thread reply: the reply is in the Inbox)
@@ -455,11 +453,22 @@ impl App {
         src: InboxSrc,
         mention: bool,
     ) -> String {
-        let who = self
-            .data
-            .member(author)
-            .map(|m| m.shown().to_string())
-            .unwrap_or_default();
+        // "Someone" for a person who left, as Chat says it
+        let who = self.who(author);
+        // a message as Chat shows it, without its formatting marks (task
+        // comments show no formatting, so they keep theirs)
+        let text = match src {
+            InboxSrc::Chat { .. } => super::chatfmt::plain(text),
+            InboxSrc::Task(_) => text.to_string(),
+        };
+        // one line under the title: a text written on several lines runs on
+        let text = text
+            .split(['\n', '\r'])
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let text = text.as_str();
         match src {
             InboxSrc::Chat {
                 thread: Some(_), ..

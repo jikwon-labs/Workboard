@@ -797,10 +797,18 @@ impl App {
                             }
                         }
                         if self.show_search {
+                            // compact: what is left after the avatar and four icon
+                            // chips still to come on its left (the field used
+                            // to push Sort over Columns)
+                            let fw = if compact {
+                                (ui.available_width() - 214.0).clamp(60.0, 110.0)
+                            } else {
+                                180.0
+                            };
                             let r = ui.add(
                                 field(&mut self.search)
                                     .hint_text(tr("Search tasks..."))
-                                    .desired_width(if compact { 110.0 } else { 180.0 }),
+                                    .desired_width(fw),
                             );
                             name_field(&r, "Search tasks...");
                             if std::mem::take(&mut self.search_focus) {

@@ -1365,3 +1365,55 @@ fn a_goal_from_before_history_starts_it_quietly() {
     h.app.goal_watch(now_ts());
     assert_eq!(goal(&h, b).done_on, Some(today()));
 }
+
+#[test]
+fn korean_typed_in_a_goal_and_a_target_name_is_kept() {
+    use egui::{Event::Ime, ImeEvent::*};
+    let (mut h, a, _) = two_goals();
+    h.click("Goal Beta launch");
+    // a target's name: end of it, then a syllable put together
+    h.click("Target name Beta testers");
+    h.key(egui::Key::End);
+    h.frame(vec![Ime(Enabled), Ime(Preedit("ㅎ".into()))]);
+    h.frame(vec![Ime(Preedit("하".into()))]);
+    h.frame(vec![Ime(Preedit("한".into()))]);
+    h.frame(vec![
+        Ime(Preedit("한".into())),
+        Ime(Disabled),
+        Ime(Commit("한".into())),
+        Ime(Disabled),
+    ]);
+    h.settle();
+    assert_eq!(goal(&h, a).targets[0].name, "Beta testers한");
+
+    // the goal's name in its settings, from empty
+    h.click("Goal settings");
+    let at = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Goal name")
+        .map(|(_, r)| r.center())
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .unwrap();
+    h.click_at(at);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.frame(vec![Ime(Enabled), Ime(Preedit("ㅁ".into()))]);
+    h.frame(vec![Ime(Preedit("목".into()))]);
+    h.frame(vec![
+        Ime(Preedit("목".into())),
+        Ime(Disabled),
+        Ime(Commit("목".into())),
+        Ime(Disabled),
+    ]);
+    h.frame(vec![Ime(Enabled), Ime(Preedit("ㅍ".into()))]);
+    h.frame(vec![Ime(Preedit("표".into()))]);
+    h.frame(vec![
+        Ime(Preedit("표".into())),
+        Ime(Disabled),
+        Ime(Commit("표".into())),
+        Ime(Disabled),
+    ]);
+    h.settle();
+    assert_eq!(goal(&h, a).name, "목표");
+}

@@ -457,7 +457,8 @@ fn check(folder: &str, msgs: Vec<(&'static str, Msg)>) -> Vec<String> {
             std::fs::write(&path, &text).unwrap();
         }
         match std::fs::read_to_string(&path) {
-            Ok(saved) if saved == text => {}
+            // (a Windows checkout may turn the files' line ends into \r\n)
+            Ok(saved) if saved.replace("\r\n", "\n") == text => {}
             Ok(_) => problems.push(format!("{folder}/{file} differs; now:\n{text}")),
             Err(_) => problems.push(format!("{folder}/{file} is missing")),
         }

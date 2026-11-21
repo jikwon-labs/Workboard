@@ -28,16 +28,21 @@ final class TaskFieldsUITests: WorkboardUITestCase {
         let chip = a.buttons["tag-\(tag)"]
         scrollTo(chip, in: a)
 
-        let est = a.textFields["estimateField"]
+        // the estimate is picked from a sheet, not typed
+        let est = a.buttons["estimateButton"]
         scrollTo(est, in: a)
-        // tap at its end, so deleting takes what an earlier run left there
-        est.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-        if let old = est.value as? String, !old.isEmpty, old != "e.g. 1h 30m" {
-            est.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count + 2))
-        }
-        est.typeText("90m\n")
-        let shown = expectation(for: NSPredicate(format: "value == '1h 30m'"), evaluatedWith: est)
+        est.tap()
+        let twoHours = a.buttons["estimate-120"]
+        XCTAssertTrue(twoHours.waitForExistence(timeout: 5))
+        twoHours.tap()
+        let shown = expectation(for: NSPredicate(format: "label CONTAINS '2h'"), evaluatedWith: est)
         wait(for: [shown], timeout: 5)
+        est.tap()
+        let clear = a.buttons["clearEstimate"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        clear.tap()
+        let cleared = expectation(for: NSPredicate(format: "NOT (label CONTAINS '2h')"), evaluatedWith: est)
+        wait(for: [cleared], timeout: 5)
 
         let rep = a.buttons["repeatMenu"]
         scrollTo(rep, in: a)

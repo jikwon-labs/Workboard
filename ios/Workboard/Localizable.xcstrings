@@ -8104,7 +8104,47 @@
         }
       }
     },
-    "•": {}
+    "•": {},
+    "Hours": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "시간"
+          }
+        }
+      }
+    },
+    "Minutes": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "분"
+          }
+        }
+      }
+    },
+    "Other time": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "직접 정하기"
+          }
+        }
+      }
+    },
+    "Clear estimate": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "예상 시간 지우기"
+          }
+        }
+      }
+    }
   },
   "version": "1.0"
 }

@@ -1010,15 +1010,43 @@ fn task_type_pill_switches_to_milestone() {
 }
 
 #[test]
-fn time_estimate_takes_hours_and_minutes_as_text() {
+fn time_estimate_is_picked_not_typed() {
     let mut h = Ui1::new();
     let id = open_design_task(&mut h);
+    // a quick pick sets it and closes the menu
     h.click("Time estimate value");
-    h.type_text("2h 30m");
+    h.click("Estimate 2h");
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().estimate_min, Some(120));
+    assert!(!h.has("Estimate hours"), "the menu closed");
+    assert!(
+        !h.painted_text("2h").is_empty(),
+        "shown back in hours and minutes"
+    );
+    // typing into the field does nothing: it is not a text box any more
+    h.click("Time estimate value");
+    h.type_text("213123123");
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().estimate_min, Some(120));
+    // the steppers take any other time, capped at whole minutes in an hour
+    h.click("Estimate minutes");
+    h.type_text("30");
     h.key(egui::Key::Enter);
     h.app.apply_actions();
     assert_eq!(h.app.task(id).unwrap().estimate_min, Some(150));
-    assert!(h.has("2h 30m"), "shown back as text");
+    h.click("Estimate minutes");
+    h.type_text("75");
+    h.key(egui::Key::Enter);
+    h.app.apply_actions();
+    assert_eq!(
+        h.app.task(id).unwrap().estimate_min,
+        Some(120 + 59),
+        "minutes stay under an hour"
+    );
+    // Clear removes it
+    h.click("Clear estimate");
+    h.app.apply_actions();
+    assert_eq!(h.app.task(id).unwrap().estimate_min, None);
 }
 
 #[test]

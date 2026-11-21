@@ -12,11 +12,9 @@ struct TaskDetailsSection: View {
     @Environment(SyncClient.self) private var client
     let task: TaskView
     let can: Bool
-    @State private var estimate = ""
-    @State private var estimateBad = false
     @State private var picking: DateField?
     @State private var addingTag = false
-    @FocusState private var estimateFocused: Bool
+    @State private var estimating = false
 
     enum DateField: Identifiable { case start, startTime, dueTime; var id: Self { self } }
 
@@ -87,19 +85,19 @@ struct TaskDetailsSection: View {
             .accessibilityIdentifier("repeatMenu")
 
             if apps.timeEstimates {
-                LabeledContent("Estimate") {
-                    TextField("e.g. 1h 30m", text: $estimate)
-                        .multilineTextAlignment(.trailing)
-                        .focused($estimateFocused)
-                        .submitLabel(.done)
-                        .onSubmit(saveEstimate)
-                        .foregroundStyle(estimateBad ? .red : .primary)
-                        .disabled(!can)
-                        .accessibilityIdentifier("estimateField")
+                // picked, not typed: free text took any digits and dropped
+                // what it could not read
+                Button { estimating = true } label: {
+                    LabeledContent("Estimate") {
+                        Text(task.estimateMin.map(Edits.fmtEstimate) ?? String(localized: "None"))
+                    }
                 }
-                .onAppear { estimate = task.estimateMin.map(Edits.fmtEstimate) ?? "" }
-                .onChange(of: task.estimateMin) { if !estimateFocused { estimate = task.estimateMin.map(Edits.fmtEstimate) ?? "" } }
-                .onChange(of: estimateFocused) { _, now in if !now { saveEstimate() } }
+                .foregroundStyle(.primary)
+                .disabled(!can)
+                .accessibilityIdentifier("estimateButton")
+                .sheet(isPresented: $estimating) {
+                    EstimateSheet(task: task).presentationDetents([.large])
+                }
             }
 
             Menu {
@@ -142,18 +140,73 @@ struct TaskDetailsSection: View {
             }
         }
     }
+}
 
-    func saveEstimate() {
-        let text = estimate.trimmingCharacters(in: .whitespaces)
-        if text.isEmpty {
-            estimateBad = false
-            client.edit { d, me in Edits.setEstimate(&d, task: task.id, minutes: nil, me: me, ts: nowTs()) }
-            return
+/// The time estimate: quick picks, or hours and minutes on wheels, as the
+/// Mac's estimate menu.
+struct EstimateSheet: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
+    let task: TaskView
+    @State private var hours = 0
+    @State private var minutes = 0
+
+    static let presets: [UInt32] = [15, 30, 60, 120, 240, 480]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(Self.presets, id: \.self) { m in
+                        Button { set(m) } label: {
+                            CheckedLabel(Edits.fmtEstimate(m), checked: task.estimateMin == m)
+                        }
+                        .foregroundStyle(.primary)
+                        .accessibilityIdentifier("estimate-\(m)")
+                    }
+                    // above the wheels, so it shows without scrolling
+                    if task.estimateMin != nil {
+                        Button("Clear estimate", role: .destructive) { set(nil) }
+                            .accessibilityIdentifier("clearEstimate")
+                    }
+                }
+                Section("Other time") {
+                    HStack(spacing: 0) {
+                        Picker("Hours", selection: $hours) {
+                            ForEach(0..<100) { Text(verbatim: "\($0)h").tag($0) }
+                        }
+                        .accessibilityIdentifier("estimateHours")
+                        Picker("Minutes", selection: $minutes) {
+                            ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { Text(verbatim: "\($0)m").tag($0) }
+                        }
+                        .accessibilityIdentifier("estimateMinutes")
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(height: 140)
+                }
+            }
+            .navigationTitle("Estimate")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                CancelButton { dismiss() }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Set") { set(UInt32(hours * 60 + minutes)) }
+                        .disabled(hours == 0 && minutes == 0)
+                        .accessibilityIdentifier("setEstimate")
+                }
+            }
+            .onAppear {
+                let m = Int(task.estimateMin ?? 0)
+                hours = min(m / 60, 99)
+                minutes = (m % 60) / 5 * 5
+            }
         }
-        guard let min = Edits.parseEstimate(text) else { estimateBad = true; return }
-        estimateBad = false
-        estimate = Edits.fmtEstimate(min)
-        client.edit { d, me in Edits.setEstimate(&d, task: task.id, minutes: min, me: me, ts: nowTs()) }
+    }
+
+    func set(_ m: UInt32?) {
+        let id = task.id
+        client.edit { d, me in Edits.setEstimate(&d, task: id, minutes: m, me: me, ts: nowTs()) }
+        dismiss()
     }
 }
 

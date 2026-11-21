@@ -66,6 +66,8 @@ pub const T: &[(&str, &str)] = &[
     ("Date closed", "닫힌 날짜"),
     ("Date done", "완료일"),
     ("Time estimate", "예상 시간"),
+    ("hours", "시간"),
+    ("minutes", "분"),
     ("Latest comment", "최근 댓글"),
     // filter panel
     ("Any time", "언제든"),

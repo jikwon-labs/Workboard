@@ -577,9 +577,13 @@ impl App {
                         RichText::new(tr("Time estimate")).color(t.text2),
                         t.text2,
                     );
-                    ui.horizontal(|ui| {
-                        taskfields::estimate_field(ui, win_id, &mut task.estimate_min);
-                    });
+                    taskfields::estimate_field(
+                        ui,
+                        &t,
+                        win_id,
+                        field_w - 110.0,
+                        &mut task.estimate_min,
+                    );
                 } else if !one_col {
                     ui.label("");
                     ui.label("");

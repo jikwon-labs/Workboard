@@ -1,4 +1,4 @@
-// The task window's smaller fields: task type, the time estimate as text,
+// The task window's smaller fields: task type, the time estimate picker,
 // time entries, tag suggestions, watchers, checklist rows, relationships
 // (waiting on / blocking / linked), the parent picker, the formatted
 // description and attachments.
@@ -164,36 +164,82 @@ fn paint_diamond(p: &egui::Painter, c: egui::Pos2, r: f32, color: Color32) {
     p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
 }
 
-/// The time estimate as text: shows "2h 30m", takes what is typed when the
-/// field is left or Enter is pressed.
-pub(super) fn estimate_field(ui: &mut Ui, id: egui::Id, est: &mut Option<u32>) {
-    let te = id.with("est_edit");
-    let buf_id = id.with("est_buf");
-    let focused = ui.memory(|m| m.has_focus(te));
-    let mut buf: String = if focused {
-        ui.data(|d| d.get_temp(buf_id)).unwrap_or_default()
-    } else {
-        est.map(fmt_estimate).unwrap_or_default()
-    };
-    let r = ui.add(
-        egui::TextEdit::singleline(&mut buf)
-            .id(te)
-            .hint_text(tr("Empty"))
-            .frame(false)
-            .desired_width(110.0),
-    );
-    name_field(&r, "Time estimate value");
-    let r = r.on_hover_text(tr("Type a time like 2h 30m, 45m or 1.5h"));
-    if r.has_focus() {
-        ui.data_mut(|d| d.insert_temp(buf_id, buf.clone()));
+/// Quick picks in the time estimate menu, in minutes (a day is 8 hours).
+pub const ESTIMATE_PRESETS: [u32; 6] = [15, 30, 60, 120, 240, 480];
+
+/// The time estimate: shows "2h 30m" (or Empty) and opens a menu with quick
+/// picks and hour and minute steppers. It used to be free text, which took
+/// any digits ("213123123") and dropped what it could not read without a
+/// word; a picker only offers times that make sense.
+pub(super) fn estimate_field(
+    ui: &mut Ui,
+    t: &Theme,
+    id: egui::Id,
+    width: f32,
+    est: &mut Option<u32>,
+) {
+    let (r, resp) = ui.allocate_exact_size(vec2(width, 26.0), Sense::click());
+    name_it(&resp, "Time estimate value");
+    if resp.hovered() {
+        ui.painter().rect_filled(r, 6.0, t.hover);
     }
-    if r.lost_focus() {
-        if buf.trim().is_empty() {
-            *est = None;
-        } else if let Some(m) = parse_estimate(&buf) {
-            *est = (m > 0).then_some(m);
+    let (text, color) = match *est {
+        Some(m) => (fmt_hm(m as i64 * 60), t.text),
+        None => (tr("Empty").to_string(), t.text3),
+    };
+    ui.painter().text(
+        r.left_center() + vec2(6.0, 0.0),
+        Align2::LEFT_CENTER,
+        text,
+        FontId::proportional(13.0),
+        color,
+    );
+    popup(ui, &resp, id.with("est"), 220.0, |ui| {
+        estimate_menu(ui, t, est)
+    });
+}
+
+/// The time estimate menu: quick picks, then hours and minutes to set any
+/// other time, and Clear.
+fn estimate_menu(ui: &mut Ui, t: &Theme, est: &mut Option<u32>) {
+    ui.label(RichText::new(tr("Time estimate")).small().color(t.text3));
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        for m in ESTIMATE_PRESETS {
+            let r = ui.selectable_label(*est == Some(m), fmt_hm(m as i64 * 60));
+            name_it(&r, &format!("Estimate {}", fmt_estimate(m)));
+            if r.clicked() {
+                *est = Some(m);
+                close_popup(ui);
+            }
         }
-        ui.data_mut(|d| d.remove::<String>(buf_id));
+    });
+    ui.add_space(6.0);
+    let cur = est.unwrap_or(0);
+    let (mut h, mut m) = (cur / 60, cur % 60);
+    ui.horizontal(|ui| {
+        let r = ui.add(egui::DragValue::new(&mut h).range(0..=999).speed(0.1));
+        name_it(&r, "Estimate hours");
+        ui.label(tr("hours"));
+        ui.add_space(6.0);
+        let r = ui.add(egui::DragValue::new(&mut m).range(0..=59).speed(0.2));
+        name_it(&r, "Estimate minutes");
+        ui.label(tr("minutes"));
+    });
+    let total = h * 60 + m;
+    if total != cur {
+        *est = (total > 0).then_some(total);
+    }
+    if est.is_some() {
+        ui.add_space(6.0);
+        let r = ui.add(ghost(egui::Button::new(
+            RichText::new(tr("Clear")).color(t.text2),
+        )));
+        name_it(&r, "Clear estimate");
+        if r.clicked() {
+            *est = None;
+            close_popup(ui);
+        }
     }
 }
 

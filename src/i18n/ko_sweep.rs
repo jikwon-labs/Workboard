@@ -60,10 +60,6 @@ pub const T: &[(&str, &str)] = &[
     ("Time entries", "시간 항목"),
     ("No time tracked yet", "아직 추적한 시간이 없습니다"),
     ("Remove this entry", "이 항목 제거"),
-    (
-        "Type a time like 2h 30m, 45m or 1.5h",
-        "2h 30m, 45m, 1.5h처럼 시간을 입력하세요",
-    ),
     ("e.g. 1h 30m", "예: 1h 30m"),
     ("Task type", "작업 유형"),
     ("Milestone", "마일스톤"),

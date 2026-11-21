@@ -12,6 +12,16 @@ fn posts_page() -> Ui1 {
     h
 }
 
+fn channel_id(h: &Ui1, name: &str) -> u64 {
+    h.app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Channel && c.name == name)
+        .unwrap()
+        .id
+}
+
 /// Every post in the workspace (title, text), oldest first.
 fn all_posts(h: &Ui1) -> Vec<Message> {
     let mut v: Vec<Message> = h
@@ -87,4 +97,49 @@ fn a_post_from_the_posts_page_mentions_as_the_channel_does() {
     h.click("Post");
     let p = all_posts(&h).pop().unwrap();
     assert_eq!(p.mentions, vec![3], "a team's name tells the team");
+}
+
+/// The channel picked for a post goes away while it is being written
+/// (someone deletes it, or I leave it while it is private): the post isn't
+/// sent and what was written stays. It used to clear the box and put the
+/// post nowhere, or into the private channel I had left.
+#[test]
+fn a_post_being_written_stays_when_its_channel_goes_away() {
+    let mut h = posts_page();
+    write_post(&mut h, "website-redesign", "Launch", "Next week");
+    let id = channel_id(&h, "website-redesign");
+    h.app.data.channels.retain(|c| c.id != id);
+    h.settle();
+    assert!(
+        !h.painted_text("Select Channel").is_empty(),
+        "the box asks for a channel again"
+    );
+    h.click("Post");
+    assert_eq!(h.app.post.title, "Launch", "the title stays");
+    assert_eq!(h.app.post.body, "Next week", "the text stays");
+    assert!(all_posts(&h).is_empty());
+
+    // a private channel I leave while writing
+    let mut h = posts_page();
+    let id = channel_id(&h, "website-redesign");
+    let c = h.app.data.channels.iter_mut().find(|c| c.id == id).unwrap();
+    c.private = true;
+    h.settle();
+    write_post(&mut h, "website-redesign", "Launch", "Next week");
+    let me = h.app.data.me;
+    let c = h.app.data.channels.iter_mut().find(|c| c.id == id).unwrap();
+    c.members.retain(|m| *m != me);
+    h.settle();
+    h.click("Post");
+    assert!(
+        all_posts(&h).is_empty(),
+        "nothing went into the channel I left"
+    );
+    assert_eq!(h.app.post.title, "Launch");
+
+    // picking a channel again sends it
+    pick_channel(&mut h, "general");
+    h.click("Post");
+    assert_eq!(all_posts(&h).len(), 1);
+    assert!(h.app.post.title.is_empty());
 }

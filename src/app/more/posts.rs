@@ -137,8 +137,10 @@ impl App {
                                         }
                                     }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        let ready = !self.post.title.trim().is_empty()
-                                            && self.post.channel != 0;
+                                        // a channel still listed: not one deleted
+                                        // or left since it was picked
+                                        let picked = chans.iter().any(|c| c.0 == self.post.channel);
+                                        let ready = !self.post.title.trim().is_empty() && picked;
                                         let b =
                                             Tint(
                                                 egui::Button::new(RichText::new(tr("Post")).color(
@@ -150,7 +152,7 @@ impl App {
                                             );
                                         if ui
                                             .add(b)
-                                            .on_hover_text(if self.post.channel == 0 {
+                                            .on_hover_text(if !picked {
                                                 tr("Select a channel first")
                                             } else {
                                                 ""

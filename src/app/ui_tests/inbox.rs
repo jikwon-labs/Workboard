@@ -534,3 +534,35 @@ fn only_the_rows_on_screen_are_drawn() {
     h.settle();
     assert_eq!(h.painted_text("Alex Kim commented: Comment 299").len(), 1);
 }
+
+#[test]
+fn clear_all_clears_only_the_rows_shown() {
+    let (mut comment, mut mention, mut saved) = (String::new(), String::new(), String::new());
+    let mut h = inbox(|d| {
+        comment = comment_on(d, CASE, "Over to you", 60);
+        mention = mention_in_general(d, 2, "@Me look", 120);
+        saved = comment_on(d, "Inbox case two", "Saved one", 180);
+        d.extra.inbox_later.push(saved.clone());
+    });
+    // with a filter on, only the rows it shows
+    h.click("Filter");
+    h.click("Mentions");
+    h.click("Clear all");
+    assert_eq!(h.app.data.extra.inbox_cleared, vec![mention.clone()]);
+    // the filter button says which filter is on
+    h.click("Mentions");
+    h.click("Everything");
+    assert!(h.has(CASE), "the comment is still in Primary");
+    // on Later: cleared, and no longer saved for later
+    h.click("Inbox Later");
+    h.click("Clear all");
+    assert!(h.app.data.extra.inbox_later.is_empty());
+    assert!(h.app.data.extra.inbox_cleared.contains(&saved));
+    // nothing left on Later, and nothing to clear on Cleared: the button is off
+    let before = h.app.data.extra.inbox_cleared.clone();
+    h.click("Clear all");
+    h.click("Inbox Cleared");
+    h.click("Clear all");
+    assert_eq!(h.app.data.extra.inbox_cleared, before);
+    assert!(!h.app.data.extra.inbox_cleared.contains(&comment));
+}

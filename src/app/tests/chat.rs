@@ -1047,6 +1047,47 @@ fn inbox_rows_build_quickly_with_many_rows_cleared() {
     assert!(took.as_secs_f64() < 3.0, "built in {took:?}");
 }
 
+/// In a thread someone else started, replies reach me once I wrote in it,
+/// and only the ones after my own; a mention in a reply reaches me
+/// anyway; the channel's copy of a reply ("Also send to the channel") is
+/// not a second row.
+#[test]
+fn thread_replies_after_mine_reach_the_inbox_once() {
+    let mut a = app();
+    a.data.tasks.clear();
+    let me = a.data.me;
+    let now = now_ts();
+    let c = a
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.name == "general")
+        .unwrap();
+    c.messages.clear();
+    let mut root = chat_msg(910, 3, "Lunch on Friday?", now - 100);
+    root.replies.push(chat_msg(911, 2, "before me", now - 90));
+    root.replies
+        .push(chat_msg(912, me, "count me in", now - 80));
+    root.replies.push(chat_msg(913, 4, "after me", now - 70));
+    let mut mention = chat_msg(914, 2, "@Me see this", now - 60);
+    mention.mentions = vec![me];
+    root.replies.push(mention.clone());
+    c.messages.push(root);
+    // the reply with the mention, also sent to the channel
+    let mut copy = mention;
+    copy.id = 915;
+    copy.thread_of = Some(910);
+    c.messages.push(copy);
+    let rows = a.inbox_items();
+    let mut texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
+    texts.sort();
+    assert_eq!(texts, vec!["@Me see this", "after me"]);
+    let m = rows.iter().find(|r| r.text == "@Me see this").unwrap();
+    assert!(m.mention && m.reply && m.tab == 0);
+    let r = rows.iter().find(|r| r.text == "after me").unwrap();
+    assert!(r.reply && !r.mention && r.tab == 0);
+}
+
 #[test]
 fn mentions_in_private_channels_i_am_not_in_stay_out() {
     let mut a = app();

@@ -2,6 +2,7 @@
 // messages, mentions, unread counts, notifications and huddles.
 
 use super::*;
+use crate::app::nav::InboxTab;
 
 #[test]
 fn chat_send_react_pin_thread_post_and_task() {
@@ -681,7 +682,7 @@ fn inbox_primary_and_badge_follow_the_settings() {
         a.inbox_items()
             .iter()
             .cloned()
-            .filter(|i| i.tab == 0)
+            .filter(|i| i.tab == InboxTab::Primary)
             .map(|i| i.text)
             .collect::<Vec<_>>()
     };
@@ -696,18 +697,18 @@ fn inbox_primary_and_badge_follow_the_settings() {
     assert!(a
         .inbox_items()
         .iter()
-        .any(|i| i.text == "Not for you" && i.tab == 1));
+        .any(|i| i.text == "Not for you" && i.tab == InboxTab::Other));
     assert!(a
         .inbox_items()
         .iter()
-        .any(|i| i.text == "assigned to Alex Kim" && i.tab == 1 && !i.assigned));
+        .any(|i| i.text == "assigned to Alex Kim" && i.tab == InboxTab::Other && !i.assigned));
     assert_eq!(a.inbox_badge(), 3);
     // clearing and Later take rows off the badge
     let keys: Vec<String> = a
         .inbox_items()
         .iter()
         .cloned()
-        .filter(|i| i.tab == 0)
+        .filter(|i| i.tab == InboxTab::Primary)
         .map(|i| i.key)
         .collect();
     a.data.extra.inbox_cleared.push(keys[0].clone());
@@ -747,10 +748,10 @@ fn chat_mentions_and_thread_replies_reach_the_inbox() {
     let items = a.inbox_items();
     assert!(items
         .iter()
-        .any(|i| i.text == "Sounds good" && i.reply && i.tab == 0));
+        .any(|i| i.text == "Sounds good" && i.reply && i.tab == InboxTab::Primary));
     assert!(items
         .iter()
-        .any(|i| i.text == "@Me please look" && i.mention && i.tab == 0));
+        .any(|i| i.text == "@Me please look" && i.mention && i.tab == InboxTab::Primary));
     assert!(!items.iter().any(|i| i.text == "nothing for me"));
     assert_eq!(a.inbox_badge(), 2);
     assert_eq!(a.chat_replies().len(), 1);
@@ -901,7 +902,7 @@ fn inbox_rows_moved_on_my_other_device_show_at_once() {
     let keys: Vec<String> = a
         .inbox_items()
         .iter()
-        .filter(|i| i.tab == 0)
+        .filter(|i| i.tab == InboxTab::Primary)
         .map(|i| i.key.clone())
         .take(2)
         .collect();
@@ -909,7 +910,10 @@ fn inbox_rows_moved_on_my_other_device_show_at_once() {
     a.data.extra.inbox_cleared = vec![keys[0].clone()];
     a.data_changed();
     let tab = |a: &App, k: &str| a.inbox_items().iter().find(|i| i.key == k).unwrap().tab;
-    assert_eq!((tab(&a, &keys[0]), tab(&a, &keys[1])), (3, 0));
+    assert_eq!(
+        (tab(&a, &keys[0]), tab(&a, &keys[1])),
+        (InboxTab::Cleared, InboxTab::Primary)
+    );
     // both devices agreed on that; then on my phone: the first row back,
     // the second cleared
     use crate::sync::mine::collect;
@@ -922,7 +926,7 @@ fn inbox_rows_moved_on_my_other_device_show_at_once() {
     assert_eq!(a.data.extra.inbox_cleared, vec![keys[1].clone()]);
     assert_eq!(
         (tab(&a, &keys[0]), tab(&a, &keys[1])),
-        (0, 3),
+        (InboxTab::Primary, InboxTab::Cleared),
         "the Inbox shows what the phone did"
     );
 }
@@ -961,7 +965,10 @@ fn inbox_rows_build_quickly_with_many_rows_cleared() {
     let t0 = std::time::Instant::now();
     let rows = a.inbox_items();
     let took = t0.elapsed();
-    assert_eq!(rows.iter().filter(|r| r.tab == 3).count(), 30_000);
+    assert_eq!(
+        rows.iter().filter(|r| r.tab == InboxTab::Cleared).count(),
+        30_000
+    );
     // looking each row up in a list of 30 000 took seconds
     assert!(took.as_secs_f64() < 3.0, "built in {took:?}");
 }
@@ -1002,9 +1009,9 @@ fn thread_replies_after_mine_reach_the_inbox_once() {
     texts.sort();
     assert_eq!(texts, vec!["@Me see this", "after me"]);
     let m = rows.iter().find(|r| r.text == "@Me see this").unwrap();
-    assert!(m.mention && m.reply && m.tab == 0);
+    assert!(m.mention && m.reply && m.tab == InboxTab::Primary);
     let r = rows.iter().find(|r| r.text == "after me").unwrap();
-    assert!(r.reply && !r.mention && r.tab == 0);
+    assert!(r.reply && !r.mention && r.tab == InboxTab::Primary);
 }
 
 #[test]
@@ -1295,7 +1302,7 @@ fn comments_on_a_task_i_duplicated_go_to_primary() {
         .cloned()
         .find(|i| i.src == crate::app::nav::InboxSrc::Task(copy) && i.text == "looks good")
         .unwrap();
-    assert_eq!(row.tab, 0);
+    assert_eq!(row.tab, InboxTab::Primary);
 }
 
 /// Runs `f` as another member, then switches back.
@@ -1312,7 +1319,7 @@ fn assigned_in_primary(a: &App) -> Vec<u64> {
     a.inbox_items()
         .iter()
         .cloned()
-        .filter(|i| i.assigned && i.tab == 0)
+        .filter(|i| i.assigned && i.tab == InboxTab::Primary)
         .filter_map(|i| match i.src {
             nav::InboxSrc::Task(t) => Some(t),
             _ => None,
@@ -1324,7 +1331,7 @@ fn mentioned_in_primary(a: &App) -> Vec<String> {
     a.inbox_items()
         .iter()
         .cloned()
-        .filter(|i| i.mention && i.tab == 0)
+        .filter(|i| i.mention && i.tab == InboxTab::Primary)
         .map(|i| i.text)
         .collect()
 }

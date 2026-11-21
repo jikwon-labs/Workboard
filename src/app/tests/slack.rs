@@ -3,6 +3,7 @@
 // between computers and versions.
 
 use super::*;
+use crate::app::nav::InboxTab;
 
 /// A small Slack export: two people, #general with a thread and a file,
 /// and #random. `Mia` is a member here by email, `ghost` isn't.
@@ -346,7 +347,8 @@ fn imported_mentions_and_replies_are_not_news_in_anyones_inbox() {
         .collect();
     assert_eq!(rows.len(), 2, "the mention and the reply are in the Inbox");
     assert!(
-        rows.iter().all(|r| r.tab == 3 && r.imported),
+        rows.iter()
+            .all(|r| r.tab == InboxTab::Cleared && r.imported),
         "but already cleared"
     );
     assert_eq!(a.inbox_badge(), badge, "the badge doesn't move");

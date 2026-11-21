@@ -308,7 +308,7 @@ fn timesheet_cells_and_totals_use_hours_and_minutes() {
 fn inbox_tabs_without_anything_to_invite_for_use_their_own_icon() {
     let mut h = Ui1::new();
     h.app.apply(Action::Go(Location::Inbox));
-    h.app.inbox_tab = 2;
+    h.app.inbox_tab = super::nav::InboxTab::Later;
     h.settle();
     assert!(shows(&h, "Nothing saved for later"));
     // the icons are drawn lines now; the people icon comes only with the

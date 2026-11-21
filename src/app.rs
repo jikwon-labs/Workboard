@@ -566,7 +566,7 @@ pub struct App {
     ws_file: String,
     sidebar_collapsed: bool,
     force_menu: Option<String>,
-    inbox_tab: u8,
+    inbox_tab: nav::InboxTab,
     channel_find: Option<String>,
     channel_panel: u8,
     /// Each hub's sidebar filter (Docs, Dashboards, Teams, ...).
@@ -1109,7 +1109,7 @@ impl App {
             ws_file,
             sidebar_collapsed: false,
             force_menu: arg("--menu"),
-            inbox_tab: 0,
+            inbox_tab: nav::InboxTab::Primary,
             channel_find: None,
             channel_panel: 0,
             hub: Default::default(),

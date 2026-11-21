@@ -132,6 +132,26 @@ pub(super) enum InboxSrc {
     },
 }
 
+/// A tab of the Inbox page, and the tab an Inbox row is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) enum InboxTab {
+    #[default]
+    Primary,
+    Other,
+    Later,
+    Cleared,
+}
+
+impl InboxTab {
+    /// In the order of the tabs on the page.
+    pub(crate) const ALL: [InboxTab; 4] = [
+        InboxTab::Primary,
+        InboxTab::Other,
+        InboxTab::Later,
+        InboxTab::Cleared,
+    ];
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct InboxItem {
     pub key: String,
@@ -146,8 +166,7 @@ pub(super) struct InboxItem {
     pub assigned: bool,
     /// A chat reply in a thread I started or wrote in.
     pub reply: bool,
-    /// 0 Primary, 1 Other, 2 Later, 3 Cleared.
-    pub tab: u8,
+    pub tab: InboxTab,
     /// From an imported message (old history): starts out Cleared and is
     /// never announced.
     pub imported: bool,
@@ -287,22 +306,22 @@ impl App {
             .collect();
         let tab_of = |key: &str, primary: bool| {
             if cleared.contains(key) {
-                3
+                InboxTab::Cleared
             } else if later.contains(key) {
-                2
+                InboxTab::Later
             } else if primary {
-                0
+                InboxTab::Primary
             } else {
-                1
+                InboxTab::Other
             }
         };
         // imported history is already cleared for everyone, unless saved
         // for later
         let imported_tab = |key: &str| {
             if later.contains(key) {
-                2
+                InboxTab::Later
             } else {
-                3
+                InboxTab::Cleared
             }
         };
         let members = &self.data.members;
@@ -441,7 +460,7 @@ impl App {
         let rows = self
             .inbox_items()
             .iter()
-            .filter(|i| i.tab == 0 && !read.contains(&i.key))
+            .filter(|i| i.tab == InboxTab::Primary && !read.contains(&i.key))
             .count();
         rows + if self.data.extra.notify.reminders {
             self.due_reminders()

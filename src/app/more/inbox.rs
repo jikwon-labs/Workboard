@@ -1,11 +1,75 @@
 // The Inbox page (Primary / Other / Later / Cleared).
 
 use super::*;
+use crate::app::nav::InboxTab;
 
 // ---------------------------------------------------------------- inbox (Primary / Other / Later / Cleared)
 
 impl App {
     pub(crate) fn inbox_page(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        self.inbox_tabs(ui);
+        // collect items (what is on which tab: inbox_items)
+        let mut items: Vec<super::nav::InboxItem> = self
+            .inbox_items()
+            .iter()
+            .cloned()
+            .filter(|x| x.tab == self.inbox_tab)
+            .collect();
+        let on_tab = items.len();
+        match self.inbox_filter {
+            // comments on tasks: chat mentions are under Mentions
+            1 => items.retain(|x| x.comment && matches!(x.src, super::nav::InboxSrc::Task(_))),
+            2 => items.retain(|x| x.mention),
+            3 => items.retain(|x| x.assigned),
+            _ => {}
+        }
+        // the tab has rows, only the filter hides them all
+        let filtered_out = items.is_empty() && on_tab > 0;
+        items.sort_by_key(|x| std::cmp::Reverse(x.ts));
+        if self.inbox_toolbar(ui, !items.is_empty()) {
+            for k in items.iter().map(|x| &x.key) {
+                self.data.extra.inbox_later.retain(|x| x != k);
+                self.data.extra.inbox_cleared.push(k.clone());
+            }
+            self.dirty = true;
+        }
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(18, 0))
+                    .show(ui, |ui| {
+                        if self.inbox_tab == InboxTab::Primary {
+                            self.reminders_block(ui);
+                        }
+                        // reminders are waiting above: not "all caught up"
+                        let reminders_shown = self.inbox_tab == InboxTab::Primary
+                            && self
+                                .data
+                                .extra
+                                .reminders
+                                .iter()
+                                .any(|r| r.owner == self.data.me && !r.done);
+                        if items.is_empty() && reminders_shown && !filtered_out {
+                            ui.add_space(16.0);
+                            ui.label(
+                                RichText::new(tr("No new comments, mentions or assignments."))
+                                    .color(t.text3),
+                            );
+                        } else if items.is_empty() {
+                            ui.add_space(ui.available_height() * 0.3);
+                            ui.vertical_centered(|ui| self.inbox_empty(ui, filtered_out));
+                        }
+                        for it in items {
+                            self.inbox_row(ui, it);
+                        }
+                    });
+            });
+    }
+
+    /// Primary / Other / Later / Cleared along the top.
+    fn inbox_tabs(&mut self, ui: &mut Ui) {
         let t = self.t();
         // tabs
         let w = ui.available_width();
@@ -26,7 +90,7 @@ impl App {
             );
             let resp = ui.interact(r, ui.id().with(("itab", i)), Sense::click());
             name_it(&resp, &format!("Inbox {}", label));
-            let sel = self.inbox_tab == i as u8;
+            let sel = self.inbox_tab == InboxTab::ALL[i];
             if resp.hovered() && !sel {
                 ui.painter().rect_filled(r.shrink(4.0), 6.0, t.hover);
             }
@@ -61,7 +125,7 @@ impl App {
                 );
             }
             if resp.clicked() {
-                self.inbox_tab = i as u8;
+                self.inbox_tab = InboxTab::ALL[i];
             }
         }
         ui.painter().hline(
@@ -69,24 +133,12 @@ impl App {
             tabs_r.bottom(),
             Stroke::new(1.0_f32, t.border),
         );
-        // collect items (what is on which tab: inbox_items)
-        let mut items: Vec<super::nav::InboxItem> = self
-            .inbox_items()
-            .iter()
-            .cloned()
-            .filter(|x| x.tab == self.inbox_tab)
-            .collect();
-        let on_tab = items.len();
-        match self.inbox_filter {
-            // comments on tasks: chat mentions are under Mentions
-            1 => items.retain(|x| x.comment && matches!(x.src, super::nav::InboxSrc::Task(_))),
-            2 => items.retain(|x| x.mention),
-            3 => items.retain(|x| x.assigned),
-            _ => {}
-        }
-        // the tab has rows, only the filter hides them all
-        let filtered_out = items.is_empty() && on_tab > 0;
-        items.sort_by_key(|x| std::cmp::Reverse(x.ts));
+    }
+
+    /// The row under the tabs: the filter, Clear all, notification
+    /// settings and Reminder. Returns true when Clear all was pressed.
+    fn inbox_toolbar(&mut self, ui: &mut Ui, has_items: bool) -> bool {
+        let t = self.t();
         let mut clear_all = false;
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(18, 10))
@@ -111,7 +163,7 @@ impl App {
                         }
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let can_clear = !items.is_empty() && self.inbox_tab != 3;
+                        let can_clear = has_items && self.inbox_tab != InboxTab::Cleared;
                         if ui
                             .add_enabled_ui(can_clear, |ui| {
                                 icon_button(
@@ -142,335 +194,290 @@ impl App {
                     });
                 });
             });
-        if clear_all {
-            for k in items.iter().map(|x| &x.key) {
-                self.data.extra.inbox_later.retain(|x| x != k);
-                self.data.extra.inbox_cleared.push(k.clone());
-            }
-            self.dirty = true;
-        }
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(18, 0))
-                    .show(ui, |ui| {
-                        if self.inbox_tab == 0 {
-                            self.reminders_block(ui);
-                        }
-                        // reminders are waiting above: not "all caught up"
-                        let reminders_shown = self.inbox_tab == 0
-                            && self
-                                .data
-                                .extra
-                                .reminders
-                                .iter()
-                                .any(|r| r.owner == self.data.me && !r.done);
-                        if items.is_empty() && reminders_shown && !filtered_out {
-                            ui.add_space(16.0);
-                            ui.label(
-                                RichText::new(tr("No new comments, mentions or assignments."))
-                                    .color(t.text3),
-                            );
-                        } else if items.is_empty() {
-                            ui.add_space(ui.available_height() * 0.3);
-                            ui.vertical_centered(|ui| {
-                                let alone = self.data.members.len() <= 1;
-                                // only someone who may invite is pointed to inviting
-                                let invite = alone && self.may_manage();
-                                // alone, the Inbox stays empty: point at what is due
-                                let me = self.data.me;
-                                let due_work = self
-                                    .data
-                                    .tasks
-                                    .iter()
-                                    .filter(|x| {
-                                        x.assignees.contains(&me)
+        clear_all
+    }
+
+    /// What an empty tab says, and the way on from it.
+    fn inbox_empty(&mut self, ui: &mut Ui, filtered_out: bool) {
+        let t = self.t();
+        let alone = self.data.members.len() <= 1;
+        // only someone who may invite is pointed to inviting
+        let invite = alone && self.may_manage();
+        // alone, the Inbox stays empty: point at what is due
+        let me = self.data.me;
+        let due_work = self
+            .data
+            .tasks
+            .iter()
+            .filter(|x| {
+                x.assignees.contains(&me)
                                             && x.due.is_some_and(|d| d <= today())
                                             && !self.data.is_closed(x)
                                             // as the sidebar's Today & Overdue counts
                                             && self.task_visible(x)
-                                    })
-                                    .count();
-                                let point_to_due =
-                                    self.inbox_tab == 0 && alone && due_work > 0 && !filtered_out;
-                                // the people icon only where it invites people
-                                let (title, sub, icon) = match self.inbox_tab {
-                                    _ if filtered_out => (
-                                        "Nothing matches this filter",
-                                        "This tab has items the filter hides.",
-                                        "filter",
-                                    ),
-                                    0 if point_to_due => (
-                                        "Nothing from other people",
-                                        "The Inbox collects comments, mentions and assignments from others.",
-                                        "check",
-                                    ),
-                                    0 if invite => (
-                                        "Looking to collaborate?",
-                                        "Collaboration is one invite away.",
-                                        "teams",
-                                    ),
-                                    0 => (
-                                        "You're all caught up",
-                                        "New comments, mentions and assignments show up here.",
-                                        "check",
-                                    ),
-                                    1 => (
-                                        "Nothing in Other",
-                                        "Updates that don't need you show up here.",
-                                        "inbox",
-                                    ),
-                                    2 => (
-                                        "Nothing saved for later",
-                                        "Use Later on an item to come back to it.",
-                                        "alarm",
-                                    ),
-                                    _ => (
-                                        "Nothing cleared yet",
-                                        "Cleared items show up here.",
-                                        "check",
-                                    ),
-                                };
-                                let (r, _) =
-                                    ui.allocate_exact_size(vec2(60.0, 60.0), Sense::hover());
-                                ui.painter().rect_stroke(
-                                    r.shrink(2.0),
-                                    14.0,
-                                    Stroke::new(1.5_f32, t.border),
-                                    egui::StrokeKind::Inside,
-                                );
-                                line_icon_scaled(
-                                    ui.painter(),
-                                    icon,
-                                    r.center(),
-                                    Color32::from_rgb(0x5f, 0x55, 0xee),
-                                    1.6,
-                                );
-                                ui.add_space(10.0);
-                                ui.label(RichText::new(tr(title)).size(18.0).color(t.text));
-                                ui.label(RichText::new(tr(sub)).size(14.0).color(t.text2));
-                                if filtered_out {
-                                    ui.add_space(10.0);
-                                    if ui.button(tr("Show everything")).clicked() {
-                                        self.inbox_filter = 0;
-                                    }
-                                } else if point_to_due {
-                                    ui.add_space(10.0);
-                                    ui.label(
-                                        RichText::new(trf!(
-                                            "Tasks due today or overdue: {}",
-                                            due_work
-                                        ))
-                                        .size(14.0)
-                                        .color(t.text),
-                                    );
-                                    ui.add_space(6.0);
-                                    if ui
-                                        .add(Tint(
-                                            egui::Button::new(
-                                                RichText::new(tr("Open Today & Overdue"))
-                                                    .size(15.0)
-                                                    .color(t.on_primary),
-                                            )
-                                            .fill(t.primary)
-                                            .corner_radius(7)
-                                            .min_size(vec2(0.0, 38.0)),
-                                        ))
-                                        .clicked()
-                                    {
-                                        self.actions.push(Action::Go(Location::TodayOverdue));
-                                    }
-                                    ui.add_space(4.0);
-                                    if invite && ui.button(tr("Invite people")).clicked() {
-                                        self.modal = Some(Modal::Invite {
-                                            emails: String::new(),
-                                            role: "Member".into(),
-                                        });
-                                    }
-                                } else if self.inbox_tab == 0 && invite && !filtered_out {
-                                    ui.add_space(10.0);
-                                    if ui
-                                        .add(Tint(
-                                            egui::Button::new(
-                                                RichText::new(tr("Invite people"))
-                                                    .size(15.0)
-                                                    .color(t.on_primary),
-                                            )
-                                            .fill(t.primary)
-                                            .corner_radius(7)
-                                            .min_size(vec2(0.0, 38.0)),
-                                        ))
-                                        .clicked()
-                                    {
-                                        self.modal = Some(Modal::Invite {
-                                            emails: String::new(),
-                                            role: "Member".into(),
-                                        });
-                                    }
-                                }
-                            });
-                        }
-                        for it in items {
-                            let (key, ts, tname) = (it.key.clone(), it.ts, it.title.clone());
-                            let w = ui.available_width();
-                            let (r, resp) = ui.allocate_exact_size(vec2(w, 58.0), Sense::click());
-                            name_it(&resp, &tname);
-                            // a row scrolled out of sight keeps its place but isn't
-                            // drawn: thousands of rows would be on every frame
-                            if !ui.is_rect_visible(r) {
-                                // (still opened from the keyboard or a screen reader)
-                                if row_press(&resp) {
-                                    self.open_inbox_src(it.src);
-                                }
-                                continue;
-                            }
-                            if resp.hovered() {
-                                ui.painter().rect_filled(r, 8.0, t.hover);
-                            }
-                            ui.painter()
-                                .hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
-                            if let Some(m) = self.data.member(it.author) {
-                                paint_avatar(
-                                    ui.painter(),
-                                    r.left_center() + vec2(22.0, 0.0),
-                                    13.0,
-                                    m,
-                                    t.bg,
-                                );
-                            }
-                            // a comment on an archived task: say the task is archived
-                            let archived = match it.src {
-                                super::nav::InboxSrc::Task(id) => {
-                                    self.task(id).is_some_and(|x| !self.data.task_live(x))
-                                }
-                                _ => false,
-                            };
-                            // the title stops where the line under it does, before the
-                            // time and the buttons on the right
-                            let text_clip =
-                                Rect::from_min_max(r.min, pos2(r.right() - 190.0, r.bottom()));
-                            // shortened with an ellipsis there, not cut mid-letter
-                            let text_w = text_clip.width() - 56.0;
-                            let title = if archived {
-                                trf!("{} (archived)", tname)
-                            } else {
-                                tname.clone()
-                            };
-                            let font = FontId::proportional(14.0);
-                            ui.painter().text(
-                                r.left_top() + vec2(48.0, 18.0),
-                                Align2::LEFT_CENTER,
-                                fit_text(ui.painter(), &title, &font, text_w),
-                                font,
-                                if archived { t.text2 } else { t.text },
-                            );
-                            let line = self
-                                .inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
-                            let font = FontId::proportional(13.0);
-                            ui.painter().text(
-                                r.left_top() + vec2(48.0, 40.0),
-                                Align2::LEFT_CENTER,
-                                fit_text(ui.painter(), &line, &font, text_w),
-                                font,
-                                t.text2,
-                            );
-                            // under the pointer the row's buttons take the time's place: a
-                            // long time ("Oct 17 at 4:19 PM") would show through them
-                            let buttons = resp.hovered() || ui.rect_contains_pointer(r);
-                            if !buttons {
-                                ui.painter().text(
-                                    r.right_center() - vec2(12.0, 0.0),
-                                    Align2::RIGHT_CENTER,
-                                    fmt_ago(ts),
-                                    FontId::proportional(12.0),
-                                    t.text3,
-                                );
-                            }
-                            let mut handled = false;
-                            if buttons {
-                                let lr = Rect::from_min_size(
-                                    pos2(r.right() - 180.0, r.center().y - 13.0),
-                                    vec2(56.0, 26.0),
-                                );
-                                let cr = Rect::from_min_size(
-                                    pos2(r.right() - 120.0, r.center().y - 13.0),
-                                    vec2(56.0, 26.0),
-                                );
-                                if self.inbox_tab != 2
-                                    && pressed_once(
-                                        &put_over(
-                                            ui,
-                                            lr,
-                                            egui::Button::new(tr("Later")).corner_radius(6),
-                                        ),
-                                        &mut handled,
-                                    )
-                                {
-                                    // a cleared row moves to Later, as it does on the iPhone
-                                    let x = &mut self.data.extra;
-                                    x.inbox_cleared.retain(|x| x != &key);
-                                    if !x.inbox_later.contains(&key) {
-                                        x.inbox_later.push(key.clone());
-                                    }
-                                    self.dirty = true;
-                                    handled = true;
-                                }
-                                // Later items can go back to the inbox (imported history
-                                // would go back to Cleared: only Clear for it)
-                                if self.inbox_tab == 2
-                                    && !it.imported
-                                    && pressed_once(
-                                        &put_over(
-                                            ui,
-                                            lr,
-                                            egui::Button::new(tr("Primary")).corner_radius(6),
-                                        )
-                                        .on_hover_text(tr("Back to the inbox")),
-                                        &mut handled,
-                                    )
-                                {
-                                    self.data.extra.inbox_later.retain(|x| x != &key);
-                                    self.dirty = true;
-                                    handled = true;
-                                }
-                                let ctext = if self.inbox_tab == 3 {
-                                    "Restore"
-                                } else {
-                                    "Clear"
-                                };
-                                // imported history stays cleared unless saved for later:
-                                // Restore would do nothing
-                                let can_restore = !it.imported;
-                                if (self.inbox_tab != 3 || can_restore)
-                                    && pressed_once(
-                                        &put_over(
-                                            ui,
-                                            cr,
-                                            egui::Button::new(tr(ctext)).corner_radius(6),
-                                        ),
-                                        &mut handled,
-                                    )
-                                {
-                                    if self.inbox_tab == 3 {
-                                        // back where it belongs, as on the iPhone: also out
-                                        // of Later, where an older version could leave it
-                                        self.data.extra.inbox_cleared.retain(|x| x != &key);
-                                        self.data.extra.inbox_later.retain(|x| x != &key);
-                                    } else {
-                                        self.data.extra.inbox_later.retain(|x| x != &key);
-                                        self.data.extra.inbox_cleared.push(key.clone());
-                                    }
-                                    self.dirty = true;
-                                    handled = true;
-                                }
-                            }
-                            if !handled && row_press(&resp) {
-                                self.open_inbox_src(it.src);
-                            }
-                        }
-                    });
-            });
+            })
+            .count();
+        let point_to_due =
+            self.inbox_tab == InboxTab::Primary && alone && due_work > 0 && !filtered_out;
+        // the people icon only where it invites people
+        let (title, sub, icon) = match self.inbox_tab {
+            _ if filtered_out => (
+                "Nothing matches this filter",
+                "This tab has items the filter hides.",
+                "filter",
+            ),
+            InboxTab::Primary if point_to_due => (
+                "Nothing from other people",
+                "The Inbox collects comments, mentions and assignments from others.",
+                "check",
+            ),
+            InboxTab::Primary if invite => (
+                "Looking to collaborate?",
+                "Collaboration is one invite away.",
+                "teams",
+            ),
+            InboxTab::Primary => (
+                "You're all caught up",
+                "New comments, mentions and assignments show up here.",
+                "check",
+            ),
+            InboxTab::Other => (
+                "Nothing in Other",
+                "Updates that don't need you show up here.",
+                "inbox",
+            ),
+            InboxTab::Later => (
+                "Nothing saved for later",
+                "Use Later on an item to come back to it.",
+                "alarm",
+            ),
+            InboxTab::Cleared => (
+                "Nothing cleared yet",
+                "Cleared items show up here.",
+                "check",
+            ),
+        };
+        let (r, _) = ui.allocate_exact_size(vec2(60.0, 60.0), Sense::hover());
+        ui.painter().rect_stroke(
+            r.shrink(2.0),
+            14.0,
+            Stroke::new(1.5_f32, t.border),
+            egui::StrokeKind::Inside,
+        );
+        line_icon_scaled(
+            ui.painter(),
+            icon,
+            r.center(),
+            Color32::from_rgb(0x5f, 0x55, 0xee),
+            1.6,
+        );
+        ui.add_space(10.0);
+        ui.label(RichText::new(tr(title)).size(18.0).color(t.text));
+        ui.label(RichText::new(tr(sub)).size(14.0).color(t.text2));
+        if filtered_out {
+            ui.add_space(10.0);
+            if ui.button(tr("Show everything")).clicked() {
+                self.inbox_filter = 0;
+            }
+        } else if point_to_due {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(trf!("Tasks due today or overdue: {}", due_work))
+                    .size(14.0)
+                    .color(t.text),
+            );
+            ui.add_space(6.0);
+            if ui
+                .add(Tint(
+                    egui::Button::new(
+                        RichText::new(tr("Open Today & Overdue"))
+                            .size(15.0)
+                            .color(t.on_primary),
+                    )
+                    .fill(t.primary)
+                    .corner_radius(7)
+                    .min_size(vec2(0.0, 38.0)),
+                ))
+                .clicked()
+            {
+                self.actions.push(Action::Go(Location::TodayOverdue));
+            }
+            ui.add_space(4.0);
+            if invite && ui.button(tr("Invite people")).clicked() {
+                self.modal = Some(Modal::Invite {
+                    emails: String::new(),
+                    role: "Member".into(),
+                });
+            }
+        } else if self.inbox_tab == InboxTab::Primary && invite && !filtered_out {
+            ui.add_space(10.0);
+            if ui
+                .add(Tint(
+                    egui::Button::new(
+                        RichText::new(tr("Invite people"))
+                            .size(15.0)
+                            .color(t.on_primary),
+                    )
+                    .fill(t.primary)
+                    .corner_radius(7)
+                    .min_size(vec2(0.0, 38.0)),
+                ))
+                .clicked()
+            {
+                self.modal = Some(Modal::Invite {
+                    emails: String::new(),
+                    role: "Member".into(),
+                });
+            }
+        }
+    }
+
+    /// One Inbox row: who and what, the time, and Later / Primary / Clear /
+    /// Restore under the pointer. A click opens what it is about.
+    fn inbox_row(&mut self, ui: &mut Ui, it: super::nav::InboxItem) {
+        let t = self.t();
+        let (key, ts, tname) = (it.key.clone(), it.ts, it.title.clone());
+        let w = ui.available_width();
+        let (r, resp) = ui.allocate_exact_size(vec2(w, 58.0), Sense::click());
+        name_it(&resp, &tname);
+        // a row scrolled out of sight keeps its place but isn't
+        // drawn: thousands of rows would be on every frame
+        if !ui.is_rect_visible(r) {
+            // (still opened from the keyboard or a screen reader)
+            if row_press(&resp) {
+                self.open_inbox_src(it.src);
+            }
+            return;
+        }
+        if resp.hovered() {
+            ui.painter().rect_filled(r, 8.0, t.hover);
+        }
+        ui.painter()
+            .hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
+        if let Some(m) = self.data.member(it.author) {
+            paint_avatar(
+                ui.painter(),
+                r.left_center() + vec2(22.0, 0.0),
+                13.0,
+                m,
+                t.bg,
+            );
+        }
+        // a comment on an archived task: say the task is archived
+        let archived = match it.src {
+            super::nav::InboxSrc::Task(id) => {
+                self.task(id).is_some_and(|x| !self.data.task_live(x))
+            }
+            _ => false,
+        };
+        // the title stops where the line under it does, before the
+        // time and the buttons on the right
+        let text_clip = Rect::from_min_max(r.min, pos2(r.right() - 190.0, r.bottom()));
+        // shortened with an ellipsis there, not cut mid-letter
+        let text_w = text_clip.width() - 56.0;
+        let title = if archived {
+            trf!("{} (archived)", tname)
+        } else {
+            tname.clone()
+        };
+        let font = FontId::proportional(14.0);
+        ui.painter().text(
+            r.left_top() + vec2(48.0, 18.0),
+            Align2::LEFT_CENTER,
+            fit_text(ui.painter(), &title, &font, text_w),
+            font,
+            if archived { t.text2 } else { t.text },
+        );
+        let line = self.inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
+        let font = FontId::proportional(13.0);
+        ui.painter().text(
+            r.left_top() + vec2(48.0, 40.0),
+            Align2::LEFT_CENTER,
+            fit_text(ui.painter(), &line, &font, text_w),
+            font,
+            t.text2,
+        );
+        // under the pointer the row's buttons take the time's place: a
+        // long time ("Oct 17 at 4:19 PM") would show through them
+        let buttons = resp.hovered() || ui.rect_contains_pointer(r);
+        if !buttons {
+            ui.painter().text(
+                r.right_center() - vec2(12.0, 0.0),
+                Align2::RIGHT_CENTER,
+                fmt_ago(ts),
+                FontId::proportional(12.0),
+                t.text3,
+            );
+        }
+        let mut handled = false;
+        if buttons {
+            let lr = Rect::from_min_size(
+                pos2(r.right() - 180.0, r.center().y - 13.0),
+                vec2(56.0, 26.0),
+            );
+            let cr = Rect::from_min_size(
+                pos2(r.right() - 120.0, r.center().y - 13.0),
+                vec2(56.0, 26.0),
+            );
+            if self.inbox_tab != InboxTab::Later
+                && pressed_once(
+                    &put_over(ui, lr, egui::Button::new(tr("Later")).corner_radius(6)),
+                    &mut handled,
+                )
+            {
+                // a cleared row moves to Later, as it does on the iPhone
+                let x = &mut self.data.extra;
+                x.inbox_cleared.retain(|x| x != &key);
+                if !x.inbox_later.contains(&key) {
+                    x.inbox_later.push(key.clone());
+                }
+                self.dirty = true;
+                handled = true;
+            }
+            // Later items can go back to the inbox (imported history
+            // would go back to Cleared: only Clear for it)
+            if self.inbox_tab == InboxTab::Later
+                && !it.imported
+                && pressed_once(
+                    &put_over(ui, lr, egui::Button::new(tr("Primary")).corner_radius(6))
+                        .on_hover_text(tr("Back to the inbox")),
+                    &mut handled,
+                )
+            {
+                self.data.extra.inbox_later.retain(|x| x != &key);
+                self.dirty = true;
+                handled = true;
+            }
+            let ctext = if self.inbox_tab == InboxTab::Cleared {
+                "Restore"
+            } else {
+                "Clear"
+            };
+            // imported history stays cleared unless saved for later:
+            // Restore would do nothing
+            let can_restore = !it.imported;
+            if (self.inbox_tab != InboxTab::Cleared || can_restore)
+                && pressed_once(
+                    &put_over(ui, cr, egui::Button::new(tr(ctext)).corner_radius(6)),
+                    &mut handled,
+                )
+            {
+                if self.inbox_tab == InboxTab::Cleared {
+                    // back where it belongs, as on the iPhone: also out
+                    // of Later, where an older version could leave it
+                    self.data.extra.inbox_cleared.retain(|x| x != &key);
+                    self.data.extra.inbox_later.retain(|x| x != &key);
+                } else {
+                    self.data.extra.inbox_later.retain(|x| x != &key);
+                    self.data.extra.inbox_cleared.push(key.clone());
+                }
+                self.dirty = true;
+                handled = true;
+            }
+        }
+        if !handled && row_press(&resp) {
+            self.open_inbox_src(it.src);
+        }
     }
 }
 

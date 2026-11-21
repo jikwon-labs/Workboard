@@ -5,6 +5,7 @@
 use super::notify::Kind;
 use super::tests::channel_id;
 use super::*;
+use crate::app::nav::InboxTab;
 
 fn app() -> App {
     let mut a = super::tests::app();
@@ -761,7 +762,7 @@ fn comments_on_a_task_i_duplicated_notify_like_the_inbox_shows_them() {
     assert!(a
         .inbox_items()
         .iter()
-        .any(|i| i.tab == 0 && i.text == "Thanks for copying it"));
+        .any(|i| i.tab == InboxTab::Primary && i.text == "Thanks for copying it"));
     a.notify_scan();
     assert_eq!(kinds(&a), vec![Kind::Comment]);
 }

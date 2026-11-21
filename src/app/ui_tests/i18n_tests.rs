@@ -487,9 +487,9 @@ pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             }),
         ));
     }
-    for tab in 0..4u8 {
+    for tab in crate::app::nav::InboxTab::ALL {
         v.push((
-            format!("inbox tab {}", tab),
+            format!("inbox tab {:?}", tab),
             Box::new(move |a: &mut App| {
                 a.section = Section::Home;
                 a.loc = Location::Inbox;

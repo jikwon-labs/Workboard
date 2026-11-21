@@ -543,3 +543,190 @@ fn a_dropdown_without_choices_says_so_and_doesnt_block_submit() {
     assert_eq!(h.app.sweep.forms.error_at, None);
     task_named(&h, "Nothing to pick");
 }
+
+/// Presses Delete in the "Delete the form?" dialog (its title and the
+/// dialog are named Delete too: the button is the lowest small one).
+fn confirm_delete(h: &mut Ui1) {
+    let at = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Delete" && r.height() < 40.0)
+        .map(|(_, r)| r.center())
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .expect("the dialog's Delete button");
+    h.click_at(at);
+}
+
+/// Hands this app's changes to the team server.
+fn send(h: &mut Ui1) {
+    h.app.sync_note_change();
+    h.app.write_shared();
+}
+
+/// Takes in what the team server sends until `cond` holds, then draws.
+fn receive(h: &mut Ui1, what: &str, cond: impl Fn(&App) -> bool) {
+    crate::app::tests::net_until(&mut h.app, what, cond);
+    h.settle();
+}
+
+/// Two people on a team server, each clicking in their own app: a form the
+/// owner makes reaches the teammate, whose answer comes back to the owner's
+/// Answers tab with a notice; a rename reaches the teammate; two edits at
+/// once to different parts of one form both stay; a delete takes the form
+/// the teammate has open back to the list; a form for the owner's Personal
+/// space never reaches the teammate.
+#[test]
+fn forms_go_between_teammates_through_a_server() {
+    let server = workboard_server::testing::TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = Ui1::new();
+    a.app.connect_server(&addr, "").unwrap();
+    receive(&mut a, "A on the server", |x| x.data.extra.shared.is_some());
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file()
+        && std::time::Instant::now() < until
+    {
+        a.app.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    receive(&mut a, "the people list", |x| {
+        x.sync_rt.people.iter().any(|p| p.member == 3)
+    });
+    a.app.access_request(wb_net::Msg::CreateInvite {
+        member: 3,
+        role: wb_net::Role::Member,
+    });
+    receive(&mut a, "an invite code", |x| {
+        x.sync_rt
+            .people
+            .iter()
+            .any(|p| p.member == 3 && p.invite.is_some())
+    });
+    let code = a
+        .app
+        .sync_rt
+        .people
+        .iter()
+        .find(|p| p.member == 3)
+        .and_then(|p| p.invite.clone())
+        .unwrap();
+    let mut b = Ui1::new();
+    b.app = App::build(None, Some(crate::app::tests::blank_as("Theirs", 1, "B")));
+    b.app.notify_rt.last_clock = i64::MAX;
+    b.app.connect_server(&addr, &code.to_lowercase()).unwrap();
+    receive(&mut b, "B joined", |x| x.data.extra.shared.is_some());
+    assert_eq!(b.app.data.me, 3);
+
+    // the owner makes a form; the teammate finds it in the sidebar
+    open_forms(&mut a);
+    a.click("IT Requests");
+    let fid = a.app.form_open.unwrap();
+    a.app.notify_scan(); // (the first look only remembers what is there)
+    send(&mut a);
+    receive(&mut b, "the form at B", |x| {
+        x.data.extra.forms.iter().any(|f| f.id == fid)
+    });
+    open_forms(&mut b);
+    b.click("Open form IT Requests");
+    assert_eq!(b.app.form_open, Some(fid));
+
+    // the teammate answers; the owner sees the answer and is told
+    b.click("Fill out");
+    b.click("Answer 1");
+    b.type_text("Printer jams");
+    b.click("Answer 2 Urgent");
+    b.click("Submit");
+    send(&mut b);
+    receive(&mut a, "B's answer at A", |x| {
+        x.data
+            .tasks
+            .iter()
+            .any(|t| t.form == Some(fid) && t.name == "Printer jams")
+    });
+    a.click("Answers");
+    assert!(a.has("Answer task Printer jams"));
+    assert!(!a.painted_text("1 answer").is_empty());
+    a.app.notify_scan();
+    assert!(
+        a.app
+            .notify_rt
+            .sent
+            .iter()
+            .any(|n| n.title == "New answer to IT Requests"),
+        "the owner is told: {:?}",
+        a.app.notify_rt.sent
+    );
+
+    // a rename reaches the teammate
+    a.click("Edit");
+    a.click("Form name");
+    a.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    a.type_text("Help desk");
+    send(&mut a);
+    receive(&mut b, "the new name at B", |x| {
+        x.data.extra.forms.iter().any(|f| f.name == "Help desk")
+    });
+    assert!(b.has("Open form Help desk"));
+
+    // both change the form at once, different parts of it
+    a.click("Form description");
+    a.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    a.type_text("Tell us what broke.");
+    send(&mut a);
+    b.click("Edit");
+    b.click("Change icon");
+    b.click("Icon heart");
+    b.key(egui::Key::Escape);
+    send(&mut b);
+    let both = |x: &App| {
+        x.data
+            .extra
+            .forms
+            .iter()
+            .any(|f| f.id == fid && f.icon == "heart" && f.description == "Tell us what broke.")
+    };
+    receive(&mut a, "both changes at A", both);
+    receive(&mut b, "both changes at B", both);
+
+    // the owner deletes it while the teammate has it open
+    a.click("Back to all forms");
+    a.click("Form menu Help desk");
+    a.click("Delete form");
+    confirm_delete(&mut a);
+    assert!(a.app.data.extra.forms.iter().all(|f| f.id != fid));
+    send(&mut a);
+    receive(&mut b, "the delete at B", |x| {
+        x.data.extra.forms.iter().all(|f| f.id != fid)
+    });
+    assert_eq!(b.app.form_open, None, "back to the list");
+    assert!(!b.has("Open form Help desk"));
+    assert!(
+        b.app.data.tasks.iter().any(|t| t.name == "Printer jams"),
+        "the tasks it made stay"
+    );
+
+    // a form for the owner's Personal space stays the owner's
+    a.app.create_personal_list();
+    a.settle();
+    a.click("New form");
+    let private = a.app.form_open.unwrap();
+    a.click("Pick the List for new tasks");
+    a.click("Personal / Personal List");
+    send(&mut a);
+    let list = a.app.data.first_list().unwrap();
+    a.app.apply(Action::Add {
+        list,
+        name: "After the private form".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    send(&mut a);
+    receive(&mut b, "A's later task at B", |x| {
+        x.data.tasks.iter().any(|t| t.name == "After the private form")
+    });
+    assert!(b.app.data.extra.forms.iter().all(|f| f.id != private));
+}

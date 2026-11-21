@@ -1,5 +1,6 @@
-// The few things that differ between macOS, Windows and Linux outside the
-// window itself: the home folder and handing a file to the system.
+// The things that differ between macOS, Windows and Linux outside the window
+// itself: folders, handing a file to the system, shortcuts, secrets, the
+// system language and the words for the computer's parts.
 
 use std::path::{Path, PathBuf};
 
@@ -82,6 +83,119 @@ pub fn take_redo(i: &mut egui::InputState) -> bool {
         egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
         egui::Key::Z,
     ) || (!cfg!(target_os = "macos") && i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y))
+}
+
+/// The text for this kind of computer: `mac` on macOS (and elsewhere),
+/// `pc` on Windows. Where the app's text names the computer ("this Mac"),
+/// its file manager (Finder) or its Dock, each version stays a whole
+/// sentence with its own translation, so both are passed in, already
+/// through `tr`.
+pub fn mac_or_pc<T>(mac: T, pc: T) -> T {
+    if cfg!(windows) {
+        pc
+    } else {
+        mac
+    }
+}
+
+/// Whether the system keeps the app's secrets: the macOS Keychain. Elsewhere
+/// the app keeps them in a file of its own (see together/tokens.rs).
+#[cfg_attr(test, allow(dead_code))]
+pub const SECRET_STORE: bool = cfg!(target_os = "macos");
+
+/// A secret the system keeps for the app (on macOS a Keychain generic
+/// password under `service` and `account`). None without `SECRET_STORE`.
+#[cfg_attr(test, allow(dead_code))]
+pub fn secret_get(service: &str, account: &str) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    return security_framework::passwords::get_generic_password(service, account)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok());
+    #[allow(unreachable_code)]
+    {
+        let _ = (service, account);
+        None
+    }
+}
+
+/// Has the system keep a secret (see `secret_get`); does nothing without
+/// `SECRET_STORE`.
+#[cfg_attr(test, allow(dead_code))]
+pub fn secret_set(service: &str, account: &str, value: &str) {
+    #[cfg(target_os = "macos")]
+    let _ = security_framework::passwords::set_generic_password(service, account, value.as_bytes());
+    #[cfg(not(target_os = "macos"))]
+    let _ = (service, account, value);
+}
+
+/// Has the system forget a secret (see `secret_get`).
+#[cfg_attr(test, allow(dead_code))]
+pub fn secret_delete(service: &str, account: &str) {
+    #[cfg(target_os = "macos")]
+    let _ = security_framework::passwords::delete_generic_password(service, account);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (service, account);
+}
+
+/// The first preferred language of the system, such as "ko-KR" or "en-US".
+pub fn system_language() -> String {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        use objc::runtime::Object;
+        use objc::{class, msg_send, sel, sel_impl};
+        // SAFETY: NSLocale.preferredLanguages returns an autoreleased NSArray of NSString
+        unsafe {
+            let langs: *mut Object = msg_send![class!(NSLocale), preferredLanguages];
+            if !langs.is_null() {
+                let count: usize = msg_send![langs, count];
+                if count > 0 {
+                    let first: *mut Object = msg_send![langs, objectAtIndex: 0usize];
+                    let utf8: *const std::os::raw::c_char = msg_send![first, UTF8String];
+                    if !utf8.is_null() {
+                        return std::ffi::CStr::from_ptr(utf8)
+                            .to_string_lossy()
+                            .into_owned();
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        // the display languages chosen in Windows Settings, as names like
+        // "ko-KR", one after another, each ending in a 0
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetUserPreferredUILanguages(
+                flags: u32,
+                count: *mut u32,
+                buffer: *mut u16,
+                len: *mut u32,
+            ) -> i32;
+        }
+        const MUI_LANGUAGE_NAME: u32 = 0x8;
+        let mut count = 0u32;
+        let mut buf = [0u16; 512];
+        let mut len = buf.len() as u32;
+        // SAFETY: buf holds len u16s; Windows writes at most that many
+        let ok = unsafe {
+            GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, buf.as_mut_ptr(), &mut len)
+        };
+        if ok != 0 {
+            let first: Vec<u16> = buf.iter().take_while(|c| **c != 0).copied().collect();
+            if !first.is_empty() {
+                return String::from_utf16_lossy(&first);
+            }
+        }
+    }
+    for k in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        if let Ok(v) = std::env::var(k) {
+            if !v.is_empty() {
+                return v.replace('_', "-");
+            }
+        }
+    }
+    String::new()
 }
 
 /// Open a file or web address with whatever the system uses for it.

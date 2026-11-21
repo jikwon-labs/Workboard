@@ -117,11 +117,10 @@ impl App {
                 RowOpts::default(),
                 |_, _| false,
             );
-            let badge = if cfg!(windows) {
-                "Show the unread count on the taskbar icon"
-            } else {
-                "Show the unread count on the Dock icon"
-            };
+            let badge = crate::os::mac_or_pc(
+                "Show the unread count on the Dock icon",
+                "Show the unread count on the taskbar icon",
+            );
             ch |= setting_row(
                 ui,
                 t,
@@ -339,11 +338,10 @@ impl App {
                     sound,
                 );
             }
-            self.toast(if cfg!(windows) {
-                tr("Sent a test notification. If no banner shows, turn on notifications for Workboard in Windows Settings > System > Notifications.")
-            } else {
-                tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications.")
-            });
+            self.toast(crate::os::mac_or_pc(
+                tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications."),
+                tr("Sent a test notification. If no banner shows, turn on notifications for Workboard in Windows Settings > System > Notifications."),
+            ));
         }
         if ch {
             self.dirty = true;
@@ -623,7 +621,7 @@ fn preview(ui: &mut Ui, t: &Theme, tn: &Tones, n: &NotifySettings) {
             Color32::WHITE,
         );
     }
-    let place = if cfg!(windows) { "Taskbar" } else { "Dock" };
+    let place = crate::os::mac_or_pc("Dock", "Taskbar");
     p.text(
         pos2(dock.center().x, dock.bottom() + 9.0),
         Align2::CENTER_CENTER,
@@ -712,17 +710,16 @@ fn preview(ui: &mut Ui, t: &Theme, tn: &Tones, n: &NotifySettings) {
 /// a link there under it, and the test button at the right. Returns (open
 /// the settings, send a test).
 fn delivery_footer(ui: &mut Ui, t: &Theme) -> (bool, bool) {
-    let (help, open) = if cfg!(windows) {
-        (
-            "If notifications don't show, turn them on for Workboard in Windows Settings.",
-            "Open Windows Settings",
-        )
-    } else {
+    let (help, open) = crate::os::mac_or_pc(
         (
             "If notifications don't show, turn them on for Workboard in System Settings.",
             "Open System Settings",
-        )
-    };
+        ),
+        (
+            "If notifications don't show, turn them on for Workboard in Windows Settings.",
+            "Open Windows Settings",
+        ),
+    );
     let w = ui.available_width();
     let test_label = tr("Send a test notification");
     let button_w = ui

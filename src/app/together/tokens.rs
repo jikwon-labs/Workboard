@@ -8,7 +8,7 @@ use super::*;
 // in data.json). When trying the app with a separate WORKBOARD_HOME folder it
 // lives in that folder instead, and tests keep it in memory.
 
-#[cfg(all(not(test), target_os = "macos"))]
+#[cfg(not(test))]
 const KEYCHAIN_SERVICE: &str = "Workboard server";
 
 fn token_account(addr: &str, device: &str) -> String {
@@ -25,7 +25,7 @@ fn test_tokens() -> &'static std::sync::Mutex<std::collections::HashMap<String, 
 #[cfg(not(test))]
 fn token_file() -> Option<PathBuf> {
     let separate = std::env::var("WORKBOARD_HOME").is_ok_and(|v| !v.is_empty());
-    (separate || !cfg!(target_os = "macos")).then(|| Data::dir().join("server-tokens.json"))
+    (separate || !crate::os::SECRET_STORE).then(|| Data::dir().join("server-tokens.json"))
 }
 
 #[cfg(not(test))]
@@ -65,12 +65,7 @@ pub(crate) fn load_token(addr: &str, device: &str) -> Option<String> {
         if let Some(p) = token_file() {
             return read_token_file(&p).get(&key).cloned();
         }
-        #[cfg(target_os = "macos")]
-        return security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, &key)
-            .ok()
-            .and_then(|b| String::from_utf8(b).ok());
-        #[allow(unreachable_code)]
-        None
+        crate::os::secret_get(KEYCHAIN_SERVICE, &key)
     }
 }
 
@@ -89,12 +84,7 @@ pub(crate) fn save_token(addr: &str, device: &str, token: &str) {
             write_token_file(&p, &m);
             return;
         }
-        #[cfg(target_os = "macos")]
-        let _ = security_framework::passwords::set_generic_password(
-            KEYCHAIN_SERVICE,
-            &key,
-            token.as_bytes(),
-        );
+        crate::os::secret_set(KEYCHAIN_SERVICE, &key, token);
     }
 }
 
@@ -113,7 +103,6 @@ pub(crate) fn forget_token(addr: &str, device: &str) {
             write_token_file(&p, &m);
             return;
         }
-        #[cfg(target_os = "macos")]
-        let _ = security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, &key);
+        crate::os::secret_delete(KEYCHAIN_SERVICE, &key);
     }
 }

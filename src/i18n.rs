@@ -436,7 +436,7 @@ pub fn resolve(c: Choice) -> Lang {
         Choice::En => Lang::En,
         Choice::Ko => Lang::Ko,
         Choice::System => {
-            if system_language().starts_with("ko") {
+            if crate::os::system_language().starts_with("ko") {
                 Lang::Ko
             } else {
                 Lang::En
@@ -459,67 +459,6 @@ pub fn choice_from_key(s: &str) -> Choice {
         "ko" => Choice::Ko,
         _ => Choice::System,
     }
-}
-
-/// The first preferred language of the system, such as "ko-KR" or "en-US".
-fn system_language() -> String {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        use objc::runtime::Object;
-        use objc::{class, msg_send, sel, sel_impl};
-        // SAFETY: NSLocale.preferredLanguages returns an autoreleased NSArray of NSString
-        unsafe {
-            let langs: *mut Object = msg_send![class!(NSLocale), preferredLanguages];
-            if !langs.is_null() {
-                let count: usize = msg_send![langs, count];
-                if count > 0 {
-                    let first: *mut Object = msg_send![langs, objectAtIndex: 0usize];
-                    let utf8: *const std::os::raw::c_char = msg_send![first, UTF8String];
-                    if !utf8.is_null() {
-                        return std::ffi::CStr::from_ptr(utf8)
-                            .to_string_lossy()
-                            .into_owned();
-                    }
-                }
-            }
-        }
-    }
-    #[cfg(windows)]
-    {
-        // the display languages chosen in Windows Settings, as names like
-        // "ko-KR", one after another, each ending in a 0
-        #[link(name = "kernel32")]
-        extern "system" {
-            fn GetUserPreferredUILanguages(
-                flags: u32,
-                count: *mut u32,
-                buffer: *mut u16,
-                len: *mut u32,
-            ) -> i32;
-        }
-        const MUI_LANGUAGE_NAME: u32 = 0x8;
-        let mut count = 0u32;
-        let mut buf = [0u16; 512];
-        let mut len = buf.len() as u32;
-        // SAFETY: buf holds len u16s; Windows writes at most that many
-        let ok = unsafe {
-            GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, buf.as_mut_ptr(), &mut len)
-        };
-        if ok != 0 {
-            let first: Vec<u16> = buf.iter().take_while(|c| **c != 0).copied().collect();
-            if !first.is_empty() {
-                return String::from_utf16_lossy(&first);
-            }
-        }
-    }
-    for k in ["LC_ALL", "LC_MESSAGES", "LANG"] {
-        if let Ok(v) = std::env::var(k) {
-            if !v.is_empty() {
-                return v.replace('_', "-");
-            }
-        }
-    }
-    String::new()
 }
 
 #[cfg(test)]

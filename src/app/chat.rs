@@ -1212,6 +1212,29 @@ impl App {
         self.take_dropped(ui.ctx(), thread_rect);
         let dragging = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
 
+        // Cmd+F: the find box with the cursor in it, its words selected so
+        // typing replaces them (not under a dialog or the task window)
+        let find_id = egui::Id::new(("chan_find", cid));
+        if self.modal.is_none()
+            && self.palette.is_none()
+            && self.open_task.is_none()
+            && self.viewer.is_none()
+            && self.quick_add.is_none()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F))
+        {
+            let n = self
+                .channel_find
+                .get_or_insert_with(String::new)
+                .chars()
+                .count();
+            let mut st = egui::TextEdit::load_state(ui.ctx(), find_id).unwrap_or_default();
+            st.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(n),
+            )));
+            st.store(ui.ctx(), find_id);
+            ui.memory_mut(|m| m.request_focus(find_id));
+        }
         // ---- conversation (header with tabs, side panel, messages, composer)
         let conv = egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin { left: 16, right: 12, top: 8, bottom: 0 }).show(ui, |ui| {
@@ -1426,8 +1449,11 @@ impl App {
                     self.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                 }
                 if let Some(mut q) = self.channel_find.take() {
-                    ui.add(field(&mut q).hint_text(tr("Find in channel")).desired_width(200.0));
-                    self.channel_find = Some(q);
+                    let r = ui.add(field(&mut q).id(find_id).hint_text(tr("Find in channel")).desired_width(200.0));
+                    // Escape in it closes it, and every message shows again
+                    if !(r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+                        self.channel_find = Some(q);
+                    }
                 }
                 if self.channel_panel != 0 {
                     let label = match self.channel_panel {

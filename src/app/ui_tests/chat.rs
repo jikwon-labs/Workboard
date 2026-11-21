@@ -3810,3 +3810,72 @@ fn files_and_links_show_only_those_messages() {
     assert_eq!(h.app.channel_panel, 0);
     assert!(shown(&h, "Lunch at noon"), "every message again");
 }
+
+/// Cmd+F in a conversation opens its find box with the cursor in it: what is
+/// typed next narrows the messages. Pressed again (the box already open, the
+/// cursor elsewhere) it comes back to the box with its words selected, and
+/// Escape there closes it and shows every message again.
+#[test]
+fn cmd_f_finds_in_the_open_conversation() {
+    let shown = |h: &Ui1, text: &str| !h.painted_text(text).is_empty();
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Message composer");
+    h.type_text("apples for the team");
+    h.key(egui::Key::Enter);
+    h.type_text("bananas tomorrow");
+    h.key(egui::Key::Enter);
+    assert!(shown(&h, "apples for the team") && shown(&h, "bananas tomorrow"));
+
+    h.key_with(egui::Key::F, egui::Modifiers::COMMAND);
+    assert_eq!(
+        h.app.channel_find.as_deref(),
+        Some(""),
+        "the find box opens"
+    );
+    h.type_text("apple");
+    assert_eq!(
+        h.app.channel_find.as_deref(),
+        Some("apple"),
+        "typed into it"
+    );
+    assert_eq!(h.app.chat.text, "", "not into the composer");
+    assert!(shown(&h, "apples for the team"));
+    assert!(!shown(&h, "bananas tomorrow"), "only what matches");
+
+    // again from the composer: back to the box, its words replaced by typing
+    h.click("Message composer");
+    h.key_with(egui::Key::F, egui::Modifiers::COMMAND);
+    h.type_text("banana");
+    assert_eq!(h.app.channel_find.as_deref(), Some("banana"));
+    assert_eq!(h.app.chat.text, "");
+    assert!(shown(&h, "bananas tomorrow"));
+    assert!(!shown(&h, "apples for the team"));
+
+    // Escape closes it, and the conversation stays open
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.channel_find, None, "the find box closes");
+    assert!(h.app.chat.open.is_some());
+    assert!(shown(&h, "apples for the team") && shown(&h, "bananas tomorrow"));
+
+    // in a direct message as well
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct)
+        .map(|c| c.id)
+        .expect("a direct message in the sample data");
+    h.app.chat.open = Some(dm);
+    h.settle();
+    h.key_with(egui::Key::F, egui::Modifiers::COMMAND);
+    h.type_text("zzz");
+    assert_eq!(h.app.channel_find.as_deref(), Some("zzz"));
+
+    // and the shortcuts list names it
+    h.app.open_settings("Keyboard shortcuts");
+    h.settle();
+    assert!(shown(&h, &crate::os::keys("\u{2318}F")));
+    assert!(shown(&h, "Find in a conversation"));
+}

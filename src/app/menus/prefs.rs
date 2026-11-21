@@ -139,6 +139,7 @@ impl App {
                     // one row per action (Create task was listed twice)
                     ("\u{2318}N  /  \u{2325}T  /  T", "Create task"),
                     ("\u{2318}G", "New message"),
+                    ("\u{2318}F", "Find in a conversation"),
                     ("R", "Create reminder"),
                     ("N  /  P", "Open or close the notepad"),
                     ("\u{2318}\\", "Show or hide the sidebar"),

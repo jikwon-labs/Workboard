@@ -161,6 +161,7 @@ pub const T: &[(&str, &str)] = &[
     ("Mint", "민트"),
     // keyboard shortcuts
     ("New message", "새 메시지"),
+    ("Find in a conversation", "대화에서 찾기"),
     ("Create reminder", "리마인더 만들기"),
     ("Open or close the notepad", "메모장 열기/닫기"),
     ("Show or hide the sidebar", "사이드바 표시/숨기기"),

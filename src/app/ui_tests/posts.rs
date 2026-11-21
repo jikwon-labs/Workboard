@@ -245,3 +245,21 @@ fn another_workspace_starts_the_posts_page_channel_and_filters_over() {
     assert_eq!(h.app.post.title, "Office move", "what was written stays");
     assert_eq!(h.app.post.body, "Monday");
 }
+
+/// With posts there but the filters hiding all of them, the page says no
+/// post matches, as other filtered lists do ("No tasks match"), not that
+/// there are no posts yet. Without any post it still says that.
+#[test]
+fn filters_that_hide_every_post_say_none_match() {
+    let mut h = posts_page();
+    assert!(!h.painted_text("There are no Posts yet!").is_empty());
+    assert!(h.painted_text("No posts match").is_empty());
+    write_post(&mut h, "general", "Office move", "Monday");
+    h.click("Post");
+    pick_filter(&mut h, "Post type filter", "Question");
+    assert!(h.painted_text("There are no Posts yet!").is_empty());
+    assert!(!h.painted_text("No posts match").is_empty());
+    pick_filter(&mut h, "Post type filter", "Any type");
+    assert!(h.painted_text("No posts match").is_empty());
+    assert!(!h.painted_text("Office move").is_empty());
+}

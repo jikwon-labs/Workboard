@@ -358,6 +358,7 @@ impl App {
                     .filter(|c| c.members.contains(&me))
                     .map(|c| c.id)
                     .collect();
+                let any = !posts.is_empty();
                 posts.retain(|p| {
                     (!self.post.following || following.contains(&p.1))
                         && self.post.f_channel.map(|c| c == p.1).unwrap_or(true)
@@ -391,11 +392,13 @@ impl App {
                         );
                         line_icon_scaled(ui.painter(), "megaphone", r.center(), t.text2, 1.6);
                         ui.add_space(10.0);
-                        ui.label(
-                            RichText::new(tr("There are no Posts yet!"))
-                                .size(18.0)
-                                .color(t.text),
-                        );
+                        // posts there, all of them filtered out
+                        let say = if any {
+                            tr("No posts match")
+                        } else {
+                            tr("There are no Posts yet!")
+                        };
+                        ui.label(RichText::new(say).size(18.0).color(t.text));
                     });
                 }
                 for (cname, cid, m) in posts {

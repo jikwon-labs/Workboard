@@ -56,6 +56,7 @@ pub const T: &[(&str, &str)] = &[
     ("Oldest", "오래된 순"),
     ("Newest", "최신순"),
     ("There are no Posts yet!", "아직 게시물이 없습니다!"),
+    ("No posts match", "일치하는 게시물이 없습니다"),
     ("{} in {} \u{2022} {}", "{1}의 {0} \u{2022} {2}"),
     ("Open in channel", "채널에서 열기"),
     // meetings

@@ -522,16 +522,18 @@ impl App {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 let name_w = (ui.available_width() - 190.0).max(120.0);
-                let mut name = self.data.extra.goals[gi].targets[i].name.clone();
+                let name_id = egui::Id::new(("target name", gid, i));
+                let mut name = typed_name(ui, name_id, &self.data.extra.goals[gi].targets[i].name);
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut name)
+                        .id(name_id)
                         .frame(false)
                         .font(FontId::proportional(15.0))
                         .desired_width(name_w)
                         .margin(egui::Margin::ZERO),
                 );
                 name_field(&r, &format!("Target name {}", v.name));
-                if r.changed() {
+                if keep_typed(ui, name_id, &r, &name) {
                     self.data.extra.goals[gi].targets[i].name = name;
                     self.dirty = true;
                 }
@@ -881,9 +883,14 @@ impl App {
         let g = &mut self.data.extra.goals[gi];
         let mut ch = false;
         label(ui, tr("Goal name"));
-        let r = ui.add(field(&mut g.name).desired_width(f32::INFINITY));
+        let name_id = egui::Id::new(("goal name", gid));
+        let mut name = typed_name(ui, name_id, &g.name);
+        let r = ui.add(field(&mut name).id(name_id).desired_width(f32::INFINITY));
         name_field(&r, "Goal name");
-        ch |= r.changed();
+        if keep_typed(ui, name_id, &r, &name) {
+            g.name = name;
+            ch = true;
+        }
         ui.add_space(10.0);
         ui.columns(2, |cols| {
             for (c, (name, which)) in cols.iter_mut().zip([("Start date", 0), ("Due date", 1)]) {
@@ -1153,6 +1160,30 @@ fn milestone_float(
             }
         });
     out
+}
+
+/// What a name box shows: while it is being typed in, what is typed there
+/// (blank too), else the name `kept`.
+fn typed_name(ui: &Ui, id: egui::Id, kept: &str) -> String {
+    if ui.memory(|m| m.has_focus(id)) {
+        ui.data(|d| d.get_temp::<String>(id))
+            .unwrap_or_else(|| kept.to_string())
+    } else {
+        kept.to_string()
+    }
+}
+
+/// Remembers what is typed in name box `id` while it is being typed in, and
+/// says whether to keep it: only a name with something in it is kept, so a
+/// goal or target is never left without one (New goal asks for a name too),
+/// and a box left blank shows the name again.
+fn keep_typed(ui: &Ui, id: egui::Id, r: &egui::Response, typed: &str) -> bool {
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, typed.to_string()));
+    } else {
+        ui.data_mut(|d| d.remove_temp::<String>(id));
+    }
+    r.changed() && !typed.trim().is_empty()
 }
 
 /// A done-or-not target's button: "✓ Done" filled in the goal's colour or

@@ -1015,3 +1015,34 @@ fn deleting_a_goal_closes_its_page_and_unlinks_its_chat_card() {
     assert!(g.log.iter().any(|e| e.what == GoalChange::Milestone(100)));
     assert!(h.has("Achieved Office move"));
 }
+
+#[test]
+fn a_goal_or_target_name_cant_be_left_empty() {
+    let (mut h, a, _) = two_goals();
+    h.click("Goal Beta launch");
+    h.click("Goal settings");
+    // the box, under its label of the same name
+    let at = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Goal name")
+        .map(|(_, r)| r.center())
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .unwrap();
+    h.click_at(at);
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.settle();
+    assert_eq!(goal(&h, a).name, "Beta launch", "a blank name isn't kept");
+    h.type_text("Beta 2");
+    assert_eq!(goal(&h, a).name, "Beta 2", "a new one is");
+    h.click("Close goal settings");
+    assert!(h.has("Beta 2"));
+
+    h.click("Target name Beta testers");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.click("Goal overview");
+    assert_eq!(goal(&h, a).targets[0].name, "Beta testers");
+    assert!(h.has("Target name Beta testers"), "the box shows it again");
+}

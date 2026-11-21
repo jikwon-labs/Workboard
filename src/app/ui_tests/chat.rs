@@ -3235,6 +3235,36 @@ fn a_post_card_stacks_its_title_and_text_and_names_where_it_went() {
         .any(|x| x.contains("in #  ") || x.contains("in  ")));
 }
 
+/// The Sort menu above the posts ends where the post cards end, in a wide
+/// and a narrow window and in both languages (the filter chips before it
+/// differ in width).
+#[test]
+fn the_posts_sort_menu_lines_up_with_the_cards() {
+    for (w, ko) in [(1440.0, false), (900.0, false), (1440.0, true)] {
+        let mut h = Ui1::sized(w, 900.0);
+        h.click("general");
+        h.click("Post");
+        h.click("Message composer");
+        h.type_text("Office closed on Friday for the move");
+        h.key(egui::Key::Enter);
+        if ko {
+            crate::i18n::set_lang(crate::i18n::Lang::Ko);
+        }
+        h.app.section = Section::Posts;
+        h.settle();
+        let sort = h.rect("Sort posts");
+        let open = h.rect(tr("Open in channel"));
+        // the card's inner margin is 14 points
+        let card_right = open.right() + 14.0;
+        assert!(
+            (sort.right() - card_right).abs() <= 2.0,
+            "{w} ko {ko}: Sort ends at {} but the cards at {card_right}",
+            sort.right()
+        );
+        crate::i18n::set_lang(crate::i18n::Lang::En);
+    }
+}
+
 /// A post sent without a title is saved as "Update" for everyone, and each
 /// reader sees that default in their own language: in the channel and on the
 /// Posts page. A title someone typed is shown as typed.

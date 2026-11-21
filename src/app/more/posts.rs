@@ -208,6 +208,7 @@ impl App {
                     .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
+                    let row_left = ui.cursor().left();
                     ui.add_space(pad);
                     let fol = Tint(
                         egui::Button::new(RichText::new(tr("Channels I'm Following")).color(
@@ -318,18 +319,36 @@ impl App {
                             }
                         }
                     });
-                    ui.add_space((cw - 520.0).max(10.0));
-                    ui.label(RichText::new(tr("Sort:")).color(t.text2));
-                    egui::ComboBox::from_id_salt("post_sort")
-                        .selected_text(if self.post.sort_old {
-                            tr("Oldest")
-                        } else {
-                            tr("Newest")
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.post.sort_old, false, tr("Newest"));
-                            ui.selectable_value(&mut self.post.sort_old, true, tr("Oldest"));
-                        });
+                    // the sort menu ends where the post cards below end,
+                    // however wide the filters before it are
+                    let room = (row_left + pad + cw - ui.cursor().left()).max(0.0);
+                    let h = ui.min_rect().height();
+                    ui.allocate_ui_with_layout(
+                        vec2(room, h),
+                        Layout::right_to_left(Align::Center),
+                        |ui| {
+                            let sort = egui::ComboBox::from_id_salt("post_sort")
+                                .selected_text(if self.post.sort_old {
+                                    tr("Oldest")
+                                } else {
+                                    tr("Newest")
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut self.post.sort_old,
+                                        false,
+                                        tr("Newest"),
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.post.sort_old,
+                                        true,
+                                        tr("Oldest"),
+                                    );
+                                });
+                            name_it(&sort.response, "Sort posts");
+                            ui.label(RichText::new(tr("Sort:")).color(t.text2));
+                        },
+                    );
                 });
                 ui.add_space(12.0);
                 let mut posts: Vec<(String, u64, Message)> = vec![];

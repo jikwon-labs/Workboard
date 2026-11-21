@@ -175,6 +175,57 @@ final class WhiteboardTests: XCTestCase {
         XCTAssertTrue(Edits.renameWhiteboard(&d, board: 840, to: "Plan"))
         XCTAssertTrue(Edits.deleteWhiteboard(&d, board: 840))
     }
+
+    /// A board with the shapes and a line the Mac app lays out (a template).
+    private func boardWithShapes() -> JSON {
+        var d = SampleWorkspace.make()
+        Edits.addWhiteboard(&d, me: 1, id: 840)
+        Edits.addNote(&d, board: 840, at: [200, 200], color: [32, 32, 32])
+        Sync.fillBoardIds(&d)
+        var bs = d.at("extra.whiteboards")!.array!
+        let box = { (id: UInt64, y: Double, text: String) -> JSON in
+            ["id": .id(id), "kind": "rect", "pos": [.double(0), .double(y)], "size": [.double(160), .double(64)],
+             "text": .string(text), "color": [.int(182), .int(96), .int(224)]]
+        }
+        bs[0]["shapes"] = [box(501, 0, "CEO"), box(502, 124, "CTO")]
+        bs[0]["lines"] = [["id": .id(503), "from": .id(501), "to": .id(502), "a": [.double(0), .double(0)],
+                           "b": [.double(0), .double(0)], "color": [.int(182), .int(96), .int(224)], "elbow": true]]
+        d.set("extra.whiteboards", .array(bs))
+        return d
+    }
+
+    func testNoteEditsKeepTheShapesAndClearTakesThemToo() {
+        var d = boardWithShapes()
+        let board = { (d: JSON) in d.at("extra.whiteboards")!.array![0] }
+        XCTAssertEqual(WorkspaceView(d).whiteboards(d)[0].shapeCount, 2, "counted in the list")
+        // editing and deleting a note here leaves the Mac app's shapes alone
+        let note = WorkspaceView(d).whiteboards(d)[0].notes[0].id
+        XCTAssertTrue(Edits.updateNote(&d, board: 840, note: note, text: "idea", pos: [10, 10]))
+        XCTAssertTrue(Edits.deleteNote(&d, board: 840, note: note))
+        XCTAssertEqual(board(d)["shapes"]?.array?.count, 2)
+        XCTAssertEqual(board(d)["lines"]?.array?.count, 1)
+        // Clear takes everything, as on the Mac: the shapes and lines stayed
+        var meta = SyncMeta(of: d)
+        Sync.stamp(d, &meta, now: 1000)
+        d.set("extra.sync", meta.json)
+        let mac = d
+        Edits.addNote(&d, board: 840, at: [50, 50], color: [8, 128, 234])
+        XCTAssertTrue(Edits.clearWhiteboard(&d, board: 840))
+        XCTAssertEqual(board(d)["notes"]?.array?.count, 0)
+        XCTAssertNil(board(d)["shapes"], "left out of an empty board, like the Mac app does")
+        XCTAssertNil(board(d)["lines"])
+        XCTAssertEqual(WorkspaceView(d).whiteboards(d)[0].shapeCount, 0)
+        meta = SyncMeta(of: d)
+        Sync.stamp(d, &meta, now: 2000)
+        d.set("extra.sync", meta.json)
+        for id: UInt64 in [501, 502, 503] {
+            XCTAssertNotNil(SyncMeta(of: d).tombs[id], "\(id) is marked deleted for the others")
+        }
+        // the Mac's copy from before the Clear doesn't bring them back
+        Sync.merge(&d, [mac])
+        XCTAssertNil(board(d)["shapes"]?.array?.first, "\(board(d))")
+        XCTAssertNil(board(d)["lines"]?.array?.first)
+    }
 }
 
 final class TemplateTests: XCTestCase {

@@ -16,7 +16,14 @@ struct WhiteboardsView: View {
                 NavigationLink { WhiteboardCanvas(boardId: b.id) } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(b.name).fontWeight(.medium)
-                        Text("\(b.strokes.count) strokes · \(b.notes.count) notes").font(.caption).foregroundStyle(.secondary)
+                        Group {
+                            if b.shapeCount > 0 {
+                                Text("\(b.strokes.count) strokes · \(b.notes.count) notes · \(b.shapeCount) shapes")
+                            } else {
+                                Text("\(b.strokes.count) strokes · \(b.notes.count) notes")
+                            }
+                        }
+                        .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .deleteSwipe(client.canEdit) { client.edit { d, _ in Edits.deleteWhiteboard(&d, board: b.id) } }

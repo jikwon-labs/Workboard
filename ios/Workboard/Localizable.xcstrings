@@ -432,6 +432,16 @@
         }
       }
     },
+    "%lld strokes · %lld notes · %lld shapes": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "선 %1$lld개 · 메모 %2$lld개 · 도형 %3$lld개"
+          }
+        }
+      }
+    },
     "%lld tags": {
       "localizations": {
         "ko": {

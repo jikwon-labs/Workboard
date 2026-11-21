@@ -40,6 +40,9 @@ public struct WhiteboardView: Identifiable, Hashable, Sendable {
     public let strokes: [StrokeView]
     public let notes: [StickyView]
     public let owner: UInt64
+    /// How many boxes, diamonds, circles and labels the Mac app put on it
+    /// (WbShape; not drawn here, kept as they are by every edit here).
+    public let shapeCount: Int
 
     /// WB_COLORS in src/app/more.rs.
     public static let colors: [[Int]] = [[32, 32, 32], [0xd3, 0x3d, 0x44], [8, 128, 234], [41, 151, 100], [0xf8, 0xae, 0x00], [0x5f, 0x55, 0xee]]
@@ -52,6 +55,7 @@ public struct WhiteboardView: Identifiable, Hashable, Sendable {
         strokes = (j["strokes"]?.array ?? []).map(StrokeView.init)
         notes = (j["notes"]?.array ?? []).map(StickyView.init)
         owner = j["owner"]?.uint ?? 0
+        shapeCount = j["shapes"]?.array?.count ?? 0
     }
 }
 
@@ -142,11 +146,16 @@ extension Edits {
         }
     }
 
+    /// Everything on it goes, the shapes and lines the Mac app draws too
+    /// (they stayed, and came back on every computer); like the Mac app,
+    /// the two lists are left out of an empty board.
     @discardableResult
     public static func clearWhiteboard(_ data: inout JSON, board: UInt64) -> Bool {
         changeBoard(&data, board) { b in
             b["strokes"] = []
             b["notes"] = []
+            b["shapes"] = nil
+            b["lines"] = nil
             return true
         }
     }

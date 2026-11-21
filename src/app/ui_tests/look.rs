@@ -440,21 +440,14 @@ fn check_boxes_are_squares_that_fill_when_ticked() {
     let mut h = Ui1::new();
     h.app.modal = Some(Modal::CustomizeNav);
     h.settle();
-    fn boxes(s: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
-        match s {
-            egui::Shape::Rect(r)
-                if (r.rect.width() - 15.0).abs() < 0.1 && (r.rect.height() - 15.0).abs() < 0.1 =>
-            {
-                out.push(r.clone())
-            }
-            egui::Shape::Vec(v) => v.iter().for_each(|s| boxes(s, out)),
-            _ => {}
+    let found = h.shapes_where(|s| match s {
+        egui::Shape::Rect(r)
+            if (r.rect.width() - 15.0).abs() < 0.1 && (r.rect.height() - 15.0).abs() < 0.1 =>
+        {
+            Some(r.clone())
         }
-    }
-    let mut found = vec![];
-    for c in &h.shapes {
-        boxes(&c.shape, &mut found);
-    }
+        _ => None,
+    });
     assert!(found.len() >= 4, "a box per app: {}", found.len());
     for b in &found {
         assert!(b.corner_radius.nw <= 4, "square corners, not a circle");
@@ -548,24 +541,17 @@ fn radio_buttons_that_are_off_have_a_visible_ring() {
     // Settings > Language: three choices at the top of the page
     h.app.open_settings("Language");
     h.settle();
-    fn rings(s: &egui::Shape, out: &mut Vec<egui::epaint::CircleShape>) {
-        match s {
-            // grey rings of the radio size (status icons are coloured)
-            egui::Shape::Circle(c)
-                if (c.radius - 6.9).abs() < 0.2
-                    && c.stroke.color.r() == c.stroke.color.g()
-                    && c.stroke.color.g() == c.stroke.color.b() =>
-            {
-                out.push(*c)
-            }
-            egui::Shape::Vec(v) => v.iter().for_each(|s| rings(s, out)),
-            _ => {}
+    let found = h.shapes_where(|s| match s {
+        // grey rings of the radio size (status icons are coloured)
+        egui::Shape::Circle(c)
+            if (c.radius - 6.9).abs() < 0.2
+                && c.stroke.color.r() == c.stroke.color.g()
+                && c.stroke.color.g() == c.stroke.color.b() =>
+        {
+            Some(*c)
         }
-    }
-    let mut found = vec![];
-    for c in &h.shapes {
-        rings(&c.shape, &mut found);
-    }
+        _ => None,
+    });
     assert!(found.len() >= 2, "the choices that are off draw rings");
     let page = h.app.t().bg;
     for r in &found {
@@ -590,19 +576,12 @@ fn black_theme_primary_button_reads_as_enabled_in_dark_mode() {
     let t = h.app.t();
     let (r, text) = h.painted_text("+ New goal")[0];
     // the button's own fill under its label
-    fn fills(s: &egui::Shape, p: Pos2, out: &mut Vec<Color32>) {
-        match s {
-            egui::Shape::Rect(r) if r.rect.contains(p) && r.rect.width() < 300.0 => {
-                out.push(r.fill)
-            }
-            egui::Shape::Vec(v) => v.iter().for_each(|s| fills(s, p, out)),
-            _ => {}
+    let found = h.shapes_where(|s| match s {
+        egui::Shape::Rect(b) if b.rect.contains(r.center()) && b.rect.width() < 300.0 => {
+            Some(b.fill)
         }
-    }
-    let mut found = vec![];
-    for c in &h.shapes {
-        fills(&c.shape, r.center(), &mut found);
-    }
+        _ => None,
+    });
     assert!(
         found.contains(&t.primary),
         "the button is filled: {found:?}"

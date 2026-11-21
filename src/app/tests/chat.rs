@@ -1637,14 +1637,13 @@ fn emoji_pictures(texts: &[&str]) -> usize {
             }
         });
     });
-    fn count(s: &egui::Shape) -> usize {
-        match s {
-            egui::Shape::Vec(v) => v.iter().map(count).sum(),
-            egui::Shape::Mesh(m) => (m.texture_id != egui::TextureId::default()) as usize,
-            _ => 0,
+    let mut n = 0;
+    crate::app::ui_tests::each_shape(&out.shapes, |s, _| {
+        if let egui::Shape::Mesh(m) = s {
+            n += (m.texture_id != egui::TextureId::default()) as usize;
         }
-    }
-    out.shapes.iter().map(|c| count(&c.shape)).sum()
+    });
+    n
 }
 
 #[test]

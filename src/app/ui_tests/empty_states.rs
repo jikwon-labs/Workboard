@@ -514,23 +514,6 @@ fn dark_mode_tag_chips_are_readable() {
     assert!(painted.iter().all(|p| p.1 == want), "{:?}", painted);
 }
 
-impl Ui1 {
-    /// Every shape painted in the last frame, nested ones included.
-    fn all_shapes(&self) -> Vec<egui::Shape> {
-        fn walk(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
-            match shape {
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
-                s => out.push(s.clone()),
-            }
-        }
-        let mut out = vec![];
-        for s in &self.shapes {
-            walk(&s.shape, &mut out);
-        }
-        out
-    }
-}
-
 #[test]
 fn dark_mode_dialogs_and_theme_swatches_stand_out() {
     let dark = crate::theme::theme(true);
@@ -539,7 +522,7 @@ fn dark_mode_dialogs_and_theme_swatches_stand_out() {
     h.app.data.extra.auto_theme = false;
     h.app.modal = Some(Modal::Themes);
     h.settle();
-    let shapes = h.all_shapes();
+    let shapes = h.shapes_where(|s| Some(s.clone()));
     // the dialog's backdrop is the theme's overlay
     let screen = Rect::from_min_size(pos2(0.0, 0.0), h.size);
     assert!(shapes.iter().any(|s| matches!(s,
@@ -567,7 +550,7 @@ fn a_new_workspace_shows_its_colour_chosen() {
     });
     h.settle();
     let chosen = |h: &Ui1| {
-        h.all_shapes()
+        h.shapes_where(|s| Some(s.clone()))
             .iter()
             .filter_map(|s| match s {
                 egui::Shape::Rect(r)

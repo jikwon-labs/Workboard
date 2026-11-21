@@ -41,3 +41,5 @@ mod wording_tests;
 mod workspaces;
 
 use harness::*;
+// for the tests outside the click-through ones that look at painted shapes
+pub(super) use harness::each_shape;

@@ -367,17 +367,10 @@ fn task_window_menu_rows_have_no_frame() {
     );
     h.click("Task actions");
     assert!(h.has("Duplicate"), "the menu is open");
-    fn boxes(s: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
-        match s {
-            egui::Shape::Rect(r) => out.push(r.clone()),
-            egui::Shape::Vec(v) => v.iter().for_each(|s| boxes(s, out)),
-            _ => {}
-        }
-    }
-    let mut found = vec![];
-    for c in &h.shapes {
-        boxes(&c.shape, &mut found);
-    }
+    let found = h.shapes_where(|s| match s {
+        egui::Shape::Rect(r) => Some(r.clone()),
+        _ => None,
+    });
     for row in ["Duplicate", "Copy ID", "Copy link", "Delete task"] {
         let r = h.rect(row);
         let framed = found.iter().any(|b| {

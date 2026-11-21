@@ -650,6 +650,17 @@ impl Ui1 {
         self.settle();
     }
 
+    /// What `pick` takes from the shapes painted in the last frame (nested
+    /// ones included), in paint order.
+    pub(super) fn shapes_where<T>(
+        &self,
+        mut pick: impl FnMut(&egui::Shape) -> Option<T>,
+    ) -> Vec<T> {
+        let mut out = vec![];
+        each_shape(&self.shapes, |s, _| out.extend(pick(s)));
+        out
+    }
+
     pub(super) fn count_named(&self, name: &str) -> usize {
         self.tree.iter().filter(|(n, _)| n == name).count()
     }
@@ -667,21 +678,7 @@ impl Ui1 {
 
 /// Red dots (the theme's danger color) painted inside the control named `name`.
 pub(super) fn red_dots_in(h: &Ui1, name: &str) -> usize {
-    let danger = h.app.t().danger;
-    let Some((_, rect)) = h.tree.iter().rev().find(|(n, _)| n == name) else {
-        return 0;
-    };
-    fn count(s: &egui::Shape, rect: egui::Rect, danger: Color32) -> usize {
-        match s {
-            egui::Shape::Circle(c) if c.fill == danger && rect.contains(c.center) => 1,
-            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, danger)).sum(),
-            _ => 0,
-        }
-    }
-    h.shapes
-        .iter()
-        .map(|c| count(&c.shape, *rect, danger))
-        .sum()
+    dots_in(h, name, h.app.t().danger)
 }
 
 /// The number on the red unread pill painted inside the control named
@@ -689,20 +686,14 @@ pub(super) fn red_dots_in(h: &Ui1, name: &str) -> usize {
 pub(super) fn red_badge_in(h: &Ui1, name: &str) -> Option<String> {
     let danger = h.app.t().danger;
     let (_, area) = h.tree.iter().rev().find(|(n, _)| n == name)?;
-    fn pills(s: &egui::Shape, area: Rect, danger: Color32, out: &mut Vec<Rect>) {
-        match s {
+    let pill = *h
+        .shapes_where(|s| match s {
             egui::Shape::Rect(r) if r.fill == danger && area.contains(r.rect.center()) => {
-                out.push(r.rect)
+                Some(r.rect)
             }
-            egui::Shape::Vec(v) => v.iter().for_each(|s| pills(s, area, danger, out)),
-            _ => {}
-        }
-    }
-    let mut found = vec![];
-    for c in &h.shapes {
-        pills(&c.shape, *area, danger, &mut found);
-    }
-    let pill = *found.first()?;
+            _ => None,
+        })
+        .first()?;
     let mut text = None;
     each_text(&h.shapes, |ts, _| {
         let c = ts
@@ -728,14 +719,11 @@ pub(super) fn dots_in(h: &Ui1, name: &str, color: Color32) -> usize {
 
 /// Filled dots of `color` painted inside `rect`.
 pub(super) fn dots_in_rect(h: &Ui1, rect: egui::Rect, color: Color32) -> usize {
-    fn count(s: &egui::Shape, rect: egui::Rect, color: Color32) -> usize {
-        match s {
-            egui::Shape::Circle(c) if c.fill == color && rect.contains(c.center) => 1,
-            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, color)).sum(),
-            _ => 0,
-        }
-    }
-    h.shapes.iter().map(|c| count(&c.shape, rect, color)).sum()
+    h.shapes_where(|s| match s {
+        egui::Shape::Circle(c) if c.fill == color && rect.contains(c.center) => Some(()),
+        _ => None,
+    })
+    .len()
 }
 
 /// Grey presence rings ("not online") painted inside the control named `name`.
@@ -749,18 +737,15 @@ pub(super) fn rings_in(h: &Ui1, name: &str) -> usize {
 /// Grey presence rings painted inside `rect`.
 pub(super) fn rings_in_rect(h: &Ui1, rect: egui::Rect) -> usize {
     let grey = h.app.t().text3;
-    fn count(s: &egui::Shape, rect: egui::Rect, grey: Color32) -> usize {
-        match s {
-            egui::Shape::Circle(c)
-                if c.stroke.color == grey && c.radius < 4.0 && rect.contains(c.center) =>
-            {
-                1
-            }
-            egui::Shape::Vec(v) => v.iter().map(|s| count(s, rect, grey)).sum(),
-            _ => 0,
+    h.shapes_where(|s| match s {
+        egui::Shape::Circle(c)
+            if c.stroke.color == grey && c.radius < 4.0 && rect.contains(c.center) =>
+        {
+            Some(())
         }
-    }
-    h.shapes.iter().map(|c| count(&c.shape, rect, grey)).sum()
+        _ => None,
+    })
+    .len()
 }
 
 // WCAG contrast ratio of two colors
@@ -813,22 +798,34 @@ pub(super) fn list_id(h: &Ui1, name: &str) -> u64 {
         .unwrap()
 }
 
+/// Calls `f` with every shape painted (the ones inside shape lists too, not
+/// the lists themselves), in paint order, with the clip rect it was painted in.
+pub(in crate::app) fn each_shape(
+    shapes: &[egui::epaint::ClippedShape],
+    mut f: impl FnMut(&egui::Shape, Rect),
+) {
+    fn walk(shape: &egui::Shape, clip: Rect, f: &mut dyn FnMut(&egui::Shape, Rect)) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, f)),
+            s => f(s, clip),
+        }
+    }
+    for s in shapes {
+        walk(&s.shape, s.clip_rect, &mut f);
+    }
+}
+
 /// Calls `f` with every text painted in the last frame (also the ones inside
 /// shape lists), in paint order, with the clip rect it was painted in.
 pub(super) fn each_text(
     shapes: &[egui::epaint::ClippedShape],
     mut f: impl FnMut(&egui::epaint::TextShape, Rect),
 ) {
-    fn walk(shape: &egui::Shape, clip: Rect, f: &mut dyn FnMut(&egui::epaint::TextShape, Rect)) {
-        match shape {
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, f)),
-            egui::Shape::Text(ts) => f(ts, clip),
-            _ => {}
+    each_shape(shapes, |s, clip| {
+        if let egui::Shape::Text(ts) = s {
+            f(ts, clip)
         }
-    }
-    for s in shapes {
-        walk(&s.shape, s.clip_rect, &mut f);
-    }
+    });
 }
 
 /// Every text painted in the last frame.

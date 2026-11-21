@@ -1289,6 +1289,8 @@ impl App {
             self.temp_app = temp;
         }
         match label {
+            // Home can be dragged down the rail and end up in More's menu
+            "Home" => self.section = Section::Home,
             "Spaces" => self.actions.push(Action::Go(Location::Everything)),
             "Chat" => {
                 self.section = Section::Chat;

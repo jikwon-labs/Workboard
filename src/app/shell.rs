@@ -918,9 +918,6 @@ impl App {
                             Some(ts) => self.section = *ts,
                             None => {
                                 self.open_app(label);
-                                if label == "Home" {
-                                    self.section = Section::Home;
-                                }
                             }
                         }
                     }

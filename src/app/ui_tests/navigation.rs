@@ -835,6 +835,32 @@ fn a_full_bar_keeps_invite_at_the_bottom_and_moves_the_rest_into_more() {
     }
 }
 
+/// Home dragged to the bottom of a full bar goes into More's menu in a
+/// small window, and opens from there. Clicking it there did nothing.
+#[test]
+fn home_moved_into_more_still_opens_from_there() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.data.extra.rail_items = [
+        "Planner",
+        "AI",
+        "Teams",
+        "Docs",
+        "Dashboards",
+        "Whiteboards",
+        "Forms",
+        "Home",
+    ]
+    .map(String::from)
+    .to_vec();
+    h.settle();
+    h.click("Rail Planner");
+    assert_eq!(h.app.section, Section::Planner);
+    assert!(!h.has("Rail Home"), "Home is in More's menu");
+    h.click("Rail More");
+    h.click("Home");
+    assert_eq!(h.app.section, Section::Home);
+}
+
 #[test]
 fn the_ai_page_closes_with_its_button_or_escape() {
     let mut h = Ui1::new();

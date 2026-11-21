@@ -1682,3 +1682,36 @@ fn the_eraser_takes_a_stroke_between_its_points_and_on_a_fast_swipe() {
         "the swipe across took it"
     );
 }
+
+/// A note's corner stays under the pointer while it is resized, also after
+/// going past the smallest size and coming back.
+#[test]
+fn a_resized_note_keeps_its_corner_under_the_pointer() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
+    h.app.wb_tool = 2;
+    h.settle();
+    let c = h.rect("Resize note 0").center();
+    h.hover(c);
+    h.frame(vec![button(c, true)]);
+    for k in 1..=10 {
+        h.frame(vec![egui::Event::PointerMoved(
+            c - vec2(20.0 * k as f32, 0.0),
+        )]);
+    }
+    assert_eq!(board_of(&h, wid).notes[0].wh()[0], 100.0, "the smallest");
+    for k in 1..=12 {
+        h.frame(vec![egui::Event::PointerMoved(
+            c - vec2(200.0, 0.0) + vec2(20.0 * k as f32, 0.0),
+        )]);
+    }
+    let end = c + vec2(40.0, 0.0);
+    h.frame(vec![button(end, false)]);
+    h.settle();
+    let wh = board_of(&h, wid).notes[0].wh();
+    assert!(
+        (wh[0] - 200.0).abs() < 0.5,
+        "40 wider, as the pointer: {wh:?}"
+    );
+    assert!((wh[1] - 120.0).abs() < 0.5, "{wh:?}");
+}

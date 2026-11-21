@@ -683,25 +683,35 @@ impl App {
                                 );
                             }
                         }
+                        // the size follows the pointer from where the drag
+                        // began, so the corner stays under it (adding up each
+                        // step's move left it behind once the note was at its
+                        // smallest or largest)
                         if g.drag_started_by(egui::PointerButton::Primary) {
                             size_from = Some((n.id, n.size));
+                            ui.data_mut(|d| d.insert_temp(g.id, wh));
                         }
                         if g.dragged_by(egui::PointerButton::Primary) {
-                            size_note = Some((i, g.drag_delta() / z));
+                            let start: [f32; 2] = ui.data(|d| d.get_temp(g.id)).unwrap_or(wh);
+                            let moved = ui.input(|i| {
+                                i.pointer
+                                    .press_origin()
+                                    .zip(i.pointer.interact_pos())
+                                    .map_or(egui::Vec2::ZERO, |(o, q)| (q - o) / z)
+                            });
+                            size_note = Some((i, [start[0] + moved.x, start[1] + moved.y]));
                         }
                     }
                 }
                 if let Some((id, was)) = size_from {
                     self.sweep.wb_undo.push((wid, WbUndo::NoteResized(id, was)));
                 }
-                if let Some((i, d)) = size_note {
-                    let n = &mut wb.notes[i];
-                    let wh = n.wh();
-                    n.size = [
-                        (wh[0] + d.x).clamp(100.0, 800.0),
-                        (wh[1] + d.y).clamp(70.0, 800.0),
-                    ];
-                    self.dirty = true;
+                if let Some((i, wh)) = size_note {
+                    let size = [wh[0].clamp(100.0, 800.0), wh[1].clamp(70.0, 800.0)];
+                    if wb.notes[i].size != size {
+                        wb.notes[i].size = size;
+                        self.dirty = true;
+                    }
                 }
                 if let Some((i, c)) = recolor {
                     wb.notes[i].color = c;

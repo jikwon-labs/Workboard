@@ -280,7 +280,7 @@ impl App {
             rows.extend(chans.map(|c| {
                 (
                     "Channels",
-                    None,
+                    Some(Icon::Hash),
                     c.name.clone(),
                     tr("Channel").into(),
                     Hit::Chat(c.id),

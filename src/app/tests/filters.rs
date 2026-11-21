@@ -656,6 +656,21 @@ fn search_reads_copied_links_and_finds_apps_and_people() {
 }
 
 #[test]
+fn every_search_result_has_an_icon() {
+    use crate::app::more::Hit;
+    // a channel's row named "#" as its icon, which no line icon is called:
+    // channels were the only results drawn without one
+    let a = app();
+    let rows = a.search_rows("general", 4);
+    assert!(rows.iter().any(|r| matches!(r.4, Hit::Chat(_))));
+    for q in ["general", "a", "alex", "quarterly"] {
+        for r in a.search_rows(q, 0) {
+            assert!(r.1.is_some(), "{:?} {} has no icon", r.0, r.2);
+        }
+    }
+}
+
+#[test]
 fn search_leaves_out_archived_lists_and_other_peoples_private_docs() {
     let mut a = app();
     let me = a.data.me;

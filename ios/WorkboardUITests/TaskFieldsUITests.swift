@@ -75,10 +75,10 @@ final class TaskFieldsUITests: WorkboardUITestCase {
         let add = a.buttons["addTimeButton"]
         scrollTo(add, in: a)
         add.tap()
-        let field = a.textFields["addTimeField"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
-        field.typeText("45m")
+        // picked on the wheels, not typed
+        let mins = a.pickerWheels.element(boundBy: 1)
+        XCTAssertTrue(mins.waitForExistence(timeout: 5))
+        mins.adjust(toPickerWheelValue: "45m")
         a.buttons["addTimeConfirm"].tap()
         XCTAssertTrue(a.staticTexts["45m"].firstMatch.waitForExistence(timeout: 5), "the entry shows")
     }

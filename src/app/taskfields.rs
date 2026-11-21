@@ -216,17 +216,8 @@ fn estimate_menu(ui: &mut Ui, t: &Theme, est: &mut Option<u32>) {
     });
     ui.add_space(6.0);
     let cur = est.unwrap_or(0);
-    let (mut h, mut m) = (cur / 60, cur % 60);
-    ui.horizontal(|ui| {
-        let r = ui.add(egui::DragValue::new(&mut h).range(0..=999).speed(0.1));
-        name_it(&r, "Estimate hours");
-        ui.label(tr("hours"));
-        ui.add_space(6.0);
-        let r = ui.add(egui::DragValue::new(&mut m).range(0..=59).speed(0.2));
-        name_it(&r, "Estimate minutes");
-        ui.label(tr("minutes"));
-    });
-    let total = h * 60 + m;
+    let mut total = cur;
+    hours_minutes(ui, &mut total, 999, "Estimate hours", "Estimate minutes");
     if total != cur {
         *est = (total > 0).then_some(total);
     }
@@ -242,6 +233,26 @@ fn estimate_menu(ui: &mut Ui, t: &Theme, est: &mut Option<u32>) {
         }
     }
 }
+
+/// An hour stepper (up to `max_h`) and a minute stepper (0 to 59) for a
+/// time in minutes. Each can be dragged or clicked and typed; what is typed
+/// is held to the range.
+fn hours_minutes(ui: &mut Ui, total: &mut u32, max_h: u32, h_name: &str, m_name: &str) {
+    let (mut h, mut m) = ((*total / 60).min(max_h), *total % 60);
+    ui.horizontal(|ui| {
+        let r = ui.add(egui::DragValue::new(&mut h).range(0..=max_h).speed(0.1));
+        name_it(&r, h_name);
+        ui.label(tr("hours"));
+        ui.add_space(6.0);
+        let r = ui.add(egui::DragValue::new(&mut m).range(0..=59).speed(0.2));
+        name_it(&r, m_name);
+        ui.label(tr("minutes"));
+    });
+    *total = h * 60 + m;
+}
+
+/// Quick picks for time added by hand, in minutes.
+pub const ADD_TIME_PRESETS: [u32; 5] = [15, 30, 60, 120, 240];
 
 /// The time entries popup under Track time: the entries (newest first)
 /// with a remove button, and a row to add time by hand.
@@ -273,44 +284,48 @@ pub(super) fn time_entries_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut
         task.time_entries.remove(i);
     }
     ui.separator();
-    let buf_id = id.with("add_time");
+    // picked, not typed, as the estimate: quick picks or hours and minutes
+    // (up to a day), then Today or Yesterday
+    let min_id = id.with("add_time");
     let day_id = id.with("add_day");
-    let mut buf: String = ui.data(|d| d.get_temp(buf_id)).unwrap_or_default();
+    let mut min: u32 = ui.data(|d| d.get_temp(min_id)).unwrap_or(0);
     let mut yesterday: bool = ui.data(|d| d.get_temp(day_id)).unwrap_or(false);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        for m in ADD_TIME_PRESETS {
+            let r = ui.selectable_label(min == m, fmt_hm(m as i64 * 60));
+            name_it(&r, &format!("Add {}", fmt_estimate(m)));
+            if r.clicked() {
+                min = m;
+            }
+        }
+    });
+    hours_minutes(ui, &mut min, 24, "Hours to add", "Minutes to add");
+    min = min.min(24 * 60);
     let mut add = false;
     ui.horizontal(|ui| {
-        let r = ui.add(
-            field(&mut buf)
-                .hint_text(tr("e.g. 1h 30m"))
-                .desired_width(90.0),
-        );
-        name_field(&r, "Time to add");
-        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            add = true;
-        }
         if ui.selectable_label(!yesterday, tr("Today")).clicked() {
             yesterday = false;
         }
         if ui.selectable_label(yesterday, tr("Yesterday")).clicked() {
             yesterday = true;
         }
-        if primary_button(ui, t, tr("Add time")).clicked() {
+        let r = ui.add_enabled_ui(min > 0, |ui| primary_button(ui, t, tr("Add time")));
+        if r.inner.clicked() {
             add = true;
         }
     });
-    if add {
-        if let Some(min) = parse_estimate(&buf).filter(|m| *m > 0) {
-            let end = now_ts() - if yesterday { 86400 } else { 0 };
-            task.time_entries.push(TimeEntry {
-                start: end - min as i64 * 60,
-                end,
-                member: me,
-            });
-            buf.clear();
-        }
+    if add && min > 0 {
+        let end = now_ts() - if yesterday { 86400 } else { 0 };
+        task.time_entries.push(TimeEntry {
+            start: end - min as i64 * 60,
+            end,
+            member: me,
+        });
+        min = 0;
     }
     ui.data_mut(|d| {
-        d.insert_temp(buf_id, buf);
+        d.insert_temp(min_id, min);
         d.insert_temp(day_id, yesterday);
     });
 }

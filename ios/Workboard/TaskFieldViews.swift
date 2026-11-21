@@ -171,18 +171,7 @@ struct EstimateSheet: View {
                     }
                 }
                 Section("Other time") {
-                    HStack(spacing: 0) {
-                        Picker("Hours", selection: $hours) {
-                            ForEach(0..<100) { Text(verbatim: "\($0)h").tag($0) }
-                        }
-                        .accessibilityIdentifier("estimateHours")
-                        Picker("Minutes", selection: $minutes) {
-                            ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { Text(verbatim: "\($0)m").tag($0) }
-                        }
-                        .accessibilityIdentifier("estimateMinutes")
-                    }
-                    .pickerStyle(.wheel)
-                    .frame(height: 140)
+                    DurationWheels(hours: $hours, minutes: $minutes, maxHours: 99, id: "estimate")
                 }
             }
             .navigationTitle("Estimate")
@@ -207,6 +196,30 @@ struct EstimateSheet: View {
         let id = task.id
         client.edit { d, me in Edits.setEstimate(&d, task: id, minutes: m, me: me, ts: nowTs()) }
         dismiss()
+    }
+}
+
+/// Hour and minute wheels (minutes in fives), for the estimate and for time
+/// added by hand.
+struct DurationWheels: View {
+    @Binding var hours: Int
+    @Binding var minutes: Int
+    let maxHours: Int
+    let id: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Picker("Hours", selection: $hours) {
+                ForEach(0...maxHours, id: \.self) { Text(verbatim: "\($0)h").tag($0) }
+            }
+            .accessibilityIdentifier("\(id)Hours")
+            Picker("Minutes", selection: $minutes) {
+                ForEach(Array(stride(from: 0, to: 60, by: 5)), id: \.self) { Text(verbatim: "\($0)m").tag($0) }
+            }
+            .accessibilityIdentifier("\(id)Minutes")
+        }
+        .pickerStyle(.wheel)
+        .frame(height: 140)
     }
 }
 
@@ -434,7 +447,7 @@ struct TimeSection: View {
                 .disabled(!can)
                 .accessibilityIdentifier("addTimeButton")
                 .sheet(isPresented: $addingTime) {
-                    AddTimeSheet(task: task).presentationDetents([.medium])
+                    AddTimeSheet(task: task).presentationDetents([.large])
                 }
         } header: {
             Text("Time tracked")
@@ -473,47 +486,56 @@ struct TrackedSchedule: TimelineSchedule {
     }
 }
 
+/// Time added by hand: quick picks or hours and minutes on wheels (up to a
+/// day), for today or yesterday. Picked, not typed, as the estimate.
 struct AddTimeSheet: View {
     @Environment(SyncClient.self) private var client
     @Environment(\.dismiss) private var dismiss
     let task: TaskView
-    @State private var text = ""
+    @State private var hours = 0
+    @State private var minutes = 0
     @State private var yesterday = false
-    @FocusState private var focused: Bool
+
+    static let presets = [15, 30, 60, 120, 240]
 
     var body: some View {
         NavigationStack {
             Form {
-                TextField("e.g. 1h 30m", text: $text)
-                    .focused($focused)
-                    .onAppear { focused = true }
-                    .submitLabel(.done)
-                    .onSubmit(add)
-                    .accessibilityIdentifier("addTimeField")
+                Section {
+                    HStack(spacing: 6) {
+                        ForEach(Self.presets, id: \.self) { m in
+                            let on = hours * 60 + minutes == m
+                            Button(Edits.fmtEstimate(UInt32(m))) { hours = m / 60; minutes = m % 60 }
+                                .buttonStyle(.bordered)
+                                .tint(on ? .accentColor : .secondary)
+                                .accessibilityIdentifier("addTime-\(m)")
+                        }
+                    }
+                    DurationWheels(hours: $hours, minutes: $minutes, maxHours: 24, id: "addTime")
+                }
                 Picker("Day", selection: $yesterday) {
                     Text("Today").tag(false)
                     Text("Yesterday").tag(true)
                 }
                 .pickerStyle(.segmented)
-                if !text.isEmpty && minutes == nil {
-                    Text("Write it like 1h 30m, 45m or 2:30").font(.footnote).foregroundStyle(.red)
-                }
             }
             .navigationTitle("Add time")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: add).disabled(minutes == nil).accessibilityIdentifier("addTimeConfirm")
+                    Button("Add", action: add).disabled(total == 0).accessibilityIdentifier("addTimeConfirm")
                 }
             }
         }
     }
 
-    var minutes: UInt32? { Edits.parseEstimate(text).flatMap { $0 > 0 ? $0 : nil } }
+    /// minutes, at most a day
+    var total: Int { min(hours * 60 + minutes, 24 * 60) }
 
     func add() {
-        guard let m = minutes else { return }
+        guard total > 0 else { return }
+        let m = UInt32(total)
         client.edit { d, me in Edits.addTimeEntry(&d, task: task.id, minutes: m, yesterday: yesterday, me: me, ts: nowTs()) }
         dismiss()
     }

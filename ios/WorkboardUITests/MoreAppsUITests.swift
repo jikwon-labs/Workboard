@@ -94,10 +94,9 @@ final class MoreAppsUITests: WorkboardUITestCase {
         let pick = a.buttons["sheetPick-205"]
         XCTAssertTrue(pick.waitForExistence(timeout: 5))
         pick.tap()
-        let field = a.textFields["addTimeField"]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
-        field.typeText("30m")
+        let half = a.buttons["addTime-30"]
+        XCTAssertTrue(half.waitForExistence(timeout: 5))
+        half.tap()
         a.buttons["addTimeConfirm"].tap()
         XCTAssertTrue(a.buttons["sheetRow-205"].waitForExistence(timeout: 5))
         a.segmentedControls["timesheetTabs"].buttons["All timesheets"].tap()

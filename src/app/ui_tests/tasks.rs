@@ -1068,13 +1068,30 @@ fn time_entries_add_by_hand_and_remove() {
         .clear();
     h.settle();
     h.click("Time entries");
-    h.click("Time to add");
-    h.type_text("1h 30m");
+    // nothing picked yet: Add time does nothing
+    h.click("Add time");
+    h.app.apply_actions();
+    assert!(h.app.task(id).unwrap().time_entries.is_empty());
+    // a quick pick, then the minutes stepper, then Add time
+    h.click("Add 1h");
+    h.click("Minutes to add");
+    h.type_text("30");
+    h.key(egui::Key::Enter);
     h.click("Add time");
     h.app.apply_actions();
     let t = h.app.task(id).unwrap();
     assert_eq!(t.time_entries.len(), 1);
     assert_eq!(t.time_entries[0].end - t.time_entries[0].start, 5400);
+    // typed hours are held to a day
+    h.click("Hours to add");
+    h.type_text("213123123");
+    h.key(egui::Key::Enter);
+    h.click("Add time");
+    h.app.apply_actions();
+    let t = h.app.task(id).unwrap();
+    assert_eq!(t.time_entries.len(), 2);
+    assert_eq!(t.time_entries[1].end - t.time_entries[1].start, 24 * 3600);
+    h.click("Remove entry 2");
     h.click("Remove entry 1");
     h.app.apply_actions();
     assert!(h.app.task(id).unwrap().time_entries.is_empty());

@@ -2,7 +2,7 @@
 // and a teammate's changes arriving mid-edit.
 
 use super::*;
-use crate::app::more::WB_ORIGIN;
+use crate::app::more::{WbTool, WB_ORIGIN};
 
 /// A whiteboard on a team (a server that isn't connected), open on screen,
 /// with three strokes and two notes the team already knows.
@@ -15,7 +15,7 @@ fn shared_board(h: &mut Ui1) -> u64 {
     });
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     let ids: Vec<u64> = (0..5).map(|_| h.app.data.new_id()).collect();
     let wb = h
         .app
@@ -89,7 +89,7 @@ fn whiteboard_notes_delete_undo_and_clear_asks() {
     let mut h = Ui1::new();
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     let wb = h
         .app
         .data
@@ -179,7 +179,7 @@ fn whiteboard_undo_puts_a_moved_note_back() {
     let mut h = Ui1::new();
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     let wb = h
         .app
         .data
@@ -195,7 +195,7 @@ fn whiteboard_undo_puts_a_moved_note_back() {
         color: [0xf8, 0xae, 0x00],
         ..Default::default()
     });
-    h.app.wb_tool = 2;
+    h.app.sweep.wb.tool = WbTool::Select;
     h.settle();
     // press near the note's bottom edge and drag it
     let x = h.rect("Delete note 0");
@@ -240,7 +240,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
     let mut h = Ui1::new();
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     let board = |h: &Ui1| {
         h.app
             .data
@@ -270,7 +270,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
     h.settle();
     assert!(!h.has("Delete note 0"), "the far note is off screen");
     let canvas = h.rect("Whiteboard canvas");
-    let view = |h: &Ui1| h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+    let view = |h: &Ui1| h.app.sweep.wb.view.get(&wid).copied().unwrap_or_default();
     // two-finger scroll moves the view until the note shows
     h.frame(vec![egui::Event::PointerMoved(canvas.center())]);
     for _ in 0..40 {
@@ -311,7 +311,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
     let after = v.to_board(canvas.min + WB_ORIGIN, at);
     assert!((before[0] - after[0]).abs() < 0.5 && (before[1] - after[1]).abs() < 0.5);
     // a pen stroke is stored in board coordinates
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     let from = canvas.center();
     let to = from + vec2(80.0, 40.0);
     h.drag_by(from, to);
@@ -371,7 +371,7 @@ fn a_teammate_change_arriving_while_i_draw_keeps_every_stroke() {
     let known: Vec<u64> = board_of(&h, wid).strokes.iter().map(|s| s.id).collect();
     let before = h.app.data.clone();
     // I start a stroke and keep the button down
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     let canvas = h.rect("Whiteboard canvas");
     let from = canvas.center();
     h.frame(vec![egui::Event::PointerMoved(from)]);
@@ -460,7 +460,7 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
     let known: Vec<u64> = board_of(&h, wid).strokes.iter().map(|s| s.id).collect();
     let canvas = h.rect("Whiteboard canvas");
     // I draw a stroke
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     h.drag_by(canvas.center(), canvas.center() + vec2(60.0, 20.0));
     let mine = board_of(&h, wid)
         .strokes
@@ -469,7 +469,7 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
         .unwrap()
         .id;
     // I add a note
-    h.app.wb_tool = 1;
+    h.app.sweep.wb.tool = WbTool::Sticky;
     let at = canvas.left_top() + vec2(120.0, 420.0);
     h.click_at(at);
     let b = board_of(&h, wid);
@@ -526,9 +526,9 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
     // a note I moved, with a teammate's note merged in before it
     let first = b.notes[0].id;
     let at0 = b.notes[0].pos;
-    h.app.wb_tool = 2;
+    h.app.sweep.wb.tool = WbTool::Select;
     h.settle();
-    let view = h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+    let view = h.app.sweep.wb.view.get(&wid).copied().unwrap_or_default();
     let grab = view.to_screen(canvas.min + WB_ORIGIN, [at0[0] + 80.0, at0[1] + 4.0]);
     h.drag_by(grab, grab + vec2(40.0, 30.0));
     let moved = board_of(&h, wid)
@@ -575,7 +575,7 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
     );
 
     // a stroke of mine a teammate already erased: Undo does nothing to the board
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     h.drag_by(
         canvas.center() + vec2(0.0, 60.0),
         canvas.center() + vec2(60.0, 80.0),
@@ -610,7 +610,7 @@ fn typing_in_a_note_keeps_going_to_it_after_scrolling_the_board() {
     let mut h = Ui1::new();
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     let wb = h
         .app
         .data
@@ -664,7 +664,8 @@ fn typing_in_a_note_keeps_going_to_it_after_scrolling_the_board() {
     assert!(
         h.app
             .sweep
-            .wb_view
+            .wb
+            .view
             .get(&wid)
             .is_some_and(|v| v.pan.y < -150.0),
         "the board scrolled"
@@ -737,7 +738,7 @@ fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
     let side = crate::widgets::CONTROL_H + 0.5;
     assert!(plus.width() <= side && plus.height() <= side);
     h.click("Add a whiteboard");
-    let wid = h.app.wb_open.expect("a board was made and opened");
+    let wid = h.app.sweep.wb.open.expect("a board was made and opened");
     let made = board_of(&h, wid).name;
     assert!(h.has(&made), "its row is in the sidebar");
     assert!(h.has("Draw with the pen"), "the card says how to start");
@@ -758,7 +759,7 @@ fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
 
     // an untouched name takes the template's
     h.click("Add a whiteboard");
-    let wid2 = h.app.wb_open.unwrap();
+    let wid2 = h.app.sweep.wb.open.unwrap();
     assert_ne!(wid, wid2);
     h.click("Flow Chart");
     let b = board_of(&h, wid2);
@@ -767,10 +768,10 @@ fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
 
     // picking a way to draw puts the card away and chooses the tool
     h.click("Add a whiteboard");
-    h.app.wb_tool = 2;
+    h.app.sweep.wb.tool = WbTool::Select;
     h.settle();
     h.click("Draw with the pen");
-    assert_eq!(h.app.wb_tool, 0);
+    assert_eq!(h.app.sweep.wb.tool, WbTool::Pen);
     assert!(!h.has("Draw with the pen"));
 }
 
@@ -781,23 +782,23 @@ fn each_whiteboard_tool_shows_its_own_settings() {
     let mut h = Ui1::new();
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    h.app.sweep.wb_new = None;
+    h.app.sweep.wb.new = None;
     h.settle();
     h.click("Pen");
-    assert_eq!(h.app.wb_tool, 0);
+    assert_eq!(h.app.sweep.wb.tool, WbTool::Pen);
     assert!(h.has("Pen width"));
     assert!(h.has("Colour 6"), "six pen colours");
     h.click("Colour 3");
-    assert_eq!(h.app.wb_color, crate::app::more::WB_COLORS[2]);
+    assert_eq!(h.app.sweep.wb.color, crate::app::more::WB_COLORS[2]);
     h.click("Sticky note");
-    assert_eq!(h.app.wb_tool, 1);
+    assert_eq!(h.app.sweep.wb.tool, WbTool::Sticky);
     assert!(!h.has("Pen width"), "no width for a note");
     assert!(h.has("Colour 5") && !h.has("Colour 6"), "no black paper");
     h.click("Eraser");
-    assert_eq!(h.app.wb_tool, 3);
+    assert_eq!(h.app.sweep.wb.tool, WbTool::Eraser);
     assert!(!h.has("Colour 1"));
     h.click("Select");
-    assert_eq!(h.app.wb_tool, 2);
+    assert_eq!(h.app.sweep.wb.tool, WbTool::Select);
 }
 
 /// The bars float over the board: pressing on one does not draw under it.
@@ -806,10 +807,10 @@ fn drawing_does_not_start_on_a_floating_bar() {
     let mut h = Ui1::new();
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    h.app.sweep.wb_new = None;
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.new = None;
+    h.app.sweep.wb.tool = WbTool::Pen;
     h.settle();
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     // from the gap between the tool bar's buttons, across the board
     let pen = h.rect("Pen");
     let from = pos2(pen.center().x, pen.bottom() + 2.0);
@@ -828,10 +829,10 @@ fn whiteboard_zoom_goes_back_to_100_percent() {
     let mut h = Ui1::new();
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    h.app.sweep.wb_new = None;
+    h.app.sweep.wb.new = None;
     h.settle();
-    let wid = h.app.wb_open.unwrap();
-    let view = |h: &Ui1| h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+    let wid = h.app.sweep.wb.open.unwrap();
+    let view = |h: &Ui1| h.app.sweep.wb.view.get(&wid).copied().unwrap_or_default();
     // moved away from the start first
     let canvas = h.rect("Whiteboard canvas");
     h.frame(vec![egui::Event::PointerMoved(canvas.center())]);
@@ -864,17 +865,20 @@ fn whiteboard_list_shows_a_card_for_each_board() {
     assert!(h.has("Start from scratch"));
     assert!(h.has("Root Cause Analysis"));
     h.click("Action Plan");
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     h.click("All Whiteboards");
-    assert_eq!(h.app.wb_open, None, "back to the list");
+    assert_eq!(h.app.sweep.wb.open, None, "back to the list");
     let key = format!("Star wb:{}", wid);
     h.click(&key);
     assert!(h.app.data.extra.starred.contains(&format!("wb:{}", wid)));
-    assert_eq!(h.app.wb_open, None, "the star does not open the board");
+    assert_eq!(
+        h.app.sweep.wb.open, None,
+        "the star does not open the board"
+    );
     // its card (drawn after the template card and the sidebar row of the
     // same name) opens it
     h.click("Action Plan");
-    assert_eq!(h.app.wb_open, Some(wid));
+    assert_eq!(h.app.sweep.wb.open, Some(wid));
 }
 
 /// "More templates" on a new board's card lists every template on the card,
@@ -886,11 +890,11 @@ fn more_templates_fill_the_board_just_made() {
     let mut h = Ui1::new();
     open_whiteboards(&mut h);
     h.click("New whiteboard");
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     let boards = h.app.data.extra.whiteboards.len();
     assert!(!h.has("Root Cause Analysis"));
     h.click("More templates");
-    assert_eq!(h.app.wb_open, Some(wid), "the board stays open");
+    assert_eq!(h.app.sweep.wb.open, Some(wid), "the board stays open");
     assert!(h.has("Draw with the pen"), "the card stays up");
     assert!(!h.has("More templates"), "every template is shown");
     // all of them on the card, wrapped inside its edges
@@ -915,7 +919,7 @@ fn more_templates_fill_the_board_just_made() {
         boards,
         "no other board was made"
     );
-    assert_eq!(h.app.wb_open, Some(wid));
+    assert_eq!(h.app.sweep.wb.open, Some(wid));
     let b = board_of(&h, wid);
     assert_eq!(b.name, "Root Cause Analysis");
     assert_eq!((b.shapes.len(), b.lines.len()), (5, 5));
@@ -931,7 +935,7 @@ fn a_template_renaming_the_board_being_named_selects_the_new_name() {
     let mut h = Ui1::new();
     open_whiteboards(&mut h);
     h.click("New whiteboard");
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     h.settle();
     assert!(h.app.data.extra.whiteboards.iter().any(|w| w.id == wid));
     h.app.wb_fill_template(wid, "Root Cause Analysis");
@@ -950,7 +954,7 @@ fn clear_board_question_has_even_room_around_it() {
     let mut h = Ui1::new();
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    h.app.sweep.wb_new = None;
+    h.app.sweep.wb.new = None;
     h.settle();
     h.click("Board menu");
     h.click("Clear board");
@@ -990,8 +994,8 @@ fn clear_board_question_has_even_room_around_it() {
 fn board_with_notes(h: &mut Ui1, at: &[[f32; 2]]) -> u64 {
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    h.app.sweep.wb_new = None;
-    let wid = h.app.wb_open.unwrap();
+    h.app.sweep.wb.new = None;
+    let wid = h.app.sweep.wb.open.unwrap();
     let ids: Vec<u64> = at.iter().map(|_| h.app.data.new_id()).collect();
     let wb = h
         .app
@@ -1054,7 +1058,7 @@ fn a_note_moves_by_its_top_strip_and_lines_up_with_the_others() {
     let mut h = Ui1::new();
     let wid = board_with_notes(&mut h, &[[100.0, 100.0], [400.0, 113.0]]);
     let b = board_of(&h, wid).notes[1].id;
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     h.settle();
     let grab = on_screen(&h, [480.0, 113.0 + 9.0]);
     h.hover(grab);
@@ -1083,7 +1087,7 @@ fn a_note_moves_by_its_top_strip_and_lines_up_with_the_others() {
     assert_eq!(note_pos(&h, wid, b), [400.0, 100.0]);
     assert!(!guides_shown(&h), "the line goes when it is let go");
     assert!(board_of(&h, wid).strokes.is_empty(), "the pen drew nothing");
-    assert!(h.app.sweep.wb_note_drag.is_none());
+    assert!(h.app.sweep.wb.note_drag.is_none());
     cmd_key(&mut h, egui::Key::Z);
     assert_eq!(note_pos(&h, wid, b), [400.0, 113.0], "Cmd+Z put it back");
 }
@@ -1095,8 +1099,8 @@ fn a_note_moves_by_its_top_strip_and_lines_up_with_the_others() {
 fn the_pen_shows_a_pencil_for_the_pointer() {
     let mut h = Ui1::new();
     board_with_notes(&mut h, &[[100.0, 100.0]]);
-    h.app.wb_tool = 0;
-    h.app.wb_color = crate::app::more::WB_COLORS[2];
+    h.app.sweep.wb.tool = WbTool::Pen;
+    h.app.sweep.wb.color = crate::app::more::WB_COLORS[2];
     h.settle();
     let at = h.rect("Whiteboard canvas").center() + vec2(100.0, 100.0);
     h.hover(at);
@@ -1111,7 +1115,7 @@ fn the_pen_shows_a_pencil_for_the_pointer() {
     assert_eq!(h.cursor, egui::CursorIcon::Text, "on a note's text");
     h.hover(h.rect("Eraser").center());
     assert_eq!(h.cursor, egui::CursorIcon::PointingHand, "on the tool bar");
-    h.app.wb_tool = 1;
+    h.app.sweep.wb.tool = WbTool::Sticky;
     h.hover(at);
     assert_eq!(
         h.cursor,
@@ -1133,7 +1137,7 @@ fn a_click_on_a_note_types_in_it_with_any_tool() {
     let text = egui::Id::new(("wb_note_text", wid, nid));
     let typing = |h: &Ui1| h.ctx.memory(|m| m.has_focus(text));
     let note = |h: &Ui1| board_of(h, wid).notes;
-    h.app.wb_tool = 1;
+    h.app.sweep.wb.tool = WbTool::Sticky;
     h.settle();
     // low on the note, below its text
     h.click_at(on_screen(&h, [180.0, 212.0]));
@@ -1145,7 +1149,7 @@ fn a_click_on_a_note_types_in_it_with_any_tool() {
     h.click_at(on_screen(&h, [180.0, 109.0]));
     assert_eq!(note(&h).len(), 1);
 
-    h.app.wb_tool = 2;
+    h.app.sweep.wb.tool = WbTool::Select;
     h.settle();
     h.click_at(h.rect("Whiteboard canvas").center());
     assert!(!typing(&h));
@@ -1175,7 +1179,7 @@ fn a_click_on_a_note_types_in_it_with_any_tool() {
 fn cmd_z_takes_back_on_the_board_but_not_while_typing() {
     let mut h = Ui1::new();
     let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     h.settle();
     let c = h.rect("Whiteboard canvas").center();
     h.drag_by(c, c + vec2(80.0, 30.0));
@@ -1220,10 +1224,10 @@ fn cmd_z_takes_back_on_the_board_but_not_while_typing() {
 fn template_board(h: &mut Ui1, name: &str) -> u64 {
     h.app.new_whiteboard();
     h.app.section = Section::Whiteboards;
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     h.app.wb_fill_template(wid, name);
-    h.app.sweep.wb_new = None;
-    h.app.wb_tool = 2;
+    h.app.sweep.wb.new = None;
+    h.app.sweep.wb.tool = WbTool::Select;
     h.settle();
     wid
 }
@@ -1329,12 +1333,12 @@ fn the_plus_on_a_shape_adds_one_joined_to_it() {
     let mut h = Ui1::new();
     open_whiteboards(&mut h);
     h.click("Organizational Chart");
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     h.click("Select");
     h.click("Shape CEO");
     let ceo = shape(&board_of(&h, wid), "CEO").id;
     assert_eq!(
-        h.app.sweep.wb_sel,
+        h.app.sweep.wb.sel,
         Some((wid, crate::app::more::WbSel::Shape(ceo)))
     );
     assert!(h.has("Add shape below") && h.has("Resize shape 3"));
@@ -1351,7 +1355,7 @@ fn the_plus_on_a_shape_adds_one_joined_to_it() {
     assert!(b.shapes[..4].iter().all(|s| !overlap(s, &new)));
     // it is picked and takes the typing
     assert_eq!(
-        h.app.sweep.wb_sel,
+        h.app.sweep.wb.sel,
         Some((wid, crate::app::more::WbSel::Shape(new.id)))
     );
     h.type_text("CFO");
@@ -1411,7 +1415,7 @@ fn a_shape_moves_resizes_recolours_and_deletes() {
     h.key(egui::Key::Delete);
     let b = board_of(&h, wid);
     assert_eq!((b.shapes.len(), b.lines.len()), (2, 1), "with its line");
-    assert_eq!(h.app.sweep.wb_sel, None);
+    assert_eq!(h.app.sweep.wb.sel, None);
     h.click("Undo");
     let b = board_of(&h, wid);
     assert_eq!((b.shapes.len(), b.lines.len()), (3, 2), "both back");
@@ -1429,7 +1433,7 @@ fn a_line_is_picked_restyled_and_deleted() {
     h.click_at(mid);
     let first = board_of(&h, wid).lines[0].id;
     assert_eq!(
-        h.app.sweep.wb_sel,
+        h.app.sweep.wb.sel,
         Some((wid, crate::app::more::WbSel::Line(first)))
     );
     h.click("Dashed line");
@@ -1440,7 +1444,7 @@ fn a_line_is_picked_restyled_and_deleted() {
     assert_eq!(board_of(&h, wid).lines.len(), 1);
     // a click on the empty board lets the pick go
     h.click_at(mid);
-    assert_eq!(h.app.sweep.wb_sel, None);
+    assert_eq!(h.app.sweep.wb.sel, None);
 }
 
 /// The Shape tool puts the chosen shape where the board is clicked, ready
@@ -1454,7 +1458,7 @@ fn shape_tool_puts_shapes_down_and_the_line_tool_joins_them() {
     // anyone clicking
     h.hover(h.rect("Whiteboard canvas").center());
     h.click("Shape");
-    assert_eq!(h.app.wb_tool, 4);
+    assert_eq!(h.app.sweep.wb.tool, WbTool::Shape);
     assert!(h.has("Circle") && h.has("Colour 6"));
     h.click("Diamond");
     h.click_at(on_screen(&h, [100.0, 100.0]));
@@ -1467,7 +1471,7 @@ fn shape_tool_puts_shapes_down_and_the_line_tool_joins_them() {
         [100.0, 100.0],
         "centred where clicked"
     );
-    assert_eq!(h.app.wb_tool, 2, "back to Select");
+    assert_eq!(h.app.sweep.wb.tool, WbTool::Select, "back to Select");
     h.type_text("Ship?");
     assert_eq!(board_of(&h, wid).shapes[0].text, "Ship?");
     h.key(egui::Key::Escape);
@@ -1497,7 +1501,7 @@ fn shape_tool_puts_shapes_down_and_the_line_tool_joins_them() {
 fn a_note_is_resized_by_its_corner() {
     let mut h = Ui1::new();
     let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     h.settle();
     let c = h.rect("Resize note 0").center();
     h.drag_by(c, c + vec2(80.0, 40.0));
@@ -1518,7 +1522,7 @@ fn a_note_is_resized_by_its_corner() {
 // ------------------------------------------------------------ QA round 1
 
 fn view_of(h: &Ui1, wid: u64) -> crate::app::more::WbView {
-    h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default()
+    h.app.sweep.wb.view.get(&wid).copied().unwrap_or_default()
 }
 
 fn space_key(h: &mut Ui1, pressed: bool) {
@@ -1590,7 +1594,7 @@ fn a_board_deleted_by_a_teammate_while_open_goes_back_to_the_list() {
     h.app.merge_in(&[team], &[]);
     h.settle();
     assert!(h.app.data.extra.whiteboards.iter().all(|w| w.id != wid));
-    assert_eq!(h.app.wb_open, None);
+    assert_eq!(h.app.sweep.wb.open, None);
     assert!(h.has("Start from scratch"), "the list of boards shows");
 }
 
@@ -1689,7 +1693,7 @@ fn the_eraser_takes_a_stroke_between_its_points_and_on_a_fast_swipe() {
         width: 2.5,
         points: (0..100).map(|k| [300.0 + k as f32 * 3.0, 500.0]).collect(),
     });
-    h.app.wb_tool = 3;
+    h.app.sweep.wb.tool = WbTool::Eraser;
     h.settle();
     h.hover(on_screen(&h, [450.0, 250.0]));
     h.click_at(on_screen(&h, [450.0, 300.0]));
@@ -1713,7 +1717,7 @@ fn the_eraser_takes_a_stroke_between_its_points_and_on_a_fast_swipe() {
 fn a_resized_note_keeps_its_corner_under_the_pointer() {
     let mut h = Ui1::new();
     let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
-    h.app.wb_tool = 2;
+    h.app.sweep.wb.tool = WbTool::Select;
     h.settle();
     let c = h.rect("Resize note 0").center();
     h.hover(c);
@@ -1755,12 +1759,12 @@ fn escape_ends_typing_in_a_shape_before_letting_it_go() {
     h.key(egui::Key::Escape);
     assert!(!h.has("Shape text"), "the typing ended");
     assert_eq!(
-        h.app.sweep.wb_sel,
+        h.app.sweep.wb.sel,
         Some((wid, crate::app::more::WbSel::Shape(id))),
         "still picked"
     );
     h.key(egui::Key::Escape);
-    assert_eq!(h.app.sweep.wb_sel, None);
+    assert_eq!(h.app.sweep.wb.sel, None);
 }
 
 /// Undo takes back a template laid out on a board, as it does everything
@@ -1770,7 +1774,7 @@ fn undo_takes_back_a_template() {
     let mut h = Ui1::new();
     open_whiteboards(&mut h);
     h.click("New whiteboard");
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     h.click("Flow Chart");
     let b = board_of(&h, wid);
     assert_eq!((b.shapes.len(), b.lines.len()), (3, 2));
@@ -1814,7 +1818,7 @@ fn undo_puts_a_notes_colour_back() {
 fn a_line_dragged_within_one_shape_is_not_drawn() {
     let mut h = Ui1::new();
     let wid = template_board(&mut h, "Flow Chart");
-    h.app.wb_tool = 5;
+    h.app.sweep.wb.tool = WbTool::Line;
     h.settle();
     let s = shape(&board_of(&h, wid), "Step").clone();
     let from = on_screen(&h, [s.pos[0] + 20.0, s.pos[1] + 15.0]);
@@ -1839,12 +1843,12 @@ fn a_line_dragged_within_one_shape_is_not_drawn() {
             from + (to - from) * (k as f32 / 12.0),
         )]);
     }
-    assert!(h.app.sweep.wb_link.is_some(), "a line is being dragged out");
+    assert!(h.app.sweep.wb.link.is_some(), "a line is being dragged out");
     assert_eq!(lines(&h), before, "no line is shown");
     h.frame(vec![button(to, false)]);
     h.settle();
     assert_eq!(board_of(&h, wid).lines.len(), 2);
-    assert!(!h.app.sweep.wb_undo.iter().any(|u| matches!(
+    assert!(!h.app.sweep.wb.undo.iter().any(|u| matches!(
         u,
         (w, crate::app::more::WbUndo::Added(s, l)) if *w == wid && s.is_empty() && !l.is_empty()
     )));
@@ -1858,7 +1862,7 @@ fn a_board_card_counts_its_notes_and_shapes() {
     let mut h = Ui1::new();
     open_whiteboards(&mut h);
     h.click("Flow Chart");
-    let wid = h.app.wb_open.unwrap();
+    let wid = h.app.sweep.wb.open.unwrap();
     // the sidebar row's swatch, in the template's colour
     let colour = board_of(&h, wid).shapes[0].color;
     let row = h
@@ -1953,7 +1957,7 @@ fn cmd_z_waits_while_a_note_is_dragged() {
 fn a_new_note_takes_the_typing() {
     let mut h = Ui1::new();
     let wid = board_with_notes(&mut h, &[]);
-    h.app.wb_tool = 1;
+    h.app.sweep.wb.tool = WbTool::Sticky;
     h.settle();
     h.hover(on_screen(&h, [300.0, 300.0]));
     h.click_at(on_screen(&h, [300.0, 300.0]));
@@ -1982,8 +1986,15 @@ fn the_tool_options_bar_stays_on_the_page_in_a_small_window() {
         let mut h = Ui1::sized(900.0, 560.0);
         template_board(&mut h, "Flow Chart");
         crate::i18n::set_lang(lang);
-        for tool in [2u8, 0, 3, 1, 4, 5] {
-            h.app.wb_tool = tool;
+        for tool in [
+            WbTool::Select,
+            WbTool::Pen,
+            WbTool::Eraser,
+            WbTool::Sticky,
+            WbTool::Shape,
+            WbTool::Line,
+        ] {
+            h.app.sweep.wb.tool = tool;
             h.settle();
             let canvas = h.rect("Whiteboard canvas");
             let mut off = vec![];
@@ -1993,14 +2004,14 @@ fn the_tool_options_bar_stays_on_the_page_in_a_small_window() {
                     off.push(ts.galley.text().to_string());
                 }
             });
-            assert!(off.is_empty(), "tool {tool}: {off:?} runs off the page");
+            assert!(off.is_empty(), "tool {tool:?}: {off:?} runs off the page");
         }
         crate::i18n::set_lang(crate::i18n::Lang::En);
     }
     // in a usual window the hint is there
     let mut h = Ui1::new();
     template_board(&mut h, "Flow Chart");
-    h.app.wb_tool = 5;
+    h.app.sweep.wb.tool = WbTool::Line;
     h.settle();
     assert!(!h.painted_text("Drag from one shape to another").is_empty());
 }
@@ -2108,8 +2119,8 @@ fn black_ink_shows_on_a_dark_board() {
         color: black,
         ..Default::default()
     });
-    h.app.wb_tool = 0;
-    h.app.wb_color = black;
+    h.app.sweep.wb.tool = WbTool::Pen;
+    h.app.sweep.wb.color = black;
     h.settle();
     let t = h.app.t();
     assert_eq!(t.column_bg.r(), t.column_bg.g());
@@ -2150,7 +2161,7 @@ fn black_ink_shows_on_a_dark_board() {
     }
     assert_eq!(found, [true; 4], "stroke, line, box, swatch");
     // the bar over a picked black shape shows its colour too
-    h.app.wb_tool = 2;
+    h.app.sweep.wb.tool = WbTool::Select;
     h.settle();
     h.hover(h.rect("Whiteboard canvas").center());
     h.click("Shape Box");
@@ -2208,7 +2219,7 @@ fn redo_puts_back_what_undo_took_back() {
     assert_eq!(shape(&board_of(&h, wid), "Step").pos, step.pos);
 
     // a new step forgets what Undo took back
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     h.settle();
     let c = on_screen(&h, [900.0, 700.0]);
     h.drag_by(c, c + vec2(60.0, 20.0));
@@ -2224,7 +2235,7 @@ fn redo_puts_back_notes_and_strokes() {
     let mut h = Ui1::new();
     let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
     let id = board_of(&h, wid).notes[0].id;
-    h.app.wb_tool = 0;
+    h.app.sweep.wb.tool = WbTool::Pen;
     h.settle();
     let c = on_screen(&h, [500.0, 500.0]);
     h.drag_by(c, c + vec2(80.0, 30.0));
@@ -2262,7 +2273,7 @@ fn cmd_shift_z(h: &mut Ui1) {
 }
 
 fn can_redo(h: &Ui1, wid: u64) -> bool {
-    h.app.sweep.wb_redo.iter().any(|u| u.0 == wid)
+    h.app.sweep.wb.redo.iter().any(|u| u.0 == wid)
 }
 
 /// A shape just put down (or added by a +) is ready to type in, and a drag
@@ -2278,7 +2289,7 @@ fn a_shape_being_typed_in_moves_with_a_drag() {
     h.click_at(on_screen(&h, [200.0, 200.0]));
     h.type_text("Plan");
     let s0 = board_of(&h, wid).shapes[0].clone();
-    assert!(h.app.sweep.wb_edit.is_some(), "typing in it");
+    assert!(h.app.sweep.wb.edit.is_some(), "typing in it");
     // from its top left, away from the text in the middle
     let at = on_screen(&h, [s0.pos[0] + 15.0, s0.pos[1] + 12.0]);
     h.drag_by(at, at + vec2(100.0, 40.0));
@@ -2286,7 +2297,7 @@ fn a_shape_being_typed_in_moves_with_a_drag() {
     assert_eq!(s1.pos, [s0.pos[0] + 100.0, s0.pos[1] + 40.0]);
     assert_eq!(s1.text, "Plan");
     assert_eq!(
-        h.app.sweep.wb_sel,
+        h.app.sweep.wb.sel,
         Some((wid, crate::app::more::WbSel::Shape(s0.id))),
         "still picked"
     );
@@ -2296,7 +2307,7 @@ fn a_shape_being_typed_in_moves_with_a_drag() {
     // the same for one a + added
     h.click("Add shape right");
     let s2 = board_of(&h, wid).shapes[1].clone();
-    assert!(h.app.sweep.wb_edit.is_some_and(|e| e.1 == s2.id));
+    assert!(h.app.sweep.wb.edit.is_some_and(|e| e.1 == s2.id));
     let at = on_screen(&h, [s2.pos[0] + 15.0, s2.pos[1] + 12.0]);
     h.drag_by(at, at + vec2(0.0, 80.0));
     assert_eq!(

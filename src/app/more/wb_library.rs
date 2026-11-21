@@ -366,7 +366,7 @@ impl App {
         let Some(w) = self.data.extra.whiteboards.iter_mut().find(|w| w.id == wid) else {
             return;
         };
-        if let Some(n) = self.sweep.wb_new.as_mut().filter(|n| n.id == wid) {
+        if let Some(n) = self.sweep.wb.new.as_mut().filter(|n| n.id == wid) {
             if n.name == w.name {
                 // made in the language of the person making it, like a new task's name
                 w.name = tr(name).to_string();
@@ -410,7 +410,8 @@ impl App {
         // Undo takes it back, as anything else added to the board
         if !sids.is_empty() {
             self.sweep
-                .wb_did(wid, super::whiteboard::WbUndo::Added(sids, lids));
+                .wb
+                .did(wid, super::whiteboard::WbUndo::Added(sids, lids));
         }
         self.dirty = true;
     }
@@ -715,12 +716,12 @@ impl App {
             self.dirty = true;
         }
         if let Some(id) = open {
-            self.wb_open = Some(id);
+            self.sweep.wb.open = Some(id);
         }
         if let Some(name) = make {
             self.new_whiteboard();
             if name != "Start from scratch" {
-                if let Some(id) = self.wb_open {
+                if let Some(id) = self.sweep.wb.open {
                     self.wb_fill_template(id, name);
                 }
             }
@@ -760,10 +761,11 @@ impl App {
                 },
             );
         }
-        let open = self.wb_open;
+        let open = self.sweep.wb.open;
         let lit = self
             .sweep
-            .wb_new
+            .wb
+            .new
             .as_mut()
             .map(|n| (n.id, *n.since.get_or_insert(now)));
         let mut pick = None;
@@ -821,7 +823,7 @@ impl App {
             }
         }
         if let Some(id) = pick {
-            self.wb_open = Some(id);
+            self.sweep.wb.open = Some(id);
         }
     }
 }

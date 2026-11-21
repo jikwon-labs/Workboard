@@ -520,7 +520,7 @@ impl App {
         let item = match self.section {
             Section::Chat => self.chat.open,
             Section::Docs => self.doc_open,
-            Section::Whiteboards => self.wb_open,
+            Section::Whiteboards => self.sweep.wb.open,
             Section::Forms => self.form_open,
             Section::Dashboards => self.dash_open,
             _ => None,
@@ -578,7 +578,7 @@ impl App {
                 self.chat.open = s.item;
             }
             Section::Docs => self.doc_open = s.item,
-            Section::Whiteboards => self.wb_open = s.item,
+            Section::Whiteboards => self.sweep.wb.open = s.item,
             Section::Forms => self.form_open = s.item,
             Section::Dashboards => self.dash_open = s.item,
             _ => {}

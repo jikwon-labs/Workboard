@@ -981,7 +981,7 @@ impl App {
         });
         // shown as just made: lit in the sidebar, the name ready to type
         // over, and a card in the middle of the empty board
-        self.sweep.wb_new = Some(crate::app::more::WbNew {
+        self.sweep.wb.new = Some(crate::app::more::WbNew {
             id,
             since: None,
             focus: true,
@@ -990,7 +990,7 @@ impl App {
             all_templates: false,
             renamed: false,
         });
-        self.wb_open = Some(id);
+        self.sweep.wb.open = Some(id);
         self.section = Section::Whiteboards;
         self.dirty = true;
     }

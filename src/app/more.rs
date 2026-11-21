@@ -35,7 +35,9 @@ pub use search::Hit;
 #[cfg(test)]
 pub(crate) use wb_shapes::line_path;
 pub use wb_shapes::{WbLineStyle, WbLink, WbSel};
-pub use whiteboard::{WbNew, WbUndo, WbView};
+#[cfg(test)]
+pub use whiteboard::WbUndo;
+pub use whiteboard::{WbNew, WbTool, WbView, WhiteboardUi};
 // for tests that place the pointer on the board
 #[cfg(test)]
 pub(crate) use whiteboard::note_fill;
@@ -43,15 +45,6 @@ pub(crate) use whiteboard::note_fill;
 pub(crate) use whiteboard::GUIDE as WB_GUIDE;
 #[cfg(test)]
 pub use whiteboard::{WB_COLORS, WB_ORIGIN};
-
-impl SweepUi {
-    /// Keeps a step I took on board `wid` for Undo. Redo can no longer
-    /// put back what Undo took there, as in any editor.
-    pub fn wb_did(&mut self, wid: u64, op: WbUndo) {
-        self.wb_undo.push((wid, op));
-        self.wb_redo.retain(|u| u.0 != wid);
-    }
-}
 
 /// Screen state of the app pages (not saved).
 #[derive(Default)]
@@ -70,35 +63,8 @@ pub struct SweepUi {
     pub search_recent: Vec<String>,
     /// A destructive button waiting for "Yes" (e.g. "wb_clear", "goal").
     pub confirm: Option<String>,
-    /// Whiteboard pen width (0 = the standard 2.5).
-    pub wb_width: f32,
-    pub wb_undo: Vec<(u64, WbUndo)>,
-    /// What the whiteboard's Redo puts back: the steps Undo took back,
-    /// newest last. A new step on that board forgets them.
-    pub wb_redo: Vec<(u64, WbUndo)>,
-    /// The pen stroke being drawn: (whiteboard, stroke id).
-    pub wb_drawing: Option<(u64, u64)>,
-    /// The note being dragged: (whiteboard, note id, where it was when the
-    /// drag began). Its place follows the pointer from there, so lining up
-    /// with another note can let go again as the pointer moves on.
-    pub wb_note_drag: Option<(u64, u64, [f32; 2])>,
-    /// Each whiteboard's pan and zoom on screen (not saved).
-    pub wb_view: HashMap<u64, WbView>,
-    /// The whiteboard just made here, shown as new for a moment.
-    pub wb_new: Option<WbNew>,
-    /// The shape or line the Select tool has picked: (whiteboard, pick).
-    pub wb_sel: Option<(u64, WbSel)>,
-    /// The shape being typed in: (whiteboard, shape, still to take the focus).
-    pub wb_edit: Option<(u64, u64, bool)>,
-    /// The Shape tool's shape (in `SHAPE_KINDS`).
-    pub wb_kind: usize,
-    /// How the Line tool draws.
-    pub wb_line_style: WbLineStyle,
-    /// The line being dragged out with the Line tool.
-    pub wb_link: Option<WbLink>,
-    /// Where the whiteboard's floating bars were on screen last frame: a
-    /// middle-button drag that starts on one doesn't move the board.
-    pub wb_bars: Vec<egui::Rect>,
+    /// The whiteboard pages.
+    pub wb: WhiteboardUi,
     /// The form `form_fill` holds answers for.
     pub form_for: Option<u64>,
     pub form_error: Option<String>,
@@ -1052,8 +1018,8 @@ impl App {
             });
         }
         if kind == "whiteboard" {
-            self.sweep.wb_undo.retain(|u| u.0 != id);
-            self.sweep.wb_redo.retain(|u| u.0 != id);
+            self.sweep.wb.undo.retain(|u| u.0 != id);
+            self.sweep.wb.redo.retain(|u| u.0 != id);
         }
         let x = &mut self.data.extra;
         match kind {
@@ -1067,8 +1033,8 @@ impl App {
             "whiteboard" => {
                 x.whiteboards.retain(|w| w.id != id);
                 x.starred.retain(|s| s != &format!("wb:{}", id));
-                if self.wb_open == Some(id) {
-                    self.wb_open = None;
+                if self.sweep.wb.open == Some(id) {
+                    self.sweep.wb.open = None;
                 }
             }
             "form" => {

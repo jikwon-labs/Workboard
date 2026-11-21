@@ -25,14 +25,14 @@ const TOOL: f32 = 40.0;
 /// The zoom (percent) button in the zoom bar, and the whole bar.
 const PCT_W: f32 = 54.0;
 const ZOOM_W: f32 = 6.0 + BTN + PCT_W + BTN + 9.0 + BTN + 6.0;
-/// The tools, top to bottom: (`wb_tool`, icon, name).
-const TOOLS: [(u8, &str, &str); 6] = [
-    (2, "move", "Select"),
-    (0, "pen", "Pen"),
-    (3, "eraser", "Eraser"),
-    (1, "sticky", "Sticky note"),
-    (4, "shapes", "Shape"),
-    (5, "connector", "Line"),
+/// The tools, top to bottom: (tool, icon, name).
+const TOOLS: [(WbTool, &str, &str); 6] = [
+    (WbTool::Select, "move", "Select"),
+    (WbTool::Pen, "pen", "Pen"),
+    (WbTool::Eraser, "eraser", "Eraser"),
+    (WbTool::Sticky, "sticky", "Sticky note"),
+    (WbTool::Shape, "shapes", "Shape"),
+    (WbTool::Line, "connector", "Line"),
 ];
 /// The note a black pen colour makes (black paper would hide the text).
 const STICKY_FOR_BLACK: [u8; 3] = [0xf8, 0xae, 0x00];
@@ -147,7 +147,7 @@ impl App {
         let t = self.t();
         let wid = self.data.extra.whiteboards[wi].id;
         let now = ui.input(|i| i.time);
-        if let Some(n) = self.sweep.wb_new.as_mut().filter(|n| n.id == wid) {
+        if let Some(n) = self.sweep.wb.new.as_mut().filter(|n| n.id == wid) {
             n.since.get_or_insert(now);
         }
         self.wb_name_bar(ui, &t, rect, wi);
@@ -159,7 +159,7 @@ impl App {
 
     /// The "how to start" card of a board just made goes away.
     fn close_wb_start(&mut self, wid: u64) {
-        if let Some(n) = self.sweep.wb_new.as_mut().filter(|n| n.id == wid) {
+        if let Some(n) = self.sweep.wb.new.as_mut().filter(|n| n.id == wid) {
             n.start = false;
         }
     }
@@ -191,7 +191,7 @@ impl App {
         let w = name_w + rest;
         let bar = Rect::from_min_size(rect.min + vec2(EDGE, EDGE), vec2(w, BAR_H));
         card(ui, t, bar, 12.0, ui.id().with(("wb_name_bar", wid)));
-        self.sweep.wb_bars.push(bar);
+        self.sweep.wb.bars.push(bar);
 
         let nr = Rect::from_min_size(
             pos2(bar.left() + 6.0, bar.center().y - 15.0),
@@ -225,7 +225,8 @@ impl App {
         // template renamed it, while the name is still being typed)
         if let Some(n) = self
             .sweep
-            .wb_new
+            .wb
+            .new
             .as_mut()
             .filter(|n| n.id == wid && (n.focus || (n.renamed && resp.has_focus())))
         {
@@ -239,7 +240,7 @@ impl App {
                 egui::text::CCursor::new(len),
             )));
             st.store(ui.ctx(), te_id);
-        } else if let Some(n) = self.sweep.wb_new.as_mut().filter(|n| n.id == wid) {
+        } else if let Some(n) = self.sweep.wb.new.as_mut().filter(|n| n.id == wid) {
             // renamed while the name wasn't being typed: nothing to fix
             n.renamed = false;
         }
@@ -360,10 +361,10 @@ impl App {
                                     wb.shapes.clear();
                                     wb.lines.clear();
                                 }
-                                self.sweep.wb_sel = None;
-                                self.sweep.wb_edit = None;
-                                self.sweep.wb_undo.retain(|u| u.0 != wid);
-                                self.sweep.wb_redo.retain(|u| u.0 != wid);
+                                self.sweep.wb.sel = None;
+                                self.sweep.wb.edit = None;
+                                self.sweep.wb.undo.retain(|u| u.0 != wid);
+                                self.sweep.wb.redo.retain(|u| u.0 != wid);
                                 self.sweep.confirm = None;
                                 self.dirty = true;
                                 close_popup(ui);
@@ -383,7 +384,7 @@ impl App {
         })
         .clicked()
         {
-            self.sweep.wb_view.remove(&wid);
+            self.sweep.wb.view.remove(&wid);
             close_popup(ui);
         }
         if menu_row_named(ui, t, "Clear board", tr("Clear board"), false, |p, c| {
@@ -415,8 +416,8 @@ impl App {
             vec2(w, BAR_H),
         );
         card(ui, t, bar, 12.0, ui.id().with(("wb_zoom_bar", wid)));
-        self.sweep.wb_bars.push(bar);
-        let mut view = self.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+        self.sweep.wb.bars.push(bar);
+        let mut view = self.sweep.wb.view.get(&wid).copied().unwrap_or_default();
         let before = view;
         let y = bar.center().y - BTN / 2.0;
         let mut x = bar.left() + 6.0;
@@ -524,11 +525,11 @@ impl App {
         let top = (rect.center().y - h / 2.0).max(rect.top() + EDGE + BAR_H + 12.0);
         let bar = Rect::from_min_size(pos2(rect.left() + EDGE, top), vec2(TOOL + 12.0, h));
         card(ui, t, bar, 14.0, ui.id().with(("wb_tool_bar", wid)));
-        self.sweep.wb_bars.push(bar);
+        self.sweep.wb.bars.push(bar);
         let mut y = bar.top() + 6.0;
         for (tool, icon, name) in TOOLS {
             let r = Rect::from_min_size(pos2(bar.left() + 6.0, y), vec2(TOOL, TOOL));
-            let on = self.wb_tool == tool;
+            let on = self.sweep.wb.tool == tool;
             if bar_button(
                 ui,
                 t,
@@ -544,9 +545,9 @@ impl App {
             )
             .clicked()
             {
-                self.wb_tool = tool;
-                self.sweep.wb_sel = None;
-                self.sweep.wb_edit = None;
+                self.sweep.wb.tool = tool;
+                self.sweep.wb.sel = None;
+                self.sweep.wb.edit = None;
                 self.close_wb_start(wid);
             }
             y += TOOL + 4.0;
@@ -557,7 +558,7 @@ impl App {
             Stroke::new(1.0_f32, t.border),
         );
         y += 9.0;
-        let can_undo = self.sweep.wb_undo.iter().any(|u| u.0 == wid);
+        let can_undo = self.sweep.wb.undo.iter().any(|u| u.0 == wid);
         let r = Rect::from_min_size(pos2(bar.left() + 6.0, y), vec2(TOOL, TOOL));
         let tip = format!("{}  {}", tr("Undo"), crate::os::keys("\u{2318}Z"));
         if bar_button(
@@ -578,7 +579,7 @@ impl App {
             self.wb_undo(wid);
         }
         y += TOOL + 4.0;
-        let can_redo = self.sweep.wb_redo.iter().any(|u| u.0 == wid);
+        let can_redo = self.sweep.wb.redo.iter().any(|u| u.0 == wid);
         let r = Rect::from_min_size(pos2(bar.left() + 6.0, y), vec2(TOOL, TOOL));
         let redo_keys = if cfg!(target_os = "macos") {
             crate::os::keys("\u{2318}\u{21E7}Z")
@@ -615,7 +616,7 @@ impl App {
         const SW: f32 = 30.0;
         const SEP: f32 = 17.0;
         const SLIDER: f32 = 104.0;
-        let tool = self.wb_tool;
+        let tool = self.sweep.wb.tool;
         let name = TOOLS.iter().find(|x| x.0 == tool).map_or("Pen", |x| x.2);
         let p = ui.painter().clone();
         let label = p.layout_no_wrap(
@@ -624,24 +625,32 @@ impl App {
             t.text,
         );
         let swatches: &[[u8; 3]] = match tool {
-            0 | 4 | 5 => &WB_COLORS,
-            1 => &WB_COLORS[1..],
+            WbTool::Pen | WbTool::Shape | WbTool::Line => &WB_COLORS,
+            WbTool::Sticky => &WB_COLORS[1..],
             _ => &[],
         };
-        let kinds = if tool == 4 { SHAPE_KINDS.len() } else { 0 };
-        let toggles = if tool == 5 { STYLE_TOGGLES.len() } else { 0 };
+        let kinds = if tool == WbTool::Shape {
+            SHAPE_KINDS.len()
+        } else {
+            0
+        };
+        let toggles = if tool == WbTool::Line {
+            STYLE_TOGGLES.len()
+        } else {
+            0
+        };
         let hint = match tool {
-            1 => Some(tr("Click the board to add a note")),
-            2 => Some(tr(
+            WbTool::Sticky => Some(tr("Click the board to add a note")),
+            WbTool::Select => Some(tr(
                 "Click a shape to change it, drag notes and shapes to move them",
             )),
-            3 => Some(tr("Click or drag over a stroke to erase it")),
-            4 => Some(tr("Click the board to put it there")),
-            5 => Some(tr("Drag from one shape to another")),
-            _ => None,
+            WbTool::Eraser => Some(tr("Click or drag over a stroke to erase it")),
+            WbTool::Shape => Some(tr("Click the board to put it there")),
+            WbTool::Line => Some(tr("Drag from one shape to another")),
+            WbTool::Pen => None,
         }
         .map(|h| p.layout_no_wrap(h.to_string(), FontId::proportional(13.0), t.text2));
-        let width_label = (tool == 0).then(|| {
+        let width_label = (tool == WbTool::Pen).then(|| {
             p.layout_no_wrap(tr("Width").to_string(), FontId::proportional(13.0), t.text2)
         });
 
@@ -678,7 +687,7 @@ impl App {
             vec2(w, OPTIONS_H),
         );
         card(ui, t, bar, 14.0, ui.id().with("wb_tool_options"));
-        self.sweep.wb_bars.push(bar);
+        self.sweep.wb.bars.push(bar);
         let cy = bar.center().y;
         let mut x = bar.left() + 16.0;
         p.galley(pos2(x, cy - label.size().y / 2.0), label.clone(), t.text);
@@ -703,11 +712,11 @@ impl App {
         };
         if kinds > 0 {
             for (i, (kind, name, _)) in SHAPE_KINDS.iter().enumerate() {
-                let on = self.sweep.wb_kind == i;
+                let on = self.sweep.wb.kind == i;
                 let (c, resp) = pic_button(x, ui.id().with(("wb_kind", i)), name, on);
                 paint_kind_icon(&p, kind, c, if on { t.primary } else { t.text2 });
                 if resp.on_hover_text(tr(name)).clicked() {
-                    self.sweep.wb_kind = i;
+                    self.sweep.wb.kind = i;
                 }
                 x += SW;
             }
@@ -715,22 +724,22 @@ impl App {
             x += SEP;
         }
 
-        let chosen = if tool == 1 {
-            sticky_color(self.wb_color)
+        let chosen = if tool == WbTool::Sticky {
+            sticky_color(self.sweep.wb.color)
         } else {
-            self.wb_color
+            self.sweep.wb.color
         };
         for (i, c) in swatches.iter().enumerate() {
             let r = Rect::from_min_size(pos2(x, cy - SW / 2.0), vec2(SW, SW));
             let resp = ui.interact(r, ui.id().with(("wb_colour", tool, i)), Sense::click());
             name_it(&resp, &format!("Colour {}", i + 1));
-            let fill = if tool == 1 {
+            let fill = if tool == WbTool::Sticky {
                 note_fill(t, *c)
             } else {
                 ink(t, *c)
             };
             p.circle_filled(r.center(), 9.0, fill);
-            if tool == 1 {
+            if tool == WbTool::Sticky {
                 // pale paper still shows against the bar
                 p.circle_stroke(r.center(), 9.0, Stroke::new(1.0_f32, rgb(*c)));
             }
@@ -745,7 +754,7 @@ impl App {
                 );
             }
             if resp.clicked() {
-                self.wb_color = *c;
+                self.sweep.wb.color = *c;
             }
             x += SW;
         }
@@ -754,12 +763,12 @@ impl App {
             bar_sep(&p, t, x + SEP / 2.0, cy);
             x += SEP;
             for (k, (name, tip)) in STYLE_TOGGLES.iter().enumerate() {
-                let st = self.sweep.wb_line_style;
+                let st = self.sweep.wb.line_style;
                 let on = [st.elbow, st.dashed, st.arrow][k];
                 let (c, resp) = pic_button(x, ui.id().with(("wb_line_style", k)), name, on);
                 paint_style_icon(&p, k, c, if on { t.primary } else { t.text2 });
                 if resp.on_hover_text(tr(tip)).clicked() {
-                    let st = &mut self.sweep.wb_line_style;
+                    let st = &mut self.sweep.wb.line_style;
                     match k {
                         0 => st.elbow = !st.elbow,
                         1 => st.dashed = !st.dashed,
@@ -790,7 +799,7 @@ impl App {
                 v.widgets.active.fg_stroke = Stroke::new(2.0_f32, t.primary);
                 v.selection.bg_fill = t.primary;
                 let r = ui.add(
-                    egui::Slider::new(&mut self.sweep.wb_width, 1.0..=16.0)
+                    egui::Slider::new(&mut self.sweep.wb.width, 1.0..=16.0)
                         .show_value(false)
                         .step_by(0.5)
                         .trailing_fill(true),
@@ -801,16 +810,16 @@ impl App {
             p.text(
                 pos2(x, cy),
                 Align2::LEFT_CENTER,
-                format!("{:.1}", self.sweep.wb_width),
+                format!("{:.1}", self.sweep.wb.width),
                 FontId::proportional(13.0),
                 t.text,
             );
             x += 30.0;
             // how thick the line comes out, in its colour
-            let lw = self.sweep.wb_width.min(12.0);
+            let lw = self.sweep.wb.width.min(12.0);
             p.line_segment(
                 [pos2(x + 2.0, cy), pos2(x + 22.0, cy)],
-                Stroke::new(lw, ink(t, self.wb_color)),
+                Stroke::new(lw, ink(t, self.sweep.wb.color)),
             );
         }
         if let Some(g) = hint {
@@ -827,7 +836,7 @@ impl App {
     fn wb_start_card(&mut self, ui: &mut Ui, t: &Theme, rect: Rect, wi: usize, now: f64) {
         let w = &self.data.extra.whiteboards[wi];
         let wid = w.id;
-        let Some(new) = self.sweep.wb_new.clone().filter(|n| n.id == wid && n.start) else {
+        let Some(new) = self.sweep.wb.new.clone().filter(|n| n.id == wid && n.start) else {
             return;
         };
         // anything on it means it has started
@@ -918,7 +927,7 @@ impl App {
         );
         c.multiply_opacity(e);
         card(&c, t, cr, 16.0, c.id().with("card"));
-        self.sweep.wb_bars.push(cr);
+        self.sweep.wb.bars.push(cr);
         let p = c.painter().clone();
         let cx = cr.center().x;
         let mut y = cr.top() + 24.0;
@@ -946,8 +955,8 @@ impl App {
 
         let bw = (cw - 48.0 - 10.0) / 2.0;
         for (k, (icon, name, tool)) in [
-            ("pen", "Draw with the pen", 0u8),
-            ("sticky", "Add sticky notes", 1),
+            ("pen", "Draw with the pen", WbTool::Pen),
+            ("sticky", "Add sticky notes", WbTool::Sticky),
         ]
         .into_iter()
         .enumerate()
@@ -985,7 +994,7 @@ impl App {
                 c.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             if resp.clicked() {
-                self.wb_tool = tool;
+                self.sweep.wb.tool = tool;
                 self.close_wb_start(wid);
             }
         }
@@ -1018,7 +1027,7 @@ impl App {
                     c.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 if resp.clicked() {
-                    if let Some(n) = self.sweep.wb_new.as_mut().filter(|n| n.id == wid) {
+                    if let Some(n) = self.sweep.wb.new.as_mut().filter(|n| n.id == wid) {
                         n.all_templates = true;
                     }
                 }
@@ -1054,7 +1063,7 @@ impl App {
             }
             if resp.clicked() {
                 self.wb_fill_template(wid, name);
-                self.wb_tool = 2;
+                self.sweep.wb.tool = WbTool::Select;
                 self.close_wb_start(wid);
             }
         }

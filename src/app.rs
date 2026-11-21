@@ -535,9 +535,6 @@ pub struct App {
     ws_places: HashMap<String, &'static str>,
     create_text: String,
     new_message_open: bool,
-    wb_open: Option<u64>,
-    wb_tool: u8,
-    wb_color: [u8; 3],
     form_open: Option<u64>,
     form_fill: HashMap<usize, String>,
     /// The open form's tab: Edit, Fill out or Answers.
@@ -1072,9 +1069,6 @@ impl App {
             ws_places: HashMap::new(),
             create_text: String::new(),
             new_message_open: false,
-            wb_open: None,
-            wb_tool: 0,
-            wb_color: [32, 32, 32],
             form_open: None,
             form_fill: HashMap::new(),
             form_tab: more::FormTab::Edit,
@@ -1174,13 +1168,13 @@ impl App {
             };
             for m in made {
                 app.new_whiteboard();
-                if let Some(id) = app.wb_open.filter(|_| *m != "new") {
+                if let Some(id) = app.sweep.wb.open.filter(|_| *m != "new") {
                     app.wb_fill_template(id, m);
                 }
             }
             if w == "list" {
-                app.wb_open = None;
-                app.sweep.wb_new = None;
+                app.sweep.wb.open = None;
+                app.sweep.wb.new = None;
             }
         }
         // --form home / edit / fill / answers: the Forms pages with forms in

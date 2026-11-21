@@ -1246,10 +1246,12 @@ impl App {
         // list, not an empty page
         let boards = &self.data.extra.whiteboards;
         if self
-            .wb_open
+            .sweep
+            .wb
+            .open
             .is_some_and(|id| !boards.iter().any(|w| w.id == id))
         {
-            self.wb_open = None;
+            self.sweep.wb.open = None;
         }
         let n = |f: u8| {
             let boards = &self.data.extra.whiteboards;
@@ -1275,7 +1277,12 @@ impl App {
                 count: n(2),
             },
         ];
-        let sel = self.wb_open.is_none().then_some(self.hub_filter.min(2));
+        let sel = self
+            .sweep
+            .wb
+            .open
+            .is_none()
+            .then_some(self.hub_filter.min(2));
         let (clicked, plus) = self.hub_sidebar(
             ui,
             HubSide {
@@ -1290,7 +1297,7 @@ impl App {
         );
         if let Some(i) = clicked {
             self.hub_filter = i;
-            self.wb_open = None;
+            self.sweep.wb.open = None;
         }
         if plus {
             self.new_whiteboard();
@@ -1298,7 +1305,7 @@ impl App {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
             .show_inside(ui, |ui| {
-                if self.wb_open.is_some() {
+                if self.sweep.wb.open.is_some() {
                     self.whiteboard_canvas(ui);
                 } else {
                     self.wb_library(ui);

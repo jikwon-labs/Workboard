@@ -427,7 +427,7 @@ impl App {
                 self.channel_panel = 0;
             }
             Hit::Whiteboard(id) => {
-                self.wb_open = Some(id);
+                self.sweep.wb.open = Some(id);
                 self.section = Section::Whiteboards;
             }
             Hit::Form(id) => {

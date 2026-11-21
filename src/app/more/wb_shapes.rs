@@ -460,11 +460,12 @@ impl App {
         let wid = self.data.extra.whiteboards[wi].id;
         let p = ui.painter_at(rect);
         let lw = (2.0 * z).max(1.0);
-        let selecting = self.wb_tool == 2 && !space;
+        let selecting = self.sweep.wb.tool == WbTool::Select && !space;
         let picked = self
             .sweep
-            .wb_sel
-            .filter(|s| s.0 == wid && self.wb_tool == 2)
+            .wb
+            .sel
+            .filter(|s| s.0 == wid && self.sweep.wb.tool == WbTool::Select)
             .map(|s| s.1);
         let hover = ui
             .input(|i| i.pointer.hover_pos())
@@ -489,18 +490,18 @@ impl App {
         }
         // the line being dragged out with the Line tool, and the shape it
         // will be tied to
-        if let Some(link) = self.sweep.wb_link.filter(|k| k.wid == wid) {
+        if let Some(link) = self.sweep.wb.link.filter(|k| k.wid == wid) {
             if let Some(at) = ui.input(|i| i.pointer.interact_pos()) {
                 let wb = &self.data.extra.whiteboards[wi];
                 let b = view.to_board(origin, at);
                 let to = shape_at(&wb.shapes, bpos(b)).filter(|&s| s != link.from);
-                let style = self.sweep.wb_line_style;
+                let style = self.sweep.wb.line_style;
                 let l = WbLine {
                     from: link.from,
                     to: to.unwrap_or(0),
                     a: link.a,
                     b,
-                    color: self.wb_color,
+                    color: self.sweep.wb.color,
                     elbow: style.elbow,
                     dashed: style.dashed,
                     arrow: style.arrow,
@@ -531,7 +532,7 @@ impl App {
         }
 
         // (a shape a teammate took away meanwhile is not typed in)
-        let mut editing = self.sweep.wb_edit.filter(|e| {
+        let mut editing = self.sweep.wb.edit.filter(|e| {
             e.0 == wid
                 && self.data.extra.whiteboards[wi]
                     .shapes
@@ -638,14 +639,14 @@ impl App {
             self.dirty = true;
         }
         if let Some(old) = grab {
-            self.sweep.wb_did(wid, WbUndo::ShapeWas(old));
+            self.sweep.wb.did(wid, WbUndo::ShapeWas(old));
         }
-        self.sweep.wb_edit = editing.filter(|e| e.1 != 0);
+        self.sweep.wb.edit = editing.filter(|e| e.1 != 0);
         if let Some(id) = pick {
-            self.sweep.wb_sel = Some((wid, WbSel::Shape(id)));
+            self.sweep.wb.sel = Some((wid, WbSel::Shape(id)));
         }
         if let Some(id) = edit {
-            self.sweep.wb_edit = Some((wid, id, true));
+            self.sweep.wb.edit = Some((wid, id, true));
         }
     }
 
@@ -663,10 +664,10 @@ impl App {
         wi: usize,
     ) {
         let wid = self.data.extra.whiteboards[wi].id;
-        if self.wb_tool != 2 {
+        if self.sweep.wb.tool != WbTool::Select {
             return;
         }
-        let Some(sel) = self.sweep.wb_sel.filter(|s| s.0 == wid).map(|s| s.1) else {
+        let Some(sel) = self.sweep.wb.sel.filter(|s| s.0 == wid).map(|s| s.1) else {
             return;
         };
         let wb = &self.data.extra.whiteboards[wi];
@@ -676,7 +677,7 @@ impl App {
         };
         // taken away meanwhile (Undo, or a teammate)
         if !there {
-            self.sweep.wb_sel = None;
+            self.sweep.wb.sel = None;
             return;
         }
         // the keys are for a dialog or menu open over the board (a Delete
@@ -698,11 +699,11 @@ impl App {
                 return;
             }
             if esc {
-                self.sweep.wb_sel = None;
+                self.sweep.wb.sel = None;
                 return;
             }
             if let (true, WbSel::Shape(id)) = (enter, sel) {
-                self.sweep.wb_edit = Some((wid, id, true));
+                self.sweep.wb.edit = Some((wid, id, true));
             }
         }
         match sel {
@@ -833,7 +834,7 @@ impl App {
                 });
             }
             if h.drag_started_by(egui::PointerButton::Primary) {
-                self.sweep.wb_did(wid, WbUndo::ShapeWas(s.clone()));
+                self.sweep.wb.did(wid, WbUndo::ShapeWas(s.clone()));
             }
             if h.dragged_by(egui::PointerButton::Primary) {
                 if let Some(at) = h.interact_pointer_pos() {
@@ -929,7 +930,7 @@ impl App {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
             }
             if h.drag_started_by(egui::PointerButton::Primary) {
-                self.sweep.wb_did(wid, WbUndo::LineWas(l.clone()));
+                self.sweep.wb.did(wid, WbUndo::LineWas(l.clone()));
             }
             if h.dragged_by(egui::PointerButton::Primary) {
                 if let Some(at) = h.interact_pointer_pos() {
@@ -1020,7 +1021,7 @@ impl App {
         top = top.min(lowest).max(rect.top() + 8.0);
         let bar = Rect::from_min_size(pos2(left, top), vec2(w, H));
         card(ui, t, bar, 10.0, ui.id().with(("wb_pick_bar", wid)));
-        self.sweep.wb_bars.push(bar);
+        self.sweep.wb.bars.push(bar);
         let p = ui.painter().clone();
         let cy = bar.center().y;
         let mut x = bar.left() + 8.0;
@@ -1100,7 +1101,7 @@ impl App {
             .iter_mut()
             .find(|s| s.id == id)
         {
-            self.sweep.wb_did(wid, WbUndo::ShapeWas(s.clone()));
+            self.sweep.wb.did(wid, WbUndo::ShapeWas(s.clone()));
             f(s);
             self.dirty = true;
         }
@@ -1113,10 +1114,10 @@ impl App {
             .iter_mut()
             .find(|l| l.id == id)
         {
-            self.sweep.wb_did(wid, WbUndo::LineWas(l.clone()));
+            self.sweep.wb.did(wid, WbUndo::LineWas(l.clone()));
             f(l);
             // what the next line drawn with the Line tool looks like
-            self.sweep.wb_line_style = WbLineStyle {
+            self.sweep.wb.line_style = WbLineStyle {
                 elbow: l.elbow,
                 dashed: l.dashed,
                 arrow: l.arrow,
@@ -1169,16 +1170,17 @@ impl App {
             arrow: like.arrow,
         });
         self.sweep
-            .wb_did(wid, WbUndo::Added(vec![new_id], vec![line_id]));
-        self.sweep.wb_sel = Some((wid, WbSel::Shape(new_id)));
-        self.sweep.wb_edit = Some((wid, new_id, true));
+            .wb
+            .did(wid, WbUndo::Added(vec![new_id], vec![line_id]));
+        self.sweep.wb.sel = Some((wid, WbSel::Shape(new_id)));
+        self.sweep.wb.edit = Some((wid, new_id, true));
         self.dirty = true;
     }
 
     /// The Shape tool's click: the chosen shape, centred where it was
     /// clicked, picked and ready to type in (the tool goes back to Select).
     pub(crate) fn wb_place_shape(&mut self, wid: u64, wi: usize, at: [f32; 2]) {
-        let (kind, _, size) = SHAPE_KINDS[self.sweep.wb_kind.min(SHAPE_KINDS.len() - 1)];
+        let (kind, _, size) = SHAPE_KINDS[self.sweep.wb.kind.min(SHAPE_KINDS.len() - 1)];
         let id = self.data.new_id();
         self.data.extra.whiteboards[wi].shapes.push(WbShape {
             id,
@@ -1186,13 +1188,13 @@ impl App {
             pos: [at[0] - size[0] / 2.0, at[1] - size[1] / 2.0],
             size,
             text: String::new(),
-            color: self.wb_color,
+            color: self.sweep.wb.color,
             filled: false,
         });
-        self.sweep.wb_did(wid, WbUndo::Added(vec![id], vec![]));
-        self.wb_tool = 2;
-        self.sweep.wb_sel = Some((wid, WbSel::Shape(id)));
-        self.sweep.wb_edit = Some((wid, id, true));
+        self.sweep.wb.did(wid, WbUndo::Added(vec![id], vec![]));
+        self.sweep.wb.tool = WbTool::Select;
+        self.sweep.wb.sel = Some((wid, WbSel::Shape(id)));
+        self.sweep.wb.edit = Some((wid, id, true));
         self.dirty = true;
     }
 
@@ -1209,12 +1211,12 @@ impl App {
         if resp.drag_started() {
             let a = press.unwrap_or(at);
             let from = shape_at(&self.data.extra.whiteboards[wi].shapes, bpos(a)).unwrap_or(0);
-            self.sweep.wb_link = Some(WbLink { wid, from, a });
+            self.sweep.wb.link = Some(WbLink { wid, from, a });
         }
         if !resp.drag_stopped() {
             return;
         }
-        let Some(link) = self.sweep.wb_link.take().filter(|k| k.wid == wid) else {
+        let Some(link) = self.sweep.wb.link.take().filter(|k| k.wid == wid) else {
             return;
         };
         let on = shape_at(&self.data.extra.whiteboards[wi].shapes, bpos(at));
@@ -1228,19 +1230,19 @@ impl App {
             return;
         }
         let id = self.data.new_id();
-        let style = self.sweep.wb_line_style;
+        let style = self.sweep.wb.line_style;
         self.data.extra.whiteboards[wi].lines.push(WbLine {
             id,
             from: link.from,
             to,
             a: link.a,
             b: at,
-            color: self.wb_color,
+            color: self.sweep.wb.color,
             elbow: style.elbow,
             dashed: style.dashed,
             arrow: style.arrow,
         });
-        self.sweep.wb_did(wid, WbUndo::Added(vec![], vec![id]));
+        self.sweep.wb.did(wid, WbUndo::Added(vec![], vec![id]));
         self.dirty = true;
     }
 
@@ -1262,17 +1264,17 @@ impl App {
                 .collect();
             dist_to_path(&pts, at) < 6.0
         });
-        self.sweep.wb_sel = hit.map(|l| (wid, WbSel::Line(l.id)));
-        self.sweep.wb_edit = None;
+        self.sweep.wb.sel = hit.map(|l| (wid, WbSel::Line(l.id)));
+        self.sweep.wb.edit = None;
     }
 
     /// Deletes the pick: a shape takes the lines tied to it along. Undo
     /// brings them back.
     pub(crate) fn wb_delete_pick(&mut self, wid: u64) {
-        let Some((_, sel)) = self.sweep.wb_sel.take().filter(|s| s.0 == wid) else {
+        let Some((_, sel)) = self.sweep.wb.sel.take().filter(|s| s.0 == wid) else {
             return;
         };
-        self.sweep.wb_edit = None;
+        self.sweep.wb.edit = None;
         let Some(wb) = self.data.extra.whiteboards.iter_mut().find(|w| w.id == wid) else {
             return;
         };
@@ -1299,7 +1301,7 @@ impl App {
             }
         }
         if !shapes.is_empty() || !lines.is_empty() {
-            self.sweep.wb_did(wid, WbUndo::Removed(shapes, lines));
+            self.sweep.wb.did(wid, WbUndo::Removed(shapes, lines));
             self.dirty = true;
         }
     }

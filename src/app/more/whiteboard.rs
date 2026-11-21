@@ -104,6 +104,88 @@ impl Default for WbView {
     }
 }
 
+/// A whiteboard tool, chosen in the tool bar down the left.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum WbTool {
+    #[default]
+    Pen,
+    Sticky,
+    Select,
+    Eraser,
+    Shape,
+    Line,
+}
+
+/// Screen state of the whiteboard pages (not saved).
+pub struct WhiteboardUi {
+    /// The board open on the page.
+    pub open: Option<u64>,
+    pub tool: WbTool,
+    /// The pen's (and a new note's) colour.
+    pub color: [u8; 3],
+    /// Pen width (0 = the standard 2.5).
+    pub width: f32,
+    pub undo: Vec<(u64, WbUndo)>,
+    /// What Redo puts back: the steps Undo took back, newest last. A new
+    /// step on that board forgets them.
+    pub redo: Vec<(u64, WbUndo)>,
+    /// The pen stroke being drawn: (whiteboard, stroke id).
+    pub drawing: Option<(u64, u64)>,
+    /// The note being dragged: (whiteboard, note id, where it was when the
+    /// drag began). Its place follows the pointer from there, so lining up
+    /// with another note can let go again as the pointer moves on.
+    pub note_drag: Option<(u64, u64, [f32; 2])>,
+    /// Each whiteboard's pan and zoom on screen.
+    pub view: HashMap<u64, WbView>,
+    /// The whiteboard just made here, shown as new for a moment.
+    pub new: Option<WbNew>,
+    /// The shape or line the Select tool has picked: (whiteboard, pick).
+    pub sel: Option<(u64, WbSel)>,
+    /// The shape being typed in: (whiteboard, shape, still to take the focus).
+    pub edit: Option<(u64, u64, bool)>,
+    /// The Shape tool's shape (in `SHAPE_KINDS`).
+    pub kind: usize,
+    /// How the Line tool draws.
+    pub line_style: WbLineStyle,
+    /// The line being dragged out with the Line tool.
+    pub link: Option<WbLink>,
+    /// Where the floating bars were on screen last frame: a middle-button
+    /// drag that starts on one doesn't move the board.
+    pub bars: Vec<egui::Rect>,
+}
+
+impl Default for WhiteboardUi {
+    fn default() -> Self {
+        WhiteboardUi {
+            open: None,
+            tool: WbTool::default(),
+            color: WB_COLORS[0],
+            width: 0.0,
+            undo: vec![],
+            redo: vec![],
+            drawing: None,
+            note_drag: None,
+            view: HashMap::new(),
+            new: None,
+            sel: None,
+            edit: None,
+            kind: 0,
+            line_style: WbLineStyle::default(),
+            link: None,
+            bars: vec![],
+        }
+    }
+}
+
+impl WhiteboardUi {
+    /// Keeps a step I took on board `wid` for Undo. Redo can no longer
+    /// put back what Undo took there, as in any editor.
+    pub fn did(&mut self, wid: u64, op: WbUndo) {
+        self.undo.push((wid, op));
+        self.redo.retain(|u| u.0 != wid);
+    }
+}
+
 impl WbView {
     pub const MIN_ZOOM: f32 = 0.2;
     pub const MAX_ZOOM: f32 = 4.0;
@@ -296,7 +378,9 @@ impl App {
             .frame(egui::Frame::new().fill(t.column_bg))
             .show_inside(ui, |ui| {
                 let Some(wi) = self
-                    .wb_open
+                    .sweep
+                    .wb
+                    .open
                     .and_then(|id| self.data.extra.whiteboards.iter().position(|w| w.id == id))
                 else {
                     ui.label(
@@ -333,8 +417,8 @@ impl App {
                         self.wb_redo(wid);
                     }
                 }
-                if self.sweep.wb_width <= 0.0 {
-                    self.sweep.wb_width = 2.5;
+                if self.sweep.wb.width <= 0.0 {
+                    self.sweep.wb.width = 2.5;
                 }
                 // the board fills the whole page; its bars float over it
                 let (rect, resp) =
@@ -344,14 +428,14 @@ impl App {
                 let origin = rect.min + WB_ORIGIN;
                 // pan and zoom: Space or middle-button drag and two-finger
                 // scroll move the view; pinch, Cmd+scroll and the buttons zoom
-                let mut view = self.sweep.wb_view.get(&wid).copied().unwrap_or_default();
+                let mut view = self.sweep.wb.view.get(&wid).copied().unwrap_or_default();
                 let space =
                     !ui.ctx().wants_keyboard_input() && ui.input(|i| i.key_down(egui::Key::Space));
                 // the middle button moves the view from wherever on the board
                 // its drag starts, a shape, a note or a handle too (which
                 // took the drag: a shape moved instead), but not from a
                 // floating bar, a menu or a dialog
-                let bars = std::mem::take(&mut self.sweep.wb_bars);
+                let bars = std::mem::take(&mut self.sweep.wb.bars);
                 let middle_down = ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
                 let middle = middle_down
                     && self.modal.is_none()
@@ -434,7 +518,7 @@ impl App {
                 // a note being dragged follows the pointer from where it was
                 // taken, lining up with the notes in view as it nears them
                 let mut guides = vec![];
-                if let Some((_, nid, start)) = self.sweep.wb_note_drag.filter(|d| d.0 == wid) {
+                if let Some((_, nid, start)) = self.sweep.wb.note_drag.filter(|d| d.0 == wid) {
                     let ni = wb.notes.iter().position(|n| n.id == nid);
                     let moved = ui.input(|i| {
                         i.pointer
@@ -473,13 +557,13 @@ impl App {
                         _ => {
                             // let go; a drag that left it where it was is
                             // nothing to undo
-                            self.sweep.wb_note_drag = None;
+                            self.sweep.wb.note_drag = None;
                             let back = ni.is_some_and(|ni| wb.notes[ni].pos == start);
                             if back
-                                && matches!(self.sweep.wb_undo.last(),
+                                && matches!(self.sweep.wb.undo.last(),
                                     Some((w, WbUndo::NoteMoved(id, _))) if *w == wid && *id == nid)
                             {
-                                self.sweep.wb_undo.pop();
+                                self.sweep.wb.undo.pop();
                             }
                         }
                     }
@@ -572,7 +656,7 @@ impl App {
                     let editing = typable && ui.memory(|m| m.has_focus(text_id));
                     let grip = Rect::from_min_size(r.min, vec2(r.width(), NOTE_GRIP * z));
                     if !space {
-                        let area = if self.wb_tool == 2 && !editing {
+                        let area = if self.sweep.wb.tool == WbTool::Select && !editing {
                             r
                         } else {
                             grip
@@ -591,7 +675,8 @@ impl App {
                         }
                         let moving = self
                             .sweep
-                            .wb_note_drag
+                            .wb
+                            .note_drag
                             .is_some_and(|d| d.0 == wid && d.1 == n.id);
                         if h.dragged() || moving {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -736,7 +821,7 @@ impl App {
                     }
                 }
                 if let Some((id, was)) = size_from {
-                    self.sweep.wb_did(wid, WbUndo::NoteResized(id, was));
+                    self.sweep.wb.did(wid, WbUndo::NoteResized(id, was));
                 }
                 if let Some((i, wh)) = size_note {
                     let size = [wh[0].clamp(100.0, 800.0), wh[1].clamp(70.0, 800.0)];
@@ -748,7 +833,7 @@ impl App {
                 if let Some((i, c)) = recolor {
                     let n = &mut wb.notes[i];
                     if n.color != c {
-                        self.sweep.wb_did(wid, WbUndo::NoteColour(n.id, n.color));
+                        self.sweep.wb.did(wid, WbUndo::NoteColour(n.id, n.color));
                         n.color = c;
                         self.dirty = true;
                     }
@@ -756,12 +841,12 @@ impl App {
                 if let Some(i) = drop_note {
                     // Undo brings it back
                     let n = wb.notes.remove(i);
-                    self.sweep.wb_did(wid, WbUndo::NoteGone(i, n));
+                    self.sweep.wb.did(wid, WbUndo::NoteGone(i, n));
                     self.dirty = true;
                 }
                 if let Some((id, at)) = move_from {
-                    self.sweep.wb_did(wid, WbUndo::NoteMoved(id, at));
-                    self.sweep.wb_note_drag = Some((wid, id, at));
+                    self.sweep.wb.did(wid, WbUndo::NoteMoved(id, at));
+                    self.sweep.wb.note_drag = Some((wid, id, at));
                     ui.ctx().request_repaint();
                 }
                 if let Some((id, len)) = type_in {
@@ -801,8 +886,8 @@ impl App {
                 if let Some(pos) = resp.interact_pointer_pos().filter(|_| primary && !space) {
                     let b = view.to_board(origin, pos);
                     let local = vec2(b[0], b[1]);
-                    match self.wb_tool {
-                        0 => {
+                    match self.sweep.wb.tool {
+                        WbTool::Pen => {
                             if resp.drag_started() {
                                 // the line starts where the button went down
                                 let start = ui
@@ -817,17 +902,17 @@ impl App {
                                 let id = self.data.new_id();
                                 self.data.extra.whiteboards[wi].strokes.push(WbStroke {
                                     id,
-                                    color: self.wb_color,
-                                    width: self.sweep.wb_width,
+                                    color: self.sweep.wb.color,
+                                    width: self.sweep.wb.width,
                                     points,
                                 });
-                                self.sweep.wb_drawing = Some((wid, id));
-                                self.sweep.wb_did(wid, WbUndo::Stroke(id));
+                                self.sweep.wb.drawing = Some((wid, id));
+                                self.sweep.wb.did(wid, WbUndo::Stroke(id));
                                 self.dirty = true;
                             } else if resp.dragged() {
                                 // the stroke being drawn, wherever a merge put
                                 // it (a teammate's strokes can come after it)
-                                let drawing = self.sweep.wb_drawing.filter(|d| d.0 == wid);
+                                let drawing = self.sweep.wb.drawing.filter(|d| d.0 == wid);
                                 if let Some(s) = drawing.and_then(|(_, sid)| {
                                     self.data.extra.whiteboards[wi]
                                         .strokes
@@ -838,21 +923,21 @@ impl App {
                                 }
                             }
                             if resp.drag_stopped() {
-                                self.sweep.wb_drawing = None;
+                                self.sweep.wb.drawing = None;
                                 self.dirty = true;
                             }
                         }
-                        1 => {
+                        WbTool::Sticky => {
                             if resp.clicked() {
                                 let id = self.data.new_id();
                                 self.data.extra.whiteboards[wi].notes.push(Sticky {
                                     id,
                                     pos: [local.x - 80.0, local.y - 60.0],
                                     text: String::new(),
-                                    color: super::wb_panels::sticky_color(self.wb_color),
+                                    color: super::wb_panels::sticky_color(self.sweep.wb.color),
                                     ..Default::default()
                                 });
-                                self.sweep.wb_did(wid, WbUndo::Note(id));
+                                self.sweep.wb.did(wid, WbUndo::Note(id));
                                 self.dirty = true;
                                 // it takes the typing, as a shape put down
                                 // does (what was typed right after went nowhere)
@@ -862,7 +947,7 @@ impl App {
                                 }
                             }
                         }
-                        3 => {
+                        WbTool::Eraser => {
                             // the eraser takes away whole strokes it touches
                             // anywhere along them, all the way the pointer
                             // went since the last frame (it only looked near
@@ -883,43 +968,50 @@ impl App {
                                 let wb = &mut self.data.extra.whiteboards[wi];
                                 while let Some(i) = wb.strokes.iter().position(hit) {
                                     let s = wb.strokes.remove(i);
-                                    self.sweep.wb_did(wid, WbUndo::StrokeGone(i, s));
+                                    self.sweep.wb.did(wid, WbUndo::StrokeGone(i, s));
                                     self.dirty = true;
                                 }
                             }
                         }
-                        2 => {
+                        WbTool::Select => {
                             if resp.clicked() {
                                 self.wb_click_board(wid, wi, origin, view, pos);
                             }
                         }
-                        4 => {
+                        WbTool::Shape => {
                             if resp.clicked() {
                                 self.wb_place_shape(wid, wi, b);
                             }
                         }
-                        5 => {
+                        WbTool::Line => {
                             let press = ui
                                 .input(|i| i.pointer.press_origin())
                                 .map(|o| view.to_board(origin, o));
                             self.wb_link_drag(&resp, wid, wi, b, press);
                         }
-                        _ => {}
                     }
                 }
                 if !resp.dragged() {
                     // a Line tool drag that ended off the board
-                    self.sweep.wb_link = None;
+                    self.sweep.wb.link = None;
                 }
                 // the pen's pointer is a pencil on the board (on a note's text
                 // it stays the I-beam, on its top strip the hand)
                 let drawing = resp.dragged_by(egui::PointerButton::Primary);
-                if self.wb_tool == 0 && !space && !panning && (resp.hovered() || drawing) {
+                if self.sweep.wb.tool == WbTool::Pen
+                    && !space
+                    && !panning
+                    && (resp.hovered() || drawing)
+                {
                     if let Some(at) = hover.filter(|q| rect.contains(*q)) {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
                         let top =
                             egui::LayerId::new(egui::Order::Tooltip, ui.id().with("wb_pencil"));
-                        paint_pencil(&ui.ctx().layer_painter(top), at, ink(&t, self.wb_color));
+                        paint_pencil(
+                            &ui.ctx().layer_painter(top),
+                            at,
+                            ink(&t, self.sweep.wb.color),
+                        );
                     }
                 }
                 // drawn last, so they sit on top of the board and take the
@@ -931,9 +1023,9 @@ impl App {
     /// Keeps a board's view, forgetting it when it is the starting one.
     pub(crate) fn set_wb_view(&mut self, wid: u64, view: WbView) {
         if view == WbView::default() {
-            self.sweep.wb_view.remove(&wid);
+            self.sweep.wb.view.remove(&wid);
         } else {
-            self.sweep.wb_view.insert(wid, view);
+            self.sweep.wb.view.insert(wid, view);
         }
     }
 
@@ -941,24 +1033,24 @@ impl App {
     /// added, deleted, moved, resized or restyled, or an erasing. Redo can
     /// put it back.
     pub(crate) fn wb_undo(&mut self, wid: u64) {
-        let Some(k) = self.sweep.wb_undo.iter().rposition(|u| u.0 == wid) else {
+        let Some(k) = self.sweep.wb.undo.iter().rposition(|u| u.0 == wid) else {
             return;
         };
-        let (_, op) = self.sweep.wb_undo.remove(k);
+        let (_, op) = self.sweep.wb.undo.remove(k);
         if let Some(back) = self.wb_apply(wid, op) {
-            self.sweep.wb_redo.push((wid, back));
+            self.sweep.wb.redo.push((wid, back));
         }
     }
 
     /// Puts back the last step Undo took back on a board; Undo can take it
     /// back again.
     pub(crate) fn wb_redo(&mut self, wid: u64) {
-        let Some(k) = self.sweep.wb_redo.iter().rposition(|u| u.0 == wid) else {
+        let Some(k) = self.sweep.wb.redo.iter().rposition(|u| u.0 == wid) else {
             return;
         };
-        let (_, op) = self.sweep.wb_redo.remove(k);
+        let (_, op) = self.sweep.wb.redo.remove(k);
         if let Some(back) = self.wb_apply(wid, op) {
-            self.sweep.wb_undo.push((wid, back));
+            self.sweep.wb.undo.push((wid, back));
         }
     }
 

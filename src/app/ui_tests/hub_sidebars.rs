@@ -209,8 +209,8 @@ fn favorites_is_a_filter_on_docs_dashboards_and_whiteboards() {
         (boards[0].id, boards[1].id)
     };
     h.app.data.extra.starred.push(format!("wb:{}", a));
-    h.app.wb_open = None;
-    h.app.sweep.wb_new = None;
+    h.app.sweep.wb.open = None;
+    h.app.sweep.wb.new = None;
     open_hub(&mut h, "Whiteboards", Section::Whiteboards);
     h.click("Favorites");
     assert_eq!(h.app.hub_filter, 2);

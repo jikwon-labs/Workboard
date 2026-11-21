@@ -1581,7 +1581,7 @@ fn whiteboard_undo_brings_back_a_deleted_note() {
     use super::more::WbUndo;
     let mut a = app();
     a.new_whiteboard();
-    let wid = a.wb_open.unwrap();
+    let wid = a.sweep.wb.open.unwrap();
     let wb = a
         .data
         .extra
@@ -1597,7 +1597,7 @@ fn whiteboard_undo_brings_back_a_deleted_note() {
         color: [1, 1, 1],
         ..Default::default()
     };
-    a.sweep.wb_undo.push((wid, WbUndo::NoteGone(0, n)));
+    a.sweep.wb.undo.push((wid, WbUndo::NoteGone(0, n)));
     a.wb_undo(wid);
     assert_eq!(
         a.data

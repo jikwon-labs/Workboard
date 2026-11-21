@@ -626,244 +626,301 @@ pub fn build(
 ) -> Result<(Value, &'static str), String> {
     let names = Names::of(copy);
     let lang_line = answer_in(lang);
-    let find_channel = |id: u64| {
-        array_at(copy, "channels")
-            .iter()
-            .find(|c| u64_field(c, "id") == Some(id))
-            .ok_or_else(|| AI_NOT_FOUND.to_string())
-    };
     match ask {
         AiAsk::SummarizeChannel { channel } => {
-            let c = find_channel(*channel)?;
-            let (text, taken, total) = conversation_text(c, &names);
-            if taken == 0 {
-                return Err(AI_EMPTY.into());
-            }
-            let note = if taken < total {
-                format!(
-                    "\n(Only the newest {} of its {} messages are here.)",
-                    taken, total
-                )
-            } else {
-                String::new()
-            };
-            let system = format!(
-                "{} You sum up a team chat conversation for someone catching up on it. Lead with what matters: decisions made, open questions, requests and who they are for, and dates or deadlines mentioned. Use short bullet points (\"- \"), under a few bold headings only when the conversation covers several topics. Mention people by name. Say nothing that isn't in the messages. {}",
-                ROLE, lang_line
-            );
-            let prompt = format!(
-                "Conversation: {}{}\nMessages, oldest first (replies in a thread are indented under the message they answer):\n\n{}",
-                channel_title(c, &names),
-                note,
-                text
-            );
-            Ok((
-                request(
-                    model,
-                    vec![text_block(system)],
-                    vec![user(prompt)],
-                    "low",
-                    None,
-                ),
-                "conversation summary",
-            ))
+            summarize_channel(model, copy, &names, lang_line, *channel)
         }
         AiAsk::SummarizeThread { channel, message } => {
-            let c = find_channel(*channel)?;
-            let m = array_at(c, "messages")
-                .iter()
-                .find(|m| u64_field(m, "id") == Some(*message))
-                .ok_or_else(|| AI_NOT_FOUND.to_string())?;
-            let mut text = format!(
-                "[{}] {}: {}",
-                when(m["ts"].as_i64().unwrap_or(0)),
-                author(m, &names),
-                cut(&message_words(m), 8_000)
-            );
-            let mut used = text.len();
-            for r in array_at(m, "replies") {
-                if used > SUMMARY_CHARS {
-                    text.push_str("\n(The rest of the replies are left out.)");
-                    break;
-                }
-                let line = format!(
-                    "\n[{}] {}: {}",
-                    when(r["ts"].as_i64().unwrap_or(0)),
-                    author(r, &names),
-                    cut(&message_words(r), 4_000)
-                );
-                used += line.len();
-                text.push_str(&line);
-            }
-            let system = format!(
-                "{} You sum up one thread of a team chat: what it is about, where it landed, and what is still open or waiting on someone. Use a few short bullet points (\"- \"). Mention people by name. Say nothing that isn't in the messages. {}",
-                ROLE, lang_line
-            );
-            let prompt = format!(
-                "A thread in {}. The first message, then the replies in order:\n\n{}",
-                channel_title(c, &names),
-                text
-            );
-            Ok((
-                request(
-                    model,
-                    vec![text_block(system)],
-                    vec![user(prompt)],
-                    "low",
-                    None,
-                ),
-                "thread summary",
-            ))
+            summarize_thread(model, copy, &names, lang_line, *channel, *message)
         }
-        AiAsk::Write { how, text, title } => {
-            if !AI_WRITE.contains(&how.as_str()) {
-                return Err(AI_UNKNOWN.into());
-            }
-            if text.chars().count() + title.chars().count() > AI_MAX_TEXT {
-                return Err(AI_TOO_LONG.into());
-            }
-            if text.trim().is_empty() && !(how == "draft" && !title.trim().is_empty()) {
-                return Err(AI_EMPTY.into());
-            }
-            let task = match how.as_str() {
-                "improve" => "Improve the writing: clearer and easier to read, with the same meaning, tone and language.",
-                "fix" => "Fix the spelling, grammar and punctuation. Change nothing else.",
-                "shorter" => "Make it shorter, keeping the key points, in the same language.",
-                "longer" => "Make it longer and more detailed, in the same language, without making up facts.",
-                "summarize" => "Sum it up in a few short bullet points, in the same language.",
-                "korean" => "Translate it into Korean.",
-                "english" => "Translate it into English.",
-                "continue" => "Continue writing from where it ends, in the same language and style. Give only the new text.",
-                _ => "Write a first draft of it from its title (and any notes): what it is for, what to do, and when it is done.",
-            };
-            let lang_note = if how == "draft" { lang_line } else { "" };
-            let system = format!(
-                "{} You work on a piece of writing in a team workspace. It may use Markdown (# headings, - lists, - [ ] checklists, **bold**); keep that formatting. Reply with only the resulting text: no introduction, no quotation marks around it, no explanation. {}",
-                ROLE, lang_note
-            );
-            let mut prompt = format!("{}\n\n", task);
-            if !title.trim().is_empty() {
-                prompt.push_str(&format!("Title: {}\n\n", one_line(title)));
-            }
-            if !text.trim().is_empty() {
-                prompt.push_str(&format!("The text:\n<text>\n{}\n</text>", text));
-            }
-            let effort = if matches!(how.as_str(), "fix" | "korean" | "english") {
-                "low"
-            } else {
-                "medium"
-            };
-            Ok((
-                request(
-                    model,
-                    vec![text_block(system)],
-                    vec![user(prompt)],
-                    effort,
-                    None,
-                ),
-                "writing",
-            ))
-        }
-        AiAsk::Subtasks { name, description } => {
-            if name.trim().is_empty() {
-                return Err(AI_EMPTY.into());
-            }
-            if name.chars().count() + description.chars().count() > AI_MAX_TEXT {
-                return Err(AI_TOO_LONG.into());
-            }
-            let system = format!(
-                "{} You break a task into subtasks for a team's task list. Suggest 3 to 8 concrete subtasks in a sensible order, each a short name that starts with what to do. Don't repeat the task itself. {}",
-                ROLE, lang_line
-            );
-            let mut prompt = format!("Task: {}", one_line(name));
-            if !description.trim().is_empty() {
-                prompt.push_str(&format!("\nDescription:\n{}", description));
-            }
-            let format = json!({
-                "type": "json_schema",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "subtasks": {"type": "array", "items": {"type": "string"}}
-                    },
-                    "required": ["subtasks"],
-                    "additionalProperties": false
-                }
-            });
-            Ok((
-                request(
-                    model,
-                    vec![text_block(system)],
-                    vec![user(prompt)],
-                    "low",
-                    Some(format),
-                ),
-                "subtasks",
-            ))
-        }
-        AiAsk::Question { question, history } => {
-            let q = question.trim();
-            if q.is_empty() {
-                return Err(AI_EMPTY.into());
-            }
-            if q.chars().count() > AI_MAX_TEXT {
-                return Err(AI_TOO_LONG.into());
-            }
-            // the newest turns, as many as fit: the oldest go first
-            let mut history: Vec<&AiTurn> = history.iter().rev().take(MAX_HISTORY).rev().collect();
-            let size = |t: &AiTurn| t.question.chars().count() + t.answer.chars().count();
-            while q.chars().count() + history.iter().map(|t| size(t)).sum::<usize>() > AI_MAX_TEXT {
-                history.remove(0);
-            }
-            let ws = Workspace::read(copy, &names);
-            let overview = ws.overview(CONTEXT_CHARS / 2);
-            // what the question (and the one before, for "and what about...")
-            // is about
-            let mut about = q.to_string();
-            if let Some(t) = history.last() {
-                about.push(' ');
-                about.push_str(&t.question);
-            }
-            let details = ws.details(
-                &about,
-                CONTEXT_CHARS - overview.len().min(CONTEXT_CHARS / 2),
-                now,
-            );
-            let system = format!(
-                "{} You answer questions about a team's workspace (its tasks, docs and chat) for {}, from the workspace information below; they can see all of it. If it doesn't hold the answer, say so plainly rather than guessing. Be brief: a direct answer first, then details as short bullet points (\"- \") when they help. When you mention a task, doc or message from the workspace, put its marker right after it exactly as written below, like [task:123], [doc:45] or [msg:6:789]; the app turns markers into links. Today is {}. {}",
-                ROLE,
-                names.get(member),
-                chrono::Local::now().format("%Y-%m-%d (%A)"),
-                lang_line
-            );
-            let mut messages = vec![];
-            for t in history {
-                messages.push(user(t.question.clone()));
-                messages.push(json!({"role": "assistant", "content": t.answer.clone()}));
-            }
-            messages.push(user(format!(
-                "Workspace items that match the question:\n\n{}\n\nQuestion: {}",
-                if details.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    details
-                },
-                q
-            )));
-            let mut ov = text_block(format!("Overview of the workspace:\n\n{}", overview));
-            ov["cache_control"] = json!({"type": "ephemeral"});
-            Ok((
-                request(
-                    model,
-                    vec![text_block(system), ov],
-                    messages,
-                    "medium",
-                    None,
-                ),
-                "question",
-            ))
-        }
+        AiAsk::Write { how, text, title } => write(model, lang_line, how, text, title),
+        AiAsk::Subtasks { name, description } => subtasks(model, lang_line, name, description),
+        AiAsk::Question { question, history } => ask_question(
+            model, copy, &names, member, lang_line, question, history, now,
+        ),
     }
+}
+
+/// The conversation `id` in the copy.
+fn find_channel(copy: &Value, id: u64) -> Result<&Value, String> {
+    array_at(copy, "channels")
+        .iter()
+        .find(|c| u64_field(c, "id") == Some(id))
+        .ok_or_else(|| AI_NOT_FOUND.to_string())
+}
+
+/// A summary of a conversation's newest messages.
+fn summarize_channel(
+    model: &str,
+    copy: &Value,
+    names: &Names,
+    lang_line: &str,
+    channel: u64,
+) -> Result<(Value, &'static str), String> {
+    let c = find_channel(copy, channel)?;
+    let (text, taken, total) = conversation_text(c, names);
+    if taken == 0 {
+        return Err(AI_EMPTY.into());
+    }
+    let note = if taken < total {
+        format!(
+            "\n(Only the newest {} of its {} messages are here.)",
+            taken, total
+        )
+    } else {
+        String::new()
+    };
+    let system = format!(
+        "{} You sum up a team chat conversation for someone catching up on it. Lead with what matters: decisions made, open questions, requests and who they are for, and dates or deadlines mentioned. Use short bullet points (\"- \"), under a few bold headings only when the conversation covers several topics. Mention people by name. Say nothing that isn't in the messages. {}",
+        ROLE, lang_line
+    );
+    let prompt = format!(
+        "Conversation: {}{}\nMessages, oldest first (replies in a thread are indented under the message they answer):\n\n{}",
+        channel_title(c, names),
+        note,
+        text
+    );
+    Ok((
+        request(
+            model,
+            vec![text_block(system)],
+            vec![user(prompt)],
+            "low",
+            None,
+        ),
+        "conversation summary",
+    ))
+}
+
+/// A summary of one thread.
+fn summarize_thread(
+    model: &str,
+    copy: &Value,
+    names: &Names,
+    lang_line: &str,
+    channel: u64,
+    message: u64,
+) -> Result<(Value, &'static str), String> {
+    let c = find_channel(copy, channel)?;
+    let m = array_at(c, "messages")
+        .iter()
+        .find(|m| u64_field(m, "id") == Some(message))
+        .ok_or_else(|| AI_NOT_FOUND.to_string())?;
+    let mut text = format!(
+        "[{}] {}: {}",
+        when(m["ts"].as_i64().unwrap_or(0)),
+        author(m, names),
+        cut(&message_words(m), 8_000)
+    );
+    let mut used = text.len();
+    for r in array_at(m, "replies") {
+        if used > SUMMARY_CHARS {
+            text.push_str("\n(The rest of the replies are left out.)");
+            break;
+        }
+        let line = format!(
+            "\n[{}] {}: {}",
+            when(r["ts"].as_i64().unwrap_or(0)),
+            author(r, names),
+            cut(&message_words(r), 4_000)
+        );
+        used += line.len();
+        text.push_str(&line);
+    }
+    let system = format!(
+        "{} You sum up one thread of a team chat: what it is about, where it landed, and what is still open or waiting on someone. Use a few short bullet points (\"- \"). Mention people by name. Say nothing that isn't in the messages. {}",
+        ROLE, lang_line
+    );
+    let prompt = format!(
+        "A thread in {}. The first message, then the replies in order:\n\n{}",
+        channel_title(c, names),
+        text
+    );
+    Ok((
+        request(
+            model,
+            vec![text_block(system)],
+            vec![user(prompt)],
+            "low",
+            None,
+        ),
+        "thread summary",
+    ))
+}
+
+/// Rewriting, translating or drafting a piece of writing (`how`, one of AI_WRITE).
+fn write(
+    model: &str,
+    lang_line: &str,
+    how: &str,
+    text: &str,
+    title: &str,
+) -> Result<(Value, &'static str), String> {
+    if !AI_WRITE.contains(&how) {
+        return Err(AI_UNKNOWN.into());
+    }
+    if text.chars().count() + title.chars().count() > AI_MAX_TEXT {
+        return Err(AI_TOO_LONG.into());
+    }
+    if text.trim().is_empty() && !(how == "draft" && !title.trim().is_empty()) {
+        return Err(AI_EMPTY.into());
+    }
+    let task = match how {
+        "improve" => "Improve the writing: clearer and easier to read, with the same meaning, tone and language.",
+        "fix" => "Fix the spelling, grammar and punctuation. Change nothing else.",
+        "shorter" => "Make it shorter, keeping the key points, in the same language.",
+        "longer" => "Make it longer and more detailed, in the same language, without making up facts.",
+        "summarize" => "Sum it up in a few short bullet points, in the same language.",
+        "korean" => "Translate it into Korean.",
+        "english" => "Translate it into English.",
+        "continue" => "Continue writing from where it ends, in the same language and style. Give only the new text.",
+        _ => "Write a first draft of it from its title (and any notes): what it is for, what to do, and when it is done.",
+    };
+    let lang_note = if how == "draft" { lang_line } else { "" };
+    let system = format!(
+        "{} You work on a piece of writing in a team workspace. It may use Markdown (# headings, - lists, - [ ] checklists, **bold**); keep that formatting. Reply with only the resulting text: no introduction, no quotation marks around it, no explanation. {}",
+        ROLE, lang_note
+    );
+    let mut prompt = format!("{}\n\n", task);
+    if !title.trim().is_empty() {
+        prompt.push_str(&format!("Title: {}\n\n", one_line(title)));
+    }
+    if !text.trim().is_empty() {
+        prompt.push_str(&format!("The text:\n<text>\n{}\n</text>", text));
+    }
+    let effort = if matches!(how, "fix" | "korean" | "english") {
+        "low"
+    } else {
+        "medium"
+    };
+    Ok((
+        request(
+            model,
+            vec![text_block(system)],
+            vec![user(prompt)],
+            effort,
+            None,
+        ),
+        "writing",
+    ))
+}
+
+/// Subtasks suggested for a task.
+fn subtasks(
+    model: &str,
+    lang_line: &str,
+    name: &str,
+    description: &str,
+) -> Result<(Value, &'static str), String> {
+    if name.trim().is_empty() {
+        return Err(AI_EMPTY.into());
+    }
+    if name.chars().count() + description.chars().count() > AI_MAX_TEXT {
+        return Err(AI_TOO_LONG.into());
+    }
+    let system = format!(
+        "{} You break a task into subtasks for a team's task list. Suggest 3 to 8 concrete subtasks in a sensible order, each a short name that starts with what to do. Don't repeat the task itself. {}",
+        ROLE, lang_line
+    );
+    let mut prompt = format!("Task: {}", one_line(name));
+    if !description.trim().is_empty() {
+        prompt.push_str(&format!("\nDescription:\n{}", description));
+    }
+    let format = json!({
+        "type": "json_schema",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "subtasks": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["subtasks"],
+            "additionalProperties": false
+        }
+    });
+    Ok((
+        request(
+            model,
+            vec![text_block(system)],
+            vec![user(prompt)],
+            "low",
+            Some(format),
+        ),
+        "subtasks",
+    ))
+}
+
+/// A question about the workspace, with the conversation so far.
+#[allow(clippy::too_many_arguments)]
+fn ask_question(
+    model: &str,
+    copy: &Value,
+    names: &Names,
+    member: u64,
+    lang_line: &str,
+    question: &str,
+    history: &[AiTurn],
+    now: i64,
+) -> Result<(Value, &'static str), String> {
+    let q = question.trim();
+    if q.is_empty() {
+        return Err(AI_EMPTY.into());
+    }
+    if q.chars().count() > AI_MAX_TEXT {
+        return Err(AI_TOO_LONG.into());
+    }
+    // the newest turns, as many as fit: the oldest go first
+    let mut history: Vec<&AiTurn> = history.iter().rev().take(MAX_HISTORY).rev().collect();
+    let size = |t: &AiTurn| t.question.chars().count() + t.answer.chars().count();
+    while q.chars().count() + history.iter().map(|t| size(t)).sum::<usize>() > AI_MAX_TEXT {
+        history.remove(0);
+    }
+    let ws = Workspace::read(copy, names);
+    let overview = ws.overview(CONTEXT_CHARS / 2);
+    // what the question (and the one before, for "and what about...")
+    // is about
+    let mut about = q.to_string();
+    if let Some(t) = history.last() {
+        about.push(' ');
+        about.push_str(&t.question);
+    }
+    let details = ws.details(
+        &about,
+        CONTEXT_CHARS - overview.len().min(CONTEXT_CHARS / 2),
+        now,
+    );
+    let system = format!(
+        "{} You answer questions about a team's workspace (its tasks, docs and chat) for {}, from the workspace information below; they can see all of it. If it doesn't hold the answer, say so plainly rather than guessing. Be brief: a direct answer first, then details as short bullet points (\"- \") when they help. When you mention a task, doc or message from the workspace, put its marker right after it exactly as written below, like [task:123], [doc:45] or [msg:6:789]; the app turns markers into links. Today is {}. {}",
+        ROLE,
+        names.get(member),
+        chrono::Local::now().format("%Y-%m-%d (%A)"),
+        lang_line
+    );
+    let mut messages = vec![];
+    for t in history {
+        messages.push(user(t.question.clone()));
+        messages.push(json!({"role": "assistant", "content": t.answer.clone()}));
+    }
+    messages.push(user(format!(
+        "Workspace items that match the question:\n\n{}\n\nQuestion: {}",
+        if details.is_empty() {
+            "(none)".to_string()
+        } else {
+            details
+        },
+        q
+    )));
+    let mut ov = text_block(format!("Overview of the workspace:\n\n{}", overview));
+    ov["cache_control"] = json!({"type": "ephemeral"});
+    Ok((
+        request(
+            model,
+            vec![text_block(system), ov],
+            messages,
+            "medium",
+            None,
+        ),
+        "question",
+    ))
 }
 
 // --------------------------------------------- the workspace for questions

@@ -735,6 +735,30 @@ fn reactions_made_at_once_are_all_kept_and_removals_stick() {
 }
 
 #[test]
+fn reactions_stay_in_the_order_they_were_added() {
+    let mut ma = SyncMeta::default();
+    let mut a = ws(json!([]), chat(json!([])), &ma);
+    save(&mut a, &mut ma, 10);
+    let (mut b, mut mb) = (a.clone(), ma.clone());
+    // 👍 first, then 🎉 (which sorts before 👍 by character), then a second 👍
+    a["channels"] = chat(json!([{"emoji": "👍", "users": [1]}]));
+    save(&mut a, &mut ma, 20);
+    b["channels"] = chat(json!([{"emoji": "🎉", "users": [2]}]));
+    save(&mut b, &mut mb, 30);
+    swap(&mut a, &mut b);
+    let mut ma = meta_of(&a);
+    ma.field_hashes = part_hashes(&a);
+    a["channels"][0]["messages"][0]["reactions"] =
+        json!([{"emoji": "👍", "users": [1, 3]}, {"emoji": "🎉", "users": [2]}]);
+    save(&mut a, &mut ma, 40);
+    swap(&mut a, &mut b);
+    let want = json!([{"emoji": "👍", "users": [1, 3]}, {"emoji": "🎉", "users": [2]}]);
+    for v in [&a, &b] {
+        assert_eq!(v["channels"][0]["messages"][0]["reactions"], want);
+    }
+}
+
+#[test]
 fn timers_started_at_once_both_keep_running() {
     let mut ma = SyncMeta::default();
     let task = |extra: Value| {

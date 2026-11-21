@@ -257,7 +257,7 @@ pub(crate) fn merge_fields<'a>(
     let mut entry = BTreeMap::new();
     let mut obj = Map::new();
     let mut decided: HashSet<String> = HashSet::new();
-    let mut reactions: Vec<(String, u64)> = vec![];
+    let mut reactions: Vec<(String, u64, i64)> = vec![];
     let mut timers: Vec<(u64, i64)> = vec![];
     let mut entries: Vec<(&str, Value)> = vec![];
     let mut custom = Map::new();
@@ -289,7 +289,7 @@ pub(crate) fn merge_fields<'a>(
                 decided.insert("reactions".into());
                 if let (Some(_), Some((e, u))) = (val, rest.rsplit_once('/')) {
                     if let Ok(u) = u.parse() {
-                        reactions.push((e.to_string(), u));
+                        reactions.push((e.to_string(), u, t));
                     }
                 }
             }
@@ -353,17 +353,19 @@ pub(crate) fn merge_fields<'a>(
     (obj, decided, loose)
 }
 
-/// The merged reactions, one per (emoji, person), into `obj`.
+/// The merged reactions, one per (emoji, person), into `obj`, each with
+/// the time it was added.
 fn put_reactions(
     obj: &mut Map<String, Value>,
-    mut reactions: Vec<(String, u64)>,
+    mut reactions: Vec<(String, u64, i64)>,
     newest: &Map<String, Value>,
 ) {
-    // the same order on every device, whatever order the copies had
-    // them in: by emoji, then by person
-    reactions.sort();
+    // in the order they were added, the same on every device whatever
+    // order the copies had them in: emoji by when someone first left it,
+    // people by when they did (ties by emoji, then by person)
+    reactions.sort_by(|a, b| a.2.cmp(&b.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
     let mut out: Vec<(String, Vec<u64>)> = vec![];
-    for (e, u) in reactions {
+    for (e, u, _) in reactions {
         match out.iter_mut().find(|(x, _)| *x == e) {
             Some((_, users)) => users.push(u),
             None => out.push((e, vec![u])),

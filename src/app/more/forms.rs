@@ -214,7 +214,8 @@ fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (u
             },
             "assignee" => a.assignees.extend(v.parse::<u64>().ok()),
             k => {
-                if k == "number" && !v.parse::<f64>().is_ok_and(f64::is_finite) {
+                // read as goal numbers are: thousands commas allowed, finite
+                if k == "number" && super::goals::parse_number(&v).is_none() {
                     return Err((i, trf!("\"{}\" needs a number.", label)));
                 }
                 if k == "email" && !email_ok(&v) {

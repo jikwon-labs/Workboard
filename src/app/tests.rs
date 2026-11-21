@@ -1425,7 +1425,8 @@ fn form_answers_check_email_and_number_strictly() {
     for bad in ["@.", "a.b@", "@b.co", "a@b.", "a@.co", "a b@c.d", "ab.cd"] {
         assert!(check("3", bad).unwrap_err().contains("email"), "{bad}");
     }
-    for good in ["0", "-2.5", "1e3", " 12 "] {
+    // thousands commas, as goal numbers take them
+    for good in ["0", "-2.5", "1e3", " 12 ", "1,000", "12,500.5"] {
         assert!(check(good, "a@b.co").is_ok(), "{good}");
     }
     for bad in ["inf", "-infinity", "NaN", "1e400", "twelve"] {

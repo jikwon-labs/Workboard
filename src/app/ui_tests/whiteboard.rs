@@ -2042,3 +2042,106 @@ fn the_bar_over_a_tall_picked_shape_stays_on_screen() {
         "no bar left at the page's edge"
     );
 }
+
+/// Black ink shows on a dark board. The pen's first colour is the dark
+/// page's own colour, so black strokes, shapes and lines vanished there,
+/// and so did the black swatch and the pen's width preview; they are drawn
+/// light on a dark page now (the board keeps them black).
+#[test]
+fn black_ink_shows_on_a_dark_board() {
+    let mut h = Ui1::new();
+    h.app.data.dark = true;
+    let wid = board_with_notes(&mut h, &[]);
+    let black = crate::app::more::WB_COLORS[0];
+    let ids: Vec<u64> = (0..3).map(|_| h.app.data.new_id()).collect();
+    let wb = h
+        .app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap();
+    wb.strokes.push(WbStroke {
+        id: ids[0],
+        color: black,
+        width: 3.0,
+        points: vec![[100.0, 300.0], [200.0, 320.0], [300.0, 300.0]],
+    });
+    wb.shapes.push(WbShape {
+        id: ids[1],
+        kind: "rect".into(),
+        pos: [400.0, 100.0],
+        size: [160.0, 80.0],
+        text: "Box".into(),
+        color: black,
+        filled: false,
+    });
+    wb.lines.push(WbLine {
+        id: ids[2],
+        a: [100.0, 450.0],
+        b: [400.0, 450.0],
+        color: black,
+        ..Default::default()
+    });
+    h.app.wb_tool = 0;
+    h.app.wb_color = black;
+    h.settle();
+    let t = h.app.t();
+    assert_eq!(t.column_bg.r(), t.column_bg.g());
+    let seen = |c: Color32, what: &str| {
+        let k = contrast(c, t.column_bg).min(contrast(c, t.bg));
+        assert!(k >= 3.0, "{what} drawn in {c:?}: contrast {k}");
+    };
+    let at = |b: [f32; 2]| on_screen(&h, b);
+    let solid = |s: &egui::epaint::PathStroke| match s.color {
+        egui::epaint::ColorMode::Solid(c) => c,
+        _ => Color32::TRANSPARENT,
+    };
+    let mut found = [false; 4];
+    for c in &h.shapes {
+        match &c.shape {
+            egui::Shape::Path(p) if (p.points[0] - at([100.0, 300.0])).length() < 0.5 => {
+                seen(solid(&p.stroke), "the stroke");
+                found[0] = true;
+            }
+            egui::Shape::Path(p) if (p.points[0] - at([100.0, 450.0])).length() < 0.5 => {
+                seen(solid(&p.stroke), "the line");
+                found[1] = true;
+            }
+            egui::Shape::Rect(r) if (r.rect.min - at([400.0, 100.0])).length() < 0.5 => {
+                if r.stroke.width > 0.0 {
+                    seen(r.stroke.color, "the box");
+                    found[2] = true;
+                }
+            }
+            egui::Shape::Circle(ci)
+                if ci.radius == 9.0 && h.rect("Colour 1").contains(ci.center) =>
+            {
+                seen(ci.fill, "the black swatch");
+                found[3] = true;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(found, [true; 4], "stroke, line, box, swatch");
+    // the bar over a picked black shape shows its colour too
+    h.app.wb_tool = 2;
+    h.settle();
+    h.hover(h.rect("Whiteboard canvas").center());
+    h.click("Shape Box");
+    let dot = h.rect("Pick colour 1").center();
+    let fill = h
+        .shapes
+        .iter()
+        .find_map(|c| match &c.shape {
+            egui::Shape::Circle(ci) if (ci.center - dot).length() < 0.5 && ci.fill.a() > 0 => {
+                Some(ci.fill)
+            }
+            _ => None,
+        })
+        .expect("the pick bar's first colour");
+    seen(fill, "the pick bar's black");
+    // stored as it was: black, for a teammate on a light page
+    assert_eq!(board_of(&h, wid).strokes[0].color, black);
+}

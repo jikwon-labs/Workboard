@@ -7,7 +7,7 @@
 // with Clear and Delete next to the zoom buttons.
 
 use super::wb_shapes::{paint_kind_icon, paint_style_icon, SHAPE_KINDS, STYLE_TOGGLES};
-use super::whiteboard::{note_fill, WB_COLORS};
+use super::whiteboard::{ink, note_fill, WB_COLORS};
 use super::*;
 use crate::app::icons::{paint_minus, paint_plus};
 use egui::{Pos2, Response};
@@ -692,7 +692,11 @@ impl App {
             let r = Rect::from_min_size(pos2(x, cy - SW / 2.0), vec2(SW, SW));
             let resp = ui.interact(r, ui.id().with(("wb_colour", tool, i)), Sense::click());
             name_it(&resp, &format!("Colour {}", i + 1));
-            let fill = if tool == 1 { note_fill(t, *c) } else { rgb(*c) };
+            let fill = if tool == 1 {
+                note_fill(t, *c)
+            } else {
+                ink(t, *c)
+            };
             p.circle_filled(r.center(), 9.0, fill);
             if tool == 1 {
                 // pale paper still shows against the bar
@@ -774,7 +778,7 @@ impl App {
             let lw = self.sweep.wb_width.min(12.0);
             p.line_segment(
                 [pos2(x + 2.0, cy), pos2(x + 22.0, cy)],
-                Stroke::new(lw, rgb(self.wb_color)),
+                Stroke::new(lw, ink(t, self.wb_color)),
             );
         }
         if let Some(g) = hint {

@@ -3,7 +3,7 @@
 // hub's sidebar, and filling a board from a template.
 
 use super::wb_shapes::{line_path, paint_line, paint_shape_body, shape_rect, GAP};
-use super::whiteboard::note_fill;
+use super::whiteboard::{ink, note_fill};
 use super::*;
 use egui::Pos2;
 
@@ -275,7 +275,7 @@ fn paint_thumbnail(p: &egui::Painter, t: &Theme, w: &Whiteboard, area: Rect) {
         let pts: Vec<Pos2> = s.points.iter().map(|q| to(*q)).collect();
         p.add(egui::Shape::line(
             pts,
-            Stroke::new((s.width * scale).max(1.0), rgb(s.color)),
+            Stroke::new((s.width * scale).max(1.0), ink(t, s.color)),
         ));
     }
     for l in &w.lines {
@@ -283,7 +283,7 @@ fn paint_thumbnail(p: &egui::Painter, t: &Theme, w: &Whiteboard, area: Rect) {
             .iter()
             .map(|q| to([q.x, q.y]))
             .collect();
-        paint_line(p, l, &pts, 1.2, rgb(l.color));
+        paint_line(p, l, &pts, 1.2, ink(t, l.color));
     }
     for s in &w.shapes {
         let r = Rect::from_min_size(to(s.pos), vec2(s.size[0], s.size[1]) * scale);
@@ -801,7 +801,7 @@ impl App {
             p.rect_stroke(
                 sw,
                 3.5,
-                Stroke::new(1.0_f32, colour.map_or(t.border, rgb)),
+                Stroke::new(1.0_f32, colour.map_or(t.border, |c| ink(t, c))),
                 egui::StrokeKind::Inside,
             );
             let g = elided(

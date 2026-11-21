@@ -26,6 +26,17 @@ pub struct WbNew {
     pub all_templates: bool,
 }
 
+/// The colour board ink `c` is drawn in: black (the pen's first colour,
+/// which is the dark page's own colour) shows light on a dark page, where it
+/// vanished. The board keeps it black, for teammates on a light page.
+pub(crate) fn ink(t: &Theme, c: [u8; 3]) -> Color32 {
+    if t.dark && c.iter().all(|&v| v < 64) {
+        t.text
+    } else {
+        rgb(c)
+    }
+}
+
 /// Where the board's 0,0 sits in the canvas at the starting view: clear of
 /// the tool bar down the left and the name bar at the top, which float over
 /// the board.
@@ -402,7 +413,7 @@ impl App {
                         .collect();
                     p.add(egui::Shape::line(
                         pts,
-                        Stroke::new(s.width * z, rgb(s.color)),
+                        Stroke::new(s.width * z, ink(&t, s.color)),
                     ));
                 }
                 // shapes and their lines, under the notes
@@ -898,7 +909,7 @@ impl App {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
                         let top =
                             egui::LayerId::new(egui::Order::Tooltip, ui.id().with("wb_pencil"));
-                        paint_pencil(&ui.ctx().layer_painter(top), at, rgb(self.wb_color));
+                        paint_pencil(&ui.ctx().layer_painter(top), at, ink(&t, self.wb_color));
                     }
                 }
                 // drawn last, so they sit on top of the board and take the

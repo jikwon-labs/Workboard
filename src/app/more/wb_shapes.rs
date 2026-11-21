@@ -8,7 +8,7 @@
 
 use super::wb_library::mix;
 use super::wb_panels::{bar_sep, card};
-use super::whiteboard::{WbUndo, WbView, WB_COLORS};
+use super::whiteboard::{ink, WbUndo, WbView, WB_COLORS};
 use super::*;
 use crate::app::icons::paint_plus;
 use egui::{Pos2, Response};
@@ -210,7 +210,7 @@ fn next_spot(shapes: &[WbShape], s: &WbShape, dir: usize) -> Rect {
 /// The inside of a shape: a tint of its colour when filled.
 fn shape_fill(t: &Theme, s: &WbShape) -> Color32 {
     if s.filled {
-        mix(t.bg, rgb(s.color), 0.28)
+        mix(t.bg, ink(t, s.color), 0.28)
     } else {
         t.bg
     }
@@ -218,7 +218,7 @@ fn shape_fill(t: &Theme, s: &WbShape) -> Color32 {
 
 /// Draws a shape's inside and outline in `r` (on screen), lines `w` wide.
 pub(crate) fn paint_shape_body(p: &egui::Painter, t: &Theme, s: &WbShape, r: Rect, w: f32) {
-    let st = Stroke::new(w, rgb(s.color));
+    let st = Stroke::new(w, ink(t, s.color));
     let fill = shape_fill(t, s);
     match s.kind.as_str() {
         "text" => {
@@ -496,7 +496,7 @@ impl App {
                 if selecting && near {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
-                paint_line(&p, l, &pts, lw, rgb(l.color));
+                paint_line(&p, l, &pts, lw, ink(t, l.color));
             }
         }
         // the line being dragged out with the Line tool, and the shape it
@@ -537,7 +537,7 @@ impl App {
                 let home = link.from != 0 && shape_at(&wb.shapes, bpos(b)) == Some(link.from);
                 if !home {
                     let pts: Vec<Pos2> = line_path(&l, &wb.shapes).iter().map(to_screen).collect();
-                    paint_line(&p, &l, &pts, lw, rgb(l.color));
+                    paint_line(&p, &l, &pts, lw, ink(t, l.color));
                 }
             }
         }
@@ -887,7 +887,7 @@ impl App {
             &toggles,
             "Delete shape",
             |p, _, c, fg| {
-                paint_fill_icon(p, c, fg, mix(t.bg, rgb(s.color), 0.28));
+                paint_fill_icon(p, c, fg, mix(t.bg, ink(t, s.color), 0.28));
             },
         );
         match hit {
@@ -1040,7 +1040,7 @@ impl App {
             let r = Rect::from_min_size(pos2(x, cy - DOT / 2.0), vec2(DOT, DOT));
             let resp = ui.interact(r, ui.id().with(("wb_pick_colour", wid, i)), Sense::click());
             name_it(&resp, &format!("Pick colour {}", i + 1));
-            p.circle_filled(r.center(), 8.0, rgb(*c));
+            p.circle_filled(r.center(), 8.0, ink(t, *c));
             if *c == colour {
                 p.circle_stroke(r.center(), 11.0, Stroke::new(2.0_f32, t.text));
             } else {

@@ -79,7 +79,6 @@ pub const T: &[(&str, &str)] = &[
     ("Stop timer", "타이머 중지"),
     ("Stop (started by an older app)", "중지 (이전 버전 앱에서 시작됨)"),
     ("Delete task", "작업 삭제"),
-    ("Mark complete", "완료로 표시"),
     ("Empty", "비어 있음"),
     ("Dates", "날짜"),
     ("Due", "마감"),

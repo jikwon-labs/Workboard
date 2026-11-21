@@ -309,7 +309,9 @@ pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
             t,
             tr(PRIORITIES[pr as usize].label),
             current == pr,
-            |p, c| paint_flag(p, c + vec2(-4.0, 0.0), col, 13.0),
+            // 1pt low: the flag's cloth sits at the top of its pole, so a
+            // flag centred on the row looked higher than the text beside it
+            |p, c| paint_flag(p, c + vec2(-4.0, 1.0), col, 13.0),
         );
         if r.clicked() {
             picked = Some(pr);
@@ -317,14 +319,13 @@ pub fn priority_pick(ui: &mut Ui, t: &Theme, current: u8) -> Option<u8> {
         }
     }
     ui.separator();
+    // a drawn cross starting where the flag poles stand, about as large as
+    // a flag; the small "×" glyph sat to the right of the poles and lower
     let r = menu_row(ui, t, tr("Clear"), false, |p, c| {
-        p.text(
-            c,
-            Align2::CENTER_CENTER,
-            "\u{00D7}",
-            FontId::proportional(10.0),
-            Color32::GRAY,
-        );
+        let mid = c + vec2(0.0, 0.5);
+        let s = Stroke::new(1.5_f32, t.text3);
+        p.line_segment([mid + vec2(-4.0, -4.0), mid + vec2(4.0, 4.0)], s);
+        p.line_segment([mid + vec2(-4.0, 4.0), mid + vec2(4.0, -4.0)], s);
     });
     if r.clicked() {
         picked = Some(0);

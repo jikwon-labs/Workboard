@@ -124,11 +124,16 @@ fn click_task_row_opens_it_then_complete_and_timer() {
         h.app.task(id).unwrap().timer_started.is_some(),
         "the play button starts the timer"
     );
-    h.click("Mark complete");
+    assert!(
+        !h.has("Mark complete"),
+        "no separate check button: the status pill already sets complete"
+    );
+    h.click("Task status");
+    h.click("COMPLETE");
     assert_eq!(
         h.app.task(id).unwrap().status,
         "complete",
-        "the check button completes the task"
+        "the status pill completes the task"
     );
     h.key(egui::Key::Escape);
     assert!(h.app.open_task.is_none(), "Esc closes the task");
@@ -1181,6 +1186,61 @@ fn subtask_rows_set_due_make_top_level_and_delete() {
     h.app.apply_actions();
     assert!(sub(&h, "Pick hero image").is_none());
     assert!(h.app.subtasks(id).is_empty());
+}
+
+#[test]
+fn hovering_a_subtask_does_not_move_the_rows_below() {
+    let mut h = Ui1::new();
+    open_design_task(&mut h);
+    let before = h.rect("+  Add subtask");
+    let p = h.find("Subtask due Pick hero image").unwrap();
+    h.hover(p);
+    assert!(
+        h.has("Delete subtask Pick hero image"),
+        "hover shows the row buttons"
+    );
+    let after = h.rect("+  Add subtask");
+    assert_eq!(
+        before, after,
+        "the buttons that appear on hover take no layout space"
+    );
+}
+
+#[test]
+fn checklist_progress_shows_its_track_at_zero() {
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    for c in h
+        .app
+        .data
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == id)
+        .unwrap()
+        .checklist
+        .iter_mut()
+    {
+        c.done = false;
+    }
+    h.settle();
+    let track = h.app.t().hover;
+    let green = crate::theme::rgb([0x00, 0x88, 0x44]);
+    let bars: Vec<(Rect, egui::Color32)> = h
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Rect(r) if r.rect.height() == 4.0 => Some((r.rect, r.fill)),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        bars.iter().any(|(r, f)| *f == track && r.width() > 200.0),
+        "a full-width track shows even with nothing done: {bars:?}"
+    );
+    assert!(
+        !bars.iter().any(|(_, f)| *f == green),
+        "no green fill (it showed as a lone dot) before anything is done"
+    );
 }
 
 #[test]

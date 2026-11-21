@@ -394,41 +394,10 @@ impl App {
                     ui.set_width(field_w - 110.0);
                     let st = self.data.status_of(&task);
                     let r = status_pill(ui, &st, Sense::click());
+                    name_it(&r, "Task status");
                     popup(ui, &r, win_id.with("st"), 200.0, |ui| {
                         status_menu(ui, &t, &statuses, &mut task.status)
                     });
-                    // complete shortcut
-                    if let Some(done) = statuses.iter().find(|s| s.kind == StatusKind::Closed) {
-                        let is_done = task.status == done.name;
-                        // a tick drawn on the button, with "Done" once done
-                        let txt = if is_done { tr("Done") } else { "" };
-                        let fg = if is_done { Color32::WHITE } else { t.text2 };
-                        let slot = ui.painter().add(egui::Shape::Noop);
-                        let b = icons::icon_button_ex(
-                            ui,
-                            &t,
-                            "check",
-                            txt,
-                            "Mark complete",
-                            !is_done,
-                            0.0,
-                            fg,
-                            fg,
-                        );
-                        if is_done {
-                            ui.painter().set(
-                                slot,
-                                egui::epaint::RectShape::filled(b.rect, 6.0, rgb(done.color)),
-                            );
-                        }
-                        if b.on_hover_text(tr("Mark complete")).clicked() {
-                            task.status = if is_done {
-                                statuses[0].name.clone()
-                            } else {
-                                done.name.clone()
-                            };
-                        }
-                    }
                 });
                 if one_col {
                     ui.end_row();
@@ -558,6 +527,9 @@ impl App {
                             FontId::proportional(13.0),
                             t.text3,
                         );
+                    }
+                    if self.force_menu.as_deref() == Some("priority") {
+                        ui.memory_mut(|m| m.open_popup(win_id.with("pr")));
                     }
                     popup(ui, &presp, win_id.with("pr"), 180.0, |ui| {
                         priority_menu(ui, &t, &mut task.priority)
@@ -909,18 +881,24 @@ impl App {
             let mut top = false;
             let mut del = false;
             if hover {
-                let b = ui.put(
-                    Rect::from_center_size(pos2(r.right() - 162.0, r.center().y), vec2(22.0, 22.0)),
-                    ghost(egui::Button::new("").small()),
-                );
-                icons::line_icon(ui.painter(), "arrow_up_left", b.rect.center(), t.text2);
+                // interact instead of `ui.put`: put allocates layout space,
+                // so the buttons appearing on hover pushed the rows below down
+                let mut hover_btn = |dx: f32, key: &str, icon: &str| {
+                    let br = Rect::from_center_size(
+                        pos2(r.right() - dx, r.center().y),
+                        vec2(22.0, 22.0),
+                    );
+                    let b = ui.interact(br, win_id.with((key, s.id)), Sense::click());
+                    if b.hovered() {
+                        ui.painter().rect_filled(br, 5.0, t.hover);
+                    }
+                    icons::line_icon(ui.painter(), icon, br.center(), t.text2);
+                    b
+                };
+                let b = hover_btn(162.0, "subtop", "arrow_up_left");
                 name_it(&b, &format!("Make top-level {}", s.name));
                 top = b.on_hover_text(tr("Make it a task of its own")).clicked();
-                let b = ui.put(
-                    Rect::from_center_size(pos2(r.right() - 186.0, r.center().y), vec2(22.0, 22.0)),
-                    ghost(egui::Button::new("").small()),
-                );
-                icons::line_icon(ui.painter(), "close", b.rect.center(), t.text2);
+                let b = hover_btn(186.0, "subdel", "close");
                 name_it(&b, &format!("Delete subtask {}", s.name));
                 del = b.on_hover_text(tr("Delete")).clicked();
             }
@@ -998,11 +976,15 @@ impl App {
         if !task.checklist.is_empty() {
             let d = task.checklist.iter().filter(|c| c.done).count() as f32
                 / task.checklist.len() as f32;
-            ui.add(
-                egui::ProgressBar::new(d)
-                    .desired_height(5.0)
-                    .fill(rgb([0x00, 0x88, 0x44])),
-            );
+            // a thin track with the done share filled; egui's ProgressBar
+            // drew only a lone green dot at 0% because its track matched
+            // the window background
+            let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0), Sense::hover());
+            ui.painter().rect_filled(bar, 2.0, t.hover);
+            if d > 0.0 {
+                let fill = Rect::from_min_size(bar.min, vec2(bar.width() * d, bar.height()));
+                ui.painter().rect_filled(fill, 2.0, rgb([0x00, 0x88, 0x44]));
+            }
         }
         self.checklist_rows(ui, &t, win_id, &mut task);
         let ck_on_id = win_id.with(("adding_check", tid));

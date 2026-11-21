@@ -723,17 +723,39 @@ impl App {
                 if let Some((ts, label)) = temp {
                     rows.push((label.to_string(), Some(ts)));
                 }
-                // as many as fit above the bottom group (62 px each, the last
-                // 60), More always among them; the rest are in More's menu
+                // every item, 62 px apart (60 tall), then More. When they
+                // don't all fit above the bottom group, More stays just above
+                // it and the items scroll with the wheel behind it; those
+                // scrolled out of view are also in More's menu.
                 let top = rect.top() + 4.0;
-                let fits = (((bottom_top - top - 2.0) / RAIL_STEP).floor() as usize).max(2);
+                let more_y = (top + rows.len() as f32 * RAIL_STEP).min(bottom_top - 62.0);
+                let view = Rect::from_min_max(pos2(rect.left(), top), pos2(rect.right(), more_y));
+                let scroll_key = ui.id().with("rail_scroll");
+                let max_scroll = (rows.len() as f32 * RAIL_STEP - 2.0 - view.height()).max(0.0);
+                let mut scroll = ui.data(|d| d.get_temp::<f32>(scroll_key)).unwrap_or(0.0);
+                let any_drag = rows
+                    .iter()
+                    .any(|(l, _)| ctx.is_being_dragged(ui.id().with(("rail", l.as_str()))));
+                if max_scroll > 0.0 && !any_drag && ui.rect_contains_pointer(view) {
+                    let dy = ctx.input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        scroll -= dy;
+                        ctx.input_mut(|i| i.smooth_scroll_delta.y = 0.0);
+                    }
+                }
+                let scroll = scroll.clamp(0.0, max_scroll);
+                ui.data_mut(|d| d.insert_temp(scroll_key, scroll));
+                let slot_y = |i: usize| top + i as f32 * RAIL_STEP - scroll;
                 let hidden: Vec<String> = rows
-                    .split_off((fits - 1).min(rows.len()))
-                    .into_iter()
-                    .map(|(l, _)| l)
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| {
+                        slot_y(*i) < view.top() - 1.0 || slot_y(*i) + 60.0 > view.bottom() + 1.0
+                    })
+                    .map(|(_, (l, _))| l.clone())
                     .collect();
-                let slot_y = |i: usize| top + i as f32 * RAIL_STEP;
-                let item_id = |l: &str| ui.id().with(("rail", l));
+                let rail_id = ui.id();
+                let item_id = |l: &str| rail_id.with(("rail", l));
                 // an item dragged up or down the bar floats under the mouse
                 // while the others move aside to leave its slot open; let go,
                 // it takes that slot. The pinned items shown come first in
@@ -759,8 +781,12 @@ impl App {
                         }
                     };
                     let py = ctx.input(|i| i.pointer.latest_pos())?.y;
-                    let at = (py - grab).clamp(slot_y(0), slot_y(pinned_shown - 1));
-                    let to = (((at - top) / RAIL_STEP).round() as usize).min(pinned_shown - 1);
+                    // within the items, and within the part of the bar in view
+                    let lo = slot_y(0).max(view.top());
+                    let hi = slot_y(pinned_shown - 1).min(view.bottom() - 60.0).max(lo);
+                    let at = (py - grab).clamp(lo, hi);
+                    let to =
+                        (((at - slot_y(0)) / RAIL_STEP).round() as usize).min(pinned_shown - 1);
                     Some(RailLift { from, at, to })
                 });
                 if dragged.is_none() {
@@ -777,6 +803,11 @@ impl App {
                     }
                     l => l,
                 };
+                // the items are drawn and clicked only in the part in view
+                let full_clip = ui.clip_rect();
+                ui.set_clip_rect(view.intersect(full_clip));
+                let full_p = p.clone();
+                let p = full_p.with_clip_rect(view.intersect(full_clip));
                 // the order drawn: the dragged item taken out and put back
                 // at the slot it would drop into
                 let mut drawn: Vec<usize> = (0..rows.len()).collect();
@@ -922,7 +953,9 @@ impl App {
                         }
                     }
                 }
-                let y = slot_y(rows.len());
+                ui.set_clip_rect(full_clip);
+                let p = full_p;
+                let y = more_y;
                 // More
                 let ibox = Rect::from_center_size(pos2(cx, y + 22.0), vec2(32.0, 32.0));
                 let hit = Rect::from_min_max(pos2(rect.left(), y), pos2(rect.right(), y + 60.0));

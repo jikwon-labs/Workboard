@@ -767,8 +767,31 @@ fn the_more_menu_opens_beside_the_bar_and_stays_in_the_window() {
     assert!(clips.top() < more.top(), "moved up: {:?}", clips);
 }
 
+/// Whether a left-bar item is in the part of the bar in view (scrolled-out
+/// items are still named, behind More).
+fn in_bar(h: &Ui1, label: &str) -> bool {
+    let name = format!("Rail {}", label);
+    if !h.has(&name) {
+        return false;
+    }
+    let r = h.rect(&name);
+    let more = h.rect("Rail More");
+    label == "More" || (r.top() >= 0.0 && r.bottom() <= more.top() + 1.0)
+}
+
+/// Wheels over the left bar's items, `dy` points at a time.
+fn wheel_rail(h: &mut Ui1, dy: f32) {
+    h.frame(vec![egui::Event::PointerMoved(pos2(30.0, 150.0))]);
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(0.0, dy),
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+}
+
 #[test]
-fn a_full_bar_keeps_invite_at_the_bottom_and_moves_the_rest_into_more() {
+fn a_full_bar_keeps_invite_at_the_bottom_and_scrolls_the_rest() {
     // the smallest window the app allows
     let mut h = Ui1::sized(900.0, 560.0);
     let pinned = [
@@ -793,10 +816,7 @@ fn a_full_bar_keeps_invite_at_the_bottom_and_moves_the_rest_into_more() {
         more,
         invite
     );
-    let shown: Vec<&str> = pinned
-        .into_iter()
-        .filter(|l| h.has(&format!("Rail {}", l)))
-        .collect();
+    let shown: Vec<&str> = pinned.into_iter().filter(|l| in_bar(&h, l)).collect();
     assert!(
         !shown.is_empty() && shown.len() < pinned.len(),
         "{:?}",
@@ -827,11 +847,28 @@ fn a_full_bar_keeps_invite_at_the_bottom_and_moves_the_rest_into_more() {
         "More is lit for the open app"
     );
 
+    // the wheel over the bar brings the last ones into view, above More,
+    // and takes the first ones out; the wheel back brings them back
+    for _ in 0..10 {
+        wheel_rail(&mut h, -120.0);
+    }
+    assert!(in_bar(&h, "Chat"), "the last app scrolls into view");
+    assert!(!in_bar(&h, "Home"), "the first ones scroll out");
+    let chat = h.rect("Rail Chat");
+    assert!(chat.bottom() <= h.rect("Rail More").top() + 1.0);
+    assert!(h.rect("Rail More").bottom() <= h.rect("Rail Invite").top());
+    h.click("Rail Chat");
+    assert_eq!(h.app.section, Section::Chat, "a scrolled-in app opens");
+    for _ in 0..10 {
+        wheel_rail(&mut h, 120.0);
+    }
+    assert!(in_bar(&h, "Home") && !in_bar(&h, "Chat"));
+
     // a taller window has room for them all again
     h.size = vec2(1440.0, 1200.0);
     h.settle();
     for l in pinned {
-        assert!(h.has(&format!("Rail {}", l)), "{}", l);
+        assert!(in_bar(&h, l), "{}", l);
     }
 }
 
@@ -855,7 +892,7 @@ fn home_moved_into_more_still_opens_from_there() {
     h.settle();
     h.click("Rail Planner");
     assert_eq!(h.app.section, Section::Planner);
-    assert!(!h.has("Rail Home"), "Home is in More's menu");
+    assert!(!in_bar(&h, "Home"), "Home is out of view, in More's menu");
     h.click("Rail More");
     h.click("Home");
     assert_eq!(h.app.section, Section::Home);
@@ -1764,7 +1801,7 @@ fn dragging_a_rail_item_shows_where_it_lands_and_moves_it_there() {
 
 #[test]
 fn on_a_full_bar_a_dragged_item_stays_above_more() {
-    // the smallest window: some pinned apps are hidden in More's menu
+    // the smallest window: some pinned apps are scrolled out of view
     let mut h = Ui1::sized(900.0, 560.0);
     let pinned = [
         "Docs",
@@ -1777,10 +1814,7 @@ fn on_a_full_bar_a_dragged_item_stays_above_more() {
     ];
     h.app.data.extra.rail_items = pinned.map(String::from).to_vec();
     h.settle();
-    let shown: Vec<&str> = pinned
-        .into_iter()
-        .filter(|l| h.has(&format!("Rail {}", l)))
-        .collect();
+    let shown: Vec<&str> = pinned.into_iter().filter(|l| in_bar(&h, l)).collect();
     assert!(shown.len() >= 2 && shown.len() < pinned.len(), "{shown:?}");
     let last = *shown.last().unwrap();
 
@@ -1792,7 +1826,7 @@ fn on_a_full_bar_a_dragged_item_stays_above_more() {
     want.push("Docs");
     want.extend(&pinned[shown.len()..]);
     assert_eq!(h.app.data.extra.rail_items, want);
-    assert!(h.has("Rail Docs"), "still in the bar, after {last}");
+    assert!(in_bar(&h, "Docs"), "still in view, after {last}");
     assert!(h.rect("Rail Docs").bottom() <= h.rect("Rail More").top());
 }
 

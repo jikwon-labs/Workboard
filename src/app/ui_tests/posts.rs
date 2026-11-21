@@ -363,3 +363,38 @@ fn a_post_by_someone_who_left_names_them_as_someone() {
         "the author is Someone"
     );
 }
+
+/// "Open in channel" opens the post's channel the way the sidebar, Search
+/// and the Inbox open a conversation: a thread left open from before
+/// closes, rather than showing beside the post's channel.
+#[test]
+fn open_in_channel_closes_a_thread_left_open() {
+    let (mut h, cid) = general_with_my_message("Who has the keys?");
+    let mid = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .id;
+    h.app
+        .apply_chat(vec![crate::app::chat::ChatAction::Thread(mid)]);
+    h.settle();
+    assert!(h.has("Close thread"), "the thread is open");
+    h.app.section = Section::Posts;
+    h.settle();
+    write_post(&mut h, "general", "Office move", "Monday");
+    h.click("Post");
+    h.click("Open in channel");
+    h.settle();
+    assert_eq!(h.app.section, Section::Chat);
+    assert_eq!(h.app.chat.open, Some(cid));
+    assert!(
+        !h.has("Close thread"),
+        "no thread beside the post's channel"
+    );
+}

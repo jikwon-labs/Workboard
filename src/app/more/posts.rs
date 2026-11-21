@@ -441,8 +441,9 @@ impl App {
                                             Layout::right_to_left(Align::Center),
                                             |ui| {
                                                 if ui.link(tr("Open in channel")).clicked() {
-                                                    self.section = Section::Chat;
-                                                    self.chat.open = Some(cid);
+                                                    // as the Inbox opens one (an old
+                                                    // thread closes)
+                                                    self.open_chat_at(cid, None);
                                                 }
                                             },
                                         );

@@ -1172,12 +1172,23 @@ impl App {
                 if !self.notify_rt.away {
                     self.mark_thread_read(pc, &parent);
                 }
-                // wider by dragging its left edge; the conversation keeps room
-                let max_w = (ui.available_width() - 480.0).max(THREAD_W);
-                let panel = egui::SidePanel::right("thread")
-                    .default_width(THREAD_W)
-                    .width_range(300.0..=max_w)
-                    .resizable(true)
+                // wider by dragging its left edge; the conversation keeps room.
+                // In a small window it narrows to leave the conversation 340
+                // (it was squeezed under the thread, drawn over its messages)
+                let avail = ui.available_width();
+                let max_w = (avail - 480.0).max(THREAD_W);
+                let tight = avail - THREAD_W < 340.0;
+                let narrow_w = (avail - 340.0).clamp(240.0, THREAD_W);
+                let mut panel = egui::SidePanel::right("thread");
+                panel = if tight {
+                    panel.exact_width(narrow_w).resizable(false)
+                } else {
+                    panel
+                        .default_width(THREAD_W)
+                        .width_range(300.0..=max_w)
+                        .resizable(true)
+                };
+                let panel = panel
                     .frame(
                         egui::Frame::new()
                             .fill(t.column_bg)
@@ -1217,7 +1228,13 @@ impl App {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
                         line_icon(ui.painter(), "lock", r.center(), t.text2);
                     }
-                    ui.label(RichText::new(title.clone()).size(15.5).color(t.text));
+                    // shortened before the buttons on the right (it ran under them)
+                    let buttons = if self.ai_offered() && !no_messages { 270.0 } else { 150.0 };
+                    let room = (ui.available_width() - buttons).max(40.0);
+                    ui.scope(|ui| {
+                        ui.set_max_width(room);
+                        ui.add(egui::Label::new(RichText::new(title.clone()).size(15.5).color(t.text)).truncate());
+                    });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if channel.kind == ChannelKind::Channel {
                             // how this channel notifies me (notify.rs)
@@ -1251,7 +1268,8 @@ impl App {
                         }
                     });
                 });
-                ui.horizontal(|ui| {
+                // wraps in a narrow conversation instead of widening it
+                ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 14.0;
                     let g = ui.painter().layout_no_wrap(tr("Channel").into(), FontId::proportional(14.0), t.text);
                     let (r, _) = ui.allocate_exact_size(vec2(g.size().x + 34.0, 34.0), Sense::hover());
@@ -1283,8 +1301,12 @@ impl App {
             });
             let r = ui.available_rect_before_wrap();
             ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
-            // right panel: narrower in a small window so the messages keep room
-            let panel_w = (ui.available_width() * 0.3).clamp(170.0, 230.0);
+            // right panel: narrower in a small window so the messages keep room;
+            // where even that leaves them too little (a thread open beside a
+            // small window) only its icons, named on hover: it was drawn
+            // over the messages
+            let icons_only = ui.available_width() < 560.0;
+            let panel_w = if icons_only { 46.0 } else { (ui.available_width() * 0.3).clamp(170.0, 230.0) };
             egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(panel_w).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -1298,16 +1320,23 @@ impl App {
                         } else if resp.hovered() {
                             ui.painter().rect_filled(r, 6.0, t.hover);
                         }
+                        let at = if icons_only { r.center() - vec2(12.0, 0.0) } else { r.left_center() };
                         if code == 10 {
-                            paint_avatars(ui.painter(), r.left_center() + vec2(4.0, 0.0), 8.0, &channel.members.iter().take(1).copied().collect::<Vec<_>>(), &self.data, t.bg);
+                            paint_avatars(ui.painter(), at + vec2(4.0, 0.0), 8.0, &channel.members.iter().take(1).copied().collect::<Vec<_>>(), &self.data, t.bg);
                         } else {
-                            line_icon(ui.painter(), icon, r.left_center() + vec2(12.0, 0.0), t.text2);
+                            line_icon(ui.painter(), icon, at + vec2(12.0, 0.0), t.text2);
                         }
-                        let count_w = if code == 10 { 24.0 } else { 0.0 };
-                        paint_fit(ui, r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text, w - 32.0 - count_w);
-                        if code == 10 {
-                            ui.painter().text(r.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, channel.members.len().to_string(), FontId::proportional(12.0), t.text3);
-                        }
+                        let resp = if icons_only {
+                            name_it(&resp, label);
+                            resp.on_hover_text(tr(label))
+                        } else {
+                            let count_w = if code == 10 { 24.0 } else { 0.0 };
+                            paint_fit(ui, r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text, w - 32.0 - count_w);
+                            if code == 10 {
+                                ui.painter().text(r.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, channel.members.len().to_string(), FontId::proportional(12.0), t.text3);
+                            }
+                            resp
+                        };
                         if resp.clicked() {
                             match code {
                                 10 | 12 => self.modal = Some(Modal::ChannelSettings(cid)),

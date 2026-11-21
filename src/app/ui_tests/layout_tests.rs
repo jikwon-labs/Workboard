@@ -1462,3 +1462,23 @@ fn small_window_doc_header_and_toolbar_fit() {
         crate::i18n::set_lang(crate::i18n::Lang::En);
     }
 }
+
+/// A thread open beside a channel in the smallest window: the channel's box
+/// on the right keeps only its icons (it was drawn over the messages), the
+/// messages and the header's title don't run under anything, and the box's
+/// rows still work.
+#[test]
+fn small_window_thread_beside_a_channel_does_not_overlap() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    assert!(h.app.chat.thread_open.is_some());
+    h.size = vec2(900.0, 560.0);
+    h.settle();
+    assert!(h.has("Close thread"));
+    let texts = h.texts_in(Rect::from_min_max(pos2(320.0, 40.0), pos2(900.0, 560.0)));
+    let over = overlapping(&texts);
+    assert!(over.is_empty(), "{:?}", over);
+    h.click("Pinned messages");
+    assert_eq!(h.app.channel_panel, 1);
+}

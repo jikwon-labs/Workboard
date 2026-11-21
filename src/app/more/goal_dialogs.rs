@@ -419,33 +419,28 @@ impl App {
                     .size(12.5)
                     .color(t.text2),
             );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let named = !d.name.trim().is_empty() && !same_range(d);
-                let create = ui
-                    .add_enabled_ui(named, |ui| primary_button(ui, t, tr("Create goal")))
-                    .inner;
-                name_it(&create, "Create goal");
-                if create.clicked() && named {
-                    let mut targets = d.more.clone();
-                    targets.push(d.current_target());
-                    let g = Goal {
-                        name: d.name.trim().to_string(),
-                        color: d.color,
-                        due: d.due,
-                        owner: d.owner,
-                        targets,
-                        ..Default::default()
-                    };
-                    self.add_goal(g);
-                    self.section = Section::Goals;
-                    close = true;
-                }
-                let cancel = secondary_button(ui, tr("Cancel"));
-                name_it(&cancel, "Cancel new goal");
-                if cancel.clicked() {
-                    close = true;
-                }
-            });
+            let named = !d.name.trim().is_empty() && !same_range(d);
+            let (create, cancel) = footer_buttons(ui, t, tr("Create goal"), named);
+            name_it(&create, "Create goal");
+            name_it(&cancel, "Cancel new goal");
+            if create.clicked() && named {
+                let mut targets = d.more.clone();
+                targets.push(d.current_target());
+                let g = Goal {
+                    name: d.name.trim().to_string(),
+                    color: d.color,
+                    due: d.due,
+                    owner: d.owner,
+                    targets,
+                    ..Default::default()
+                };
+                self.add_goal(g);
+                self.section = Section::Goals;
+                close = true;
+            }
+            if cancel.clicked() {
+                close = true;
+            }
         });
         close
     }

@@ -210,19 +210,22 @@ pub fn dialog_header_as(ui: &mut Ui, t: &Theme, title: &str, close_name: &str) -
 /// until `ok`. Returns (main button clicked, Cancel clicked).
 pub fn dialog_footer(ui: &mut Ui, t: &Theme, label: &str, ok: bool) -> (bool, bool) {
     ui.add_space(14.0);
-    let mut out = (false, false);
-    ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            out.0 = ui
-                .add_enabled(
-                    ok,
-                    Tint(primary_btn(t, label).min_size(vec2(90.0, CONTROL_H))),
-                )
-                .clicked();
-            out.1 = secondary_button(ui, tr("Cancel")).clicked();
-        });
-    });
-    out
+    let (main, cancel) = ui.horizontal(|ui| footer_buttons(ui, t, label, ok)).inner;
+    (main.clicked(), cancel.clicked())
+}
+
+/// `dialog_footer`'s two buttons at the right of the row they are put in,
+/// for a footer with more in its row (a note at the left) or buttons the
+/// caller names for screen readers and tests. Returns (main, Cancel).
+pub fn footer_buttons(ui: &mut Ui, t: &Theme, label: &str, ok: bool) -> (Response, Response) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let main = ui.add_enabled(
+            ok,
+            Tint(primary_btn(t, label).min_size(vec2(90.0, CONTROL_H))),
+        );
+        (main, secondary_button(ui, tr("Cancel")))
+    })
+    .inner
 }
 
 /// A small grey label over a dialog's field.

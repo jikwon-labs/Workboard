@@ -629,21 +629,15 @@ impl App {
                 .hint_text(tr("https://..."))
                 .desired_width(f32::INFINITY),
         );
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, t, tr("Start call")).clicked()
-                    && chans.iter().any(|c| c.0 == *ch)
-                {
-                    let ctx = ui.ctx().clone();
-                    self.start_call(Some(&ctx), *ch, link);
-                    close = true;
-                }
-                if ui.button(tr("Cancel")).clicked() {
-                    close = true;
-                }
-            });
-        });
+        let (start, cancel) = dialog_footer(ui, t, tr("Start call"), true);
+        if start && chans.iter().any(|c| c.0 == *ch) {
+            let ctx = ui.ctx().clone();
+            self.start_call(Some(&ctx), *ch, link);
+            close = true;
+        }
+        if cancel {
+            close = true;
+        }
         close
     }
 

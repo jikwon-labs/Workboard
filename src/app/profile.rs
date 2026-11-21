@@ -492,31 +492,24 @@ impl App {
                 }
             }
         });
-        ui.add_space(14.0);
-        ui.horizontal(|ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let save = ui.add_enabled(
-                    !name.trim().is_empty() && !getting_ready,
-                    Tint(primary_btn(t, tr("Save changes"))),
-                );
-                if save.clicked() {
-                    if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
-                        m.name = name.trim().to_string();
-                        m.display_name = display.trim().to_string();
-                        m.title = title.trim().to_string();
-                        m.email = email.trim().to_string();
-                        m.photo = photo.clone();
-                    }
-                    self.profile_photo = None;
-                    self.dirty = true;
-                    close = true;
-                }
-                if ui.button(tr("Cancel")).clicked() {
-                    self.profile_photo = None;
-                    close = true;
-                }
-            });
-        });
+        let ok = !name.trim().is_empty() && !getting_ready;
+        let (save, cancel) = dialog_footer(ui, t, tr("Save changes"), ok);
+        if save {
+            if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
+                m.name = name.trim().to_string();
+                m.display_name = display.trim().to_string();
+                m.title = title.trim().to_string();
+                m.email = email.trim().to_string();
+                m.photo = photo.clone();
+            }
+            self.profile_photo = None;
+            self.dirty = true;
+            close = true;
+        }
+        if cancel {
+            self.profile_photo = None;
+            close = true;
+        }
         close
     }
 }

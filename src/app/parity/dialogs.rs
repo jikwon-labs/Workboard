@@ -170,26 +170,14 @@ impl App {
                     }
                 }
             });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let ok = spaces.iter().any(|s| s.0 == *space);
-                if (ui
-                    .add_enabled(
-                        ok,
-                        Tint(primary_btn(t, tr("Create")).min_size(vec2(90.0, CONTROL_H))),
-                    )
-                    .clicked()
-                    || (enter && ok))
-                    && self.create_list(*space, *folder, name).is_some()
-                {
-                    close = true;
-                }
-                if ui.button(tr("Cancel")).clicked() {
-                    close = true;
-                }
-            });
-        });
+        let ok = spaces.iter().any(|s| s.0 == *space);
+        let (create, cancel) = dialog_footer(ui, t, tr("Create"), ok);
+        if (create || (enter && ok)) && self.create_list(*space, *folder, name).is_some() {
+            close = true;
+        }
+        if cancel {
+            close = true;
+        }
         close
     }
 
@@ -245,18 +233,14 @@ impl App {
                 }
             }
         });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, t, tr("Continue")).clicked() || enter {
-                    self.create_space(name, *color);
-                    close = true;
-                }
-                if ui.button(tr("Cancel")).clicked() {
-                    close = true;
-                }
-            });
-        });
+        let (create, cancel) = dialog_footer(ui, t, tr("Continue"), true);
+        if create || enter {
+            self.create_space(name, *color);
+            close = true;
+        }
+        if cancel {
+            close = true;
+        }
         close
     }
 

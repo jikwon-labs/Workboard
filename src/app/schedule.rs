@@ -275,21 +275,18 @@ impl App {
             );
         }
         let mut close = false;
-        ui.horizontal(|ui| {
-            let b = ui.add_enabled(later, egui::Button::new(tr("Schedule")));
-            name_it(&b, "Schedule");
-            if b.clicked() {
-                let text = self.chat.channel.text.clone();
-                let picked = std::mem::take(&mut self.chat.channel.picked);
-                if self.schedule_message(ch, None, &text, &picked, at) {
-                    self.chat.channel.text.clear();
-                }
-                close = true;
+        let (schedule, cancel) = dialog_footer(ui, t, tr("Schedule"), later);
+        if schedule {
+            let text = self.chat.channel.text.clone();
+            let picked = std::mem::take(&mut self.chat.channel.picked);
+            if self.schedule_message(ch, None, &text, &picked, at) {
+                self.chat.channel.text.clear();
             }
-            if ui.button(tr("Cancel")).clicked() {
-                close = true;
-            }
-        });
+            close = true;
+        }
+        if cancel {
+            close = true;
+        }
         close
     }
 }

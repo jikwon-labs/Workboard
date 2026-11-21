@@ -22,7 +22,7 @@ struct GoalsView: View {
                             Circle().fill(Color(rgb: g.color)).frame(width: 10, height: 10)
                             Text(g.name).fontWeight(.medium)
                             Spacer()
-                            Text("\(Int((v.progress(of: g) * 100).rounded()))%").monospacedDigit().foregroundStyle(.secondary)
+                            Text("\(v.percent(of: g))%").monospacedDigit().foregroundStyle(.secondary)
                         }
                         ProgressView(value: v.progress(of: g)).tint(Color(rgb: g.color))
                         if let due = g.due { Text("Due \(Fmt.due(due))").font(.caption).foregroundStyle(.secondary) }
@@ -64,7 +64,7 @@ struct GoalDetailView: View {
                         .onSubmit { client.edit { d, _ in Edits.renameGoal(&d, goal: g.id, to: name) } }
                         .accessibilityIdentifier("goalName")
                     LabeledContent("Progress") {
-                        Text("\(Int((v.progress(of: g) * 100).rounded()))%").monospacedDigit().accessibilityIdentifier("goalProgress")
+                        Text("\(v.percent(of: g))%").monospacedDigit().accessibilityIdentifier("goalProgress")
                     }
                     if let due = g.due {
                         DatePicker("Due", selection: Binding(get: { DayFormat.date(fromDay: due) ?? Date() }, set: { new in client.edit { d, _ in Edits.setGoalDue(&d, goal: g.id, to: dayString(new)) } }), displayedComponents: .date)

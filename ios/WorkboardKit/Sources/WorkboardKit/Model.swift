@@ -507,6 +507,10 @@ public struct WorkspaceView: Sendable {
     public let channels: [ChannelView]
     public let fields: [CustomFieldView]
     public let apps: AppsView
+    /// Every task by id, archived ones too, and whether it is closed in its
+    /// list's statuses (archived spaces and lists too): what a goal's tasks
+    /// target counts, as goal_progress does on the Mac.
+    let goalTaskClosed: [UInt64: Bool]
 
     public init(_ data: JSON) {
         fields = (data.at("extra.fields")?.array ?? []).map(CustomFieldView.init)
@@ -514,12 +518,36 @@ public struct WorkspaceView: Sendable {
         name = data["workspace"]?.string ?? ""
         members = (data["members"]?.array ?? []).map(MemberView.init)
         spaces = (data["spaces"]?.array ?? []).map(SpaceView.init).filter { !$0.archived }
-        tasks = (data["tasks"]?.array ?? []).map(TaskView.init).filter { !$0.archived }
+        let allTasks = (data["tasks"]?.array ?? []).map(TaskView.init)
+        tasks = allTasks.filter { !$0.archived }
+        goalTaskClosed = WorkspaceView.closedTasks(allTasks, spaces: data["spaces"]?.array ?? [])
         docs = (data["docs"]?.array ?? []).map(DocView.init).filter { !$0.archived }
         channels = (data["channels"]?.array ?? []).map(ChannelView.init)
     }
 
     public static let empty = WorkspaceView(.object([:]))
+
+    /// status_ref and is_closed in src/model.rs over every space and list,
+    /// archived ones too: a list's space's statuses (the defaults when no
+    /// space has the list), the status by name, else the first one.
+    static func closedTasks(_ tasks: [TaskView], spaces: [JSON]) -> [UInt64: Bool] {
+        var byList: [UInt64: [StatusView]] = [:]
+        for s in spaces {
+            let statuses = (s["statuses"]?.array ?? []).map(StatusView.init)
+            let folders = s["folders"]?.array ?? []
+            let lists = (s["lists"]?.array ?? []) + folders.flatMap { $0["lists"]?.array ?? [] }
+            for l in lists {
+                if let id = l["id"]?.uint, byList[id] == nil { byList[id] = statuses }
+            }
+        }
+        var out: [UInt64: Bool] = [:]
+        for t in tasks {
+            let sts = byList[t.listId] ?? StatusView.defaults
+            let st = sts.first { $0.name == t.status } ?? sts.first ?? StatusView.defaults[0]
+            out[t.id] = st.isClosed
+        }
+        return out
+    }
 
     public func member(_ id: UInt64) -> MemberView? { members.first { $0.id == id } }
 

@@ -99,21 +99,29 @@ extension WorkspaceView {
         (data.at("extra.meetings")?.array ?? []).map(MeetingView.init).sorted { ($0.date, $0.time) < ($1.date, $1.time) }
     }
 
-    /// goal_progress in src/app/more.rs: the average of its targets' progress.
+    /// goal_progress in src/app/more/goals.rs: the average of its targets' progress.
     public func progress(of g: GoalView) -> Double {
         guard !g.targets.isEmpty else { return 0 }
-        let byId = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return g.targets.map { t -> Double in
             switch t.kind {
             case .number(let s, let target, let c, _):
                 return abs(target - s) < .ulpOfOne ? 1 : min(1, max(0, (c - s) / (target - s)))
             case .trueFalse(let d): return d ? 1 : 0
             case .tasks(let ids):
-                // tasks deleted since they were picked don't count either way
-                let live = ids.compactMap { byId[$0] }
-                return live.isEmpty ? 0 : Double(live.filter { status(of: $0).isClosed }.count) / Double(live.count)
+                // tasks deleted since they were picked don't count either
+                // way; archived ones still do, as on the Mac
+                let live = ids.compactMap { goalTaskClosed[$0] }
+                return live.isEmpty ? 0 : Double(live.filter { $0 }.count) / Double(live.count)
             }
         }.reduce(0, +) / Double(g.targets.count)
+    }
+
+    /// pct_of in src/app/more/goals.rs: the progress as a whole percent,
+    /// rounded, but 100 only once every target is met (99.5% reads 99).
+    public func percent(of g: GoalView) -> Int {
+        let p = progress(of: g)
+        let n = Int(min(100, max(0, (p * 100).rounded())))
+        return p < 1 ? min(n, 99) : n
     }
 }
 

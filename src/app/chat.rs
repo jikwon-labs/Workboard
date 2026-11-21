@@ -3719,6 +3719,324 @@ impl App {
         true
     }
 
+    /// Sends a message or a reply (`ChatAction::Send`): a slash command, a
+    /// message waiting for its files, or one that goes out now.
+    fn send_chat(&mut self, ch: u64, text: String, parent: Option<u64>, files: Vec<Attachment>) {
+        let me = self.data.me;
+        // files the box was sent with before they were ready
+        // the box it was written in: the channel's, or the thread's
+        let in_thread = parent.is_some();
+        let coming = std::mem::take(&mut self.chat.composer_mut(in_thread).coming);
+        // "/name ...": a command (integrations.rs)
+        let mut text = text;
+        if text.starts_with('/') && files.is_empty() && coming.is_empty() {
+            use super::integrations::Slash;
+            match self.slash(ch, parent, &text) {
+                Slash::Plain => {}
+                Slash::Done => return,
+                Slash::Post(t) => text = t,
+                Slash::Unknown(t) => {
+                    self.chat.composer_mut(in_thread).text = t;
+                    return;
+                }
+            }
+        }
+        if self.chat.keep_unread == Some(ch) {
+            self.chat.keep_unread = None;
+        }
+        // nothing to show yet: it goes with the first file ready
+        // (files.rs follow_prepared), so the others never get an
+        // empty message
+        if text.trim().is_empty() && files.is_empty() && !coming.is_empty() {
+            let also_channel = parent.is_some() && std::mem::take(&mut self.chat.also_channel);
+            self.chat.held.push(super::HeldMessage {
+                ch,
+                parent,
+                also_channel,
+                coming,
+            });
+            self.chat.composer_mut(in_thread).picked.clear();
+            return;
+        }
+        self.chat.composer_mut(in_thread).to_bottom = true;
+        self.send_files(&files);
+        let id = self.data.new_id();
+        // the people picked from the @ list of the box it was written in
+        let picked = std::mem::take(&mut self.chat.composer_mut(in_thread).picked);
+        let mentions = self.chat_mentions(&text, ch, &picked);
+        let m = Message {
+            goal: None,
+            edited: None,
+            imported: None,
+            preview: None,
+            forwarded: None,
+            thread_of: None,
+            bot: None,
+            mentions,
+            attachments: files,
+            id,
+            author: me,
+            text,
+            ts: now_ts(),
+            reactions: vec![],
+            replies: vec![],
+            saved: false,
+            task: None,
+            post_title: None,
+            post_type: String::new(),
+            pinned: false,
+            call: None,
+        };
+        let sent = m.text.clone();
+        // "Also send to the channel": a copy there, marked with its thread
+        let copy =
+            (parent.is_some() && std::mem::take(&mut self.chat.also_channel)).then(|| Message {
+                id: self.data.new_id(),
+                thread_of: parent,
+                ..m.clone()
+            });
+        let ids: Vec<u64> = std::iter::once(id)
+            .chain(copy.as_ref().map(|c| c.id))
+            .collect();
+        for p in coming {
+            self.chat.following.push((ch, ids.clone(), p));
+        }
+        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
+            match parent {
+                Some(pid) => {
+                    if let Some(p) = c.messages.iter_mut().find(|x| x.id == pid) {
+                        p.replies.push(m);
+                    }
+                }
+                None => c.messages.push(m),
+            }
+            c.messages.extend(copy);
+            c.last_read = c.last_read.max(now_ts());
+        }
+        self.dirty = true;
+        self.fetch_preview(ch, id, &sent);
+        // workflows this channel's new message starts (workflows.rs)
+        if parent.is_none() {
+            self.run_workflows(ch, id);
+        }
+    }
+
+    /// Turns a message into a task (`ChatAction::Task`).
+    fn chat_to_task(&mut self, ch: u64, msg: u64) {
+        let me = self.data.me;
+        if ch == u64::MAX {
+            // msg holds a task id here: open it
+            self.apply(Action::Open(msg));
+            return;
+        }
+        let text = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == ch)
+            .and_then(|c| c.messages.iter().find(|m| m.id == msg))
+            .map(|m| m.text.clone());
+        let Some(text) = text else { return };
+        let Some(list) = self.data.first_list() else {
+            return;
+        };
+        let name: String = text.lines().next().unwrap_or("").chars().take(80).collect();
+        self.apply(Action::Add {
+            list,
+            name,
+            status: None,
+            priority: DEFAULT_PRIORITY,
+            assignees: vec![me],
+            due: None,
+            parent: None,
+            open: true,
+        });
+        let tid = self.data.next_id;
+        if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == tid) {
+            task.description = text.clone();
+        }
+        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
+            if let Some(m) = c.messages.iter_mut().find(|m| m.id == msg) {
+                m.task = Some(tid);
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Puts a message changed in place back (`ChatAction::SaveEdit`).
+    fn save_message_edit(&mut self, ch: u64, msg: u64, text: String) {
+        let me = self.data.me;
+        self.chat.edit = None;
+        let found = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == ch)
+            .and_then(|c| {
+                c.messages
+                    .iter()
+                    .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
+                    .find(|m| m.id == msg)
+            });
+        // no text left: only a message with pictures (or the like) keeps going
+        if text.is_empty() && !found.is_some_and(stands_without_text) {
+            return;
+        }
+        let before = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == ch)
+            .and_then(|c| {
+                c.messages
+                    .iter()
+                    .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
+                    .find(|m| m.id == msg)
+            })
+            .map(|m| m.mentions.clone())
+            .unwrap_or_default();
+        let mentions = self.chat_mentions(&text, ch, &before);
+        let mut refetch: Option<String> = None;
+        if let Some(m) = self
+            .data
+            .channels
+            .iter_mut()
+            .find(|c| c.id == ch)
+            .and_then(|c| find_msg(&mut c.messages, msg))
+        {
+            if m.author == me && m.text != text {
+                m.mentions = mentions;
+                m.text = text;
+                m.edited = Some(now_ts());
+                self.dirty = true;
+                // a preview of an address no longer in it goes; a new one comes
+                let url = super::chatfmt::first_url(&m.text);
+                if m.preview.as_ref().map(|p| &p.url) != url.as_ref() {
+                    m.preview = None;
+                    refetch = url.map(|_| m.text.clone());
+                }
+            }
+        }
+        if let Some(text) = refetch {
+            self.fetch_preview(ch, msg, &text);
+        }
+    }
+
+    /// Deletes a message or a reply (`ChatAction::Delete`).
+    fn delete_message(&mut self, ch: u64, msg: u64) {
+        let me = self.data.me;
+        self.chat.delete = None;
+        if self.chat.edit.as_ref().is_some_and(|e| e.1 == msg) {
+            self.chat.edit = None;
+        }
+        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
+            if let Some(i) = c
+                .messages
+                .iter()
+                .position(|m| m.id == msg && m.author == me)
+            {
+                // a message with a thread takes its replies with it
+                c.messages.remove(i);
+                if self.chat.thread_open == Some(msg) {
+                    self.chat.thread_open = None;
+                }
+                self.dirty = true;
+            } else {
+                for p in c.messages.iter_mut() {
+                    if let Some(i) = p.replies.iter().position(|r| r.id == msg && r.author == me) {
+                        p.replies.remove(i);
+                        self.dirty = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Marks a conversation unread from a message on (`ChatAction::MarkUnread`).
+    fn mark_unread(&mut self, ch: u64, ts: i64) {
+        let ids: Vec<u64> = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == ch)
+            .map(|c| self.conversation(c).iter().map(|d| d.id).collect())
+            .unwrap_or_default();
+        // the red line moves up to it
+        let from = ids
+            .iter()
+            .filter_map(|id| self.data.channels.iter().find(|c| c.id == *id))
+            .flat_map(|c| c.messages.iter())
+            .filter(|m| m.ts >= ts)
+            .min_by_key(|m| m.ts)
+            .map(|m| m.id);
+        if let Some(open) = self.chat.open {
+            self.chat.read_line = Some((open, from));
+        }
+        for id in ids {
+            if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == id) {
+                c.last_read = ts - 1;
+                // and the messages from then on no longer seen
+                if let Some(s) = self.data.extra.chat_seen.get_mut(&id) {
+                    let later: HashSet<u64> = c
+                        .messages
+                        .iter()
+                        .filter(|m| m.ts >= ts)
+                        .map(|m| m.id)
+                        .collect();
+                    s.ids.retain(|x| !later.contains(x));
+                }
+                self.chat.keep_unread = Some(ch);
+                if self.persist {
+                    self.dirty = true;
+                }
+            }
+        }
+    }
+
+    /// Sets a reminder about a message (`ChatAction::Remind`).
+    fn remind_about_message(&mut self, ch: u64, msg: u64, at: Option<i64>) {
+        let me = self.data.me;
+        let found = self
+            .data
+            .channels
+            .iter_mut()
+            .find(|c| c.id == ch)
+            .and_then(|c| find_msg(&mut c.messages, msg))
+            .map(|m| (m.author, m.text.clone(), shown_post_title(m)));
+        let Some((author, text, title)) = found else {
+            return;
+        };
+        let who = self.who(author);
+        let body = title.filter(|x| !x.is_empty()).unwrap_or(text);
+        // the reminder is this person's own: in their language
+        let what = trf!(
+            "Message from {}: {}",
+            who,
+            truncate(body.lines().next().unwrap_or(""), 60)
+        );
+        match at {
+            Some(ts) => {
+                let id = self.data.new_id();
+                self.data.extra.reminders.push(Reminder {
+                    id,
+                    text: what,
+                    due_ts: ts,
+                    done: false,
+                    owner: me,
+                    message: Some((ch, msg)),
+                    ..Default::default()
+                });
+                self.dirty = true;
+                self.toast(tr("Reminder created"));
+            }
+            None => {
+                self.modal = Some(Modal::reminder(what, today()));
+                self.reminder_about = (None, Some((ch, msg)));
+            }
+        }
+    }
+
     pub(super) fn apply_chat(&mut self, acts: Vec<ChatAction>) {
         let me = self.data.me;
         for a in acts {
@@ -3886,45 +4204,7 @@ impl App {
                         }
                     }
                 }
-                ChatAction::Task { ch, msg } => {
-                    if ch == u64::MAX {
-                        // msg holds a task id here: open it
-                        self.apply(Action::Open(msg));
-                        continue;
-                    }
-                    let text = self
-                        .data
-                        .channels
-                        .iter()
-                        .find(|c| c.id == ch)
-                        .and_then(|c| c.messages.iter().find(|m| m.id == msg))
-                        .map(|m| m.text.clone());
-                    let Some(text) = text else { continue };
-                    let Some(list) = self.data.first_list() else {
-                        continue;
-                    };
-                    let name: String = text.lines().next().unwrap_or("").chars().take(80).collect();
-                    self.apply(Action::Add {
-                        list,
-                        name,
-                        status: None,
-                        priority: DEFAULT_PRIORITY,
-                        assignees: vec![me],
-                        due: None,
-                        parent: None,
-                        open: true,
-                    });
-                    let tid = self.data.next_id;
-                    if let Some(task) = self.data.tasks.iter_mut().find(|x| x.id == tid) {
-                        task.description = text.clone();
-                    }
-                    if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
-                        if let Some(m) = c.messages.iter_mut().find(|m| m.id == msg) {
-                            m.task = Some(tid);
-                        }
-                    }
-                    self.dirty = true;
-                }
+                ChatAction::Task { ch, msg } => self.chat_to_task(ch, msg),
                 ChatAction::Edit { ch, msg } => {
                     // (kept under the conversation shown; saving finds its copy)
                     let home = self.msg_home(ch, msg);
@@ -3941,175 +4221,14 @@ impl App {
                     }
                     self.chat.delete = None;
                 }
-                ChatAction::SaveEdit { ch, msg, text } => {
-                    self.chat.edit = None;
-                    let found = self
-                        .data
-                        .channels
-                        .iter()
-                        .find(|c| c.id == ch)
-                        .and_then(|c| {
-                            c.messages
-                                .iter()
-                                .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
-                                .find(|m| m.id == msg)
-                        });
-                    // no text left: only a message with pictures (or the like) keeps going
-                    if text.is_empty() && !found.is_some_and(stands_without_text) {
-                        continue;
-                    }
-                    let before = self
-                        .data
-                        .channels
-                        .iter()
-                        .find(|c| c.id == ch)
-                        .and_then(|c| {
-                            c.messages
-                                .iter()
-                                .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
-                                .find(|m| m.id == msg)
-                        })
-                        .map(|m| m.mentions.clone())
-                        .unwrap_or_default();
-                    let mentions = self.chat_mentions(&text, ch, &before);
-                    let mut refetch: Option<String> = None;
-                    if let Some(m) = self
-                        .data
-                        .channels
-                        .iter_mut()
-                        .find(|c| c.id == ch)
-                        .and_then(|c| find_msg(&mut c.messages, msg))
-                    {
-                        if m.author == me && m.text != text {
-                            m.mentions = mentions;
-                            m.text = text;
-                            m.edited = Some(now_ts());
-                            self.dirty = true;
-                            // a preview of an address no longer in it goes; a new one comes
-                            let url = super::chatfmt::first_url(&m.text);
-                            if m.preview.as_ref().map(|p| &p.url) != url.as_ref() {
-                                m.preview = None;
-                                refetch = url.map(|_| m.text.clone());
-                            }
-                        }
-                    }
-                    if let Some(text) = refetch {
-                        self.fetch_preview(ch, msg, &text);
-                    }
-                }
+                ChatAction::SaveEdit { ch, msg, text } => self.save_message_edit(ch, msg, text),
                 ChatAction::CancelEdit => {
                     self.chat.edit = None;
                     self.chat.delete = None;
                 }
-                ChatAction::Delete { ch, msg } => {
-                    self.chat.delete = None;
-                    if self.chat.edit.as_ref().is_some_and(|e| e.1 == msg) {
-                        self.chat.edit = None;
-                    }
-                    if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
-                        if let Some(i) = c
-                            .messages
-                            .iter()
-                            .position(|m| m.id == msg && m.author == me)
-                        {
-                            // a message with a thread takes its replies with it
-                            c.messages.remove(i);
-                            if self.chat.thread_open == Some(msg) {
-                                self.chat.thread_open = None;
-                            }
-                            self.dirty = true;
-                        } else {
-                            for p in c.messages.iter_mut() {
-                                if let Some(i) =
-                                    p.replies.iter().position(|r| r.id == msg && r.author == me)
-                                {
-                                    p.replies.remove(i);
-                                    self.dirty = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                ChatAction::MarkUnread { ch, ts } => {
-                    let ids: Vec<u64> = self
-                        .data
-                        .channels
-                        .iter()
-                        .find(|c| c.id == ch)
-                        .map(|c| self.conversation(c).iter().map(|d| d.id).collect())
-                        .unwrap_or_default();
-                    // the red line moves up to it
-                    let from = ids
-                        .iter()
-                        .filter_map(|id| self.data.channels.iter().find(|c| c.id == *id))
-                        .flat_map(|c| c.messages.iter())
-                        .filter(|m| m.ts >= ts)
-                        .min_by_key(|m| m.ts)
-                        .map(|m| m.id);
-                    if let Some(open) = self.chat.open {
-                        self.chat.read_line = Some((open, from));
-                    }
-                    for id in ids {
-                        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == id) {
-                            c.last_read = ts - 1;
-                            // and the messages from then on no longer seen
-                            if let Some(s) = self.data.extra.chat_seen.get_mut(&id) {
-                                let later: HashSet<u64> = c
-                                    .messages
-                                    .iter()
-                                    .filter(|m| m.ts >= ts)
-                                    .map(|m| m.id)
-                                    .collect();
-                                s.ids.retain(|x| !later.contains(x));
-                            }
-                            self.chat.keep_unread = Some(ch);
-                            if self.persist {
-                                self.dirty = true;
-                            }
-                        }
-                    }
-                }
-                ChatAction::Remind { ch, msg, at } => {
-                    let found = self
-                        .data
-                        .channels
-                        .iter_mut()
-                        .find(|c| c.id == ch)
-                        .and_then(|c| find_msg(&mut c.messages, msg))
-                        .map(|m| (m.author, m.text.clone(), shown_post_title(m)));
-                    let Some((author, text, title)) = found else {
-                        continue;
-                    };
-                    let who = self.who(author);
-                    let body = title.filter(|x| !x.is_empty()).unwrap_or(text);
-                    // the reminder is this person's own: in their language
-                    let what = trf!(
-                        "Message from {}: {}",
-                        who,
-                        truncate(body.lines().next().unwrap_or(""), 60)
-                    );
-                    match at {
-                        Some(ts) => {
-                            let id = self.data.new_id();
-                            self.data.extra.reminders.push(Reminder {
-                                id,
-                                text: what,
-                                due_ts: ts,
-                                done: false,
-                                owner: me,
-                                message: Some((ch, msg)),
-                                ..Default::default()
-                            });
-                            self.dirty = true;
-                            self.toast(tr("Reminder created"));
-                        }
-                        None => {
-                            self.modal = Some(Modal::reminder(what, today()));
-                            self.reminder_about = (None, Some((ch, msg)));
-                        }
-                    }
-                }
+                ChatAction::Delete { ch, msg } => self.delete_message(ch, msg),
+                ChatAction::MarkUnread { ch, ts } => self.mark_unread(ch, ts),
+                ChatAction::Remind { ch, msg, at } => self.remind_about_message(ch, msg, at),
                 ChatAction::Copied => self.toast(tr("Copied")),
                 ChatAction::OpenMedia { ch, msg, index } => {
                     // a picture that failed to load tries again right away
@@ -4143,105 +4262,7 @@ impl App {
                     text,
                     parent,
                     files,
-                } => {
-                    // files the box was sent with before they were ready
-                    // the box it was written in: the channel's, or the thread's
-                    let in_thread = parent.is_some();
-                    let coming = std::mem::take(&mut self.chat.composer_mut(in_thread).coming);
-                    // "/name ...": a command (integrations.rs)
-                    let mut text = text;
-                    if text.starts_with('/') && files.is_empty() && coming.is_empty() {
-                        use super::integrations::Slash;
-                        match self.slash(ch, parent, &text) {
-                            Slash::Plain => {}
-                            Slash::Done => continue,
-                            Slash::Post(t) => text = t,
-                            Slash::Unknown(t) => {
-                                self.chat.composer_mut(in_thread).text = t;
-                                continue;
-                            }
-                        }
-                    }
-                    if self.chat.keep_unread == Some(ch) {
-                        self.chat.keep_unread = None;
-                    }
-                    // nothing to show yet: it goes with the first file ready
-                    // (files.rs follow_prepared), so the others never get an
-                    // empty message
-                    if text.trim().is_empty() && files.is_empty() && !coming.is_empty() {
-                        let also_channel =
-                            parent.is_some() && std::mem::take(&mut self.chat.also_channel);
-                        self.chat.held.push(super::HeldMessage {
-                            ch,
-                            parent,
-                            also_channel,
-                            coming,
-                        });
-                        self.chat.composer_mut(in_thread).picked.clear();
-                        continue;
-                    }
-                    self.chat.composer_mut(in_thread).to_bottom = true;
-                    self.send_files(&files);
-                    let id = self.data.new_id();
-                    // the people picked from the @ list of the box it was written in
-                    let picked = std::mem::take(&mut self.chat.composer_mut(in_thread).picked);
-                    let mentions = self.chat_mentions(&text, ch, &picked);
-                    let m = Message {
-                        goal: None,
-                        edited: None,
-                        imported: None,
-                        preview: None,
-                        forwarded: None,
-                        thread_of: None,
-                        bot: None,
-                        mentions,
-                        attachments: files,
-                        id,
-                        author: me,
-                        text,
-                        ts: now_ts(),
-                        reactions: vec![],
-                        replies: vec![],
-                        saved: false,
-                        task: None,
-                        post_title: None,
-                        post_type: String::new(),
-                        pinned: false,
-                        call: None,
-                    };
-                    let sent = m.text.clone();
-                    // "Also send to the channel": a copy there, marked with its thread
-                    let copy = (parent.is_some() && std::mem::take(&mut self.chat.also_channel))
-                        .then(|| Message {
-                            id: self.data.new_id(),
-                            thread_of: parent,
-                            ..m.clone()
-                        });
-                    let ids: Vec<u64> = std::iter::once(id)
-                        .chain(copy.as_ref().map(|c| c.id))
-                        .collect();
-                    for p in coming {
-                        self.chat.following.push((ch, ids.clone(), p));
-                    }
-                    if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
-                        match parent {
-                            Some(pid) => {
-                                if let Some(p) = c.messages.iter_mut().find(|x| x.id == pid) {
-                                    p.replies.push(m);
-                                }
-                            }
-                            None => c.messages.push(m),
-                        }
-                        c.messages.extend(copy);
-                        c.last_read = c.last_read.max(now_ts());
-                    }
-                    self.dirty = true;
-                    self.fetch_preview(ch, id, &sent);
-                    // workflows this channel's new message starts (workflows.rs)
-                    if parent.is_none() {
-                        self.run_workflows(ch, id);
-                    }
-                }
+                } => self.send_chat(ch, text, parent, files),
                 ChatAction::NewChannel(name) => {
                     let id = self.data.new_id();
                     let name = name.trim().to_lowercase().replace(' ', "-");

@@ -2092,7 +2092,6 @@ impl App {
     }
 
     fn apply(&mut self, a: Action) {
-        let me = self.data.me;
         // a space shared with me to view or comment only (the server would put it back)
         if let Some(why) = self.refused_here(&a) {
             self.toast(tr(why));
@@ -5202,7 +5201,6 @@ impl App {
         }
         // quick add (+ Create > Task)
         if let Some(mut qa) = self.quick_add.take() {
-            let mut open = true;
             let mut create = false;
             let spec = Dialog {
                 // the name tests and screen readers know it by
@@ -5370,7 +5368,7 @@ impl App {
                     });
                 });
             });
-            open = !shut;
+            let open = !shut;
             if create && !qa.name.trim().is_empty() {
                 let desc = qa.description.trim().to_string();
                 if !desc.is_empty() {

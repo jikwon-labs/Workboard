@@ -28,9 +28,11 @@ fn dots_menus_open_submenus_beside_the_parent() {
     let parent = h.rect("Status");
     h.hover(parent.center());
     let sub = h.rect("IN PROGRESS");
+    // the row's "..." is at the right edge of the window, so its menu hangs
+    // from the button and the submenu opens to the left
     assert!(
-        sub.left() >= parent.right() - 2.0,
-        "Status opens to the right: parent {:?} sub {:?}",
+        sub.right() <= parent.left() + 2.0,
+        "Status opens to the left at the right edge: parent {:?} sub {:?}",
         parent,
         sub
     );

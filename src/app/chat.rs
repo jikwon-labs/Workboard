@@ -2597,7 +2597,7 @@ impl App {
                     );
                 }
             } else if let Some(au) = self.data.member(m.author) {
-                paint_avatar(ui.painter(), ar.center(), 15.0, au, t.bg);
+                paint_avatar(ui.painter(), ar.center(), 13.0, au, t.bg);
                 if let Some(p) = person {
                     let ar_resp = ar_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
                     if ar_resp.clicked() {

@@ -1083,6 +1083,32 @@ fn open_in_channel_goes_to_the_post_and_lights_it_up() {
 
 // ---------------------------------------------------------------- profiles
 
+/// Alex's avatar circles (their colour) inside `area`: their radii.
+fn alex_avatars(h: &Ui1, area: Rect) -> Vec<f32> {
+    let alex = rgb(h.app.data.member(2).unwrap().color);
+    let mut out = vec![];
+    for c in &h.shapes {
+        if let egui::Shape::Circle(s) = &c.shape {
+            if s.fill == alex && area.contains(s.center) {
+                out.push(s.radius);
+            }
+        }
+    }
+    out
+}
+
+/// The avatars beside messages in a conversation are a little smaller than
+/// they were (radius 15).
+#[test]
+fn a_messages_avatar_is_a_little_smaller() {
+    let mut h = posts_page();
+    h.click("general");
+    let list = Rect::from_min_max(pos2(330.0, 120.0), pos2(1440.0, 760.0));
+    let r = alex_avatars(&h, list);
+    assert!(!r.is_empty(), "Alex has a message in #general");
+    assert!(r.iter().all(|r| *r <= 13.0 && *r >= 11.0), "{r:?}");
+}
+
 /// Clicking someone's name (or avatar) on a message opens their profile at
 /// the right, where a thread shows: photo or initials, name, email, role,
 /// and a button to message them. Escape or the close button closes it.

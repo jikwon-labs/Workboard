@@ -1662,3 +1662,140 @@ fn a_goal_is_worked_on_from_two_computers() {
     settle(&mut a, &mut b);
     assert!(g_of(&a).is_none() && g_of(&b).is_none());
 }
+
+/// Posts go between computers through the server as they were written:
+/// title, type, text and who they mention, from the Posts page and from a
+/// channel's Post box. A post in a private channel reaches only its
+/// members. A post written while the server is away goes once it is back,
+/// once.
+#[test]
+fn posts_reach_the_team_through_a_server() {
+    let home = workboard_server::testing::temp_home("posts-server");
+    std::fs::create_dir_all(&home).unwrap();
+    let server = TestServer::start_at(&home, 0);
+    let port = server.port;
+    let addr = format!("127.0.0.1:{}", port);
+    let mut a = app();
+    // #website-redesign is private to Me and Alex
+    let web = a
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.name == "website-redesign")
+        .unwrap();
+    web.private = true;
+    web.members = vec![1, 2];
+    let web = web.id;
+    let gen = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A shared", |a| a.data.extra.shared.is_some());
+    let code = invite_code_for_sam(&mut a, &server);
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
+    b.connect_server(&addr, &code.to_lowercase()).unwrap();
+    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    assert_eq!(b.data.me, 3);
+    assert!(
+        !b.data.channels.iter().any(|c| c.id == web),
+        "Sam doesn't get the private channel"
+    );
+
+    // from the Posts page (Me): a typed title, an Idea, a mention
+    let p1 = a.add_post(
+        gen,
+        "Office move".into(),
+        "Idea",
+        "@Sam Lee boxes go Monday".into(),
+        vec![],
+        &[],
+    );
+    let p2 = a.add_post(web, "Secret".into(), "Update", "x".into(), vec![], &[]);
+    a.sync_note_change();
+    a.write_shared();
+    net_until(&mut b, "A's post at B", |b| {
+        b.data
+            .channels
+            .iter()
+            .any(|c| c.messages.iter().any(|m| m.id == p1))
+    });
+    let m = b
+        .data
+        .channels
+        .iter()
+        .flat_map(|c| c.messages.iter())
+        .find(|m| m.id == p1)
+        .unwrap()
+        .clone();
+    assert_eq!(m.post_title.as_deref(), Some("Office move"));
+    assert_eq!(m.post_type, "Idea");
+    assert_eq!(m.text, "@Sam Lee boxes go Monday");
+    assert_eq!(m.mentions, vec![3]);
+    assert!(
+        !b.data
+            .channels
+            .iter()
+            .any(|c| c.messages.iter().any(|m| m.id == p2)),
+        "the private channel's post stays with its members"
+    );
+
+    // from Sam's channel box (Post tab)
+    b.apply_chat(vec![ChatAction::SendPost {
+        ch: gen,
+        title: "Lunch".into(),
+        text: "Pizza at noon".into(),
+        files: vec![],
+    }]);
+    b.sync_note_change();
+    b.write_shared();
+    net_until(&mut a, "B's post at A", |a| {
+        a.data.channels.iter().any(|c| {
+            c.messages
+                .iter()
+                .any(|m| m.post_title.as_deref() == Some("Lunch"))
+        })
+    });
+    let m = a
+        .data
+        .channels
+        .iter()
+        .flat_map(|c| c.messages.iter())
+        .find(|m| m.post_title.as_deref() == Some("Lunch"))
+        .unwrap();
+    assert_eq!(m.post_type, "Announcement");
+    assert_eq!(m.author, 3);
+
+    // the server goes away; Me posts; it comes back
+    drop(server);
+    net_until(&mut a, "A sees the server gone", |a| {
+        matches!(a.sync_rt.net_status, Some(wb_net::Status::Reconnecting(_)))
+    });
+    let p3 = a.add_post(gen, "Offline".into(), "Question", "?".into(), vec![], &[]);
+    a.sync_note_change();
+    a.write_shared();
+    let _server = TestServer::start_at(&home, port);
+    net_until(&mut b, "the offline post at B", |b| {
+        b.data
+            .channels
+            .iter()
+            .any(|c| c.messages.iter().any(|m| m.id == p3))
+    });
+    for _ in 0..20 {
+        a.net_tick(None);
+        b.net_tick(None);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let copies = |x: &App| {
+        x.data
+            .channels
+            .iter()
+            .flat_map(|c| c.messages.iter())
+            .filter(|m| m.id == p3)
+            .count()
+    };
+    assert_eq!((copies(&a), copies(&b)), (1, 1), "once on each computer");
+}

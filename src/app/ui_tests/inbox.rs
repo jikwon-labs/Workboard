@@ -435,3 +435,33 @@ fn editing_only_a_reminders_words_does_not_alert_it_again() {
     assert_ne!(r.due_ts, due);
     assert!(!r.alerted, "a new time alerts again");
 }
+
+#[test]
+fn switching_the_language_renames_someone_in_the_kept_rows() {
+    let mut h = inbox(|d| {
+        let me = d.me;
+        let id = d.new_id();
+        let mut m = crate::app::slack::new_message(id, 99, "@Me hi".into(), now_ts() - 60);
+        m.mentions = vec![me];
+        let dm = d.new_id();
+        d.channels.push(Channel {
+            id: dm,
+            kind: ChannelKind::Direct,
+            members: vec![me, 99],
+            messages: vec![m],
+            ..Default::default()
+        });
+    });
+    assert!(h.has("Someone"));
+    h.app.open_settings("Language");
+    h.settle();
+    h.click("Language ko");
+    h.click("Rail Home");
+    h.click("Inbox");
+    let ko = h.has("누군가");
+    h.app.open_settings("Language");
+    h.settle();
+    h.click("Language en");
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert!(ko, "the row is named in the language now shown");
+}

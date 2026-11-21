@@ -215,6 +215,9 @@ impl App {
             if r.clicked() && self.lang_choice != c {
                 self.lang_choice = c;
                 crate::i18n::set_lang(crate::i18n::resolve(c));
+                // what is kept worked out (the Inbox rows) holds words in
+                // the language that was shown ("Someone")
+                self.data_changed();
                 if self.persist {
                     Data::set_language(c);
                 }

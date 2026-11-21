@@ -404,10 +404,7 @@ impl App {
                     && !ui.input(|i| i.pointer.any_down())
                 {
                     let (undo, redo) = ui.input_mut(|i| {
-                        let shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
-                        let redo = i.consume_key(shift, egui::Key::Z)
-                            || (!cfg!(target_os = "macos")
-                                && i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y));
+                        let redo = crate::os::take_redo(i);
                         let undo = !redo && i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z);
                         (undo, redo)
                     });

@@ -578,12 +578,7 @@ impl App {
         y += TOOL + 4.0;
         let can_redo = self.sweep.wb.redo.iter().any(|u| u.0 == wid);
         let r = Rect::from_min_size(pos2(bar.left() + 6.0, y), vec2(TOOL, TOOL));
-        let redo_keys = if cfg!(target_os = "macos") {
-            crate::os::keys("\u{2318}\u{21E7}Z")
-        } else {
-            "Ctrl+Y".to_string()
-        };
-        let tip = format!("{}  {}", tr("Redo"), redo_keys);
+        let tip = format!("{}  {}", tr("Redo"), crate::os::redo_keys());
         if bar_button(
             ui,
             t,

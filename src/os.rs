@@ -65,6 +65,25 @@ fn keys_for(s: &str, mac: bool) -> String {
         .replace("+ ", " ")
 }
 
+/// The Redo shortcut as this system shows it: \u{2318}\u{21E7}Z on the
+/// Mac, Ctrl+Y elsewhere (where Ctrl+Shift+Z works too).
+pub fn redo_keys() -> String {
+    if cfg!(target_os = "macos") {
+        keys("\u{2318}\u{21E7}Z")
+    } else {
+        "Ctrl+Y".to_string()
+    }
+}
+
+/// Takes this system's Redo shortcut from the input: Cmd+Shift+Z, and on
+/// Windows and Linux Ctrl+Y as well (on the Mac Cmd+Y is not Redo).
+pub fn take_redo(i: &mut egui::InputState) -> bool {
+    i.consume_key(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    ) || (!cfg!(target_os = "macos") && i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y))
+}
+
 /// Open a file or web address with whatever the system uses for it.
 pub fn open_path(p: impl AsRef<std::ffi::OsStr>) {
     let p = p.as_ref();

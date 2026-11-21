@@ -1279,3 +1279,23 @@ fn planner_columns_end_on_one_line() {
         );
     }
 }
+
+/// In the smallest window the Dashboards templates go two to a row and a
+/// dashboard's header wraps, so nothing runs past the right edge (the cards
+/// below were widened with it) and every control can be pressed.
+#[test]
+fn small_window_dashboards_stay_inside() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.section = Section::Dashboards;
+    h.settle();
+    let page = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
+    assert!(h.past_right_edge().is_empty(), "{:?}", h.past_right_edge());
+    assert!(h.cut_texts(page).is_empty(), "{:?}", h.cut_texts(page));
+    h.click("Simple Dashboard");
+    assert!(h.app.dash_open.is_some());
+    assert!(h.past_right_edge().is_empty(), "{:?}", h.past_right_edge());
+    let add = h.rect("+ Add card");
+    assert!(add.right() <= h.size.x);
+    h.click("+ Dashboard");
+    assert!(matches!(h.app.modal, Some(Modal::NewDashboard { .. })));
+}

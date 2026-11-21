@@ -289,11 +289,18 @@ pub fn chip_room(ui: &mut Ui, text: &str, size: f32, extra: f32) -> f32 {
         .layout_no_wrap(one_line(text), FontId::proportional(size), Color32::WHITE)
         .size()
         .x;
+    wrap_unless_room(ui, w + extra);
+    (ui.max_rect().width() - extra).max(24.0)
+}
+
+/// In a `horizontal_wrapped` row: starts the next row when something `w`
+/// wide doesn't fit in what's left of this one. For what egui doesn't wrap by
+/// itself (a ComboBox, a framed chip), which otherwise runs past the edge.
+pub fn wrap_unless_room(ui: &mut Ui, w: f32) {
     let at_start = ui.cursor().left() <= ui.max_rect().left() + 0.5;
-    if !at_start && w + extra > ui.available_size_before_wrap().x {
+    if !at_start && w > ui.available_size_before_wrap().x {
         ui.end_row();
     }
-    (ui.max_rect().width() - extra).max(24.0)
 }
 
 /// `text` on one line: each line break, with the spaces around it, becomes a

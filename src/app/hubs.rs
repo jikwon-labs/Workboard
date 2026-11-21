@@ -1166,15 +1166,19 @@ impl App {
             ui.label(RichText::new(sub).size(15.0).color(t.text2));
         });
         ui.add_space(24.0);
+        // three cards a row where they fit at 200 points or more, else two
+        // (or one): three of 245 ran past a small window's right edge
         let w = ui.available_width();
-        let cw = 245.0f32.max(((w - 120.0) / 3.0).min(245.0));
-        let total = cw * 3.0 + 28.0;
+        let (gap, margin) = (14.0, 24.0);
+        let cols = (((w - 2.0 * margin + gap) / (200.0 + gap)).floor() as usize).clamp(1, 3);
+        let cw = ((w - 2.0 * margin - gap * (cols - 1) as f32) / cols as f32).min(245.0);
+        let total = cw * cols as f32 + gap * (cols - 1) as f32;
         let mut all: Vec<([u8; 3], &str, &str, &str, bool)> = cards.to_vec();
         all.push(([0, 0, 0], "+", "Start from scratch", "", false));
-        for row in all.chunks(3) {
+        for row in all.chunks(cols) {
             ui.horizontal(|ui| {
                 ui.add_space(((w - total) / 2.0).max(0.0));
-                ui.spacing_mut().item_spacing.x = 14.0;
+                ui.spacing_mut().item_spacing.x = gap;
                 for (color, glyph, name, desc, ai) in row {
                     if gallery_card(ui, &t, cw, *color, glyph, name, desc, *ai).clicked() {
                         out = Some(name.to_string());

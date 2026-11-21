@@ -533,7 +533,9 @@ impl App {
                         let di = self.dash_open.and_then(|id| {
                             self.data.extra.dashboards.iter().position(|d| d.id == id)
                         });
-                        ui.horizontal(|ui| {
+                        // wraps in a small window: on one row the controls ran
+                        // past the right edge and widened the cards below
+                        ui.horizontal_wrapped(|ui| {
                             let dashes = self.data.extra.dashboards.clone();
                             match di {
                                 Some(di) => {
@@ -581,6 +583,8 @@ impl App {
                             }
                             // switch between dashboards (the overview is one of them once made)
                             let mut pick = self.dash_open;
+                            let combo_w = ui.spacing().combo_width + 12.0;
+                            crate::widgets::wrap_unless_room(ui, combo_w);
                             egui::ComboBox::from_id_salt("dash_pick")
                                 .selected_text(tr("Switch"))
                                 .show_ui(ui, |ui| {
@@ -612,6 +616,7 @@ impl App {
                                     .map(|s| s.1.clone())
                                     .unwrap_or_else(|| tr("All Spaces").into());
                                 let mut sp = self.data.extra.dashboards[di].space;
+                                crate::widgets::wrap_unless_room(ui, combo_w);
                                 egui::ComboBox::from_id_salt("dash_space")
                                     .selected_text(cur_space)
                                     .show_ui(ui, |ui| {
@@ -664,6 +669,10 @@ impl App {
                                         name: d.name.clone(),
                                     });
                                 }
+                            }
+                            // at the right end of the row, or of a row of its own
+                            if ui.available_size_before_wrap().x < 120.0 {
+                                ui.end_row();
                             }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if primary_button(ui, &t, tr("+ Dashboard")).clicked() {

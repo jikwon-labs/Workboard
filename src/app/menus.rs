@@ -406,6 +406,94 @@ impl Modal {
     }
 }
 
+/// How `App::centered_dialog` lays a dialog out.
+pub(super) struct Dialog<'a> {
+    /// The window's id (its place and size are kept under it).
+    pub id: egui::Id,
+    /// The window's name for screen readers and tests.
+    pub name: &'a str,
+    /// The title in its header, translated.
+    pub title: &'a str,
+    /// Its narrowest and widest.
+    pub width: (f32, f32),
+    /// Where it sits on the screen.
+    pub anchor: (Align2, [f32; 2]),
+    /// The close button's name for screen readers and tests.
+    pub close_name: &'a str,
+}
+
+impl<'a> Dialog<'a> {
+    /// A dialog named after its title (`name`, English) with the title
+    /// translated, `width` wide, near the top of the window.
+    pub fn new(id: &str, name: &'a str, width: f32) -> Self {
+        Dialog {
+            id: egui::Id::new(id),
+            name,
+            title: tr(name),
+            width: (width, width),
+            anchor: (Align2::CENTER_TOP, [0.0, 90.0]),
+            close_name: "Close",
+        }
+    }
+}
+
+impl App {
+    /// A dialog drawn as every dialog is: the page behind dimmed (a click
+    /// on it closes the dialog), the dialog frame with its title and close
+    /// button, kept above the page; Escape closes it too, unless it only
+    /// closes a menu. Returns whether it is to close, and what `body` gave.
+    pub(super) fn centered_dialog<R>(
+        &mut self,
+        ctx: &egui::Context,
+        d: Dialog,
+        body: impl FnOnce(&mut Self, &mut Ui) -> R,
+    ) -> (bool, Option<R>) {
+        let t = self.t();
+        let mut close = false;
+        // dim backdrop
+        let screen = ctx.screen_rect();
+        egui::Area::new(d.id.with("dim"))
+            .order(egui::Order::Middle)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                let r = ui.allocate_rect(screen, Sense::click());
+                crate::widgets::no_pointer(&r);
+                // the dark theme needs its stronger overlay to set the dialog apart
+                let dim = if t.dark {
+                    t.overlay
+                } else {
+                    Color32::from_black_alpha(90)
+                };
+                ui.painter().rect_filled(screen, 0.0, dim);
+                if r.clicked() {
+                    close = true;
+                }
+            });
+        let (min_w, max_w) = d.width;
+        let shown = egui::Window::new(RichText::new(d.name).size(17.0))
+            .id(d.id)
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(d.anchor.0, d.anchor.1)
+            .min_width(min_w)
+            .max_width(max_w)
+            .frame(dialog_frame(&t))
+            .show(ctx, |ui| {
+                ui.set_min_width(min_w - 20.0);
+                if dialog_header_as(ui, &t, d.title, d.close_name) {
+                    close = true;
+                }
+                body(self, ui)
+            });
+        ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, d.id));
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {
+            close = true;
+        }
+        (close, shown.and_then(|r| r.inner))
+    }
+}
+
 pub(super) fn modal_window_id(m: &Modal) -> egui::Id {
     egui::Id::new(("modal_window", std::mem::discriminant(m)))
 }
@@ -1327,7 +1415,6 @@ impl App {
             }
         }
         let t = self.t();
-        let mut open = true;
         let mut close = false;
         let title = match &modal {
             Modal::Invite { .. } => tr("Invite people").to_string(),
@@ -1394,66 +1481,40 @@ impl App {
             }
             .into(),
         };
-        // dim backdrop
-        let screen = ctx.screen_rect();
-        egui::Area::new(egui::Id::new("modal_dim"))
-            .order(egui::Order::Middle)
-            .fixed_pos(screen.min)
-            .show(ctx, |ui| {
-                let r = ui.allocate_rect(screen, Sense::click());
-                crate::widgets::no_pointer(&r);
-                // the dark theme needs its stronger overlay to set the dialog apart
-                let dim = if t.dark {
-                    t.overlay
-                } else {
-                    Color32::from_black_alpha(90)
-                };
-                ui.painter().rect_filled(screen, 0.0, dim);
-                if r.clicked() {
-                    close = true;
-                }
-            });
         // each kind of dialog sizes itself: a wide one doesn't leave the next wide
         let win_id = modal_window_id(&modal);
         // the Template Center has a list beside its preview
         let wide = matches!(modal, Modal::TemplateCenter(_));
         let (min_w, max_w) = if wide { (800.0, 820.0) } else { (460.0, 620.0) };
-        egui::Window::new(RichText::new(&title).size(17.0))
-            .id(win_id)
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(Align2::CENTER_CENTER, [0.0, -20.0])
-            .min_width(min_w)
-            .max_width(max_w)
-            .frame(dialog_frame(&t))
-            .show(ctx, |ui| {
-                ui.set_min_width(min_w - 20.0);
-                if dialog_header(ui, &t, &title) {
-                    open = false;
-                }
-                ui.add_space(10.0);
-                // the server and sign-in dialogs can be taller than a small
-                // window: the title stays put and the rest scrolls (the
-                // others are short, or scroll their own lists)
-                if matches!(modal, Modal::Together { .. } | Modal::JoinTeam { .. }) {
-                    let tall = (screen.height() - 140.0).max(200.0);
-                    egui::ScrollArea::vertical()
-                        .id_salt("modal_body")
-                        .max_height(tall)
-                        .min_scrolled_height(tall)
-                        .show(ui, |ui| {
-                            ui.set_min_width(min_w - 20.0);
-                            close |= self.modal_body(ui, &t, &mut modal);
-                        });
-                } else {
-                    close |= self.modal_body(ui, &t, &mut modal);
-                }
-            });
-        ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {
-            close = true;
-        }
+        let screen = ctx.screen_rect();
+        let spec = Dialog {
+            id: win_id,
+            name: &title,
+            title: &title,
+            width: (min_w, max_w),
+            anchor: (Align2::CENTER_CENTER, [0.0, -20.0]),
+            close_name: "Close",
+        };
+        let (shut, _) = self.centered_dialog(ctx, spec, |app, ui| {
+            ui.add_space(10.0);
+            // the server and sign-in dialogs can be taller than a small
+            // window: the title stays put and the rest scrolls (the
+            // others are short, or scroll their own lists)
+            if matches!(modal, Modal::Together { .. } | Modal::JoinTeam { .. }) {
+                let tall = (screen.height() - 140.0).max(200.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("modal_body")
+                    .max_height(tall)
+                    .min_scrolled_height(tall)
+                    .show(ui, |ui| {
+                        ui.set_min_width(min_w - 20.0);
+                        close |= app.modal_body(ui, &t, &mut modal);
+                    });
+            } else {
+                close |= app.modal_body(ui, &t, &mut modal);
+            }
+        });
+        let open = !shut;
         if open && !close && self.modal.is_none() {
             self.modal = Some(modal);
         } else if matches!(modal, Modal::Profile { .. }) {
@@ -2218,157 +2279,148 @@ impl App {
         let mut tab: u8 = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
         let mut go: Option<u64> = None;
         let mut dm_with: Option<u64> = None;
-        let win_id = egui::Id::new("new_message_window");
-        egui::Window::new("New message dialog")
-            .id(win_id)
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(Align2::CENTER_TOP, [0.0, 90.0])
-            .min_width(620.0)
-            .max_width(620.0)
-            .frame(dialog_frame(&t))
-            .show(ctx, |ui| {
-                if dialog_header(ui, &t, tr("New message")) {
-                    open = false;
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("To:")).color(t.text2));
-                    let r = ui.add(
-                        field(&mut q)
-                            .hint_text(tr("People or Channels"))
-                            .desired_width(f32::INFINITY),
-                    );
-                    name_field(&r, "People or Channels");
-                    focus_once(ui, &r);
-                });
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    for (i, label) in ["Recents", "People", "Channels"].iter().enumerate() {
-                        if ui.selectable_label(tab == i as u8, tr(label)).clicked() {
-                            tab = i as u8;
-                        }
+        let spec = Dialog {
+            // the name tests and screen readers know it by
+            name: "New message dialog",
+            ..Dialog::new("new_message_window", "New message", 620.0)
+        };
+        let (shut, _) = self.centered_dialog(ctx, spec, |app, ui| {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(tr("To:")).color(t.text2));
+                let r = ui.add(
+                    field(&mut q)
+                        .hint_text(tr("People or Channels"))
+                        .desired_width(f32::INFINITY),
+                );
+                name_field(&r, "People or Channels");
+                focus_once(ui, &r);
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                for (i, label) in ["Recents", "People", "Channels"].iter().enumerate() {
+                    if ui.selectable_label(tab == i as u8, tr(label)).clicked() {
+                        tab = i as u8;
                     }
-                });
-                ui.separator();
-                let ql = q.trim().to_lowercase();
-                let hit = |s: &str| ql.is_empty() || s.to_lowercase().contains(&ql);
-                let members = self.data.members.clone();
-                // people: an avatar row on Recents, a full list on People
-                if tab != 2 {
-                    ui.label(RichText::new(tr("Direct Messages")).small().color(t.text3));
-                    ui.horizontal_wrapped(|ui| {
-                        for m in members.iter().filter(|m| !m.invited && m.any_name(&hit)) {
-                            let label = if m.id == me {
-                                crate::trf!("{} (You)", m.shown())
-                            } else {
-                                m.shown().to_string()
-                            };
-                            let (r, resp) =
-                                ui.allocate_exact_size(vec2(72.0, 64.0), Sense::click());
-                            name_it(&resp, &format!("Message {}", m.shown()));
-                            if resp.hovered() {
-                                ui.painter().rect_filled(r, 8.0, t.hover);
-                            }
-                            paint_avatar(
-                                ui.painter(),
-                                r.center_top() + vec2(0.0, 22.0),
-                                16.0,
-                                m,
-                                t.card,
-                            );
-                            let short = truncate(&label, 10);
-                            ui.painter().text(
-                                r.center_bottom() - vec2(0.0, 10.0),
-                                Align2::CENTER_CENTER,
-                                short,
-                                FontId::proportional(11.0),
-                                t.text2,
-                            );
-                            if resp.clicked() {
-                                dm_with = Some(m.id);
-                            }
-                        }
-                    });
                 }
-                if tab == 1 {
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(tr("People")).small().color(t.text3));
-                    for m in members.iter().filter(|m| m.any_name(&hit) || hit(&m.email)) {
+            });
+            ui.separator();
+            let ql = q.trim().to_lowercase();
+            let hit = |s: &str| ql.is_empty() || s.to_lowercase().contains(&ql);
+            let members = app.data.members.clone();
+            // people: an avatar row on Recents, a full list on People
+            if tab != 2 {
+                ui.label(RichText::new(tr("Direct Messages")).small().color(t.text3));
+                ui.horizontal_wrapped(|ui| {
+                    for m in members.iter().filter(|m| !m.invited && m.any_name(&hit)) {
                         let label = if m.id == me {
-                            crate::trf!("{} \u{2014} You", m.shown())
+                            crate::trf!("{} (You)", m.shown())
                         } else {
                             m.shown().to_string()
                         };
-                        let ring = t.card;
-                        if menu_row(ui, &t, &label, false, |p, c| {
-                            paint_avatar(p, c, 9.0, m, ring)
-                        })
-                        .clicked()
-                        {
+                        let (r, resp) = ui.allocate_exact_size(vec2(72.0, 64.0), Sense::click());
+                        name_it(&resp, &format!("Message {}", m.shown()));
+                        if resp.hovered() {
+                            ui.painter().rect_filled(r, 8.0, t.hover);
+                        }
+                        paint_avatar(
+                            ui.painter(),
+                            r.center_top() + vec2(0.0, 22.0),
+                            16.0,
+                            m,
+                            t.card,
+                        );
+                        let short = truncate(&label, 10);
+                        ui.painter().text(
+                            r.center_bottom() - vec2(0.0, 10.0),
+                            Align2::CENTER_CENTER,
+                            short,
+                            FontId::proportional(11.0),
+                            t.text2,
+                        );
+                        if resp.clicked() {
                             dm_with = Some(m.id);
                         }
                     }
-                }
-                if tab != 1 {
-                    ui.add_space(4.0);
-                    let mut chans: Vec<(u64, String, i64)> = self
-                        .data
-                        .channels
-                        .iter()
-                        .filter(|c| {
-                            (c.kind == ChannelKind::Channel || tab == 0)
-                                && self.can_see(c)
-                                && !self.dm_duplicate(c)
-                        })
-                        .map(|c| {
-                            (
-                                c.id,
-                                self.channel_label(c),
-                                c.messages.last().map(|m| m.ts).unwrap_or(c.last_read),
-                            )
-                        })
-                        .filter(|c| hit(&c.1))
-                        .collect();
-                    if tab == 0 {
-                        chans.sort_by(|a, b| b.2.cmp(&a.2));
-                        chans.truncate(8);
+                });
+            }
+            if tab == 1 {
+                ui.add_space(4.0);
+                ui.label(RichText::new(tr("People")).small().color(t.text3));
+                for m in members.iter().filter(|m| m.any_name(&hit) || hit(&m.email)) {
+                    let label = if m.id == me {
+                        crate::trf!("{} \u{2014} You", m.shown())
+                    } else {
+                        m.shown().to_string()
+                    };
+                    let ring = t.card;
+                    if menu_row(ui, &t, &label, false, |p, c| {
+                        paint_avatar(p, c, 9.0, m, ring)
+                    })
+                    .clicked()
+                    {
+                        dm_with = Some(m.id);
                     }
-                    ui.label(
-                        RichText::new(if tab == 0 {
-                            tr("Recents")
-                        } else {
-                            tr("Channels")
-                        })
-                        .small()
-                        .color(t.text3),
-                    );
-                    egui::ScrollArea::vertical()
-                        .max_height(260.0)
-                        .show(ui, |ui| {
-                            for (id, label, _) in &chans {
-                                if menu_row(ui, &t, label, false, |p, c| {
-                                    p.text(
-                                        c,
-                                        Align2::CENTER_CENTER,
-                                        if label.starts_with('#') { "#" } else { "@" },
-                                        FontId::proportional(13.0),
-                                        t.text2,
-                                    );
-                                })
-                                .clicked()
-                                {
-                                    go = Some(*id);
-                                }
-                            }
-                            if chans.is_empty() {
-                                ui.label(RichText::new(tr("No matches")).color(t.text3));
-                            }
-                        });
                 }
-            });
-        ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
+            }
+            if tab != 1 {
+                ui.add_space(4.0);
+                let mut chans: Vec<(u64, String, i64)> = app
+                    .data
+                    .channels
+                    .iter()
+                    .filter(|c| {
+                        (c.kind == ChannelKind::Channel || tab == 0)
+                            && app.can_see(c)
+                            && !app.dm_duplicate(c)
+                    })
+                    .map(|c| {
+                        (
+                            c.id,
+                            app.channel_label(c),
+                            c.messages.last().map(|m| m.ts).unwrap_or(c.last_read),
+                        )
+                    })
+                    .filter(|c| hit(&c.1))
+                    .collect();
+                if tab == 0 {
+                    chans.sort_by(|a, b| b.2.cmp(&a.2));
+                    chans.truncate(8);
+                }
+                ui.label(
+                    RichText::new(if tab == 0 {
+                        tr("Recents")
+                    } else {
+                        tr("Channels")
+                    })
+                    .small()
+                    .color(t.text3),
+                );
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        for (id, label, _) in &chans {
+                            if menu_row(ui, &t, label, false, |p, c| {
+                                p.text(
+                                    c,
+                                    Align2::CENTER_CENTER,
+                                    if label.starts_with('#') { "#" } else { "@" },
+                                    FontId::proportional(13.0),
+                                    t.text2,
+                                );
+                            })
+                            .clicked()
+                            {
+                                go = Some(*id);
+                            }
+                        }
+                        if chans.is_empty() {
+                            ui.label(RichText::new(tr("No matches")).color(t.text3));
+                        }
+                    });
+            }
+        });
+        open &= !shut;
         if let Some(uid) = dm_with {
             let existing = self
                 .data

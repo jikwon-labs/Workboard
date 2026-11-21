@@ -1701,6 +1701,35 @@ fn inbox_with_reminders_waiting_is_not_all_caught_up() {
 }
 
 #[test]
+fn hand_made_dialogs_close_like_the_others() {
+    let mut h = Ui1::new();
+    let list = task_named(&h, "Write copy for landing page").list_id;
+    h.app.apply(Action::Go(Location::List(list)));
+    h.settle();
+    // Rename: the header's close button, and Cancel
+    h.click("List menu");
+    h.click("Rename list");
+    assert!(h.app.rename.is_some());
+    h.click("Close");
+    assert!(h.app.rename.is_none(), "the header's close button");
+    h.click("List menu");
+    h.click("Rename list");
+    h.click("Cancel");
+    assert!(h.app.rename.is_none(), "Cancel");
+    // Create Task: a click on the dimmed page behind it
+    h.click("Create");
+    h.click("Task");
+    assert!(h.app.quick_add.is_some());
+    h.click_at(pos2(20.0, 880.0));
+    assert!(h.app.quick_add.is_none(), "a click outside the dialog");
+    // New message: the header's close button
+    h.app.new_message_open = true;
+    h.settle();
+    h.click("Close");
+    assert!(!h.app.new_message_open);
+}
+
+#[test]
 fn list_crumb_opens_the_list_menu() {
     let mut h = Ui1::new();
     let list = task_named(&h, "Write copy for landing page").list_id;
@@ -1712,6 +1741,9 @@ fn list_crumb_opens_the_list_menu() {
     assert!(h.has("Delete list"));
     h.click("Rename list");
     assert!(matches!(h.app.rename, Some((Target::List(id), _)) if id == list));
+    // the Rename dialog keeps the page behind it until it is closed
+    h.key(egui::Key::Escape);
+    assert!(h.app.rename.is_none());
     // a second click on the crumb closes the menu again
     h.click("List menu");
     assert!(h.has("Export to CSV"));

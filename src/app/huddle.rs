@@ -1018,15 +1018,16 @@ impl App {
         // the huddle floats over the page but under dialogs: put an open
         // dialog (and its dimmed background) back on top
         if let Some(m) = &self.modal {
-            for id in [egui::Id::new("modal_dim"), super::menus::modal_window_id(m)] {
+            let id = super::menus::modal_window_id(m);
+            for id in [id.with("dim"), id] {
                 ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
             }
         }
         if self.new_message_open {
-            ctx.move_to_top(egui::LayerId::new(
-                egui::Order::Middle,
-                egui::Id::new("new_message_window"),
-            ));
+            let id = egui::Id::new("new_message_window");
+            for id in [id.with("dim"), id] {
+                ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
+            }
         }
         if let Some(m) = mute {
             self.set_huddle_muted(m);

@@ -62,7 +62,7 @@ mod typing;
 mod ui_tests;
 mod watch;
 mod workflows;
-use menus::Modal;
+use menus::{Dialog, Modal};
 pub use pages::Section;
 use parity::TaskFilter;
 pub use taskfields::TaskPick;
@@ -4945,32 +4945,25 @@ impl App {
         let t = self.t();
         // rename
         if let Some((tg, mut name)) = self.rename.take() {
-            let mut open = true;
             let mut done = false;
-            egui::Window::new(tr("Rename"))
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_TOP, [0.0, 120.0])
-                .show(ctx, |ui| {
-                    let r = ui.add(field(&mut name).desired_width(320.0));
+            let (shut, cancel) = self.centered_dialog(
+                ctx,
+                Dialog::new("rename_dialog", "Rename", 380.0),
+                |_, ui| {
+                    ui.add_space(10.0);
+                    let r = ui.add(field(&mut name).desired_width(f32::INFINITY));
                     r.request_focus();
                     if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         done = true;
                     }
-                    ui.horizontal(|ui| {
-                        if primary_button(ui, &t, tr("Save")).clicked() {
-                            done = true;
-                        }
-                        if ui.button(tr("Cancel")).clicked()
-                            || ui.input(|i| i.key_pressed(egui::Key::Escape))
-                        {
-                            open = false;
-                        }
-                    });
-                });
+                    let (save, cancel) = dialog_footer(ui, &t, tr("Save"), true);
+                    done |= save;
+                    cancel
+                },
+            );
             if done {
                 self.finish_rename(tg, name);
-            } else if open {
+            } else if !shut && cancel != Some(true) {
                 self.rename = Some((tg, name));
             }
         }
@@ -4992,21 +4985,27 @@ impl App {
                     self.task(id).map(|x| x.name.clone()).unwrap_or_default()
                 ),
             };
-            egui::Window::new(tr("Delete")).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 120.0]).show(ctx, |ui| {
-                ui.label(match tg {
-                    Target::Space(_) | Target::Folder(_) => trf!("Delete {}? Its lists and their tasks go to Trash, where you can restore them.", what),
-                    _ => trf!("Delete {}? It goes to Trash with everything inside it, where you can restore it.", what),
+            let (shut, _) =
+                self.centered_dialog(ctx, Dialog::new("delete_dialog", "Delete", 420.0), |app, ui| {
+                    ui.add_space(10.0);
+                    ui.label(match tg {
+                        Target::Space(_) | Target::Folder(_) => trf!("Delete {}? Its lists and their tasks go to Trash, where you can restore them.", what),
+                        _ => trf!("Delete {}? It goes to Trash with everything inside it, where you can restore it.", what),
+                    });
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        if ui.add(Tint(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger))).clicked() {
+                            app.do_delete(tg);
+                            app.confirm_delete = None;
+                        }
+                        if ui.button(tr("Cancel")).clicked() {
+                            app.confirm_delete = None;
+                        }
+                    });
                 });
-                ui.horizontal(|ui| {
-                    if ui.add(Tint(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger))).clicked() {
-                        self.do_delete(tg);
-                        self.confirm_delete = None;
-                    }
-                    if ui.button(tr("Cancel")).clicked() {
-                        self.confirm_delete = None;
-                    }
-                });
-            });
+            if shut {
+                self.confirm_delete = None;
+            }
         }
         // statuses editor
         if let Some(sid) = self.edit_statuses {
@@ -5026,8 +5025,17 @@ impl App {
                 let (mut orig, mut rules) = self.status_edit_lists(si);
                 let mut commit = false;
                 let mut removed: Option<(String, String, StatusKind)> = None;
-                egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(Align2::CENTER_TOP, [0.0, 100.0]).show(ctx, |ui| {
-                    let sts = &mut self.data.spaces[si].statuses;
+                let spec = Dialog {
+                    name: &title,
+                    title: &title,
+                    anchor: (Align2::CENTER_TOP, [0.0, 100.0]),
+                    // the name the window's own close button had
+                    close_name: "Close window",
+                    ..Dialog::new("status_editor", "", 440.0)
+                };
+                let (shut, _) = self.centered_dialog(ctx, spec, |app, ui| {
+                    ui.add_space(10.0);
+                    let sts = &mut app.data.spaces[si].statuses;
                     let mut remove = None;
                     let n = sts.len();
                     for (i, st) in sts.iter_mut().enumerate() {
@@ -5086,6 +5094,7 @@ impl App {
                     }
                     ui.label(RichText::new(tr("Renamed statuses are renamed on their tasks too; tasks of a deleted status move to a status of the same kind.")).small().color(t.text3));
                 });
+                open = !shut;
                 if let Some((old, rule_old, kind)) = removed {
                     // a delete finishes the other renames first
                     self.commit_status_renames(si, &mut orig, &mut rules);
@@ -5115,186 +5124,173 @@ impl App {
         if let Some(mut qa) = self.quick_add.take() {
             let mut open = true;
             let mut create = false;
-            let win_id = egui::Id::new("create_task_window");
-            egui::Window::new("Create Task dialog")
-                .id(win_id)
-                .title_bar(false)
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_TOP, [0.0, 90.0])
-                .min_width(600.0)
-                .max_width(600.0)
-                .frame(dialog_frame(&t))
-                .show(ctx, |ui| {
-                    if dialog_header(ui, &t, tr("Create Task")) {
-                        open = false;
-                    }
-                    ui.add_space(6.0);
-                    // location
-                    // as Move tasks: not in someone else's Personal space nor archived
-                    let all = self.all_list_paths();
-                    let cur = all
-                        .iter()
-                        .find(|x| x.0 == qa.list)
-                        .map(|x| x.1.clone())
-                        .unwrap_or_else(|| tr("Choose list").into());
-                    let before = qa.list;
-                    let pick = egui::ComboBox::from_id_salt("qa_list")
-                        .selected_text(truncate(&cur, 40))
-                        .show_ui(ui, |ui| {
-                            for (id, name) in &all {
-                                ui.selectable_value(&mut qa.list, *id, name);
-                            }
-                        });
-                    name_it(&pick.response, "Task list");
-                    if qa.list != before {
-                        qa.status = None;
-                    }
-                    ui.add_space(6.0);
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut qa.name)
-                            .hint_text(tr("Task Name"))
-                            .font(FontId::proportional(18.0))
-                            .frame(false)
-                            .desired_width(f32::INFINITY),
-                    );
-                    name_field(&r, "Task Name");
-                    focus_once(ui, &r);
-                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        create = true;
-                    }
-                    ui.add_space(4.0);
-                    let dr = ui.add(
-                        field_multi(&mut qa.description)
-                            .hint_text(tr("Add description"))
-                            .desired_rows(3)
-                            .desired_width(f32::INFINITY),
-                    );
-                    name_field(&dr, "Add description");
-                    ui.add_space(8.0);
-                    // status, assignee, due date, priority, tags
-                    let statuses = self.data.statuses_for_list(qa.list);
-                    let mut st_name = qa.status.clone().unwrap_or_else(|| {
-                        statuses.first().map(|s| s.name.clone()).unwrap_or_default()
+            let spec = Dialog {
+                // the name tests and screen readers know it by
+                name: "Create Task dialog",
+                ..Dialog::new("create_task_window", "Create Task", 600.0)
+            };
+            let (shut, _) = self.centered_dialog(ctx, spec, |app, ui| {
+                ui.add_space(6.0);
+                // location
+                // as Move tasks: not in someone else's Personal space nor archived
+                let all = app.all_list_paths();
+                let cur = all
+                    .iter()
+                    .find(|x| x.0 == qa.list)
+                    .map(|x| x.1.clone())
+                    .unwrap_or_else(|| tr("Choose list").into());
+                let before = qa.list;
+                let pick = egui::ComboBox::from_id_salt("qa_list")
+                    .selected_text(truncate(&cur, 40))
+                    .show_ui(ui, |ui| {
+                        for (id, name) in &all {
+                            ui.selectable_value(&mut qa.list, *id, name);
+                        }
                     });
-                    ui.horizontal_wrapped(|ui| {
-                        if let Some(st) = statuses.iter().find(|s| s.name == st_name).cloned() {
-                            let r = status_pill(ui, &st, Sense::click());
-                            name_it(&r, "Task status");
-                            if popup(ui, &r, egui::Id::new("qa_st"), 200.0, |ui| {
-                                status_menu(ui, &t, &statuses, &mut st_name)
+                name_it(&pick.response, "Task list");
+                if qa.list != before {
+                    qa.status = None;
+                }
+                ui.add_space(6.0);
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut qa.name)
+                        .hint_text(tr("Task Name"))
+                        .font(FontId::proportional(18.0))
+                        .frame(false)
+                        .desired_width(f32::INFINITY),
+                );
+                name_field(&r, "Task Name");
+                focus_once(ui, &r);
+                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    create = true;
+                }
+                ui.add_space(4.0);
+                let dr = ui.add(
+                    field_multi(&mut qa.description)
+                        .hint_text(tr("Add description"))
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                );
+                name_field(&dr, "Add description");
+                ui.add_space(8.0);
+                // status, assignee, due date, priority, tags
+                let statuses = app.data.statuses_for_list(qa.list);
+                let mut st_name = qa.status.clone().unwrap_or_else(|| {
+                    statuses.first().map(|s| s.name.clone()).unwrap_or_default()
+                });
+                ui.horizontal_wrapped(|ui| {
+                    if let Some(st) = statuses.iter().find(|s| s.name == st_name).cloned() {
+                        let r = status_pill(ui, &st, Sense::click());
+                        name_it(&r, "Task status");
+                        if popup(ui, &r, egui::Id::new("qa_st"), 200.0, |ui| {
+                            status_menu(ui, &t, &statuses, &mut st_name)
+                        })
+                        .unwrap_or(false)
+                        {
+                            qa.status = Some(st_name.clone());
+                            close_popup(ui);
+                        }
+                    }
+                    let a_txt = if qa.assignees.is_empty() {
+                        tr("Assignee").to_string()
+                    } else {
+                        let names: Vec<String> = qa
+                            .assignees
+                            .iter()
+                            .filter_map(|id| app.data.member(*id).map(|m| m.shown().to_string()))
+                            .collect();
+                        truncate(&names.join(", "), 20)
+                    };
+                    let r = icons::icon_button(ui, &t, "person", &a_txt, "Assignee", true);
+                    let data = &app.data;
+                    popup(ui, &r, egui::Id::new("qa_as"), 220.0, |ui| {
+                        assignee_menu(ui, &t, data, &mut qa.assignees)
+                    });
+                    let d_txt = qa
+                        .due
+                        .map(fmt_date)
+                        .unwrap_or_else(|| tr("Due date").into());
+                    let r = icons::icon_button(ui, &t, "calendar", &d_txt, "Due date", true);
+                    popup(ui, &r, egui::Id::new("qa_due"), DATE_MENU_W, |ui| {
+                        date_menu(ui, &t, egui::Id::new("qa_cal"), &mut qa.due)
+                    });
+                    let p_txt = if qa.priority > 0 {
+                        tr(PRIORITIES[qa.priority as usize].label).to_string()
+                    } else {
+                        tr("Priority").into()
+                    };
+                    let r = icons::icon_button(ui, &t, "flag", &p_txt, "Priority", true);
+                    popup(ui, &r, egui::Id::new("qa_pr"), 180.0, |ui| {
+                        priority_menu(ui, &t, &mut qa.priority)
+                    });
+                    let r = icons::icon_button(ui, &t, "tag", tr("Tags"), "Tags", true);
+                    popup(ui, &r, egui::Id::new("qa_tags"), 220.0, |ui| {
+                        let tag_r = ui.add(
+                            field(&mut qa.tag_text)
+                                .hint_text(tr("Search or add tags..."))
+                                .desired_width(f32::INFINITY),
+                        );
+                        focus_once(ui, &tag_r);
+                        if tag_r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            let tag = qa.tag_text.trim().to_lowercase();
+                            if !tag.is_empty() && !qa.tags.contains(&tag) {
+                                qa.tags.push(tag);
+                            }
+                            qa.tag_text.clear();
+                            tag_r.request_focus();
+                        }
+                        let mut known: Vec<String> = app
+                            .data
+                            .tasks
+                            .iter()
+                            .flat_map(|t| t.tags.iter().cloned())
+                            .collect();
+                        known.sort();
+                        known.dedup();
+                        let q = qa.tag_text.trim().to_lowercase();
+                        for tag in known
+                            .iter()
+                            .filter(|k| q.is_empty() || k.contains(&q))
+                            .take(8)
+                        {
+                            let on = qa.tags.contains(tag);
+                            if menu_row(ui, &t, tag, on, |p, c| {
+                                p.circle_filled(c, 4.0, tag_color(tag));
                             })
-                            .unwrap_or(false)
+                            .clicked()
                             {
-                                qa.status = Some(st_name.clone());
-                                close_popup(ui);
-                            }
-                        }
-                        let a_txt = if qa.assignees.is_empty() {
-                            tr("Assignee").to_string()
-                        } else {
-                            let names: Vec<String> = qa
-                                .assignees
-                                .iter()
-                                .filter_map(|id| {
-                                    self.data.member(*id).map(|m| m.shown().to_string())
-                                })
-                                .collect();
-                            truncate(&names.join(", "), 20)
-                        };
-                        let r = icons::icon_button(ui, &t, "person", &a_txt, "Assignee", true);
-                        let data = &self.data;
-                        popup(ui, &r, egui::Id::new("qa_as"), 220.0, |ui| {
-                            assignee_menu(ui, &t, data, &mut qa.assignees)
-                        });
-                        let d_txt = qa
-                            .due
-                            .map(fmt_date)
-                            .unwrap_or_else(|| tr("Due date").into());
-                        let r = icons::icon_button(ui, &t, "calendar", &d_txt, "Due date", true);
-                        popup(ui, &r, egui::Id::new("qa_due"), DATE_MENU_W, |ui| {
-                            date_menu(ui, &t, egui::Id::new("qa_cal"), &mut qa.due)
-                        });
-                        let p_txt = if qa.priority > 0 {
-                            tr(PRIORITIES[qa.priority as usize].label).to_string()
-                        } else {
-                            tr("Priority").into()
-                        };
-                        let r = icons::icon_button(ui, &t, "flag", &p_txt, "Priority", true);
-                        popup(ui, &r, egui::Id::new("qa_pr"), 180.0, |ui| {
-                            priority_menu(ui, &t, &mut qa.priority)
-                        });
-                        let r = icons::icon_button(ui, &t, "tag", tr("Tags"), "Tags", true);
-                        popup(ui, &r, egui::Id::new("qa_tags"), 220.0, |ui| {
-                            let tag_r = ui.add(
-                                field(&mut qa.tag_text)
-                                    .hint_text(tr("Search or add tags..."))
-                                    .desired_width(f32::INFINITY),
-                            );
-                            focus_once(ui, &tag_r);
-                            if tag_r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                let tag = qa.tag_text.trim().to_lowercase();
-                                if !tag.is_empty() && !qa.tags.contains(&tag) {
-                                    qa.tags.push(tag);
-                                }
-                                qa.tag_text.clear();
-                                tag_r.request_focus();
-                            }
-                            let mut known: Vec<String> = self
-                                .data
-                                .tasks
-                                .iter()
-                                .flat_map(|t| t.tags.iter().cloned())
-                                .collect();
-                            known.sort();
-                            known.dedup();
-                            let q = qa.tag_text.trim().to_lowercase();
-                            for tag in known
-                                .iter()
-                                .filter(|k| q.is_empty() || k.contains(&q))
-                                .take(8)
-                            {
-                                let on = qa.tags.contains(tag);
-                                if menu_row(ui, &t, tag, on, |p, c| {
-                                    p.circle_filled(c, 4.0, tag_color(tag));
-                                })
-                                .clicked()
-                                {
-                                    if on {
-                                        qa.tags.retain(|x| x != tag);
-                                    } else {
-                                        qa.tags.push(tag.clone());
-                                    }
+                                if on {
+                                    qa.tags.retain(|x| x != tag);
+                                } else {
+                                    qa.tags.push(tag.clone());
                                 }
                             }
-                        });
-                        let mut drop: Option<String> = None;
-                        for tag in &qa.tags {
-                            if chip(ui, &format!("{} \u{00D7}", tag), tag_color(tag))
-                                .on_hover_text(tr("Remove tag"))
-                                .clicked()
-                            {
-                                drop = Some(tag.clone());
-                            }
-                        }
-                        if let Some(d) = drop {
-                            qa.tags.retain(|x| *x != d);
                         }
                     });
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if primary_button(ui, &t, tr("Create Task")).clicked() {
-                                create = true;
-                            }
-                        });
-                    });
-                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {
-                        open = false;
+                    let mut drop: Option<String> = None;
+                    for tag in &qa.tags {
+                        if chip(ui, &format!("{} \u{00D7}", tag), tag_color(tag))
+                            .on_hover_text(tr("Remove tag"))
+                            .clicked()
+                        {
+                            drop = Some(tag.clone());
+                        }
+                    }
+                    if let Some(d) = drop {
+                        qa.tags.retain(|x| *x != d);
                     }
                 });
-            ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, win_id));
+                ui.add_space(10.0);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if primary_button(ui, &t, tr("Create Task")).clicked() {
+                            create = true;
+                        }
+                    });
+                });
+            });
+            open = !shut;
             if create && !qa.name.trim().is_empty() {
                 let desc = qa.description.trim().to_string();
                 if !desc.is_empty() {

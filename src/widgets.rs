@@ -171,12 +171,18 @@ pub fn card_frame(t: &Theme) -> egui::Frame {
 /// Dialog heading: title on the left, round close button on the right.
 /// Returns true when the close button was clicked.
 pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {
+    dialog_header_as(ui, t, title, "Close")
+}
+
+/// `dialog_header` whose close button has another name for screen readers
+/// and tests.
+pub fn dialog_header_as(ui: &mut Ui, t: &Theme, title: &str, close_name: &str) -> bool {
     let mut close = false;
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(title).size(18.0).color(t.text));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (r, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
-            name_it(&resp, "Close");
+            name_it(&resp, close_name);
             ui.painter().circle_filled(
                 r.center(),
                 14.0,

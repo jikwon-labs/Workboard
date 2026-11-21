@@ -373,14 +373,28 @@ impl App {
         let t = self.t();
         let n = self.selected.len();
         let mut close = false;
-        egui::Window::new("Delete tasks").title_bar(false).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).order(egui::Order::Foreground).show(ctx, |ui| {
-            ui.set_width(320.0);
-            ui.label(RichText::new(if n == 1 { tr("Delete 1 task?").to_string() } else { trf!("Delete {} tasks?", n) }).strong().size(16.0));
+        let title = if n == 1 {
+            tr("Delete 1 task?").to_string()
+        } else {
+            trf!("Delete {} tasks?", n)
+        };
+        let spec = super::menus::Dialog {
+            title: &title,
+            anchor: (Align2::CENTER_CENTER, [0.0, 0.0]),
+            ..super::menus::Dialog::new("bulk_delete_dialog", "Delete tasks", 360.0)
+        };
+        let (shut, _) = self.centered_dialog(ctx, spec, |app, ui| {
             ui.add_space(4.0);
             // only mention subtasks when some of these tasks have them
-            let subs = self.data.tasks.iter().any(|x| x.parent.is_some_and(|p| self.selected.contains(&p)));
+            let subs = app
+                .data
+                .tasks
+                .iter()
+                .any(|x| x.parent.is_some_and(|p| app.selected.contains(&p)));
             let note = match (subs, n) {
-                (true, _) => tr("Their subtasks go too. You can undo right after, or restore them from Trash."),
+                (true, _) => tr(
+                    "Their subtasks go too. You can undo right after, or restore them from Trash.",
+                ),
                 (false, 1) => tr("You can undo right after, or restore it from Trash."),
                 (false, _) => tr("You can undo right after, or restore them from Trash."),
             };
@@ -389,11 +403,14 @@ impl App {
             // Delete then Cancel, as the other confirm dialogs (Delete a
             // dashboard, Log out, Delete workspace)
             ui.horizontal(|ui| {
-                let del = ui.add(Tint(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)));
+                let del = ui.add(Tint(
+                    egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE))
+                        .fill(t.danger),
+                ));
                 name_it(&del, "Confirm delete");
                 if del.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    for id in self.selected.drain() {
-                        self.actions.push(Action::DeleteTask(id));
+                    for id in app.selected.drain() {
+                        app.actions.push(Action::DeleteTask(id));
                     }
                     close = true;
                 }
@@ -402,7 +419,7 @@ impl App {
                 }
             });
         });
-        if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if close || shut {
             self.confirm_bulk_delete = false;
         }
     }

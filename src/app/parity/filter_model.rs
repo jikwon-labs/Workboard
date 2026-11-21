@@ -109,7 +109,7 @@ impl FilterRow {
             FilterField::StartDate => self
                 .values
                 .iter()
-                .any(|v| start_matches(v.parse().unwrap_or(0), t.start)),
+                .any(|v| start_matches(v.parse().unwrap_or(0), t.start, data)),
             FilterField::Created => self
                 .values
                 .iter()
@@ -147,9 +147,22 @@ impl FilterGroup {
     }
 }
 
-fn start_matches(which: u8, start: Option<NaiveDate>) -> bool {
+/// The first day of this week: Sunday as in the calendar, or Monday with the
+/// Labs option. The due and start filters both use it so "This week" agrees.
+fn week_start(data: &Data) -> NaiveDate {
     let td = today();
-    let week_start = td - Duration::days(td.weekday().num_days_from_monday() as i64);
+    let monday = data.extra.labs.iter().any(|l| l == "week_monday");
+    let back = if monday {
+        td.weekday().num_days_from_monday()
+    } else {
+        td.weekday().num_days_from_sunday()
+    };
+    td - Duration::days(back as i64)
+}
+
+fn start_matches(which: u8, start: Option<NaiveDate>, data: &Data) -> bool {
+    let td = today();
+    let week_start = week_start(data);
     match which {
         1 => start.is_some_and(|d| d <= td),
         2 => start == Some(td),
@@ -176,14 +189,7 @@ fn age_matches(which: u8, ts: i64) -> bool {
 
 fn due_matches(due: u8, t: &Task, data: &Data) -> bool {
     let td = today();
-    // weeks start on Sunday as in the calendar, or Monday with the Labs option
-    let monday = data.extra.labs.iter().any(|l| l == "week_monday");
-    let back = if monday {
-        td.weekday().num_days_from_monday()
-    } else {
-        td.weekday().num_days_from_sunday()
-    };
-    let week_start = td - Duration::days(back as i64);
+    let week_start = week_start(data);
     match due {
         1 => t.is_overdue() && !data.is_closed(t),
         2 => t.due == Some(td),

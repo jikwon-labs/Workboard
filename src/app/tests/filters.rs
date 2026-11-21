@@ -264,6 +264,40 @@ fn new_filter_fields() {
     assert!(!a.filtered().is_empty());
 }
 
+#[test]
+fn start_and_due_filters_agree_on_this_week() {
+    use parity::{FilterField, FilterRow};
+    let mut a = app();
+    let list = list_ids(&a)[0];
+    let id = add_task(&mut a, list, "Dated");
+    let row = |f: FilterField, v: &str| FilterRow {
+        field: Some(f),
+        not: false,
+        values: vec![v.to_string()],
+    };
+    let td = crate::model::today();
+    for monday in [false, true] {
+        a.data.extra.labs.retain(|l| l != "week_monday");
+        if monday {
+            a.data.extra.labs.push("week_monday".into());
+        }
+        for back in -7..14 {
+            let d = td + chrono::Duration::days(back);
+            let t = a.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+            t.start = Some(d);
+            t.due = Some(d);
+            let t = a.task(id).unwrap();
+            for which in ["3", "4"] {
+                assert_eq!(
+                    row(FilterField::StartDate, which).matches(t, &a.data),
+                    row(FilterField::DueDate, which).matches(t, &a.data),
+                    "{d} with week_monday={monday}, choice {which}"
+                );
+            }
+        }
+    }
+}
+
 /// Four tasks with known priority and tags, and which of them a filter keeps.
 fn filter_fixture() -> (App, impl Fn(&App, &parity::TaskFilter) -> Vec<&'static str>) {
     let mut a = app();

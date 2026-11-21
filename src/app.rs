@@ -282,6 +282,79 @@ impl TableCol {
     }
 }
 
+/// The Table view's rows in the order of a column (`desc`: turned round);
+/// empty cells stay at the bottom either way. `field_num` says which custom
+/// fields hold numbers.
+fn sort_table(
+    tasks: &mut [Task],
+    data: &Data,
+    col: TableCol,
+    desc: bool,
+    now: i64,
+    field_num: &dyn Fn(u64) -> bool,
+) {
+    let first_name = |x: &Task| {
+        x.assignees
+            .first()
+            .and_then(|a| data.member(*a))
+            .map(|m| m.shown().to_lowercase())
+    };
+    tasks.sort_by(|a, b| {
+        use std::cmp::Ordering;
+        // empty cells stay at the bottom either way
+        let last = |x: Option<Ordering>| x.unwrap_or(Ordering::Equal);
+        let o = match col {
+            TableCol::Num | TableCol::Created => Some(a.created.cmp(&b.created)),
+            TableCol::Name => Some(a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+            TableCol::Status => {
+                let sts = data.statuses_for_list(a.list_id);
+                let pos = |x: &Task| {
+                    sts.iter()
+                        .position(|s| s.name == x.status)
+                        .unwrap_or(usize::MAX)
+                };
+                Some(pos(a).cmp(&pos(b)))
+            }
+            TableCol::Assignee => match (first_name(a), first_name(b)) {
+                (Some(x), Some(y)) => Some(x.cmp(&y)),
+                (x, y) => return x.is_none().cmp(&y.is_none()),
+            },
+            TableCol::Due => match (a.due, b.due) {
+                (Some(x), Some(y)) => Some(x.cmp(&y)),
+                (x, y) => return x.is_none().cmp(&y.is_none()),
+            },
+            TableCol::Priority => match (a.priority, b.priority) {
+                (0, 0) => Some(Ordering::Equal),
+                (0, _) | (_, 0) => return (a.priority == 0).cmp(&(b.priority == 0)),
+                (x, y) => Some(x.cmp(&y)),
+            },
+            TableCol::Tags => match (a.tags.first(), b.tags.first()) {
+                (Some(x), Some(y)) => Some(x.to_lowercase().cmp(&y.to_lowercase())),
+                (x, y) => return x.is_none().cmp(&y.is_none()),
+            },
+            TableCol::Tracked => Some(a.tracked_secs(now).cmp(&b.tracked_secs(now))),
+            TableCol::Field(id) => {
+                let va = a.custom.get(&id).cloned().unwrap_or_default();
+                let vb = b.custom.get(&id).cloned().unwrap_or_default();
+                match (va.is_empty(), vb.is_empty()) {
+                    (false, false) if field_num(id) => va
+                        .parse::<f64>()
+                        .unwrap_or(0.0)
+                        .partial_cmp(&vb.parse::<f64>().unwrap_or(0.0)),
+                    (false, false) => Some(va.to_lowercase().cmp(&vb.to_lowercase())),
+                    (x, y) => return x.cmp(&y),
+                }
+            }
+        };
+        let o = last(o);
+        if desc {
+            o.reverse()
+        } else {
+            o
+        }
+    });
+}
+
 #[derive(Clone)]
 struct Group {
     key: String,
@@ -3732,6 +3805,129 @@ impl App {
 
     // ---------------------------------------------------------------- table view
 
+    /// The Table view's header: a click on a column sorts by it (again: the
+    /// other way round), and the "+" at the end shows or hides columns.
+    fn table_header(
+        &mut self,
+        ui: &mut Ui,
+        cols: &[TableCol],
+        widths: &[f32],
+        fields: &[CustomField],
+        sort: Option<(TableCol, bool)>,
+        total: f32,
+    ) {
+        let t = self.t();
+        let sort_id = egui::Id::new("table_sort");
+        let field_name = |id: u64| {
+            fields
+                .iter()
+                .find(|f| f.id == id)
+                .map(|f| f.name.clone())
+                .unwrap_or_default()
+        };
+        let (hr, _) = ui.allocate_exact_size(vec2(total, 30.0), Sense::hover());
+        let mut x = hr.left();
+        let mut new_sort = sort;
+        for (i, c) in cols.iter().enumerate() {
+            let cell = Rect::from_min_size(pos2(x, hr.top()), vec2(widths[i], hr.height()));
+            let label = match c {
+                TableCol::Field(id) => field_name(*id),
+                _ => c.label().to_string(),
+            };
+            let hresp = ui.interact(cell, ui.id().with(("thead", i)), Sense::click());
+            name_it(&hresp, &format!("Sort by {}", label));
+            if hresp.hovered() {
+                ui.painter().rect_filled(cell, 0.0, t.hover);
+            }
+            let shown = if matches!(c, TableCol::Field(_)) {
+                label
+            } else {
+                tr(&label).to_string()
+            };
+            let g = ui
+                .painter()
+                .layout_no_wrap(shown, FontId::proportional(12.0), t.text3);
+            let gw = g.size().x;
+            ui.painter().with_clip_rect(cell).galley(
+                pos2(x + 8.0, hr.center().y - g.size().y / 2.0),
+                g,
+                t.text3,
+            );
+            if let Some((sc, desc)) = sort {
+                if sc == *c {
+                    ui.painter().text(
+                        pos2(x + 12.0 + gw, hr.center().y),
+                        Align2::LEFT_CENTER,
+                        if desc { "\u{2193}" } else { "\u{2191}" },
+                        FontId::proportional(12.0),
+                        t.text,
+                    );
+                }
+            }
+            if hresp.clicked() {
+                new_sort = match sort {
+                    Some((sc, false)) if sc == *c => Some((*c, true)),
+                    Some((sc, true)) if sc == *c => None,
+                    _ => Some((*c, false)),
+                };
+            }
+            ui.painter()
+                .vline(x, hr.y_range(), Stroke::new(0.5_f32, t.border));
+            x += widths[i];
+        }
+        // "+" at the end: choose the columns
+        let plus = Rect::from_min_size(pos2(x, hr.top()), vec2(36.0, hr.height()));
+        let pr = ui.interact(plus, ui.id().with("thead_plus"), Sense::click());
+        name_it(&pr, "Table columns");
+        ui.painter()
+            .vline(x, hr.y_range(), Stroke::new(0.5_f32, t.border));
+        icons::paint_plus(
+            ui.painter(),
+            plus.center(),
+            15.0,
+            if pr.hovered() { t.text } else { t.text3 },
+        );
+        let mut choices: Vec<(String, String, String)> = TableCol::FIXED
+            .iter()
+            .map(|c| (c.key(), c.label().to_string(), tr(c.label()).to_string()))
+            .collect();
+        choices.extend(
+            fields
+                .iter()
+                .map(|f| (TableCol::Field(f.id).key(), f.name.clone(), f.name.clone())),
+        );
+        popup(ui, &pr, ui.id().with("thead_plus_pop"), 220.0, |ui| {
+            ui.label(RichText::new(tr("Columns")).small().color(t.text3));
+            for (key, label, shown) in &choices {
+                let mut on = !self.prefs.hidden_cols.contains(key);
+                let r = check(ui, &mut on, shown.as_str());
+                name_it(&r, &format!("Column {}", label));
+                if r.changed() {
+                    if on {
+                        self.prefs.hidden_cols.remove(key);
+                    } else {
+                        self.prefs.hidden_cols.insert(key.clone());
+                    }
+                }
+            }
+            if fields.is_empty() {
+                ui.label(
+                    RichText::new(tr("Custom Fields you add show here too."))
+                        .small()
+                        .color(t.text3),
+                );
+            }
+        });
+        if new_sort != sort {
+            ui.data_mut(|d| d.insert_temp(sort_id, new_sort));
+        }
+        ui.painter().rect_filled(
+            Rect::from_min_size(hr.left_bottom() - vec2(0.0, 1.0), vec2(total, 1.0)),
+            0.0,
+            t.border,
+        );
+    }
+
     fn table_view(&mut self, ui: &mut Ui) {
         let t = self.t();
         let mut tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
@@ -3763,79 +3959,12 @@ impl App {
                 cols.push(c);
             }
         }
-        let field_name = |id: u64| {
-            fields
-                .iter()
-                .find(|f| f.id == id)
-                .map(|f| f.name.clone())
-                .unwrap_or_default()
-        };
         let field_num = |id: u64| fields.iter().any(|f| f.id == id && f.kind == "number");
         // a click on a header sorts by it; another click turns the order round
         let sort_id = egui::Id::new("table_sort");
         let sort: Option<(TableCol, bool)> = ui.data(|d| d.get_temp(sort_id)).flatten();
         if let Some((col, desc)) = sort {
-            let data = &self.data;
-            let first_name = |x: &Task| {
-                x.assignees
-                    .first()
-                    .and_then(|a| data.member(*a))
-                    .map(|m| m.shown().to_lowercase())
-            };
-            tasks.sort_by(|a, b| {
-                use std::cmp::Ordering;
-                // empty cells stay at the bottom either way
-                let last = |x: Option<Ordering>| x.unwrap_or(Ordering::Equal);
-                let o = match col {
-                    TableCol::Num | TableCol::Created => Some(a.created.cmp(&b.created)),
-                    TableCol::Name => Some(a.name.to_lowercase().cmp(&b.name.to_lowercase())),
-                    TableCol::Status => {
-                        let sts = data.statuses_for_list(a.list_id);
-                        let pos = |x: &Task| {
-                            sts.iter()
-                                .position(|s| s.name == x.status)
-                                .unwrap_or(usize::MAX)
-                        };
-                        Some(pos(a).cmp(&pos(b)))
-                    }
-                    TableCol::Assignee => match (first_name(a), first_name(b)) {
-                        (Some(x), Some(y)) => Some(x.cmp(&y)),
-                        (x, y) => return x.is_none().cmp(&y.is_none()),
-                    },
-                    TableCol::Due => match (a.due, b.due) {
-                        (Some(x), Some(y)) => Some(x.cmp(&y)),
-                        (x, y) => return x.is_none().cmp(&y.is_none()),
-                    },
-                    TableCol::Priority => match (a.priority, b.priority) {
-                        (0, 0) => Some(Ordering::Equal),
-                        (0, _) | (_, 0) => return (a.priority == 0).cmp(&(b.priority == 0)),
-                        (x, y) => Some(x.cmp(&y)),
-                    },
-                    TableCol::Tags => match (a.tags.first(), b.tags.first()) {
-                        (Some(x), Some(y)) => Some(x.to_lowercase().cmp(&y.to_lowercase())),
-                        (x, y) => return x.is_none().cmp(&y.is_none()),
-                    },
-                    TableCol::Tracked => Some(a.tracked_secs(now).cmp(&b.tracked_secs(now))),
-                    TableCol::Field(id) => {
-                        let va = a.custom.get(&id).cloned().unwrap_or_default();
-                        let vb = b.custom.get(&id).cloned().unwrap_or_default();
-                        match (va.is_empty(), vb.is_empty()) {
-                            (false, false) if field_num(id) => va
-                                .parse::<f64>()
-                                .unwrap_or(0.0)
-                                .partial_cmp(&vb.parse::<f64>().unwrap_or(0.0)),
-                            (false, false) => Some(va.to_lowercase().cmp(&vb.to_lowercase())),
-                            (x, y) => return x.cmp(&y),
-                        }
-                    }
-                };
-                let o = last(o);
-                if desc {
-                    o.reverse()
-                } else {
-                    o
-                }
-            });
+            sort_table(&mut tasks, &self.data, col, desc, now, &field_num);
         }
         let mut widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
         // Name takes the room the other columns leave (at least 200), so the
@@ -3850,107 +3979,7 @@ impl App {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let total: f32 = widths.iter().sum::<f32>() + 36.0;
-                let (hr, _) = ui.allocate_exact_size(vec2(total, 30.0), Sense::hover());
-                let mut x = hr.left();
-                let mut new_sort = sort;
-                for (i, c) in cols.iter().enumerate() {
-                    let cell = Rect::from_min_size(pos2(x, hr.top()), vec2(widths[i], hr.height()));
-                    let label = match c {
-                        TableCol::Field(id) => field_name(*id),
-                        _ => c.label().to_string(),
-                    };
-                    let hresp = ui.interact(cell, ui.id().with(("thead", i)), Sense::click());
-                    name_it(&hresp, &format!("Sort by {}", label));
-                    if hresp.hovered() {
-                        ui.painter().rect_filled(cell, 0.0, t.hover);
-                    }
-                    let shown = if matches!(c, TableCol::Field(_)) {
-                        label
-                    } else {
-                        tr(&label).to_string()
-                    };
-                    let g = ui
-                        .painter()
-                        .layout_no_wrap(shown, FontId::proportional(12.0), t.text3);
-                    let gw = g.size().x;
-                    ui.painter().with_clip_rect(cell).galley(
-                        pos2(x + 8.0, hr.center().y - g.size().y / 2.0),
-                        g,
-                        t.text3,
-                    );
-                    if let Some((sc, desc)) = sort {
-                        if sc == *c {
-                            ui.painter().text(
-                                pos2(x + 12.0 + gw, hr.center().y),
-                                Align2::LEFT_CENTER,
-                                if desc { "\u{2193}" } else { "\u{2191}" },
-                                FontId::proportional(12.0),
-                                t.text,
-                            );
-                        }
-                    }
-                    if hresp.clicked() {
-                        new_sort = match sort {
-                            Some((sc, false)) if sc == *c => Some((*c, true)),
-                            Some((sc, true)) if sc == *c => None,
-                            _ => Some((*c, false)),
-                        };
-                    }
-                    ui.painter()
-                        .vline(x, hr.y_range(), Stroke::new(0.5_f32, t.border));
-                    x += widths[i];
-                }
-                // "+" at the end: choose the columns
-                let plus = Rect::from_min_size(pos2(x, hr.top()), vec2(36.0, hr.height()));
-                let pr = ui.interact(plus, ui.id().with("thead_plus"), Sense::click());
-                name_it(&pr, "Table columns");
-                ui.painter()
-                    .vline(x, hr.y_range(), Stroke::new(0.5_f32, t.border));
-                icons::paint_plus(
-                    ui.painter(),
-                    plus.center(),
-                    15.0,
-                    if pr.hovered() { t.text } else { t.text3 },
-                );
-                let mut choices: Vec<(String, String, String)> = TableCol::FIXED
-                    .iter()
-                    .map(|c| (c.key(), c.label().to_string(), tr(c.label()).to_string()))
-                    .collect();
-                choices.extend(
-                    fields
-                        .iter()
-                        .map(|f| (TableCol::Field(f.id).key(), f.name.clone(), f.name.clone())),
-                );
-                popup(ui, &pr, ui.id().with("thead_plus_pop"), 220.0, |ui| {
-                    ui.label(RichText::new(tr("Columns")).small().color(t.text3));
-                    for (key, label, shown) in &choices {
-                        let mut on = !self.prefs.hidden_cols.contains(key);
-                        let r = check(ui, &mut on, shown.as_str());
-                        name_it(&r, &format!("Column {}", label));
-                        if r.changed() {
-                            if on {
-                                self.prefs.hidden_cols.remove(key);
-                            } else {
-                                self.prefs.hidden_cols.insert(key.clone());
-                            }
-                        }
-                    }
-                    if fields.is_empty() {
-                        ui.label(
-                            RichText::new(tr("Custom Fields you add show here too."))
-                                .small()
-                                .color(t.text3),
-                        );
-                    }
-                });
-                if new_sort != sort {
-                    ui.data_mut(|d| d.insert_temp(sort_id, new_sort));
-                }
-                ui.painter().rect_filled(
-                    Rect::from_min_size(hr.left_bottom() - vec2(0.0, 1.0), vec2(total, 1.0)),
-                    0.0,
-                    t.border,
-                );
+                self.table_header(ui, &cols, &widths, &fields, sort, total);
                 for (n, task) in tasks.iter().enumerate() {
                     let (rr, resp) = ui.allocate_exact_size(vec2(total, 34.0), Sense::click());
                     let id = ui.id().with(("trow", task.id));

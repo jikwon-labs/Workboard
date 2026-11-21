@@ -656,3 +656,65 @@ fn new_post_puts_the_cursor_in_the_title_and_keeps_what_was_written() {
     h.type_text("!");
     assert_eq!(h.app.post.title, "Hello!");
 }
+
+/// The buttons under the post's text work as in a channel's box: "@" lists
+/// the people (and @channel, @here, teams) to mention, the smile lists
+/// emoji, each put in where the cursor is; typing "@" opens the people
+/// list too. There is one Create task button (a "+" did the same thing),
+/// and a person picked from the list is mentioned.
+#[test]
+fn the_post_box_buttons_work_as_in_a_channels_box() {
+    let mut h = posts_page();
+    let composer = Rect::from_min_max(pos2(340.0, 100.0), pos2(1440.0, 520.0));
+    let in_box = |h: &Ui1, name: &str| {
+        h.tree
+            .iter()
+            .filter(|(n, r)| n == name && composer.contains(r.center()))
+            .count()
+    };
+    assert_eq!(in_box(&h, "+"), 0, "no second Create task button");
+    assert_eq!(in_box(&h, "Create task"), 1);
+
+    write_post(&mut h, "general", "Office move", "Hello world");
+    // the cursor back before " world"
+    for _ in 0..6 {
+        h.key(egui::Key::ArrowLeft);
+    }
+    let at = h.rect("Mention someone");
+    h.click("Mention someone");
+    let list = Rect::from_min_size(pos2(at.left() - 20.0, at.bottom()), vec2(420.0, 360.0));
+    assert!(
+        h.tree
+            .iter()
+            .any(|(n, r)| n == "@channel" && list.contains(r.center())),
+        "the groups are listed too"
+    );
+    let alex = h.rect_in("Alex Kim", list).center();
+    h.click_at(alex);
+    h.settle();
+    assert_eq!(h.app.post.body, "Hello @Alex Kim  world", "at the cursor");
+    h.type_text("x");
+    assert_eq!(
+        h.app.post.body, "Hello @Alex Kim x world",
+        "the box keeps the keyboard"
+    );
+
+    // typing "@" at the start of a word opens the list
+    h.key(egui::Key::End);
+    h.type_text(" @");
+    h.settle();
+    let sam = h.rect_in("Sam Lee", list).center();
+    h.click_at(sam);
+    h.settle();
+    assert_eq!(h.app.post.body, "Hello @Alex Kim x world @Sam Lee ");
+
+    h.click("Emoji");
+    h.click("\u{2615}");
+    h.settle();
+    assert_eq!(h.app.post.body, "Hello @Alex Kim x world @Sam Lee \u{2615}");
+
+    h.click("Post");
+    let mut m = all_posts(&h).pop().unwrap().mentions;
+    m.sort();
+    assert_eq!(m, vec![2, 3], "the people picked are mentioned");
+}

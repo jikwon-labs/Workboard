@@ -59,7 +59,7 @@ pub(super) const EMOJIS: [&str; 40] = [
 ];
 
 /// A grid of emoji buttons; returns the one clicked.
-fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
+pub(super) fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
     let mut picked = None;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
@@ -448,7 +448,7 @@ fn format_buttons(ui: &mut Ui, t: &Theme, id: egui::Id, text: &mut String, prefi
 /// The groups at the end of an @ list: "@channel" (everyone here), "@here"
 /// (who is online) and each team by name. The text to put in the box for
 /// the one clicked.
-fn group_mention_rows(ui: &mut Ui, t: &Theme, teams: &[String]) -> Option<String> {
+pub(super) fn group_mention_rows(ui: &mut Ui, t: &Theme, teams: &[String]) -> Option<String> {
     let mut out = None;
     ui.separator();
     for (word, tip) in [

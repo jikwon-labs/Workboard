@@ -743,6 +743,9 @@ struct PostsUi {
     /// "New Post" was pressed: the title takes the keyboard (and comes into
     /// sight) on the next draw.
     focus_title: bool,
+    /// People picked from the text's @ list (so a name two people share
+    /// means the one picked), sent with the post.
+    picked: Vec<u64>,
 }
 
 /// List rows: keyboard focus, the order drawn, dragging and renaming.

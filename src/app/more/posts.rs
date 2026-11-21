@@ -4,7 +4,62 @@ use super::*;
 
 // ---------------------------------------------------------------- posts
 
+/// The post's text box and its @ list (egui ids).
+const POST_TEXT: &str = "post_text";
+const POST_MENTIONS: &str = "post_mentions";
+
 impl App {
+    /// The text box's cursor: where it is (the end when the box never had
+    /// it), and the selection it replaces, as char indexes.
+    fn post_cursor(&self, ctx: &egui::Context) -> (usize, usize) {
+        let n = self.post.body.chars().count();
+        egui::TextEdit::load_state(ctx, egui::Id::new(POST_TEXT))
+            .and_then(|st| st.cursor.char_range())
+            .map(|r| {
+                let [a, b] = r.sorted();
+                (a.index.min(n), b.index.min(n))
+            })
+            .unwrap_or((n, n))
+    }
+
+    /// The character just typed in the post's text is an "@" starting a word.
+    fn typed_at_sign(&self, ctx: &egui::Context) -> bool {
+        let (at, _) = self.post_cursor(ctx);
+        let chars: Vec<char> = self.post.body.chars().collect();
+        at > 0 && chars[at - 1] == '@' && (at == 1 || chars[at - 2].is_whitespace())
+    }
+
+    /// Put `s` in the post's text at the cursor, in place of what is
+    /// selected; a picked @name takes the place of an "@" typed just before
+    /// and starts a word. The box gets the keyboard back, the cursor after it.
+    fn insert_in_post(&mut self, ctx: &egui::Context, s: &str) {
+        let (a, b) = self.post_cursor(ctx);
+        let mut chars: Vec<char> = self.post.body.chars().collect();
+        chars.drain(a..b);
+        let mut at = a;
+        let mut s = s.to_string();
+        if s.starts_with('@') {
+            if at > 0 && chars[at - 1] == '@' {
+                chars.remove(at - 1);
+                at -= 1;
+            }
+            if at > 0 && !chars[at - 1].is_whitespace() {
+                s.insert(0, ' ');
+            }
+        }
+        let added: Vec<char> = s.chars().collect();
+        let end = at + added.len();
+        chars.splice(at..at, added);
+        self.post.body = chars.into_iter().collect();
+        let id = egui::Id::new(POST_TEXT);
+        let mut st = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+        st.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+            egui::text::CCursor::new(end),
+        )));
+        st.store(ctx, id);
+        ctx.memory_mut(|m| m.request_focus(id));
+    }
+
     pub(crate) fn posts_page(&mut self, ui: &mut Ui) {
         let t = self.t();
         self.page_bar(ui, tr("Posts"), |s, ui| {
@@ -101,12 +156,17 @@ impl App {
                                 ui.separator();
                                 let r = ui.add(
                                     egui::TextEdit::multiline(&mut self.post.body)
+                                        .id(egui::Id::new(POST_TEXT))
                                         .hint_text(tr("Share an announcement..."))
                                         .frame(false)
                                         .desired_rows(3)
                                         .desired_width(f32::INFINITY),
                                 );
                                 name_field(&r, "Post text");
+                                // "@" typed at the start of a word lists the people
+                                if r.changed() && self.typed_at_sign(ui.ctx()) {
+                                    ui.memory_mut(|m| m.open_popup(egui::Id::new(POST_MENTIONS)));
+                                }
                                 // Cmd+Enter in the title or the text posts, as
                                 // it sends a comment (Enter is a new line)
                                 let cmd_enter = (title_focus || r.has_focus())
@@ -114,40 +174,65 @@ impl App {
                                         i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter)
                                     });
                                 ui.horizontal(|ui| {
-                                    // "@" is a character, "+" two lines; the others line icons
-                                    for (g, tip) in [
-                                        ("+", "Create task"),
-                                        ("@", "Mention someone"),
-                                        ("smile", "Emoji"),
-                                        ("task", "Create task"),
-                                    ] {
-                                        let b = if g == "+" {
-                                            // drawn as lines so it sits in
-                                            // the middle (the character sat low)
-                                            let b = ui.add(ghost(egui::Button::new(
-                                                crate::app::icons::sign_text(false),
-                                            )));
-                                            crate::app::icons::paint_sign(
-                                                ui,
-                                                &b,
-                                                false,
-                                                Some(t.text2),
+                                    // as in a channel's box: "@" lists the people to
+                                    // mention, the smile the emoji, put in at the cursor
+                                    let mut insert: Option<String> = None;
+                                    let at = ui
+                                        .add(ghost(egui::Button::new(
+                                            RichText::new("@").color(t.text2),
+                                        )))
+                                        .on_hover_text(tr("Mention someone"));
+                                    name_it(&at, "Mention someone");
+                                    let me = self.data.me;
+                                    let people: Vec<Member> = self
+                                        .data
+                                        .members
+                                        .iter()
+                                        .filter(|m| !m.invited && m.id != me)
+                                        .cloned()
+                                        .collect();
+                                    let teams = self.team_names();
+                                    popup(ui, &at, egui::Id::new(POST_MENTIONS), 210.0, |ui| {
+                                        if people.is_empty() {
+                                            ui.label(
+                                                RichText::new(tr("No one else here yet"))
+                                                    .color(t.text3),
                                             );
-                                            b
-                                        } else if g.len() == 1 {
-                                            ui.add(ghost(egui::Button::new(
-                                                RichText::new(g).color(t.text2),
-                                            )))
-                                        } else {
-                                            icon_button(ui, &t, g, "", tip, false)
-                                        };
-                                        if b.on_hover_text(tr(tip)).clicked() {
-                                            match g {
-                                                "@" => self.post.body.push('@'),
-                                                "smile" => self.post.body.push_str("\u{1F44D}"),
-                                                _ => self.open_quick_add(None),
+                                        }
+                                        for m in &people {
+                                            if menu_row(ui, &t, m.shown(), false, |p, c| {
+                                                paint_avatar(p, c, 8.0, m, t.card)
+                                            })
+                                            .clicked()
+                                            {
+                                                insert = Some(format!("@{} ", m.shown()));
+                                                self.post.picked.push(m.id);
+                                                close_popup(ui);
                                             }
                                         }
+                                        if let Some(g) =
+                                            crate::app::chat::group_mention_rows(ui, &t, &teams)
+                                        {
+                                            insert = Some(g);
+                                            close_popup(ui);
+                                        }
+                                    });
+                                    let em = icon_button(ui, &t, "smile", "", "Emoji", false)
+                                        .on_hover_text(tr("Emoji"));
+                                    popup(ui, &em, egui::Id::new("post_emoji"), 248.0, |ui| {
+                                        if let Some(e) = crate::app::chat::emoji_grid(ui) {
+                                            insert = Some(e.to_string());
+                                            close_popup(ui);
+                                        }
+                                    });
+                                    if icon_button(ui, &t, "task", "", "Create task", false)
+                                        .on_hover_text(tr("Create task"))
+                                        .clicked()
+                                    {
+                                        self.open_quick_add(None);
+                                    }
+                                    if let Some(text) = insert {
+                                        self.insert_in_post(ui.ctx(), &text);
                                     }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         // a channel still listed: not one deleted
@@ -172,13 +257,14 @@ impl App {
                                             let title = self.post.title.trim().to_string();
                                             let kind = self.post.kind.clone();
                                             let text = self.post.body.trim().to_string();
+                                            let picked = std::mem::take(&mut self.post.picked);
                                             self.add_post(
                                                 self.post.channel,
                                                 title,
                                                 &kind,
                                                 text,
                                                 vec![],
-                                                &[],
+                                                &picked,
                                             );
                                             self.post.title.clear();
                                             self.post.body.clear();

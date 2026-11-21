@@ -4038,11 +4038,13 @@ fn new_below(ui: &mut Ui, t: &Theme, list: Rect, n: usize) -> bool {
 pub(super) const DEFAULT_POST_TITLE: &str = "Update";
 
 /// A post's title as shown: the app's own default title in the reader's
-/// language, anything typed as it was typed.
+/// language, anything typed as it was typed. A post that came without a
+/// title (the iPhone app used to send none with text only) shows the
+/// default title too.
 pub(super) fn shown_post_title(m: &Message) -> Option<String> {
-    m.post_title.as_deref().map(|t| match t {
-        DEFAULT_POST_TITLE => tr(DEFAULT_POST_TITLE).to_string(),
-        t => t.to_string(),
+    m.post_title.as_deref().map(|t| match t.trim() {
+        "" | DEFAULT_POST_TITLE => tr(DEFAULT_POST_TITLE).to_string(),
+        _ => t.to_string(),
     })
 }
 

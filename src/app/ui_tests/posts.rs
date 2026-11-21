@@ -325,3 +325,23 @@ fn a_post_card_shows_the_texts_formatting_not_its_marks() {
     );
     assert!(!h.painted_text("Big news for ops").is_empty());
 }
+
+/// A post that came without a title (the iPhone app used to send "" when
+/// only text was written) shows the default title like one sent from the
+/// channel's box, on the Posts page and in the channel, not an empty line.
+#[test]
+fn a_post_without_a_title_shows_the_default_title() {
+    let mut h = posts_page();
+    let id = channel_id(&h, "general");
+    for (n, title) in [(9001, ""), (9002, "  ")] {
+        let mut m = crate::app::slack::new_message(n, 2, format!("From my phone {n}"), now_ts());
+        m.post_title = Some(title.into());
+        let c = h.app.data.channels.iter_mut().find(|c| c.id == id).unwrap();
+        c.messages.push(m);
+    }
+    h.settle();
+    assert_eq!(h.painted_text("Update").len(), 2, "on the Posts page");
+    h.click("Open in channel");
+    h.settle();
+    assert_eq!(h.painted_text("Update").len(), 2, "in the channel");
+}

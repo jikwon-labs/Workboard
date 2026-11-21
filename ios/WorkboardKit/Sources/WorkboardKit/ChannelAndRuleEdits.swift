@@ -116,12 +116,14 @@ extension Edits {
         return true
     }
 
-    /// A post (an announcement with a title) in a channel.
+    /// A post (an announcement with a title) in a channel. Without a title
+    /// it gets the default one, as on the Mac (`MessageView.defaultPostTitle`).
     @discardableResult
     public static func sendPost(_ data: inout JSON, channel: UInt64, title: String, text: String, picked: [UInt64] = [], me: UInt64, id: UInt64, ts: Int64) -> Bool {
-        let t = title.trimmed
+        let typed = title.trimmed
+        let t = typed.isEmpty ? MessageView.defaultPostTitle : typed
         let body = text.trimmed
-        guard !t.isEmpty || !body.isEmpty else { return false }
+        guard !typed.isEmpty || !body.isEmpty else { return false }
         let mentions = Mentions.chatIDs(in: body, data: data, channel: channel, online: [], author: me, picked: picked)
         return data.updateItem(at: "channels", id: channel) { c in
             var m = message(id: id, author: me, text: body, ts: ts)

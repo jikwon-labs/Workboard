@@ -85,6 +85,9 @@ final class MessageExtrasTests: XCTestCase {
         // the desktop saves "Update" for a post without a title; screens translate it
         XCTAssertTrue(Edits.sendPost(&d, channel: 302, title: MessageView.defaultPostTitle, text: "Doors at 9", me: 1, id: 9003, ts: 7))
         XCTAssertTrue(WorkspaceView(d).posts(me: 1).contains { $0.message.id == 9003 && $0.message.hasDefaultPostTitle })
+        // only text written: the post gets that default title too, as on the Mac
+        XCTAssertTrue(Edits.sendPost(&d, channel: 302, title: "  ", text: "Coffee is on", me: 1, id: 9004, ts: 8))
+        XCTAssertTrue(WorkspaceView(d).posts(me: 1).contains { $0.message.id == 9004 && $0.message.hasDefaultPostTitle })
         XCTAssertTrue(Edits.remindAboutMessage(&d, channel: 301, message: 313, at: 100, me: 1, id: 9002))
         XCTAssertEqual(d.at("extra.reminders")![0]!["message"], [301, 313])
     }

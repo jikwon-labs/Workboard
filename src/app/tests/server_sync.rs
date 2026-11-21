@@ -18,7 +18,7 @@ fn a_saved_workspace_leaves_out_fingerprints_it_can_work_out_again() {
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = temp_home("home-hashes");
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    super::point_home(&home);
     let mut a = app();
     a.persist = true;
     a.data.extra.shared = Some(crate::sync::SharedCfg {
@@ -184,7 +184,7 @@ fn joining_another_team_keeps_the_workspace_already_here() {
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = temp_home("home-join");
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    super::point_home(&home);
 
     // someone else's team, with an invite code for Sam
     let theirs = TestServer::start();

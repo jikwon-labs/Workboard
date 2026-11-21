@@ -226,7 +226,7 @@ fn another_workspace_starts_the_posts_page_channel_and_filters_over() {
         .unwrap_or_else(|e| e.into_inner());
     let home = temp_home("home-posts-ws");
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    crate::app::tests::point_home(&home);
     let mut h = posts_page();
     write_post(&mut h, "general", "Office move", "Monday");
     pick_filter(&mut h, "#  Channel", "# general");

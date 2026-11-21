@@ -10,7 +10,7 @@ fn own_home(tag: &str) -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|e| e.into_inner());
     let home = temp_home(&format!("home-{}", tag));
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    crate::app::tests::point_home(&home);
     guard
 }
 

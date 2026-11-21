@@ -674,13 +674,21 @@ fn custom_field_values_are_kept_per_task() {
 /// take turns: HOME is one for the whole test run.
 pub(super) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Point the app's data folder at `home` for a test holding HOME_LOCK. HOME
+/// moves it on macOS and Linux; on Windows it is under APPDATA, so that moves
+/// too, or every such test would share the real %APPDATA%\Workboard.
+pub(super) fn point_home(home: &std::path::Path) {
+    std::env::set_var("HOME", home);
+    std::env::set_var("APPDATA", home);
+}
+
 #[test]
 fn edits_are_saved_once_they_settle_off_the_screens_thread() {
     use std::time::{Duration, Instant};
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = temp_home("home-save");
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    point_home(&home);
     let mut a = app();
     a.persist = true;
     a.save_now();
@@ -746,7 +754,7 @@ fn workspaces_can_be_created_and_switched() {
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = temp_home("home");
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    point_home(&home);
     let mut a = app();
     a.persist = true;
     a.data.save();

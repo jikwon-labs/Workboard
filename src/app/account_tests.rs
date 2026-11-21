@@ -314,7 +314,7 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
         .unwrap_or_else(|e| e.into_inner());
     let home = temp_home("home-several");
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    super::tests::point_home(&home);
     let server = TestServer::with_mail_folder();
     let addr = format!("127.0.0.1:{}", server.port);
 
@@ -441,7 +441,7 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
         .unwrap_or_else(|e| e.into_inner());
     let home = temp_home("home-delws");
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    super::tests::point_home(&home);
     let server = TestServer::with_mail_folder();
     let addr = format!("127.0.0.1:{}", server.port);
 
@@ -551,7 +551,7 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
         .unwrap_or_else(|e| e.into_inner());
     let home = temp_home("home-watch");
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
+    super::tests::point_home(&home);
     let server = TestServer::with_mail_folder();
     let addr = format!("127.0.0.1:{}", server.port);
 

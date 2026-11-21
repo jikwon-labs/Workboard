@@ -310,3 +310,18 @@ fn a_pasted_title_with_line_breaks_goes_out_on_one_line() {
     let p = all_posts(&h).pop().unwrap();
     assert_eq!(p.post_title.as_deref(), Some("Lunch at noon"));
 }
+
+/// A post's text shows on its card as in the channel: bold and code
+/// without their marks, a mention marked.
+#[test]
+fn a_post_card_shows_the_texts_formatting_not_its_marks() {
+    let mut h = posts_page();
+    write_post(&mut h, "general", "Office move", "**Big** news for `ops`");
+    h.click("Post");
+    h.settle();
+    assert!(
+        h.painted_text("**Big** news for `ops`").is_empty(),
+        "no ** or ` on the card"
+    );
+    assert!(!h.painted_text("Big news for ops").is_empty());
+}

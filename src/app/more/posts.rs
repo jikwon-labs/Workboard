@@ -453,8 +453,13 @@ impl App {
                                         )
                                         .size(17.0),
                                     );
+                                    // formatted as in the channel: bold, code,
+                                    // mentions and links
                                     if !m.text.is_empty() {
-                                        ui.add(egui::Label::new(&m.text).wrap());
+                                        let text = crate::app::chat::shown_text(&m);
+                                        if let Some(link) = self.message_text(ui, &text, 14.0) {
+                                            self.link_pending = Some(link);
+                                        }
                                     }
                                 });
                             });

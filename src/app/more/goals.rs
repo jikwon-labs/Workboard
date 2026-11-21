@@ -1688,16 +1688,20 @@ fn record_popup(
         ui.label(RichText::new(name).strong());
         ui.add_space(4.0);
         let mut v: f64 = ui.data(|d| d.get_temp(value_id)).unwrap_or(current);
-        ui.horizontal(|ui| {
-            ui.label(tr("Now"));
-            let r = ui.add(number_box(&mut v));
-            name_it(&r, "Value now");
-        });
+        // Enter in the box saves, as in the app's other one-line boxes
+        let enter = ui
+            .horizontal(|ui| {
+                ui.label(tr("Now"));
+                let r = ui.add(number_box(&mut v));
+                name_it(&r, "Value now");
+                r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+            })
+            .inner;
         ui.data_mut(|d| d.insert_temp(value_id, v));
         ui.add_space(6.0);
         let save = primary_button(ui, t, tr("Save"));
         name_it(&save, "Save value");
-        if save.clicked() {
+        if save.clicked() || enter {
             *act = Some(GoalAct::SetNumber { g: gid, i, to: v });
             close_popup(ui);
         }

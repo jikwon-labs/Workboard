@@ -832,3 +832,23 @@ fn dragging_the_number_in_edit_records_one_line_and_escape_drops_a_typed_one() {
     assert_eq!(current_of(&h, id, 0), after, "Escape keeps what it was");
     assert_eq!(lines(&h), 1);
 }
+
+#[test]
+fn enter_in_record_saves_and_escape_drops_it() {
+    let (mut h, a, _) = two_goals();
+    h.click("Record Beta testers");
+    h.click("Value now");
+    h.type_text("41");
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert_eq!(current_of(&h, a, 0), 41.0, "Enter saves");
+    assert!(!h.has("Save value"), "and closes the popup");
+
+    h.click("Record Beta testers");
+    h.click("Value now");
+    h.type_text("12");
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert_eq!(current_of(&h, a, 0), 41.0, "Escape keeps what it was");
+    assert!(!h.has("Save value"));
+}

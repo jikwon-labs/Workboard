@@ -11,6 +11,7 @@ mod links;
 mod model;
 mod notifier;
 mod os;
+mod scrub;
 mod single;
 mod startup;
 use wb_sync as sync;

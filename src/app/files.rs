@@ -1252,6 +1252,14 @@ fn prepare(
         if meta.len() > MAX_FILE {
             return Err(format!("{} is larger than 90 MB.", name));
         }
+        // a picture or video goes without where it was taken, the phone and
+        // its tags (src/scrub.rs): a cleaned copy is what's measured, kept
+        // and sent
+        let clean = match kind {
+            MediaKind::File => None,
+            _ => scrubbed_copy(dir, &src, name)?,
+        };
+        let src = clean.as_ref().map(|c| c.0.clone()).unwrap_or(src.clone());
         // a plain file goes as it is: nothing to measure
         let (w, h, secs) = match kind {
             MediaKind::File => (0, 0, 0.0),
@@ -1283,6 +1291,36 @@ fn prepare(
         let _ = std::fs::remove_file(t);
     }
     out
+}
+
+/// A copy of a picture or video with its personal details taken out, in
+/// `dir`; None when there was nothing to take out. Removed when dropped.
+fn scrubbed_copy(dir: &Path, src: &Path, name: &str) -> Result<Option<TempFile>, String> {
+    let bytes = std::fs::read(src).map_err(|_| format!("{} can't be read.", name))?;
+    let Some(clean) = crate::scrub::scrub(&bytes) else {
+        return Ok(None);
+    };
+    if clean == bytes {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    // the same ending, so the kind and content type stay
+    let ext = src
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let t = dir.join(format!(".scrub-{:x}{}", wb_sync::random_u64(), ext));
+    std::fs::write(&t, clean).map_err(|e| e.to_string())?;
+    Ok(Some(TempFile(t)))
+}
+
+/// A file removed when this goes out of scope.
+struct TempFile(PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// A files thread: one upload, download or folder copy.

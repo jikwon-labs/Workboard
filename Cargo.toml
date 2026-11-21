@@ -28,6 +28,8 @@ qrcode = { version = "0.14", default-features = false }
 # tests run the real server; it is not part of the app build
 workboard-server = { path = "server", features = ["testing"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time"] }
+# test pictures for src/scrub.rs (macOS builds use ImageIO, not these)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 accesskit = "0.17"
 
 [target.'cfg(target_os = "macos")'.dependencies]

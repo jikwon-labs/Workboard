@@ -477,6 +477,9 @@ enum MediaUpload {
     static func prepare(_ item: PhotosPickerItem) async throws -> Prepared {
         if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
             guard let movie = try await item.loadTransferable(type: PickedMovie.self) else { throw Unreadable() }
+            // our own copy goes without where it was filmed and the phone
+            // (a picture loses those by being drawn again, below)
+            try MediaScrub.scrubFile(at: movie.url)
             // streamed up from the file (FileAPI.upload(file:)), never read whole
             let bytes = (try? movie.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             let asset = AVURLAsset(url: movie.url)
@@ -508,7 +511,8 @@ enum MediaUpload {
 }
 
 /// Puts a file picked in Files on the server as it is (no picture size, no
-/// still); the pending file then holds its Attachment.
+/// still), except that a picture or video goes without where it was taken
+/// and the phone (MediaScrub); the pending file then holds its Attachment.
 @MainActor
 func uploadFile(_ url: URL, server: String, auth: String?, into f: PendingFile) async {
     f.isFile = true
@@ -521,7 +525,7 @@ func uploadFile(_ url: URL, server: String, auth: String?, into f: PendingFile) 
             f.error = String(localized: "\(f.name) is a folder.")
             return
         }
-        let bytes = values.fileSize ?? 0
+        var bytes = values.fileSize ?? 0
         if bytes > FileAPI.maxBytes {
             f.error = FileError.tooLarge.explanation
             return
@@ -532,6 +536,9 @@ func uploadFile(_ url: URL, server: String, auth: String?, into f: PendingFile) 
         if !ext.isEmpty { tmp.appendPathExtension(ext) }
         try FileManager.default.copyItem(at: url, to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
+        if MediaScrub.mediaExts.contains(ext), try MediaScrub.scrubFile(at: tmp) {
+            bytes = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? bytes
+        }
         // streamed from the file, never read whole
         let sha = try await FileAPI.upload(server: server, auth: auth, file: tmp, contentType: "application/octet-stream")
         FileAPI.keep(file: tmp, sha: sha, ext: ext)

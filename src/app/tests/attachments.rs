@@ -452,6 +452,105 @@ fn a_video_shows_a_still_from_the_cache() {
         .ends_with(".mp4"));
 }
 
+fn holds(hay: &[u8], needle: &[u8]) -> bool {
+    hay.windows(needle.len()).any(|w| w == needle)
+}
+
+#[test]
+fn a_picture_goes_without_where_it_was_taken() {
+    // a JPEG whose EXIF names the place and the phone
+    let mut img = image::RgbImage::new(48, 32);
+    for (x, _, p) in img.enumerate_pixels_mut() {
+        *p = image::Rgb([x as u8 * 5, 90, 40]);
+    }
+    let mut plain = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new(&mut plain)
+        .encode_image(&img)
+        .unwrap();
+    let exif = b"Exif\0\0MM\0\x2A\0\0\0\x08\0\0\0\0\0\0 GPS +37.5665+126.9780 SecretPhone";
+    let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE1];
+    jpeg.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+    jpeg.extend_from_slice(exif);
+    jpeg.extend_from_slice(&plain[2..]);
+    let dir = temp_home("gps");
+    std::fs::create_dir_all(&dir).unwrap();
+    let pic = dir.join("Lunch.jpg");
+    std::fs::write(&pic, &jpeg).unwrap();
+
+    let mut a = app();
+    a.add_media(false, Some(pic.clone()), None);
+    let files = until_ready(&mut a, false);
+    let att = &files[0];
+    assert_eq!((att.kind, att.w, att.h), (MediaKind::Image, 48, 32));
+    let path = a.files.local(&att.file).unwrap();
+    let kept = std::fs::read(&path).unwrap();
+    assert!(!holds(&kept, b"+37.5665") && !holds(&kept, b"SecretPhone"));
+    let (sha, bytes) = wb_net::sha256_file(&path).unwrap();
+    assert_eq!(
+        (att.file.clone(), att.bytes),
+        (sha, bytes),
+        "named by what is sent"
+    );
+    // the person's own file is left alone
+    assert_eq!(std::fs::read(&pic).unwrap(), jpeg);
+    // and no cleaned copy is left lying in the cache
+    let left: Vec<_> = std::fs::read_dir(a.files.dir())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".scrub-"))
+        .collect();
+    assert!(left.is_empty());
+}
+
+#[test]
+fn a_video_goes_without_where_it_was_taken() {
+    let Some(ffmpeg) = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())
+    else {
+        eprintln!("skipped: ffmpeg isn't installed");
+        return;
+    };
+    let dir = temp_home("gpsvideo");
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("Walk.mov");
+    let ok = std::process::Command::new(ffmpeg)
+        .args([
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=320x240:rate=30",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "libx264",
+            "-metadata",
+            "location=+37.5665+126.9780/",
+            "-metadata",
+            "make=SecretPhone",
+            "-movflags",
+            "use_metadata_tags",
+        ])
+        .arg(&clip)
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok);
+    assert!(holds(&std::fs::read(&clip).unwrap(), b"+37.5665"));
+    let mut a = app();
+    a.add_media(false, Some(clip), None);
+    let files = until_ready(&mut a, false);
+    let v = files[0].clone();
+    assert_eq!((v.kind, v.w, v.h), (MediaKind::Video, 320, 240));
+    assert!((v.secs - 1.0).abs() < 0.1, "{}", v.secs);
+    let kept = std::fs::read(a.files.local(&v.file).unwrap()).unwrap();
+    assert!(!holds(&kept, b"+37.5665") && !holds(&kept, b"SecretPhone"));
+    assert!(v.thumb.is_some(), "the cleaned video still gives a still");
+}
+
 #[test]
 fn one_message_takes_at_most_ten_pictures() {
     let mut a = app();

@@ -281,11 +281,21 @@ impl App {
                     .iter()
                     .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
                 {
-                    if m.text.to_lowercase().contains(&ql) {
+                    // a post is found by its title too (its text may be empty)
+                    let title = super::chat::shown_post_title(m);
+                    let in_text = m.text.to_lowercase().contains(&ql);
+                    let in_title = title
+                        .as_ref()
+                        .is_some_and(|t| t.to_lowercase().contains(&ql));
+                    if in_text || in_title {
+                        let shown = match title {
+                            Some(t) if !in_text => t,
+                            _ => super::chat::shown_text(m),
+                        };
                         rows.push((
                             "Messages",
                             "chat",
-                            truncate(&one_line(&super::chat::shown_text(m)), 60),
+                            truncate(&one_line(&shown), 60),
                             place.clone(),
                             Hit::Chat(c.id),
                         ));

@@ -263,3 +263,25 @@ fn filters_that_hide_every_post_say_none_match() {
     assert!(h.painted_text("No posts match").is_empty());
     assert!(!h.painted_text("Office move").is_empty());
 }
+
+/// Search finds a post by its title (a post may have no text at all), as
+/// finding in the channel does, and the result shows the title.
+#[test]
+fn search_finds_a_post_by_its_title() {
+    let mut h = posts_page();
+    write_post(&mut h, "general", "Quarterly kickoff", "");
+    h.click("Post");
+    h.app.section = Section::Home;
+    h.settle();
+    assert!(
+        !h.has("Quarterly kickoff"),
+        "not on the screen behind Search"
+    );
+    h.click("Search");
+    h.type_text("kickoff");
+    h.settle();
+    assert!(h.has("Quarterly kickoff"), "the post is a result");
+    h.click("Quarterly kickoff");
+    assert_eq!(h.app.section, Section::Chat);
+    assert_eq!(h.app.chat.open, Some(channel_id(&h, "general")));
+}

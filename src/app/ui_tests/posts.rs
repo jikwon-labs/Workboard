@@ -494,3 +494,83 @@ fn a_minute_old_post_reads_one_min_ago() {
     crate::i18n::set_lang(crate::i18n::Lang::En);
     assert_eq!(ko, 1);
 }
+
+/// Put a post in a channel as if it came from someone (newest last).
+fn add_post(h: &mut Ui1, ch: u64, author: u64, title: &str, text: &str, kind: &str, ago: i64) {
+    let id = h.app.data.new_id();
+    let mut m = crate::app::slack::new_message(id, author, text.into(), now_ts() - ago);
+    m.post_title = Some(title.into());
+    m.post_type = kind.into();
+    let c = h.app.data.channels.iter_mut().find(|c| c.id == ch).unwrap();
+    c.messages.push(m);
+}
+
+/// The titles of the posts listed, top to bottom.
+fn listed(h: &Ui1, titles: &[&str]) -> Vec<String> {
+    let mut v: Vec<(f32, String)> = titles
+        .iter()
+        .filter_map(|t| {
+            h.painted_text(t)
+                .first()
+                .map(|r| (r.0.top(), t.to_string()))
+        })
+        .collect();
+    v.sort_by(|a, b| a.0.total_cmp(&b.0));
+    v.into_iter().map(|x| x.1).collect()
+}
+
+/// The filters narrow the list together and let go one by one; a post
+/// from before types were kept counts as an Announcement; Newest and
+/// Oldest turn the order around.
+#[test]
+fn the_filters_narrow_the_posts_together_and_sort_turns_them_around() {
+    let mut h = posts_page();
+    let gen = channel_id(&h, "general");
+    let web = channel_id(&h, "website-redesign");
+    add_post(&mut h, gen, 3, "Old one", "line one\nline two", "", 400);
+    add_post(&mut h, web, 2, "Web news", "Mockups", "Question", 300);
+    add_post(&mut h, gen, 2, "Lunch", "Pizza", "Idea", 200);
+    h.settle();
+    let all = ["Old one", "Web news", "Lunch"];
+    assert_eq!(
+        listed(&h, &all),
+        ["Lunch", "Web news", "Old one"],
+        "newest first"
+    );
+    assert!(drawn_texts(&h.shapes)
+        .iter()
+        .any(|t| t.starts_with("Announcement in # general")));
+
+    pick_filter(&mut h, "Post type filter", "Announcement");
+    assert_eq!(listed(&h, &all), ["Old one"], "no type is an Announcement");
+    pick_filter(&mut h, "Post type filter", "Any type");
+
+    let me = h.app.data.me;
+    let c = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == web)
+        .unwrap();
+    c.members.retain(|m| *m != me);
+    h.click("Channels I'm Following");
+    h.settle();
+    assert_eq!(listed(&h, &all), ["Lunch", "Old one"], "channels I'm in");
+    pick_filter(&mut h, "@  Author", "Alex Kim");
+    assert_eq!(listed(&h, &all), ["Lunch"], "and by Alex");
+    pick_filter(&mut h, "#  Channel", "# website-redesign");
+    assert!(listed(&h, &all).is_empty());
+    assert!(!h.painted_text("No posts match").is_empty());
+    h.click("Channels I'm Following");
+    h.settle();
+    assert_eq!(listed(&h, &all), ["Web news"], "Following let go");
+    pick_filter(&mut h, "@  Alex Kim", "Anyone");
+    pick_filter(&mut h, "#  website-redesign", "All channels");
+    assert_eq!(listed(&h, &all), ["Lunch", "Web news", "Old one"]);
+
+    h.click("Sort posts");
+    h.click("Oldest");
+    h.settle();
+    assert_eq!(listed(&h, &all), ["Old one", "Web news", "Lunch"]);
+}

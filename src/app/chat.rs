@@ -498,6 +498,51 @@ fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
 }
 
 impl App {
+    /// A post of mine in conversation `ch`, from the channel's box (Post) or
+    /// the Posts page: who it mentions worked out as for any message there
+    /// (`picked`: the people chosen from the box's @ list). Returns its id.
+    pub(super) fn add_post(
+        &mut self,
+        ch: u64,
+        title: String,
+        kind: &str,
+        text: String,
+        files: Vec<Attachment>,
+        picked: &[u64],
+    ) -> u64 {
+        let id = self.data.new_id();
+        let mentions = self.chat_mentions(&text, ch, picked);
+        let m = Message {
+            goal: None,
+            edited: None,
+            imported: None,
+            preview: None,
+            forwarded: None,
+            thread_of: None,
+            bot: None,
+            mentions,
+            attachments: files,
+            id,
+            author: self.data.me,
+            text,
+            ts: now_ts(),
+            reactions: vec![],
+            replies: vec![],
+            saved: false,
+            task: None,
+            post_title: Some(title),
+            post_type: kind.to_string(),
+            pinned: false,
+            call: None,
+        };
+        if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
+            c.messages.push(m);
+            c.last_read = c.last_read.max(now_ts());
+        }
+        self.dirty = true;
+        id
+    }
+
     pub(super) fn channel_label(&self, c: &Channel) -> String {
         match c.kind {
             ChannelKind::Channel => format!("# {}", c.name),
@@ -3466,41 +3511,12 @@ impl App {
                 } => {
                     self.chat.to_bottom = true;
                     self.send_files(&files);
-                    let id = self.data.new_id();
+                    // the channel's box: the people picked from its @ list
+                    let picked = std::mem::take(&mut self.chat.picked);
+                    let id = self.add_post(ch, title, "Announcement", text, files, &picked);
                     for p in std::mem::take(&mut self.chat.coming) {
                         self.chat.following.push((ch, vec![id], p));
                     }
-                    // the channel's box: the people picked from its @ list
-                    let picked = std::mem::take(&mut self.chat.picked);
-                    let mentions = self.chat_mentions(&text, ch, &picked);
-                    let m = Message {
-                        goal: None,
-                        edited: None,
-                        imported: None,
-                        preview: None,
-                        forwarded: None,
-                        thread_of: None,
-                        bot: None,
-                        mentions,
-                        attachments: files,
-                        id,
-                        author: me,
-                        text,
-                        ts: now_ts(),
-                        reactions: vec![],
-                        replies: vec![],
-                        saved: false,
-                        task: None,
-                        post_title: Some(title),
-                        post_type: "Announcement".into(),
-                        pinned: false,
-                        call: None,
-                    };
-                    if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
-                        c.messages.push(m);
-                        c.last_read = c.last_read.max(now_ts());
-                    }
-                    self.dirty = true;
                 }
                 ChatAction::Save { ch, msg } => {
                     if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {

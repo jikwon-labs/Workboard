@@ -158,47 +158,19 @@ impl App {
                                             .clicked()
                                             && ready
                                         {
-                                            let id = self.data.new_id();
-                                            let me = self.data.me;
-                                            let m = Message {
-                                                goal: None,
-                                                edited: None,
-                                                imported: None,
-                                                preview: None,
-                                                forwarded: None,
-                                                thread_of: None,
-                                                bot: None,
-                                                mentions: self
-                                                    .data
-                                                    .mentions_in(self.post.body.trim()),
-                                                attachments: vec![],
-                                                id,
-                                                author: me,
-                                                text: self.post.body.trim().to_string(),
-                                                ts: now_ts(),
-                                                reactions: vec![],
-                                                replies: vec![],
-                                                saved: false,
-                                                task: None,
-                                                post_title: Some(
-                                                    self.post.title.trim().to_string(),
-                                                ),
-                                                post_type: self.post.kind.clone(),
-                                                pinned: false,
-                                                call: None,
-                                            };
-                                            if let Some(c) = self
-                                                .data
-                                                .channels
-                                                .iter_mut()
-                                                .find(|c| c.id == self.post.channel)
-                                            {
-                                                c.messages.push(m);
-                                                c.last_read = now_ts();
-                                            }
+                                            let title = self.post.title.trim().to_string();
+                                            let kind = self.post.kind.clone();
+                                            let text = self.post.body.trim().to_string();
+                                            self.add_post(
+                                                self.post.channel,
+                                                title,
+                                                &kind,
+                                                text,
+                                                vec![],
+                                                &[],
+                                            );
                                             self.post.title.clear();
                                             self.post.body.clear();
-                                            self.dirty = true;
                                         }
                                     });
                                 });

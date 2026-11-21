@@ -555,7 +555,17 @@ impl App {
         if was != now {
             let mut used = vec![false; now.len()];
             let mut to: Vec<Option<usize>> = vec![None; was.len()];
+            // first the questions still where they were, then the moved ones
             for (i, q) in was.iter().enumerate() {
+                if now.get(i) == Some(q) {
+                    used[i] = true;
+                    to[i] = Some(i);
+                }
+            }
+            for (i, q) in was.iter().enumerate() {
+                if to[i].is_some() {
+                    continue;
+                }
                 if let Some(j) = (0..now.len()).find(|&j| !used[j] && now[j] == *q) {
                     used[j] = true;
                     to[i] = Some(j);

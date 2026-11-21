@@ -371,6 +371,31 @@ fn answers_stay_with_their_question_when_a_teammate_moves_it() {
     assert_eq!(task_named(&h, "Chair").description, "Wobbly leg");
 }
 
+/// A question renamed to read like another one (or passing through that
+/// while its text is typed) keeps its own answer, and the other keeps its.
+#[test]
+fn answers_stay_put_when_a_question_is_renamed_like_another() {
+    let mut h = Ui1::new();
+    let fid = blank_form(&mut h);
+    h.click("Question 1 kind");
+    h.click("Kind Short text");
+    h.click("Question 2 kind");
+    h.click("Kind Short text");
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("555");
+    h.click("Answer 2");
+    h.type_text("hello");
+    h.click("Edit");
+    h.click("Question 1");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("Details");
+    assert_eq!(form(&h, fid).fields[0].label, "Details");
+    h.click("Fill out");
+    assert_eq!(h.app.form_fill.get(&0).map(String::as_str), Some("555"));
+    assert_eq!(h.app.form_fill.get(&1).map(String::as_str), Some("hello"));
+}
+
 /// A question's kind changed on Edit drops what was typed for it (a
 /// checkbox doesn't show the old text but would have sent it); a problem
 /// found on Submit moves with its question.

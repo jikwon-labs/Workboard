@@ -142,6 +142,11 @@ pub const T: &[(&str, &str)] = &[
         "1시간 30분처럼 적거나, 좌우로 끌어서 바꿉니다",
     ),
     (
+        "No tasks yet: time is tracked on tasks",
+        "아직 작업이 없습니다. 시간은 작업에 기록됩니다",
+    ),
+    ("+ New task", "+ 새 작업 만들기"),
+    (
         "Every task is already on this week's timesheet",
         "모든 작업이 이미 이번 주 타임시트에 있습니다",
     ),

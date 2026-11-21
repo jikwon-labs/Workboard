@@ -417,6 +417,14 @@ fn timesheet_options_with_no_tasks_say_why() {
         h.app.toast.as_ref().map(|t| t.0.as_str()),
         Some("Make a task first: time is tracked on tasks")
     );
+    // and the Create Task window opens, so it says where
+    assert!(
+        h.app
+            .quick_add
+            .as_ref()
+            .is_some_and(|q| q.sheet_week.is_some()),
+        "a task made here goes on the sheet"
+    );
 }
 
 #[test]
@@ -433,9 +441,25 @@ fn timesheet_says_what_it_is_for_and_how_to_fill_it() {
     // an empty grid says how to fill it in
     h.click("Individual tasks");
     assert!(says(&h, HOW), "{:?}", h.texts());
-    // nothing to add: the menu says why instead of opening as a bare dot
+    // nothing to add: the menu says why instead of opening as a bare dot,
+    // and a task can be made right there
     h.click("+ Add task");
-    assert!(says(&h, "Make a task first: time is tracked on tasks"));
+    assert!(says(&h, "No tasks yet: time is tracked on tasks"));
+    h.click("+ New task");
+    let qa = h
+        .app
+        .quick_add
+        .as_ref()
+        .expect("the Create Task window opens");
+    assert_eq!(qa.assignees, vec![h.app.data.me], "a task of mine");
+    h.type_text("Write the report");
+    h.key(egui::Key::Enter);
+    assert!(h.app.quick_add.is_none());
+    assert!(
+        h.has("Remove row Write the report"),
+        "the new task is on this week's sheet"
+    );
+    assert!(!says(&h, HOW));
 
     // with tasks: once a row is in, the hint goes
     let mut h = Ui1::new();

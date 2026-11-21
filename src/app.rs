@@ -301,6 +301,8 @@ struct QuickAdd {
     status: Option<String>,
     tags: Vec<String>,
     tag_text: String,
+    /// Opened from the timesheet: the week whose sheet the new task goes on.
+    sheet_week: Option<NaiveDate>,
 }
 
 /// What a draft holds (text, or pictures waiting to go) and whether it's empty.
@@ -770,6 +772,8 @@ struct PendingTask {
     form: Option<u64>,
     /// Tags for the next task created from the Create Task window.
     tags: Vec<String>,
+    /// The timesheet week the next task added goes on (made from there).
+    sheet_week: Option<NaiveDate>,
 }
 
 /// The comment being written in the task window.
@@ -2033,6 +2037,9 @@ impl App {
                     attachments: vec![],
                     form: self.pending.form.take(),
                 });
+                if let Some(ws) = self.pending.sheet_week.take() {
+                    self.add_sheet_rows(ws, vec![id]);
+                }
                 if let Some(tp) = self.pending.template.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
                         t.description = tp.description.clone();
@@ -5365,6 +5372,7 @@ impl App {
                     self.pending.description = Some(desc);
                 }
                 self.pending.tags = std::mem::take(&mut qa.tags);
+                self.pending.sheet_week = qa.sheet_week;
                 self.actions.push(Action::Add {
                     list: qa.list,
                     name: qa.name.clone(),

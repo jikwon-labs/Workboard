@@ -1789,6 +1789,7 @@ impl App {
                                                 // nothing to pick from: say why instead of an empty list
                                                 _ if !self.data.tasks.iter().any(|x| self.data.task_live(x)) => {
                                                     self.toast(tr("Make a task first: time is tracked on tasks"));
+                                                    self.new_sheet_task(ws);
                                                 }
                                                 _ => {
                                                     let first = self.data.tasks.iter().find(|x| x.assignees.contains(&me) && self.data.task_live(x)).map(|x| x.id).unwrap_or(0);
@@ -2051,7 +2052,7 @@ impl App {
                                 egui::Label::new(RichText::new(tr(if any_task {
                                     "Every task is already on this week's timesheet"
                                 } else {
-                                    "Make a task first: time is tracked on tasks"
+                                    "No tasks yet: time is tracked on tasks"
                                 }))
                                 .color(t.text2))
                                 .wrap_mode(egui::TextWrapMode::Extend),
@@ -2067,6 +2068,13 @@ impl App {
                                     }
                                 }
                             });
+                        // a task can be made right here: saying "make one first"
+                        // left people asking where
+                        ui.separator();
+                        if ui.button(tr("+ New task")).clicked() {
+                            self.new_sheet_task(ws);
+                            ui.close_menu();
+                        }
                     });
                 });
             });
@@ -2093,6 +2101,20 @@ impl App {
         }
         ids.retain(|id| self.task(*id).is_some_and(|x| self.data.task_live(x)));
         ids
+    }
+
+    /// The Create Task window for a task of mine that goes on the timesheet
+    /// of the week starting `ws` once made. With no List to put it in, the
+    /// New List (or New Space) dialog opens instead and says why.
+    fn new_sheet_task(&mut self, ws: NaiveDate) {
+        self.open_quick_add(None);
+        let me = self.data.me;
+        if let Some(qa) = self.quick_add.as_mut() {
+            qa.sheet_week = Some(ws);
+            if !qa.assignees.contains(&me) {
+                qa.assignees.push(me);
+            }
+        }
     }
 
     /// Adds rows to my timesheet for the week starting `ws` only.

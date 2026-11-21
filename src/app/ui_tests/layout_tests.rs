@@ -1628,18 +1628,21 @@ fn sidebar_that_fits_does_not_scroll() {
             .expect("the sidebar is open")
             .rect
     };
+    // the last direct message is the bottom row (Direct Messages add from
+    // a "+" on their heading, with no row after the list)
     let last_row = |h: &Ui1, side: Rect| {
-        h.painted_text(&tr("New message"))
+        h.painted_text("Sam Lee")
             .into_iter()
             .map(|(r, _)| r)
             .filter(|r| side.x_range().contains(r.left()))
             .max_by(|a, b| a.top().total_cmp(&b.top()))
-            .expect("the sidebar lists New message")
+            .expect("the sidebar lists Sam Lee")
     };
     let mut tall = Ui1::sized(1440.0, 1400.0);
     tall.settle();
     // the room left under the bottom row, down to the sidebar's edge
-    let spare = side_rect(&tall).bottom() - tall.rect("New message").bottom();
+    let tall_side = side_rect(&tall);
+    let spare = tall_side.bottom() - tall.rect_in("Sam Lee", tall_side).bottom();
     // a window just tall enough for the rows: the bottom row ends 4 points
     // above the sidebar's 6-point bottom margin
     let mut h = Ui1::sized(1440.0, (1400.0 - spare + 6.0 + 4.0).ceil());

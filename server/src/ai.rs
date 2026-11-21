@@ -520,17 +520,10 @@ impl Names {
         Names(
             array_at(copy, "members")
                 .iter()
+                // a blank name reads as "person N" (see `get`)
                 .filter_map(|m| {
-                    let id = u64_field(m, "id")?;
-                    let d = text_field(m, "display_name");
-                    Some((
-                        id,
-                        if d.is_empty() {
-                            text_field(m, "name")
-                        } else {
-                            d
-                        },
-                    ))
+                    let name = wb_sync::json::shown_name(m);
+                    (!name.is_empty()).then_some((u64_field(m, "id")?, name))
                 })
                 .collect(),
         )
@@ -1478,6 +1471,18 @@ impl crate::Hub {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn people_go_by_the_shown_name_and_a_blank_one_reads_as_person_n() {
+        let names = Names::of(&serde_json::json!({"members": [
+            {"id": 3, "name": "  ", "display_name": " "},
+            {"id": 4, "name": " Kim Sam ", "display_name": ""},
+            {"id": 5, "name": "Lee Bora", "display_name": " Bora "}
+        ]}));
+        assert_eq!(names.get(3), "person 3");
+        assert_eq!(names.get(4), "Kim Sam");
+        assert_eq!(names.get(5), "Bora");
+    }
 
     #[test]
     fn the_answer_streams_in_pieces_and_says_how_it_ended() {

@@ -114,6 +114,19 @@ pub fn text_field(v: &Value, key: &str) -> String {
         .to_string()
 }
 
+/// The name others see a member record by, as the apps show it
+/// (`Member::shown`): the display name when there is one, else the full
+/// name, both trimmed. "" when neither is set.
+pub fn shown_name(member: &Value) -> String {
+    let d = text_field(member, "display_name");
+    let d = d.trim();
+    if d.is_empty() {
+        text_field(member, "name").trim().to_string()
+    } else {
+        d.to_string()
+    }
+}
+
 /// A copy's sync metadata (extra.sync); the default when it has none or it
 /// can't be read.
 pub fn meta_of(v: &Value) -> SyncMeta {
@@ -167,6 +180,16 @@ mod tests {
         assert!(get_path(&v, "extra.apps").is_none());
         put_path(&mut v, "workspace.x", Some(json!(1)));
         assert_eq!(v["workspace"], json!({"x": 1}));
+    }
+
+    #[test]
+    fn shown_name_prefers_a_display_name_and_trims() {
+        let m = |name: &str, display: &str| json!({"name": name, "display_name": display});
+        assert_eq!(shown_name(&m(" Kim Sam ", "")), "Kim Sam");
+        assert_eq!(shown_name(&m("Kim Sam", "  ")), "Kim Sam");
+        assert_eq!(shown_name(&m("Kim Sam", " Sam ")), "Sam");
+        assert_eq!(shown_name(&m("   ", "")), "");
+        assert_eq!(shown_name(&json!({"id": 1})), "");
     }
 
     #[test]

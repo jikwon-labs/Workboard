@@ -39,12 +39,9 @@ pub(crate) fn member_field(canon: Option<&Value>, member: u64, field: &str) -> S
 /// The name others see a member by, as the apps show it: their display
 /// name when they set one, else their full name.
 pub(crate) fn shown_name(canon: Option<&Value>, member: u64) -> String {
-    let d = member_field(canon, member, "display_name");
-    if d.is_empty() {
-        member_field(canon, member, "name")
-    } else {
-        d
-    }
+    member_record(canon, member)
+        .map(wb_sync::json::shown_name)
+        .unwrap_or_default()
 }
 
 pub(crate) fn member_exists(canon: Option<&Value>, member: u64) -> bool {

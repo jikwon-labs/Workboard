@@ -350,7 +350,7 @@ impl Hub {
                     "channel_id": ch,
                     "channel_name": channel_name(&canon, ch),
                     "user_id": author,
-                    "user_name": member_name(&canon, author),
+                    "user_name": crate::canon::shown_name(Some(&canon), author),
                     "text": text,
                     "trigger_word": h.trigger,
                     "message_id": m.get("id"),
@@ -409,7 +409,7 @@ impl Hub {
             "command": format!("/{}", cmd.info.name),
             "text": text,
             "user_id": member,
-            "user_name": member_name(&canon, member),
+            "user_name": crate::canon::shown_name(Some(&canon), member),
             "channel_id": channel,
             "channel_name": channel_name(&canon, channel),
         });
@@ -467,20 +467,6 @@ fn channel_name(canon: &Value, ch: u64) -> String {
         .unwrap_or_default()
 }
 
-fn member_name(canon: &Value, id: u64) -> String {
-    wb_sync::json::array_at(canon, "members")
-        .iter()
-        .find(|m| wb_sync::json::u64_field(m, "id") == Some(id))
-        .map(|m| {
-            let d = wb_sync::json::text_field(m, "display_name");
-            if d.trim().is_empty() {
-                wb_sync::json::text_field(m, "name")
-            } else {
-                d
-            }
-        })
-        .unwrap_or_default()
-}
 
 #[cfg(test)]
 mod tests {

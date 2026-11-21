@@ -840,7 +840,11 @@ impl App {
                         }
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 2.0;
-                            let who = person.map(|m| m.shown().to_string()).unwrap_or_default();
+                            // someone no longer on the team: "Someone", not
+                            // a line starting with nothing
+                            let who = person
+                                .map(|m| m.shown().to_string())
+                                .unwrap_or_else(|| tr("Someone").to_string());
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(history_text(&ev.what, &who)).size(13.5),

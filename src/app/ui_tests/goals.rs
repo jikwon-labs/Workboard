@@ -852,3 +852,25 @@ fn enter_in_record_saves_and_escape_drops_it() {
     assert_eq!(current_of(&h, a, 0), 41.0, "Escape keeps what it was");
     assert!(!h.has("Save value"));
 }
+
+#[test]
+fn history_by_someone_who_left_names_someone() {
+    let (mut h, _, _) = two_goals();
+    let id = add_goal_with(&mut h, "Signups", vec![number("People", 0.0, 10.0, 4.0)]);
+    let gone = 987_654_321;
+    assert!(h.app.data.member(gone).is_none());
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == id) {
+        g.record(GoalEvent {
+            ts: now_ts(),
+            who: gone,
+            what: GoalChange::Created,
+            pct: 0,
+        });
+    }
+    h.click("Goal Signups");
+    assert!(
+        !h.painted_text("Someone created the goal").is_empty(),
+        "not \" created the goal\""
+    );
+    assert!(h.painted_text(" created the goal").is_empty());
+}

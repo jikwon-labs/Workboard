@@ -616,12 +616,25 @@ impl App {
                 if item.done {
                     txt = txt.strikethrough().color(t.text3);
                 }
-                let l = row.add(Tint(
+                // the hover fill keeps room around the name, as on a button
+                // (a fill the size of the text sat right against its letters)
+                let slot = row.painter().add(egui::Shape::Noop);
+                let l = row.add(
                     egui::Label::new(txt)
                         .sense(Sense::click())
                         .selectable(false)
                         .truncate(),
-                ));
+                );
+                if l.hovered() {
+                    let fill = crate::widgets::hover_fill(&row);
+                    let fill = if l.is_pointer_button_down_on() {
+                        fill.gamma_multiply(1.5)
+                    } else {
+                        fill
+                    };
+                    let rect = l.rect.expand2(vec2(6.0, 3.0)).intersect(r);
+                    crate::widgets::paint_hover_slot(&row, slot, rect, fill);
+                }
                 if l.on_hover_text(tr("Click to rename")).clicked() {
                     editing = Some(i);
                 }

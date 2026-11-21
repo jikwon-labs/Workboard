@@ -4039,6 +4039,15 @@ fn new_below(ui: &mut Ui, t: &Theme, list: Rect, n: usize) -> bool {
 /// like typed text, so it is put in the reader's language where it is shown.
 pub(super) const DEFAULT_POST_TITLE: &str = "Update";
 
+/// A post's title as someone wrote it: not blank and not the app's own
+/// default title (which nobody wrote, so isn't searched or matched).
+pub(super) fn typed_post_title(m: &Message) -> Option<&str> {
+    m.post_title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && *t != DEFAULT_POST_TITLE)
+}
+
 /// A post's title as shown: the app's own default title in the reader's
 /// language, anything typed as it was typed. A post that came without a
 /// title (the iPhone app used to send none with text only) shows the

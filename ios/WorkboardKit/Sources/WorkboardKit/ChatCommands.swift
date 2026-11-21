@@ -227,8 +227,10 @@ extension Edits {
               let m = (c["messages"]?.array ?? []).first(where: { $0["id"]?.uint == message }),
               m["bot"]?.string == nil else { return }
         // a post: the keyword may be in its title, and without text its
-        // title is the {text} (as on the Mac, workflows.rs)
-        let title = m["post_title"]?.string
+        // title is the {text} (as on the Mac, workflows.rs); not the default
+        // title a post without one gets, which nobody wrote
+        let rawTitle = (m["post_title"]?.string ?? "").trimmed
+        let title: String? = rawTitle.isEmpty || rawTitle == MessageView.defaultPostTitle ? nil : rawTitle
         let typed = m["text"]?.string ?? ""
         let text = typed.trimmed.isEmpty ? (title ?? typed) : typed
         let rules = (data.at("extra.automations")?.array ?? []).filter { a in

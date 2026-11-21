@@ -7,7 +7,8 @@
 // The app of whoever posts the message runs them, once, right after
 // sending (the iPhone app too: Edits.runWorkflows), so no two computers
 // run the same one. A post is such a message too: its keyword may be in
-// the title, and its {text} is the title when it has no text. What a
+// the title, and its {text} is the title when it has no text (a title
+// someone wrote, not the default "Update" a post without one gets). What a
 // workflow posts is marked as its own (`bot` "Workflow") and starts no
 // workflow itself. Its text may say {user}, {text} and {channel}.
 
@@ -118,8 +119,7 @@ impl App {
                 let k = a.keyword.trim().to_lowercase();
                 k.is_empty()
                     || m.text.to_lowercase().contains(&k)
-                    || m.post_title
-                        .as_ref()
+                    || super::chat::typed_post_title(&m)
                         .is_some_and(|t| t.to_lowercase().contains(&k))
             })
             .cloned()
@@ -130,9 +130,9 @@ impl App {
         let me = self.data.me;
         let user = self.who(me);
         let place = self.channel_hash(ch);
-        // a post without text: its title
-        let said = match &m.post_title {
-            Some(t) if m.text.trim().is_empty() => t.clone(),
+        // a post without text: the title someone wrote (not the default)
+        let said = match super::chat::typed_post_title(&m) {
+            Some(t) if m.text.trim().is_empty() => super::chatfmt::plain(t),
             _ => super::chatfmt::plain(&m.text),
         };
         for a in rules {

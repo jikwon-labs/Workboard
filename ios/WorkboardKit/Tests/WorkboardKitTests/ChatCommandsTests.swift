@@ -74,4 +74,15 @@ final class ChatCommandsTests: XCTestCase {
         Edits.runWorkflows(&d, channel: 301, message: 991, me: 1, ts: 11) { next += 1; return next }
         XCTAssertEqual(WorkspaceView(d).channels.first { $0.id == 302 }!.messages.last!.text, "Jamie Park posted: Outage over")
     }
+
+    func testTheDefaultPostTitleStartsNoWorkflow() {
+        var d = SampleWorkspace.make()
+        XCTAssertTrue(Edits.addWorkflow(&d, channel: 301, keyword: "update", action: "post", text: "{user} posted: {text}", target: 302, list: nil, id: 980))
+        let before = WorkspaceView(d).channels.first { $0.id == 302 }!.messages.count
+        var next: UInt64 = 5000
+        // sent without a title: saved as "Update", which nobody wrote
+        XCTAssertTrue(Edits.sendPost(&d, channel: 301, title: "", text: "Lunch is here", me: 1, id: 990, ts: 10))
+        Edits.runWorkflows(&d, channel: 301, message: 990, me: 1, ts: 10) { next += 1; return next }
+        XCTAssertEqual(WorkspaceView(d).channels.first { $0.id == 302 }!.messages.count, before)
+    }
 }

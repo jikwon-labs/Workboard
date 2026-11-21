@@ -821,3 +821,96 @@ fn a_post_card_shows_its_pictures_and_opens_them() {
     assert!(h.app.viewer.is_none());
     assert_eq!(h.app.section, Section::Posts, "still on the Posts page");
 }
+
+/// The title the app gives a post sent without one ("Update") isn't
+/// something anyone wrote: a workflow's keyword isn't found in it, and a
+/// post of files alone has no {text} from it (nor a task named "Update").
+#[test]
+fn the_default_post_title_starts_no_workflow() {
+    let mut h = posts_page();
+    let gen = channel_id(&h, "general");
+    let web = channel_id(&h, "website-redesign");
+    let list = h.app.data.first_list().unwrap();
+    for (id, keyword, action, value) in [
+        (
+            77_001,
+            "update",
+            "post",
+            "{user} posted: {text}".to_string(),
+        ),
+        (77_002, "", "task", list.to_string()),
+    ] {
+        h.app.data.extra.automations.push(Automation {
+            id,
+            enabled: true,
+            trigger: "message".into(),
+            channel: Some(gen),
+            keyword: keyword.into(),
+            action: action.into(),
+            target: Some(web),
+            value,
+            ..Default::default()
+        });
+    }
+    let in_web = |h: &Ui1| {
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == web)
+            .unwrap()
+            .messages
+            .len()
+    };
+    let (before, tasks) = (in_web(&h), h.app.data.tasks.len());
+    // from the channel's Post box, without a title: saved as "Update"
+    h.click("general");
+    h.click("Post");
+    h.click("Message composer");
+    h.type_text("Lunch is here");
+    h.key(egui::Key::Enter);
+    let p = all_posts(&h).pop().unwrap();
+    assert_eq!(p.post_title.as_deref(), Some("Update"));
+    assert_eq!(in_web(&h), before, "\"update\" isn't in what was written");
+    assert_eq!(h.app.data.tasks.len(), tasks + 1, "the task workflow ran");
+    assert!(h.app.data.tasks.iter().any(|t| t.name == "Lunch is here"));
+    // a post of a file alone: no task named "Update"
+    h.app.add_post(
+        gen,
+        "Update".into(),
+        "Announcement",
+        String::new(),
+        vec![],
+        &[],
+    );
+    assert!(
+        !h.app.data.tasks.iter().any(|t| t.name == "Update"),
+        "no task named after the default title"
+    );
+    // a typed title stands for the text, without its formatting marks (as
+    // the iPhone gives it)
+    h.app.add_post(
+        gen,
+        "**Update** on the move".into(),
+        "Idea",
+        String::new(),
+        vec![],
+        &[],
+    );
+    let last = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == web)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .text
+        .clone();
+    assert_eq!(
+        last,
+        format!("{} posted: Update on the move", h.app.who(h.app.data.me))
+    );
+}

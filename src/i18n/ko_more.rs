@@ -176,7 +176,7 @@ pub const T: &[(&str, &str)] = &[
     ("Unit", "단위"),
     ("Up {} points this week", "지난주보다 {}%p 상승"),
     ("Use this sample", "이 샘플 사용"),
-    ("Where it should be by today, from its start and due dates", "시작일부터 마감일까지 흐른 시간만큼 와 있어야 할 위치"),
+    ("Where it should be by today, from its start and due dates", "오늘 기준 예정 진행률"),
     ("You can change all of this later", "모든 항목은 나중에 수정할 수 있습니다"),
     ("customers", "곳"),
     ("e.g. people", "예: 명"),

@@ -929,7 +929,14 @@ impl App {
                     } else {
                         "list"
                     };
-                    icons::line_icon(p, kind, pos2(row.left() + 9.0, row.center().y), t.text2);
+                    // three quarters size, the height of the name beside it
+                    icons::line_icon_scaled(
+                        p,
+                        kind,
+                        pos2(row.left() + 9.0, row.center().y),
+                        t.text2,
+                        0.75,
+                    );
                     let mut right = row.right();
                     if let TargetKind::Number { current, .. } = &tg.kind {
                         let b = Rect::from_min_size(

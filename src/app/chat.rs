@@ -4304,8 +4304,8 @@ pub(super) fn mention_spans(text: &str, names: &[String]) -> Vec<(usize, usize)>
         let rest = &text[i..];
         if rest.starts_with('@') && (i == 0 || text[..i].ends_with(char::is_whitespace)) {
             let after = &rest[1..];
-            let len = wb_sync::mentions::name_at(after, names.iter().map(String::as_str))
-                .or_else(|| {
+            let len =
+                wb_sync::mentions::name_at(after, names.iter().map(String::as_str)).or_else(|| {
                     Some(after.find(char::is_whitespace).unwrap_or(after.len())).filter(|w| *w > 0)
                 });
             if let Some(len) = len {

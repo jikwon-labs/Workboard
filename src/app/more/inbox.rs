@@ -399,7 +399,15 @@ impl App {
                                 } else {
                                     "Clear"
                                 };
-                                if put_over(ui, cr, egui::Button::new(tr(ctext)).corner_radius(6))
+                                // imported history stays cleared unless saved for later:
+                                // Restore would do nothing
+                                let can_restore = !it.imported;
+                                if (self.inbox_tab != 3 || can_restore)
+                                    && put_over(
+                                        ui,
+                                        cr,
+                                        egui::Button::new(tr(ctext)).corner_radius(6),
+                                    )
                                     .clicked()
                                 {
                                     if self.inbox_tab == 3 {

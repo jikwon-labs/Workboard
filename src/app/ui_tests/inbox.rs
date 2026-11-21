@@ -94,3 +94,44 @@ fn later_on_a_cleared_row_moves_it_to_later_and_it_can_go_back() {
     assert!(h.app.data.extra.inbox_later.is_empty());
     assert!(h.app.data.extra.inbox_cleared.is_empty());
 }
+
+/// Adds a message in #general by `author` that mentions me; returns its
+/// Inbox key.
+fn mention_in_general(d: &mut Data, author: u64, text: &str, ago: i64) -> String {
+    let me = d.me;
+    let id = d.new_id();
+    let mut m = crate::app::slack::new_message(id, author, text.into(), now_ts() - ago);
+    m.mentions = vec![me];
+    let c = d
+        .channels
+        .iter_mut()
+        .find(|c| c.name == "general")
+        .expect("#general");
+    c.messages.push(m);
+    format!("chat:{}:{}", c.id, id)
+}
+
+#[test]
+fn an_imported_row_offers_no_restore_it_cannot_do() {
+    let mut key = String::new();
+    let mut h = inbox(|d| {
+        key = mention_in_general(d, 2, "@Me an old Slack mention", 30 * 86400);
+        let c = d.channels.iter_mut().find(|c| c.name == "general").unwrap();
+        c.messages.last_mut().unwrap().imported = Some("slack".into());
+    });
+    // old history starts out cleared
+    h.click("Inbox Cleared");
+    hover_row(&mut h, "#general");
+    assert!(
+        !h.has("Restore"),
+        "imported history stays cleared, so Restore would do nothing"
+    );
+    // it can still be saved for later, and cleared again from there
+    h.click("Later");
+    assert!(h.app.data.extra.inbox_later.contains(&key));
+    h.click("Inbox Later");
+    hover_row(&mut h, "#general");
+    h.click("Clear");
+    h.click("Inbox Cleared");
+    assert!(h.has("#general"));
+}

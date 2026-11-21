@@ -627,11 +627,28 @@ impl App {
                             .spacing([10.0, 8.0])
                             .show(ui, |ui| {
                                 ui.label(tr("Now"));
-                                let before = *current;
-                                if ui.add(number_box(current)).changed() {
-                                    ch = true;
+                                // recorded like + Record once it is let go
+                                // (typed and left, or dragged and dropped):
+                                // a line in the history, the milestone
+                                // banner, Goal achieved. Escape drops it.
+                                let now_id = egui::Id::new(("goal number now", gid, i));
+                                let mut now: f64 =
+                                    ui.data(|d| d.get_temp(now_id)).unwrap_or(*current);
+                                let r = ui.add(number_box(&mut now));
+                                name_it(&r, "Number now");
+                                if r.dragged() || r.has_focus() {
+                                    ui.data_mut(|d| d.insert_temp(now_id, now));
+                                } else {
+                                    ui.data_mut(|d| d.remove_temp::<f64>(now_id));
+                                    let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                                    if now != *current && !esc {
+                                        act = Some(PageAct::Goal(GoalAct::SetNumber {
+                                            g: gid,
+                                            i,
+                                            to: now,
+                                        }));
+                                    }
                                 }
-                                let _ = before;
                                 ui.end_row();
                                 ui.label(tr("Start value"));
                                 ch |= ui.add(number_box(start)).changed();

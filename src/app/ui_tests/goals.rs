@@ -781,3 +781,54 @@ fn a_number_typed_with_commas_is_recorded() {
     h.click("Save value");
     assert_eq!(current_of(&h, a, 0), 1500.0);
 }
+
+#[test]
+fn setting_the_number_in_edit_goes_into_the_history_and_can_achieve_the_goal() {
+    let (mut h, _, _) = two_goals();
+    let id = add_goal_with(&mut h, "Signups", vec![number("People", 0.0, 10.0, 4.0)]);
+    h.click("Goal Signups");
+    h.click("Edit People");
+    h.click("Number now");
+    h.type_text("10");
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert_eq!(current_of(&h, id, 0), 10.0);
+    let me = h.app.data.me;
+    assert!(
+        goal(&h, id).log.iter().any(|e| e.who == me
+            && matches!(e.what, GoalChange::Number { from, to, .. } if from == 4.0 && to == 10.0)),
+        "one line in the history, from 4 to 10: {:?}",
+        goal(&h, id).log
+    );
+    assert!(
+        matches!(h.app.modal, Some(Modal::GoalAchieved { id: g }) if g == id),
+        "Goal achieved opens"
+    );
+}
+
+#[test]
+fn dragging_the_number_in_edit_records_one_line_and_escape_drops_a_typed_one() {
+    let (mut h, _, _) = two_goals();
+    let id = add_goal_with(&mut h, "Signups", vec![number("People", 0.0, 100.0, 4.0)]);
+    h.click("Goal Signups");
+    h.click("Edit People");
+    let lines = |h: &Ui1| {
+        goal(h, id)
+            .log
+            .iter()
+            .filter(|e| matches!(e.what, GoalChange::Number { .. }))
+            .count()
+    };
+    let at = h.find("Number now").expect("the box for the number now");
+    h.drag_by(at, at + vec2(30.0, 0.0));
+    let after = current_of(&h, id, 0);
+    assert!(after > 4.0, "dragged up: {after}");
+    assert_eq!(lines(&h), 1, "one line for the whole drag");
+
+    h.click("Number now");
+    h.type_text("77");
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert_eq!(current_of(&h, id, 0), after, "Escape keeps what it was");
+    assert_eq!(lines(&h), 1);
+}

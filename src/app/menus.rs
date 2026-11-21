@@ -2103,9 +2103,11 @@ impl App {
             }
             "Form" => {
                 if let Ok(f) = serde_json::from_str::<Form>(&item.payload) {
-                    // a form there now with its name keeps that one's older answers
-                    self.tie_old_answers(&f.name);
+                    // older answers found by its name, which another form of
+                    // that name had to itself meanwhile, go by their List
+                    let name = f.name.clone();
                     self.data.extra.forms.push(f);
+                    self.tie_old_answers(&name);
                 }
             }
             "Dashboard" => {

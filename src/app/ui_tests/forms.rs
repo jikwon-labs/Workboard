@@ -1281,3 +1281,45 @@ fn an_older_form_opens_and_takes_answers() {
     h.click("Submit");
     assert_eq!(task_named(&h, "Still works").form, Some(4242));
 }
+
+/// A form restored from Trash while another form of its name is in another
+/// List gets back the older answers that went to its own List; the other
+/// form keeps its own.
+#[test]
+fn a_restored_form_gets_back_its_older_answers_beside_a_namesake() {
+    let mut h = Ui1::new();
+    h.hover(pos2(700.0, 450.0));
+    let main = h.app.data.first_list().unwrap();
+    let ideas = list_id(&h, "Ideas");
+    let mut ids = vec![];
+    for list in [main, ideas] {
+        let id = h.app.data.new_id();
+        h.app.data.extra.forms.push(Form {
+            id,
+            name: "IT Requests".into(),
+            list_id: list,
+            owner: h.app.data.me,
+            ..Default::default()
+        });
+        ids.push(id);
+    }
+    old_app_answer(&mut h, main, "IT Requests", "Printer offline");
+    old_app_answer(&mut h, ideas, "IT Requests", "Idea box broken");
+    h.app.remove_item("form", ids[0]);
+    h.app.modal = Some(Modal::Trash);
+    h.settle();
+    h.click("Restore");
+    h.key(egui::Key::Escape);
+    assert_ne!(task_named(&h, "Printer offline").form, Some(ids[1]));
+    h.app.section = Section::Forms;
+    for (id, mine, other) in [
+        (ids[0], "Printer offline", "Idea box broken"),
+        (ids[1], "Idea box broken", "Printer offline"),
+    ] {
+        h.app.form_open = Some(id);
+        h.app.form_tab = FormTab::Answers;
+        h.settle();
+        assert!(h.has(&format!("Answer task {}", mine)));
+        assert!(!h.has(&format!("Answer task {}", other)));
+    }
+}

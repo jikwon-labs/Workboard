@@ -500,7 +500,8 @@ fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
 impl App {
     /// A post of mine in conversation `ch`, from the channel's box (Post) or
     /// the Posts page: who it mentions worked out as for any message there
-    /// (`picked`: the people chosen from the box's @ list). Returns its id.
+    /// (`picked`: the people chosen from the box's @ list). The title is one
+    /// line (text pasted into it may bring line breaks). Returns its id.
     pub(super) fn add_post(
         &mut self,
         ch: u64,
@@ -530,7 +531,7 @@ impl App {
             replies: vec![],
             saved: false,
             task: None,
-            post_title: Some(title),
+            post_title: Some(crate::widgets::one_line(title.trim())),
             post_type: kind.to_string(),
             pinned: false,
             call: None,

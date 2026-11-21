@@ -285,3 +285,28 @@ fn search_finds_a_post_by_its_title() {
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.app.chat.open, Some(channel_id(&h, "general")));
 }
+
+/// A title is one line: text pasted into it with line breaks goes out with
+/// spaces in their place, from the Posts page and from the channel's box.
+#[test]
+fn a_pasted_title_with_line_breaks_goes_out_on_one_line() {
+    let mut h = posts_page();
+    pick_channel(&mut h, "general");
+    h.click("Post title");
+    h.frame(vec![egui::Event::Paste("Office move\nMonday 9am\n".into())]);
+    h.settle();
+    h.click("Post");
+    let p = all_posts(&h).pop().expect("posted");
+    assert_eq!(p.post_title.as_deref(), Some("Office move Monday 9am"));
+
+    h.click("general");
+    h.click("Post");
+    let at = h.painted_text("Title")[0].0.center();
+    h.click_at(at);
+    h.frame(vec![egui::Event::Paste("Lunch\nat noon".into())]);
+    h.click("Message composer");
+    h.type_text("Pizza");
+    h.key(egui::Key::Enter);
+    let p = all_posts(&h).pop().unwrap();
+    assert_eq!(p.post_title.as_deref(), Some("Lunch at noon"));
+}

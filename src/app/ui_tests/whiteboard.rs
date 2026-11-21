@@ -1521,3 +1521,19 @@ fn delete_keys_leave_the_board_alone_while_a_menu_or_dialog_is_open() {
     h.key(egui::Key::Delete);
     assert_eq!(board_of(&h, wid).shapes.len(), 2, "then Delete takes it");
 }
+
+/// A board a teammate deleted while it was open: the page goes back to the
+/// list of boards. It stayed on an empty page with only a hint.
+#[test]
+fn a_board_deleted_by_a_teammate_while_open_goes_back_to_the_list() {
+    let mut h = Ui1::new();
+    let wid = shared_board(&mut h);
+    let team = teammate_change(&h.app.data, |d| {
+        d.extra.whiteboards.retain(|w| w.id != wid)
+    });
+    h.app.merge_in(&[team], &[]);
+    h.settle();
+    assert!(h.app.data.extra.whiteboards.iter().all(|w| w.id != wid));
+    assert_eq!(h.app.wb_open, None);
+    assert!(h.has("Start from scratch"), "the list of boards shows");
+}

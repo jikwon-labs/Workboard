@@ -1163,6 +1163,15 @@ impl App {
 
     pub(super) fn whiteboards_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
+        // the open board was deleted meanwhile (by a teammate): back to the
+        // list, not an empty page
+        let boards = &self.data.extra.whiteboards;
+        if self
+            .wb_open
+            .is_some_and(|id| !boards.iter().any(|w| w.id == id))
+        {
+            self.wb_open = None;
+        }
         let n = |f: u8| {
             let boards = &self.data.extra.whiteboards;
             Some(boards.iter().filter(|w| self.wb_in_filter(w, f)).count())

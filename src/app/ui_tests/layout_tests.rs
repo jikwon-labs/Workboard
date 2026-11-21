@@ -487,8 +487,8 @@ fn calendar_more_line_fits_inside_the_day() {
             r.left() >= more.left() - 8.0 && r.left() < more.left() + 30.0 && r.top() > more.top()
         })
         .expect("the next week's day number");
-    // that number sits 12 px under its cell's top
-    let cell_bottom = below.center().y - 12.0;
+    // that number sits DAY_NUM.y under its cell's top
+    let cell_bottom = below.center().y - DAY_NUM.y;
     assert!(
         more.bottom() <= cell_bottom + 0.5,
         "the more line {:?} ends inside the day (bottom {})",
@@ -1173,4 +1173,73 @@ fn date_menu_fills_its_width_and_its_rows_line_up() {
     h.app.apply_actions();
     let sub = task_named(&h, "Pick hero image");
     assert_eq!(sub.due, Some(pick));
+}
+
+/// In the month view today's number stays in line with the other days (its
+/// circle used to push it left) and its circle keeps clear of the day's top
+/// line; the weekday names start where the numbers do.
+#[test]
+fn calendar_today_lines_up_with_the_other_days() {
+    let mut h = Ui1::new();
+    h.click("View Calendar");
+    h.settle();
+    let td = today();
+    let danger = h.app.t().danger;
+    let circles: Vec<egui::epaint::CircleShape> = h
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Circle(c) if c.fill == danger && c.radius > 5.0 => Some(*c),
+            _ => None,
+        })
+        .collect();
+    // today's number: white, inside a red circle
+    let (num, circle) = h
+        .painted_text(&td.day().to_string())
+        .into_iter()
+        .filter(|(_, c)| *c == Color32::WHITE)
+        .find_map(|(r, _)| {
+            circles
+                .iter()
+                .find(|c| c.center.distance(r.center()) < c.radius)
+                .map(|c| (r, *c))
+        })
+        .expect("today's number in its circle");
+    // a week before or after: the same column
+    let other = if td.day() > 7 {
+        td - Duration::days(7)
+    } else {
+        td + Duration::days(7)
+    };
+    let lefts: Vec<f32> = h
+        .painted_text(&other.day().to_string())
+        .into_iter()
+        .map(|(r, _)| r.left())
+        .collect();
+    assert!(
+        // (within a glyph's side bearing: "2" and "1" start apart)
+        lefts.iter().any(|l| (l - num.left()).abs() < 1.5),
+        "today's number at x {} is in line with {} ({:?})",
+        num.left(),
+        other,
+        lefts
+    );
+    let cell_top = num.center().y - DAY_NUM.y;
+    assert!(
+        circle.center.y - circle.radius >= cell_top + 2.0,
+        "the circle {:?} keeps off the day's top line at {}",
+        circle,
+        cell_top
+    );
+    // weekday names start at the numbers' x (Sunday's column)
+    let first = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
+    let sunday = first - Duration::days(first.weekday().num_days_from_sunday() as i64);
+    let sun = h.painted_text(tr("Sun"))[0].0;
+    assert!(
+        h.painted_text(&sunday.day().to_string())
+            .iter()
+            .any(|(r, _)| (r.left() - sun.left()).abs() < 1.5),
+        "Sun at x {} starts where its days do",
+        sun.left()
+    );
 }

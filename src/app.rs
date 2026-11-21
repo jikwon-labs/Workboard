@@ -3048,7 +3048,10 @@ impl App {
             .enumerate()
         {
             p.text(
-                pos2(area.left() + cw * i as f32 + 8.0, area.top() + head / 2.0),
+                pos2(
+                    area.left() + cw * i as f32 + DAY_NUM.x,
+                    area.top() + head / 2.0,
+                ),
                 Align2::LEFT_CENTER,
                 tr(d),
                 FontId::proportional(12.0),
@@ -3143,28 +3146,33 @@ impl App {
                 Stroke::new(0.5_f32, t.border),
                 egui::StrokeKind::Inside,
             );
-            let num_pos = cell.left_top() + vec2(10.0, 12.0);
+            // today's number keeps its place (it moved left of the other
+            // days) inside a circle clear of the day's top line
+            let num_pos = cell.left_top() + DAY_NUM;
+            let num = p.layout_no_wrap(
+                d.day().to_string(),
+                FontId::proportional(12.0),
+                if d == td {
+                    Color32::WHITE
+                } else if in_month {
+                    t.text
+                } else {
+                    t.text3
+                },
+            );
             if d == td {
-                p.circle_filled(num_pos + vec2(4.0, 0.0), 11.0, t.danger);
-                p.text(
-                    num_pos + vec2(4.0, 0.0),
-                    Align2::CENTER_CENTER,
-                    d.day().to_string(),
-                    FontId::proportional(12.0),
-                    Color32::WHITE,
-                );
-            } else {
-                p.text(
-                    num_pos,
-                    Align2::LEFT_CENTER,
-                    d.day().to_string(),
-                    FontId::proportional(12.0),
-                    if in_month { t.text } else { t.text3 },
-                );
+                p.circle_filled(num_pos + vec2(num.size().x / 2.0, 0.0), 10.0, t.danger);
             }
+            p.galley(
+                num_pos - vec2(0.0, num.size().y / 2.0),
+                num,
+                Color32::PLACEHOLDER,
+            );
             if hov && !dragging {
-                let br =
-                    Rect::from_center_size(cell.right_top() + vec2(-14.0, 12.0), vec2(20.0, 20.0));
+                let br = Rect::from_center_size(
+                    cell.right_top() + vec2(-14.0, DAY_NUM.y),
+                    vec2(20.0, 20.0),
+                );
                 let b = ui.interact(br, ui.id().with(("caladd", i)), Sense::click());
                 p.rect_filled(br, 4.0, if b.hovered() { t.selected_bg } else { t.hover });
                 icons::paint_plus(&p, br.center(), 14.0, t.text2);
@@ -6237,3 +6245,7 @@ pub(crate) fn bold_font(ctx: &egui::Context, size: f32) -> FontId {
 
 #[allow(dead_code)]
 fn _unused(_: HashMap<u8, u8>) {}
+
+/// Where a day's number sits in a calendar cell (its left edge and middle),
+/// with the weekday names over the columns starting at the same x.
+const DAY_NUM: egui::Vec2 = egui::vec2(10.0, 13.0);

@@ -136,10 +136,15 @@ fn an_imported_row_offers_no_restore_it_cannot_do() {
     assert!(h.has("#general"));
 }
 
-/// Presses and releases the mouse button twice at `p` in quick succession.
+/// Presses and releases the mouse button twice at `p` in quick succession,
+/// with the app drawing a couple of frames in between as it does.
 fn double_click_at(h: &mut Ui1, p: Pos2) {
     h.frame(vec![egui::Event::PointerMoved(p)]);
-    for _ in 0..2 {
+    for n in 0..2 {
+        if n == 1 {
+            h.frame(vec![]);
+            h.frame(vec![]);
+        }
         for pressed in [true, false] {
             h.frame(vec![egui::Event::PointerButton {
                 pos: p,
@@ -565,4 +570,55 @@ fn clear_all_clears_only_the_rows_shown() {
     h.click("Clear all");
     assert_eq!(h.app.data.extra.inbox_cleared, before);
     assert!(!h.app.data.extra.inbox_cleared.contains(&comment));
+}
+
+#[test]
+fn a_double_click_on_restore_does_not_open_the_row_that_moves_up() {
+    let mut key = String::new();
+    let mut h = inbox(|d| {
+        key = comment_on(d, CASE, "Over to you", 60);
+        d.extra.inbox_cleared.push(key.clone());
+        // older and imported: below, and with no Restore button
+        mention_in_general(d, 2, "@Me an old Slack mention", 30 * 86400);
+        let c = d.channels.iter_mut().find(|c| c.name == "general").unwrap();
+        c.messages.last_mut().unwrap().imported = Some("slack".into());
+    });
+    h.click("Inbox Cleared");
+    hover_row(&mut h, CASE);
+    let restore = h.find("Restore").expect("the row's Restore button");
+    double_click_at(&mut h, restore);
+    assert!(h.app.data.extra.inbox_cleared.is_empty(), "restored");
+    assert_eq!(h.app.section, Section::Home, "the next row didn't open");
+    assert_eq!(h.app.chat.open, None);
+}
+
+#[test]
+fn a_quick_click_on_clear_after_another_control_still_clears() {
+    let mut key = String::new();
+    let mut h = inbox(|d| {
+        key = comment_on(d, CASE, "Over to you", 60);
+    });
+    hover_row(&mut h, CASE);
+    let row = h.find(CASE).unwrap();
+    let clear = h.find("Clear").unwrap();
+    let tab = h.find("Inbox Primary").unwrap();
+    // a click on the tab, then within a moment one on Clear: two clicks on
+    // different controls, not a double click
+    let press = |h: &mut Ui1, p: Pos2, pressed: bool| {
+        h.frame(vec![egui::Event::PointerButton {
+            pos: p,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        }]);
+    };
+    h.frame(vec![egui::Event::PointerMoved(tab)]);
+    press(&mut h, tab, true);
+    press(&mut h, tab, false);
+    h.frame(vec![egui::Event::PointerMoved(row)]);
+    h.frame(vec![egui::Event::PointerMoved(clear)]);
+    press(&mut h, clear, true);
+    press(&mut h, clear, false);
+    h.settle();
+    assert_eq!(h.app.data.extra.inbox_cleared, vec![key]);
 }

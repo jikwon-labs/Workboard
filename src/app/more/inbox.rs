@@ -452,7 +452,7 @@ impl App {
                                     handled = true;
                                 }
                             }
-                            if resp.clicked() && !handled {
+                            if !handled && row_press(&resp) {
                                 self.open_inbox_src(it.src);
                             }
                         }
@@ -461,14 +461,31 @@ impl App {
     }
 }
 
-/// A row button pressed once, not by the second (or third) click of a quick
-/// double click: the first click moves its row away and the next row comes
-/// up under the pointer, so the second click would land on that row's
-/// button. Any click on a button keeps the row itself from opening.
+/// A row button pressed once (see `row_press`). Any click on a button
+/// keeps the row itself from opening.
 fn pressed_once(r: &egui::Response, handled: &mut bool) -> bool {
     if !r.clicked() {
         return false;
     }
     *handled = true;
-    !r.double_clicked() && !r.triple_clicked()
+    row_press(r)
+}
+
+/// A click on a row or one of its buttons that acts, not the second (or
+/// third) click of a quick double click on the rows: the first click moves
+/// its row away and the next row comes up under the pointer, so the second
+/// would land on that row. A quick click after a click elsewhere (a tab, the
+/// filter) still acts.
+fn row_press(r: &egui::Response) -> bool {
+    if !r.clicked() {
+        return false;
+    }
+    let id = egui::Id::new("inbox_row_press");
+    let now = r.ctx.input(|i| i.time);
+    let last: Option<f64> = r.ctx.data(|d| d.get_temp(id));
+    let again = (r.double_clicked() || r.triple_clicked()) && last.is_some_and(|t| now - t < 0.6);
+    if !again {
+        r.ctx.data_mut(|d| d.insert_temp(id, now));
+    }
+    !again
 }

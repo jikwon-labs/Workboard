@@ -192,6 +192,44 @@ pub(crate) fn snap_note(
     (pos, guides)
 }
 
+/// Whether the eraser going from `a` to `b` (board units) comes within
+/// `reach` of the stroke `s` anywhere along it.
+fn stroke_hit(s: &WbStroke, a: [f32; 2], b: [f32; 2], reach: f32) -> bool {
+    let (a, b) = (pos2(a[0], a[1]), pos2(b[0], b[1]));
+    let pts: Vec<egui::Pos2> = s.points.iter().map(|q| pos2(q[0], q[1])).collect();
+    match pts.len() {
+        0 => false,
+        1 => seg_dist(a, b, pts[0], pts[0]) < reach,
+        _ => pts.windows(2).any(|w| seg_dist(a, b, w[0], w[1]) < reach),
+    }
+}
+
+/// The shortest distance between the segments `p0`-`p1` and `q0`-`q1`.
+fn seg_dist(p0: egui::Pos2, p1: egui::Pos2, q0: egui::Pos2, q1: egui::Pos2) -> f32 {
+    let side = |o: egui::Pos2, a: egui::Pos2, c: egui::Pos2| {
+        let (u, v) = (a - o, c - o);
+        u.x * v.y - u.y * v.x
+    };
+    let apart = |x: f32, y: f32| (x > 0.0 && y < 0.0) || (x < 0.0 && y > 0.0);
+    // crossing each other
+    if apart(side(q0, q1, p0), side(q0, q1, p1)) && apart(side(p0, p1, q0), side(p0, p1, q1)) {
+        return 0.0;
+    }
+    let to_seg = |p: egui::Pos2, a: egui::Pos2, c: egui::Pos2| {
+        let ac = c - a;
+        let k = if ac.length_sq() > 0.0 {
+            ((p - a).dot(ac) / ac.length_sq()).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        (a + ac * k - p).length()
+    };
+    to_seg(p0, q0, q1)
+        .min(to_seg(p1, q0, q1))
+        .min(to_seg(q0, p0, p1))
+        .min(to_seg(q1, p0, p1))
+}
+
 /// The pointer while drawing with the pen: a pencil, its tip (in the pen's
 /// colour) where the line starts. egui has no pencil among its cursors, so
 /// the real one is hidden and this is painted at its place.
@@ -774,13 +812,22 @@ impl App {
                         }
                         3 => {
                             // the eraser takes away whole strokes it touches
+                            // anywhere along them, all the way the pointer
+                            // went since the last frame (it only looked near
+                            // their points, where the pointer was: a line
+                            // drawn fast, or a fast swipe, slipped through)
                             if resp.dragged() || resp.clicked() {
-                                let hit = |s: &WbStroke| {
-                                    s.points.iter().any(|q| {
-                                        vec2(q[0] - local.x, q[1] - local.y).length()
-                                            < s.width + 6.0 / z
-                                    })
-                                };
+                                let from = if resp.drag_started() {
+                                    ui.input(|i| i.pointer.press_origin())
+                                        .map(|o| view.to_board(origin, o))
+                                } else if resp.dragged() {
+                                    let d = ui.input(|i| i.pointer.delta());
+                                    Some(view.to_board(origin, pos - d))
+                                } else {
+                                    None
+                                }
+                                .unwrap_or(b);
+                                let hit = |s: &WbStroke| stroke_hit(s, from, b, s.width + 6.0 / z);
                                 let wb = &mut self.data.extra.whiteboards[wi];
                                 while let Some(i) = wb.strokes.iter().position(hit) {
                                     let s = wb.strokes.remove(i);
@@ -897,6 +944,34 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_eraser_hits_a_stroke_along_its_segments() {
+        let s = WbStroke {
+            id: 1,
+            color: [0, 0, 0],
+            width: 2.0,
+            points: vec![[0.0, 0.0], [100.0, 0.0]],
+        };
+        // a click between the two points, and one too far off
+        assert!(stroke_hit(&s, [50.0, 3.0], [50.0, 3.0], 4.0));
+        assert!(!stroke_hit(&s, [50.0, 5.0], [50.0, 5.0], 4.0));
+        // a swipe across it whose ends are both far from it
+        assert!(stroke_hit(&s, [50.0, -40.0], [60.0, 40.0], 4.0));
+        // one alongside it, out of reach, and one that stops short
+        assert!(!stroke_hit(&s, [0.0, 10.0], [100.0, 10.0], 4.0));
+        assert!(!stroke_hit(&s, [50.0, -40.0], [50.0, -10.0], 4.0));
+        // past its end
+        assert!(stroke_hit(&s, [102.0, 0.0], [102.0, 0.0], 4.0));
+        assert!(!stroke_hit(&s, [110.0, 0.0], [110.0, 0.0], 4.0));
+        // a dot (one point)
+        let dot = WbStroke {
+            points: vec![[10.0, 10.0]],
+            ..s.clone()
+        };
+        assert!(stroke_hit(&dot, [0.0, 10.0], [20.0, 10.0], 4.0));
+        assert!(!stroke_hit(&dot, [0.0, 20.0], [20.0, 20.0], 4.0));
+    }
 
     #[test]
     fn a_dragged_note_lines_up_with_a_note_near_it() {

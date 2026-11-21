@@ -1636,3 +1636,49 @@ fn panning_works_over_shapes_notes_and_handles() {
     h.drag_by(at, at + vec2(40.0, 0.0));
     assert_ne!(board_of(&h, wid).shapes, shapes, "the left button moves it");
 }
+
+/// The eraser takes a stroke wherever it touches it: between two points
+/// far apart (a line drawn fast) and on a fast swipe across it, not only
+/// near one of its points.
+#[test]
+fn the_eraser_takes_a_stroke_between_its_points_and_on_a_fast_swipe() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[]);
+    let ids: Vec<u64> = (0..2).map(|_| h.app.data.new_id()).collect();
+    let wb = h
+        .app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap();
+    wb.strokes.push(WbStroke {
+        id: ids[0],
+        color: [0, 0, 0],
+        width: 2.5,
+        points: vec![[300.0, 300.0], [600.0, 300.0]],
+    });
+    wb.strokes.push(WbStroke {
+        id: ids[1],
+        color: [0, 0, 0],
+        width: 2.5,
+        points: (0..100).map(|k| [300.0 + k as f32 * 3.0, 500.0]).collect(),
+    });
+    h.app.wb_tool = 3;
+    h.settle();
+    h.hover(on_screen(&h, [450.0, 250.0]));
+    h.click_at(on_screen(&h, [450.0, 300.0]));
+    let left: Vec<u64> = board_of(&h, wid).strokes.iter().map(|s| s.id).collect();
+    assert_eq!(
+        left,
+        vec![ids[1]],
+        "the click between its two points took it"
+    );
+    // 35 apart a step: no step lands within reach of the line at 500
+    h.drag_by(on_screen(&h, [450.0, 130.0]), on_screen(&h, [450.0, 550.0]));
+    assert!(
+        board_of(&h, wid).strokes.is_empty(),
+        "the swipe across took it"
+    );
+}

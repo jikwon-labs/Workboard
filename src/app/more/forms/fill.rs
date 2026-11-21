@@ -106,11 +106,22 @@ impl App {
                 ui.separator();
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(tr("Submitting makes one task and tells the form's maker."))
-                            .size(12.0)
-                            .color(t.text2),
-                    );
+                    // wraps before Clear and Submit (on one line it ran under
+                    // Clear in a narrow window)
+                    let w = (ui.available_width() - 190.0).max(80.0);
+                    ui.scope(|ui| {
+                        ui.set_max_width(w);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(tr(
+                                    "Submitting makes one task and tells the form's maker.",
+                                ))
+                                .size(12.0)
+                                .color(t.text2),
+                            )
+                            .wrap(),
+                        );
+                    });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let submit = ui.add(Tint(
                             primary_btn(t, tr("Submit")).min_size(vec2(88.0, 36.0)),

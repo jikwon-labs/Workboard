@@ -1518,3 +1518,27 @@ fn small_window_inbox_and_replies_rows_shorten_their_text() {
         assert!(over.is_empty(), "{:?}: {:?}", loc, over);
     }
 }
+
+/// The Docs list's column names and a form's Fill out footer fit the
+/// smallest window: "Date updated" ran over "Sharing", and the footer's line
+/// ran under Clear.
+#[test]
+fn small_window_docs_list_headers_and_form_footer_fit() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.section = Section::Docs;
+    h.app.doc_open = None;
+    h.settle();
+    let page = Rect::from_min_max(pos2(320.0, 40.0), h.size.to_pos2());
+    let over = overlapping(&h.texts_in(page));
+    assert!(over.is_empty(), "Docs: {:?}", over);
+    h.app.new_form();
+    h.app.form_tab = crate::app::more::FormTab::Fill;
+    h.app.toast = None;
+    h.settle();
+    // the footer is at the bottom of the form: scroll there
+    h.scroll_into_view("Submit");
+    h.app.toast = None;
+    h.settle();
+    let over = overlapping(&h.texts_in(page));
+    assert!(over.is_empty(), "Fill out: {:?}", over);
+}

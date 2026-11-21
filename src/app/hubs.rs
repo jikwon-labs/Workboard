@@ -664,19 +664,22 @@ impl App {
                                 let w = ui.available_width();
                                 let cols = [0.0, 0.42, 0.62, 0.76, 0.88];
                                 let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-                                for (x, h) in cols.iter().zip([
-                                    "Name",
-                                    "Location",
-                                    "Tags",
-                                    "Date updated",
-                                    "Sharing",
-                                ]) {
-                                    ui.painter().text(
+                                for (i, (x, h)) in cols
+                                    .iter()
+                                    .zip(["Name", "Location", "Tags", "Date updated", "Sharing"])
+                                    .enumerate()
+                                {
+                                    // shortened to its column (in a narrow window
+                                    // "Date updated" ran over "Sharing")
+                                    let next = cols.get(i + 1).copied().unwrap_or(1.0);
+                                    paint_fit(
+                                        ui,
                                         pos2(hr.left() + w * x + 30.0, hr.center().y),
                                         Align2::LEFT_CENTER,
                                         tr(h),
                                         FontId::proportional(13.0),
                                         t.text2,
+                                        w * (next - x) - 34.0,
                                     );
                                 }
                                 ui.painter().hline(

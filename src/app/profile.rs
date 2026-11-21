@@ -9,6 +9,7 @@
 // puts the ones decoded into egui's temp data, where `paint_avatar` finds
 // them; until then (and without a photo) avatars show initials.
 
+use super::icons::{icon_button, icon_button_ex};
 use super::*;
 use crate::media;
 use crate::widgets::{AvatarTextures, AVATAR_TEXTURES};
@@ -79,7 +80,155 @@ impl Modal {
     }
 }
 
+/// Width of someone's profile at the right of Chat and the Posts page.
+const PROFILE_W: f32 = 340.0;
+
 impl App {
+    /// Someone's profile (`ChatUi::profile`) at the right, where a thread
+    /// shows: photo or initials, name, title, whether they're online, status,
+    /// email and role, and a button to message them (Edit profile for me).
+    /// The close button or Escape closes it.
+    pub(super) fn profile_panel(&mut self, ui: &mut Ui) {
+        let Some(id) = self.chat.profile else {
+            return;
+        };
+        let Some(m) = self.data.member(id).cloned() else {
+            // no longer in the workspace
+            self.chat.profile = None;
+            return;
+        };
+        let t = self.t();
+        let me = self.data.me;
+        let mut close = false;
+        egui::SidePanel::right("profile")
+            .exact_width(PROFILE_W)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(t.column_bg)
+                    .inner_margin(egui::Margin::symmetric(14, 10)),
+            )
+            .show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_height(30.0);
+                    ui.label(RichText::new(tr("Profile")).size(15.0).strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if icon_button(ui, &t, "close", "", "Close profile", false)
+                            .on_hover_text(tr("Close"))
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    });
+                });
+                ui.add_space(18.0);
+                ui.vertical_centered(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(112.0, 112.0), Sense::hover());
+                    paint_avatar(ui.painter(), r.center(), 52.0, &m, t.column_bg);
+                    ui.add_space(10.0);
+                    ui.label(RichText::new(m.shown()).size(20.0).strong().color(t.text));
+                    // the full name too when they go by a display name
+                    if m.shown() != m.name && !m.name.trim().is_empty() {
+                        ui.label(RichText::new(&m.name).color(t.text2));
+                    }
+                    if !m.title.trim().is_empty() {
+                        ui.label(RichText::new(m.title.trim()).color(t.text2));
+                    }
+                    if m.invited {
+                        ui.label(RichText::new(tr("Invited")).small().color(t.text3));
+                    } else if let Some(on) = self.is_online(id) {
+                        ui.horizontal(|ui| {
+                            let label = tr(if on { "Online" } else { "Offline" });
+                            let w = 14.0
+                                + ui.fonts(|f| {
+                                    f.layout_no_wrap(
+                                        label.to_string(),
+                                        FontId::proportional(13.0),
+                                        t.text2,
+                                    )
+                                    .size()
+                                    .x
+                                });
+                            ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
+                            let (d, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
+                            ui.painter().circle_filled(
+                                d.center(),
+                                4.0,
+                                if on {
+                                    Color32::from_rgb(0x2e, 0xa0, 0x43)
+                                } else {
+                                    t.text3
+                                },
+                            );
+                            ui.label(RichText::new(label).size(13.0).color(t.text2));
+                        });
+                    }
+                    if !m.status_text.trim().is_empty() {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(m.status_text.trim()).color(t.text));
+                    }
+                });
+                ui.add_space(14.0);
+                ui.separator();
+                ui.add_space(6.0);
+                for (label, value) in [
+                    ("Email", m.email.trim().to_string()),
+                    ("Role", super::menus::role_text(&m.role).to_string()),
+                ] {
+                    if value.is_empty() {
+                        continue;
+                    }
+                    ui.label(RichText::new(tr(label)).small().color(t.text3));
+                    ui.add(egui::Label::new(RichText::new(value).color(t.text)).selectable(true));
+                    ui.add_space(8.0);
+                }
+                ui.add_space(6.0);
+                let w = ui.available_width();
+                if id == me {
+                    if icon_button_ex(
+                        ui,
+                        &t,
+                        "edit",
+                        tr("Edit profile"),
+                        "Edit profile",
+                        true,
+                        w,
+                        t.text,
+                        t.text2,
+                    )
+                    .clicked()
+                    {
+                        self.open_profile();
+                    }
+                } else if !m.invited
+                    && icon_button_ex(
+                        ui,
+                        &t,
+                        "chat",
+                        tr("Message"),
+                        &format!("Message {}", m.shown()),
+                        true,
+                        w,
+                        t.text,
+                        t.text2,
+                    )
+                    .clicked()
+                {
+                    // the conversation with them, given the room
+                    self.section = Section::Chat;
+                    self.apply_chat(vec![super::chat::ChatAction::Dm(id)]);
+                    close = true;
+                }
+            });
+        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape))
+            && self.modal.is_none()
+            && !self.menu_was_open
+            && ui.memory(|mm| mm.focused().is_none());
+        if close || escape {
+            self.chat.profile = None;
+        }
+    }
+
     /// Edit profile (My settings) for me. Without an email of my own it
     /// starts with the one I sign in with to the team server.
     pub(super) fn profile_modal(&self) -> Modal {

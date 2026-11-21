@@ -1080,3 +1080,87 @@ fn open_in_channel_goes_to_the_post_and_lights_it_up() {
     }
     assert!(h.app.chat.flash.is_none(), "the light is gone there too");
 }
+
+// ---------------------------------------------------------------- profiles
+
+/// Clicking someone's name (or avatar) on a message opens their profile at
+/// the right, where a thread shows: photo or initials, name, email, role,
+/// and a button to message them. Escape or the close button closes it.
+#[test]
+fn a_name_on_a_message_opens_that_persons_profile() {
+    let mut h = posts_page();
+    h.click("general");
+    let list = Rect::from_min_max(pos2(330.0, 120.0), pos2(1440.0, 760.0));
+    let at = h.rect_in("Alex Kim", list).center();
+    h.click_at(at);
+    h.settle();
+    assert!(h.has("Close profile"), "the profile opens");
+    assert!(
+        !h.painted_text("alex@example.com").is_empty(),
+        "with the email"
+    );
+    assert!(!h.painted_text("Admin").is_empty(), "and the role");
+    let panel = h.rect("Close profile");
+    assert!(panel.left() > 900.0, "at the right: {panel:?}");
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert!(!h.has("Close profile"), "Escape closes it");
+
+    // the avatar opens it too; Message opens a conversation with them
+    let avatar = h
+        .shapes
+        .iter()
+        .find_map(|c| match &c.shape {
+            egui::Shape::Circle(s)
+                if s.fill == rgb(h.app.data.member(2).unwrap().color)
+                    && list.contains(s.center) =>
+            {
+                Some(s.center)
+            }
+            _ => None,
+        })
+        .unwrap();
+    h.click_at(avatar);
+    h.settle();
+    assert!(h.has("Close profile"));
+    h.click("Message Alex Kim");
+    h.settle();
+    let open = h.app.chat.open.unwrap();
+    let c = h.app.data.channels.iter().find(|c| c.id == open).unwrap();
+    assert_eq!(c.kind, ChannelKind::Direct);
+    assert!(c.members.contains(&2), "a conversation with Alex");
+    assert!(!h.has("Close profile"), "the conversation gets the room");
+}
+
+/// On the Posts page a post's author opens their profile at the right too;
+/// my own profile offers Edit profile.
+#[test]
+fn a_posts_author_opens_their_profile_and_mine_can_be_edited() {
+    let mut h = posts_page();
+    let gen = channel_id(&h, "general");
+    add_post(&mut h, gen, 2, "Office move", "Monday", "Announcement", 60);
+    h.settle();
+    let cards = Rect::from_min_max(pos2(330.0, 440.0), pos2(1440.0, 900.0));
+    let at = h.rect_in("Alex Kim", cards).center();
+    h.click_at(at);
+    h.settle();
+    assert_eq!(h.app.section, Section::Posts, "still on the Posts page");
+    assert!(h.has("Close profile"));
+    assert!(!h.painted_text("alex@example.com").is_empty());
+    h.click("Close profile");
+    h.settle();
+    assert!(!h.has("Close profile"));
+
+    write_post(&mut h, "general", "Lunch", "Pizza");
+    h.click("Post");
+    let me = h.app.who(h.app.data.me);
+    let at = h.rect_in(&me, cards).center();
+    h.click_at(at);
+    h.settle();
+    assert!(
+        !h.has(&format!("Message {me}")),
+        "no messaging myself from here"
+    );
+    h.click("Edit profile");
+    assert!(matches!(h.app.modal, Some(Modal::Profile { .. })));
+}

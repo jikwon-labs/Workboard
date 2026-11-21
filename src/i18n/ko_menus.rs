@@ -116,6 +116,7 @@ pub const T: &[(&str, &str)] = &[
     ("Save changes", "변경 사항 저장"),
     // edit profile
     ("Edit profile", "내 프로필 편집"),
+    ("Profile", "프로필"),
     ("Display name", "표시 이름"),
     ("This could be your first name or a nickname: what you'd like people to call you. Others see it before your full name.", "이름이나 별명처럼 사람들이 불러 주었으면 하는 이름입니다. 다른 사람에게는 성명보다 이 이름이 먼저 보입니다."),
     ("Title (job)", "직함"),

@@ -10,14 +10,15 @@ const POST_MENTIONS: &str = "post_mentions";
 
 impl App {
     /// Another workspace is open: the Posts page's picked channel, its
-    /// channel and author filters and the people picked from its @ list
-    /// named this one's channels and people (the same ids may name others
-    /// there). What is being written stays.
+    /// channel and author filters, the people picked from its @ list and
+    /// the profile shown named this one's channels and people (the same ids
+    /// may name others there). What is being written stays.
     pub(crate) fn posts_in_another_workspace(&mut self) {
         self.post.channel = 0;
         self.post.f_channel = None;
         self.post.f_author = None;
         self.post.picked.clear();
+        self.chat.profile = None;
     }
 
     /// The text box's cursor: where it is (the end when the box never had
@@ -520,15 +521,35 @@ impl App {
                                 // the frame sits in a horizontal row; stack its contents top to bottom
                                 ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
+                                        // the author's avatar and name open their profile
                                         if let Some(a) = self.data.member(m.author) {
-                                            let (r, _) = ui.allocate_exact_size(
+                                            let (r, resp) = ui.allocate_exact_size(
                                                 vec2(26.0, 26.0),
-                                                Sense::hover(),
+                                                Sense::click(),
                                             );
                                             paint_avatar(ui.painter(), r.center(), 12.0, a, t.card);
+                                            if resp
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                .clicked()
+                                            {
+                                                self.chat.profile = Some(m.author);
+                                            }
                                         }
                                         // "Someone" for a person no longer here, as in the channel
-                                        ui.label(RichText::new(self.who(m.author)).strong());
+                                        let name = egui::Label::new(
+                                            RichText::new(self.who(m.author)).strong(),
+                                        );
+                                        if self.data.member(m.author).is_some() {
+                                            if ui
+                                                .add(name.sense(Sense::click()))
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                .clicked()
+                                            {
+                                                self.chat.profile = Some(m.author);
+                                            }
+                                        } else {
+                                            ui.add(name);
+                                        }
                                         ui.label(
                                             RichText::new(trf!(
                                                 "{} in {} \u{2022} {}",

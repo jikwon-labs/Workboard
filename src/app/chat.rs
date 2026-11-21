@@ -125,8 +125,10 @@ pub(super) enum ChatAction {
         files: Vec<Attachment>,
     },
     NewChannel(String),
-    #[cfg_attr(not(test), allow(dead_code))] // only tests send it
+    /// Open the direct message with this person (made if there is none).
     Dm(u64),
+    /// Show this person's profile at the right.
+    Profile(u64),
     SendPost {
         ch: u64,
         title: String,
@@ -1156,12 +1158,14 @@ impl App {
             self.dirty = true;
         }
 
+        // ---- a profile, in the thread's place
+        self.profile_panel(ui);
         // ---- thread panel (not while the thread is in its own window)
         let mut thread_rect: Option<Rect> = None;
         if let Some(tid) = self
             .chat
             .thread_open
-            .filter(|_| self.chat.thread_window.is_none())
+            .filter(|_| self.chat.thread_window.is_none() && self.chat.profile.is_none())
         {
             let found = at.iter().find_map(|&(c, m)| {
                 let ch = self.data.channels.get(c)?;
@@ -2566,9 +2570,17 @@ impl App {
         let bg = ui.painter().add(egui::Shape::Noop);
         let inner = ui.horizontal_top(|ui| {
             ui.set_width(w);
-            let (ar, _) = ui.allocate_exact_size(
+            // someone in the workspace (not a webhook's or workflow's
+            // message): their avatar and name open their profile
+            let person =
+                (m.bot.is_none() && self.data.member(m.author).is_some()).then_some(m.author);
+            let (ar, ar_resp) = ui.allocate_exact_size(
                 vec2(36.0, if compact { 18.0 } else { 36.0 }),
-                Sense::hover(),
+                if !compact && person.is_some() {
+                    Sense::click()
+                } else {
+                    Sense::hover()
+                },
             );
             if compact {
                 if ui.rect_contains_pointer(
@@ -2586,6 +2598,12 @@ impl App {
                 }
             } else if let Some(au) = self.data.member(m.author) {
                 paint_avatar(ui.painter(), ar.center(), 15.0, au, t.bg);
+                if let Some(p) = person {
+                    let ar_resp = ar_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if ar_resp.clicked() {
+                        acts.push(ChatAction::Profile(p));
+                    }
+                }
             }
             ui.vertical(|ui| {
                 ui.set_width(w - 50.0);
@@ -2593,7 +2611,17 @@ impl App {
                     ui.horizontal(|ui| {
                         // a webhook's or command's message shows its name
                         let name = m.bot.clone().unwrap_or_else(|| self.who(m.author));
-                        ui.label(RichText::new(name).strong());
+                        let label = egui::Label::new(RichText::new(name).strong());
+                        if let Some(p) = person {
+                            let r = ui
+                                .add(label.sense(Sense::click()))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            if r.clicked() {
+                                acts.push(ChatAction::Profile(p));
+                            }
+                        } else {
+                            ui.add(label);
+                        }
                         if m.bot.is_some() {
                             egui::Frame::new()
                                 .fill(t.column_bg)
@@ -3545,7 +3573,13 @@ impl App {
             };
             match a {
                 ChatAction::JoinHuddle(ch) => self.join_huddle(ch),
+                ChatAction::Profile(id) => {
+                    // in the thread's place
+                    self.chat.profile = Some(id);
+                    self.leave_thread();
+                }
                 ChatAction::Thread(id) => {
+                    self.chat.profile = None;
                     // with the thread window open the thread shows in it
                     if let Some(ch) = self.chat.open {
                         self.show_thread(ch, Some(id));

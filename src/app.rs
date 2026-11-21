@@ -656,6 +656,9 @@ struct ChatUi {
     /// The message just gone to (conversation, message) and when (egui
     /// time): lit up for a moment.
     flash: Option<(u64, u64, f64)>,
+    /// Whose profile shows at the right of Chat and the Posts page (in the
+    /// thread's place), opened from a name or avatar.
+    profile: Option<u64>,
     /// The title in the Post tab of the channel's box (the Posts page keeps
     /// its own, `PostsUi::title`).
     post_title: String,
@@ -2934,6 +2937,7 @@ impl App {
                     }
                     Section::Posts => {
                         self.sidebar(ui);
+                        self.profile_panel(ui);
                         egui::CentralPanel::default()
                             .frame(page)
                             .show_inside(ui, |ui| self.posts_page(ui));

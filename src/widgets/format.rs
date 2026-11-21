@@ -109,8 +109,10 @@ pub fn fmt_ago(ts: i64) -> String {
     let d = now_ts() - ts;
     if d < 60 {
         tr("just now").into()
+    } else if d < 120 {
+        tr("1 min ago").into()
     } else if d < 3600 {
-        crate::trf!("{} mins ago", (d / 60).max(1))
+        crate::trf!("{} mins ago", d / 60)
     } else if d < 86400 {
         let h = d / 3600;
         if h == 1 {
@@ -165,5 +167,20 @@ pub fn truncate_chars(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}\u{2026}", s.chars().take(n).collect::<String>())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn how_long_ago_reads_right_for_one_minute_and_one_hour() {
+        let ago = |s: i64| fmt_ago(now_ts() - s);
+        assert_eq!(ago(30), "just now");
+        assert_eq!(ago(90), "1 min ago");
+        assert_eq!(ago(150), "2 mins ago");
+        assert_eq!(ago(3700), "1 hour ago");
+        assert_eq!(ago(3 * 3600), "3 hours ago");
     }
 }

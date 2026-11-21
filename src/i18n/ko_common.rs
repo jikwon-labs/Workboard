@@ -144,6 +144,7 @@ pub const T: &[(&str, &str)] = &[
     ("Tomorrow", "내일"),
     ("Yesterday", "어제"),
     ("just now", "방금"),
+    ("1 min ago", "1분 전"),
     ("{} mins ago", "{}분 전"),
     ("1 hour ago", "1시간 전"),
     ("{} hours ago", "{}시간 전"),

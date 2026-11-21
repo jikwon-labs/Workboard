@@ -218,6 +218,32 @@ fn favorites_is_a_filter_on_docs_dashboards_and_whiteboards() {
     assert!(on_page(&h, a) && !on_page(&h, b), "only the starred board");
 }
 
+/// A sub page starred from its own page is listed in Docs' Favorites, with
+/// its count. Favorites listed top-level docs only, so a starred sub page
+/// was found nowhere.
+#[test]
+fn a_starred_sub_page_is_in_docs_favorites() {
+    let mut h = Ui1::new();
+    let brief = h.app.data.docs[0].id;
+    h.app.new_doc(None);
+    let page = h.app.doc_open.unwrap();
+    {
+        let d = h.app.data.docs.iter_mut().find(|d| d.id == page).unwrap();
+        d.title = "Launch notes".into();
+        d.parent = Some(brief);
+    }
+    h.settle();
+    h.click("\u{2606}");
+    assert!(h.app.data.extra.starred.contains(&format!("doc:{}", page)));
+    h.open_docs_list();
+    assert!(!h.has("Doc Launch notes"), "All Docs lists it with its doc");
+    h.click("Favorites");
+    assert_eq!(h.app.docs_count(7), 1);
+    assert!(h.has("Doc Launch notes"));
+    h.click("Doc Launch notes");
+    assert_eq!(h.app.doc_open, Some(page));
+}
+
 /// Teams are made by the owner and admins on a server: a member sees no +
 /// (it used to show a framed + that did nothing).
 #[test]

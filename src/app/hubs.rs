@@ -421,13 +421,20 @@ impl App {
         fits && self.doc_reachable(d)
     }
 
-    /// A Docs filter's count: top-level docs only, as the list shows them
-    /// (sub pages are counted with their doc).
+    /// Whether a doc gets a line of its own in a Docs filter's list: top
+    /// level docs, their sub pages being counted with them, except in
+    /// Favorites, where a starred sub page is listed by itself (it can be
+    /// starred from its own page and would be found nowhere else).
+    pub(super) fn doc_listed(&self, d: &Doc, filter: u8) -> bool {
+        (d.parent.is_none() || filter == 7) && self.doc_in_filter(d, filter)
+    }
+
+    /// A Docs filter's count: the docs its list shows.
     pub(super) fn docs_count(&self, filter: u8) -> usize {
         self.data
             .docs
             .iter()
-            .filter(|d| d.parent.is_none() && self.doc_in_filter(d, filter))
+            .filter(|d| self.doc_listed(d, filter))
             .count()
     }
 
@@ -686,8 +693,7 @@ impl App {
                                     .data
                                     .docs
                                     .iter()
-                                    .filter(|d| self.doc_in_filter(d, filter))
-                                    .filter(|d| d.parent.is_none())
+                                    .filter(|d| self.doc_listed(d, filter))
                                     .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
                                     .filter(|d| !mine_only || d.owner == me)
                                     .filter(|d| tag.as_ref().is_none_or(|g| d.tags.contains(g)))

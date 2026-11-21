@@ -772,3 +772,31 @@ fn a_form_from_the_search_opens_on_edit() {
     assert_eq!(h.app.form_open, Some(form_named(&h, "Feedback Form")));
     assert_eq!(h.app.form_tab, FormTab::Edit);
 }
+
+/// In the smallest window, with a long form name, the header's tabs stay
+/// between the name (shortened) and the star, inside the window, in
+/// English and in Korean.
+#[test]
+fn a_long_form_name_leaves_the_tabs_room_in_a_small_window() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        let mut h = Ui1::sized(900.0, 560.0);
+        crate::i18n::set_lang(lang);
+        h.app.new_form_from(Some(4));
+        let fid = h.app.form_open.unwrap();
+        h.app.data.extra.forms[0].name =
+            "A very long form name that goes on and on for quite a while".into();
+        h.settle();
+        let edit = h.rect("Edit");
+        let answers = h.rect("Answers");
+        let star = h.rect(&format!("Star form:{}", fid));
+        let crumb = h.rect("Forms crumb");
+        crate::i18n::set_lang(crate::i18n::Lang::En);
+        assert!(
+            answers.right() + 4.0 <= star.left(),
+            "{lang:?}: the tabs end at {} and the star starts at {}",
+            answers.right(),
+            star.left()
+        );
+        assert!(answers.right() <= 900.0 && edit.left() > crumb.right());
+    }
+}

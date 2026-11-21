@@ -551,6 +551,23 @@ impl App {
                 let row = ui.available_rect_before_wrap();
                 let row = Rect::from_min_size(row.min, vec2(row.width(), CONTROL_H + 4.0));
                 ui.allocate_rect(row, Sense::hover());
+                // right: the star first, so the name and the tabs know where it starts
+                let mut right = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(row)
+                        .layout(Layout::right_to_left(Align::Center)),
+                );
+                self.star_toggle(&mut right, format!("form:{}", f.id));
+                let star_left = right.min_rect().left();
+                // the tabs, measured before the name so a long name is
+                // shortened to leave them room in a small window
+                let items: [SegItem; 3] = [
+                    ("edit", tr("Edit").into(), None, "Edit"),
+                    ("eye", tr("Fill out").into(), None, "Fill out"),
+                    ("inbox", tr("Answers").into(), Some(answers), "Answers"),
+                ];
+                let seg_w = seg_width(ui.painter(), &t, &items);
+                let tabs_end = star_left - 8.0;
                 // left: back, "All forms", the form
                 let mut left = ui.new_child(
                     egui::UiBuilder::new()
@@ -582,24 +599,27 @@ impl App {
                 let (tile, _) = left.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
                 paint_tile(left.painter(), tile, form_look(&f, &t));
                 left.add_space(2.0);
-                let room = (row.width() * 0.3).max(80.0);
+                let name_left = left.cursor().left() + 4.0;
+                let room = (row.width() * 0.3).min(tabs_end - seg_w - 16.0 - name_left);
                 let title = form_title(&f);
-                let shown = fit_text(left.painter(), &title, &FontId::proportional(14.0), room);
+                let shown = fit_text(
+                    left.painter(),
+                    &title,
+                    &FontId::proportional(14.0),
+                    room.max(12.0),
+                );
                 left.label(RichText::new(shown).size(14.0).color(t.text));
                 let left_end = left.min_rect().right();
-                // the tabs, in the middle when there is room
-                let items: [SegItem; 3] = [
-                    ("edit", tr("Edit").into(), None, "Edit"),
-                    ("eye", tr("Fill out").into(), None, "Fill out"),
-                    ("inbox", tr("Answers").into(), Some(answers), "Answers"),
-                ];
+                // the tabs: in the middle when there is room, else after the
+                // name and before the star
                 let sel = match self.form_tab {
                     FormTab::Edit => 0,
                     FormTab::Fill => 1,
                     FormTab::Answers => 2,
                 };
-                let seg_w = 330.0;
-                let x = (row.center().x - seg_w / 2.0).max(left_end + 16.0);
+                let x = (row.center().x - seg_w / 2.0)
+                    .min(tabs_end - seg_w)
+                    .max(left_end + 16.0);
                 let mut mid = ui.new_child(
                     egui::UiBuilder::new()
                         .max_rect(Rect::from_min_max(pos2(x, row.top()), row.max))
@@ -609,13 +629,7 @@ impl App {
                     self.form_tab = [FormTab::Edit, FormTab::Fill, FormTab::Answers][i];
                 }
                 let mid_end = mid.min_rect().right();
-                // right: the star, and "Saved automatically" when it fits
-                let mut right = ui.new_child(
-                    egui::UiBuilder::new()
-                        .max_rect(row)
-                        .layout(Layout::right_to_left(Align::Center)),
-                );
-                self.star_toggle(&mut right, format!("form:{}", f.id));
+                // "Saved automatically" before the star when it fits
                 let saved = tr("Saved automatically");
                 let w = right
                     .painter()

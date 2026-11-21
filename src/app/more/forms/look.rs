@@ -204,21 +204,8 @@ pub(super) type SegItem<'a> = (&'a str, String, Option<usize>, &'a str);
 pub(super) fn seg(ui: &mut Ui, t: &Theme, items: &[SegItem], sel: usize) -> Option<usize> {
     let font = FontId::proportional(13.0);
     let p = ui.painter().clone();
-    let parts: Vec<_> = items
-        .iter()
-        .map(|(_, label, count, _)| {
-            let g = p.layout_no_wrap(label.clone(), font.clone(), t.text);
-            let c =
-                count.map(|n| p.layout_no_wrap(n.to_string(), FontId::proportional(11.0), t.text3));
-            g.size().x + c.as_ref().map_or(0.0, |c| c.size().x + 5.0)
-        })
-        .collect();
-    let widths: Vec<f32> = items
-        .iter()
-        .zip(&parts)
-        .map(|((k, ..), w)| 24.0 + if k.is_empty() { 0.0 } else { 20.0 } + w)
-        .collect();
-    let total = widths.iter().sum::<f32>() + 6.0 + 2.0 * items.len().saturating_sub(1) as f32;
+    let widths = seg_widths(&p, t, items);
+    let total = seg_width(&p, t, items);
     let (track, _) = ui.allocate_exact_size(vec2(total, CONTROL_H + 4.0), Sense::hover());
     p.rect_filled(track, 8.0, t.hover);
     let mut x = track.left() + 3.0;
@@ -266,6 +253,26 @@ pub(super) fn seg(ui: &mut Ui, t: &Theme, items: &[SegItem], sel: usize) -> Opti
         x += w + 2.0;
     }
     out
+}
+
+/// Each item's width in `seg`.
+fn seg_widths(p: &egui::Painter, t: &Theme, items: &[SegItem]) -> Vec<f32> {
+    let font = FontId::proportional(13.0);
+    items
+        .iter()
+        .map(|(kind, label, count, _)| {
+            let g = p.layout_no_wrap(label.clone(), font.clone(), t.text);
+            let c =
+                count.map(|n| p.layout_no_wrap(n.to_string(), FontId::proportional(11.0), t.text3));
+            let text = g.size().x + c.as_ref().map_or(0.0, |c| c.size().x + 5.0);
+            24.0 + if kind.is_empty() { 0.0 } else { 20.0 } + text
+        })
+        .collect()
+}
+
+/// How wide `seg` draws these items, its track included.
+pub(super) fn seg_width(p: &egui::Painter, t: &Theme, items: &[SegItem]) -> f32 {
+    seg_widths(p, t, items).iter().sum::<f32>() + 6.0 + 2.0 * items.len().saturating_sub(1) as f32
 }
 
 /// A drop-down's button: framed like a secondary button, an icon and the

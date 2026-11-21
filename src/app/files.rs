@@ -1152,7 +1152,7 @@ pub(super) fn paint_file_tile(painter: &egui::Painter, rect: Rect, name: &str, t
     painter.text(
         rect.center() + vec2(0.0, if small { 12.0 } else { 14.0 }),
         Align2::CENTER_CENTER,
-        crate::widgets::truncate_chars(name, room),
+        crate::widgets::truncate(name, room + 1),
         FontId::proportional(if small { 9.5 } else { 11.0 }),
         t.text3,
     );
@@ -2244,7 +2244,7 @@ impl App {
                     Align2::CENTER_CENTER,
                     format!(
                         "{}\n{}",
-                        crate::widgets::truncate_chars(&p.name, 28),
+                        crate::widgets::truncate(&p.name, 29),
                         tr("Getting ready...")
                     ),
                     FontId::proportional(12.0),
@@ -2381,7 +2381,7 @@ impl App {
         painter.text(
             pos2(left, rect.top() + 17.0),
             Align2::LEFT_CENTER,
-            crate::widgets::truncate_chars(&a.name, room),
+            crate::widgets::truncate(&a.name, room + 1),
             FontId::proportional(13.0),
             t.text,
         );
@@ -2400,7 +2400,7 @@ impl App {
         painter.text(
             pos2(left, rect.top() + 36.0),
             Align2::LEFT_CENTER,
-            crate::widgets::truncate_chars(&status, room + 4),
+            crate::widgets::truncate(&status, room + 5),
             FontId::proportional(11.5),
             if bad { t.danger } else { t.text3 },
         );

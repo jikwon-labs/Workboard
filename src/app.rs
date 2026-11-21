@@ -6108,16 +6108,6 @@ enum CommentsPage {
     Assigned = 2,
 }
 
-fn truncate(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        s.to_string()
-    } else {
-        let mut o: String = s.chars().take(n.saturating_sub(1)).collect();
-        o.push('\u{2026}');
-        o
-    }
-}
-
 pub(crate) fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     // The original uses the system UI font (-apple-system / Segoe UI); use it when present.

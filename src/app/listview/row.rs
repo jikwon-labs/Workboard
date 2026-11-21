@@ -410,7 +410,7 @@ impl App {
                 }
             } else {
                 let short = if *name == "Latest comment" {
-                    truncate_chars(&txt, 26)
+                    truncate(&txt, 27)
                 } else {
                     txt
                 };

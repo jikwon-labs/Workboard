@@ -160,19 +160,29 @@ pub fn next_recur(d: NaiveDate, r: &str) -> NaiveDate {
     }
 }
 
-/// `s` cut to its first `n` characters with an ellipsis after them (so up to
-/// n + 1 characters), or whole when it fits.
-pub fn truncate_chars(s: &str, n: usize) -> String {
+/// `s` in at most `n` characters: whole when it fits, else its first n - 1
+/// and an ellipsis.
+pub fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
     } else {
-        format!("{}\u{2026}", s.chars().take(n).collect::<String>())
+        let mut o: String = s.chars().take(n.saturating_sub(1)).collect();
+        o.push('\u{2026}');
+        o
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncate_keeps_to_the_length_with_its_ellipsis() {
+        assert_eq!(truncate("Workboard", 9), "Workboard");
+        assert_eq!(truncate("Workboard", 5), "Work\u{2026}");
+        assert_eq!(truncate("작업 보드", 3), "작업\u{2026}");
+        assert_eq!(truncate("", 0), "");
+    }
 
     #[test]
     fn how_long_ago_reads_right_for_one_minute_and_one_hour() {

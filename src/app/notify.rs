@@ -120,7 +120,7 @@ fn sent_what(a: &[crate::model::Attachment]) -> &'static str {
 }
 
 fn cut(s: &str, n: usize) -> String {
-    truncate_chars(&s.replace('\n', " "), n)
+    truncate(&s.replace('\n', " "), n + 1)
 }
 
 /// The goal a notice's key is about ("goal:ID:...", "goalm:ID:...",

@@ -398,7 +398,7 @@ impl App {
                 ch |= ui.add(egui::TextEdit::singleline(&mut m.title).font(FontId::proportional(26.0)).frame(false).desired_width(f32::INFINITY)).changed();
                 ui.horizontal(|ui| {
                     let mut d = Some(m.date);
-                    let r = icon_button(ui, &t, "calendar", &fmt_date(m.date), "Meeting date", true);
+                    let r = icon_button(ui, &t, Icon::Calendar, &fmt_date(m.date), "Meeting date", true);
                     if let Some(true) = popup(ui, &r, ui.id().with("meet_date"), DATE_MENU_W, |ui| date_menu(ui, &t, ui.id().with("meet_cal"), &mut d)) {
                         if let Some(d) = d {
                             m.date = d;
@@ -543,7 +543,7 @@ impl App {
                     let b = icon_button(
                         ui,
                         &t,
-                        "calendar",
+                        Icon::Calendar,
                         &date.map(fmt_date).unwrap_or_else(|| tr("Date").into()),
                         "Reminder date",
                         true,

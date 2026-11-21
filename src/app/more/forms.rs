@@ -74,18 +74,18 @@ fn form_kind_label(k: &str) -> &'static str {
 }
 
 /// The line icon of a question kind.
-fn kind_icon(k: &str) -> &'static str {
+fn kind_icon(k: &str) -> Icon {
     match k {
-        "name" => "task",
-        "description" => "notebook",
-        "priority" => "flag",
-        "due" => "calendar",
-        "assignee" => "person",
-        "dropdown" => "list",
-        "number" => "hash",
-        "email" => "send",
-        "checkbox" => "check",
-        _ => "pen",
+        "name" => Icon::Task,
+        "description" => Icon::Notebook,
+        "priority" => Icon::Flag,
+        "due" => Icon::Calendar,
+        "assignee" => Icon::Person,
+        "dropdown" => Icon::List,
+        "number" => Icon::Hash,
+        "email" => Icon::Send,
+        "checkbox" => Icon::Check,
+        _ => Icon::Pen,
     }
 }
 
@@ -643,7 +643,7 @@ impl App {
                 if icon_button(
                     &mut left,
                     &t,
-                    "chevron_left",
+                    Icon::ChevronLeft,
                     "",
                     "Back to all forms",
                     false,
@@ -669,13 +669,18 @@ impl App {
                 // enough (a small window, a wide sidebar) they drop their
                 // icons, and the name goes
                 let name_left = left.cursor().left() + 4.0;
-                let tab = |icon: &'static str, wide: bool| if wide { icon } else { "" };
+                let tab = |icon: Icon, wide: bool| wide.then_some(icon);
                 let tabs = |wide: bool| -> [SegItem; 3] {
                     [
-                        (tab("edit", wide), tr("Edit").into(), None, "Edit"),
-                        (tab("eye", wide), tr("Fill out").into(), None, "Fill out"),
+                        (tab(Icon::Edit, wide), tr("Edit").into(), None, "Edit"),
                         (
-                            tab("inbox", wide),
+                            tab(Icon::Eye, wide),
+                            tr("Fill out").into(),
+                            None,
+                            "Fill out",
+                        ),
+                        (
+                            tab(Icon::Inbox, wide),
                             tr("Answers").into(),
                             Some(answers),
                             "Answers",
@@ -725,7 +730,7 @@ impl App {
                     right.add_space(8.0);
                     right.label(RichText::new(saved).size(12.0).color(t.text3));
                     let (r, _) = right.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                    line_icon_scaled(right.painter(), "check", r.center(), t.text3, 0.8);
+                    line_icon_scaled(right.painter(), Icon::Check, r.center(), t.text3, 0.8);
                 }
             });
     }

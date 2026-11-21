@@ -28,7 +28,7 @@ impl App {
                         }
                     }
                 });
-                let cz = icon_button(ui, &t, "settings", tr("Customize"), "Customize", true);
+                let cz = icon_button(ui, &t, Icon::Settings, tr("Customize"), "Customize", true);
                 popup(ui, &cz, egui::Id::new("ov_customize"), 200.0, |ui| {
                     ui.label(RichText::new(tr("Cards")).small().color(t.text3));
                     for c in OV_CARDS {

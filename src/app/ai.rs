@@ -1104,11 +1104,11 @@ impl App {
                             });
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        close = icon_button(ui, &t, "close", "", "Close AI", false)
+                        close = icon_button(ui, &t, Icon::Close, "", "Close AI", false)
                             .on_hover_text(format!("{} (Esc)", tr("Close")))
                             .clicked();
                         if !self.ai.chat.is_empty()
-                            && icon_button(ui, &t, "edit", tr("New chat"), "New chat", true)
+                            && icon_button(ui, &t, Icon::Edit, tr("New chat"), "New chat", true)
                                 .clicked()
                         {
                             self.ai.chat.clear();
@@ -1163,7 +1163,7 @@ impl App {
                 let b = icon_button_ex(
                     ui,
                     &t,
-                    "teams",
+                    Icon::Teams,
                     tr("Work together"),
                     "Work together",
                     true,
@@ -1349,7 +1349,7 @@ impl App {
                         ui.painter().circle_filled(r.center(), 16.0, fill);
                         line_icon(
                             ui.painter(),
-                            "send",
+                            Icon::Send,
                             r.center(),
                             if can { Color32::WHITE } else { t.text3 },
                         );
@@ -1426,7 +1426,7 @@ impl App {
                         let b = icon_button_ex(
                             ui,
                             t,
-                            "docs",
+                            Icon::Docs,
                             tr("Copy"),
                             &format!("Copy answer {}", job),
                             false,
@@ -1507,7 +1507,7 @@ fn ai_badge(ui: &mut Ui, size: f32) {
     gradient_square(ui.painter(), r, size * 0.3);
     line_icon_scaled(
         ui.painter(),
-        "sparkle",
+        Icon::Sparkle,
         r.center(),
         Color32::WHITE,
         (size / 17.0).max(0.8),
@@ -1516,11 +1516,11 @@ fn ai_badge(ui: &mut Ui, size: f32) {
 
 /// Questions to start from, as cards two to a row; the one clicked.
 fn ai_suggestions(ui: &mut Ui, t: &Theme) -> Option<String> {
-    const SUGGESTIONS: [(&str, &str); 4] = [
-        ("calendar", "What's due this week?"),
-        ("chat", "What did I miss in chat lately?"),
-        ("task", "Summarize my open tasks"),
-        ("alarm", "Which tasks are overdue?"),
+    const SUGGESTIONS: [(Icon, &str); 4] = [
+        (Icon::Calendar, "What's due this week?"),
+        (Icon::Chat, "What did I miss in chat lately?"),
+        (Icon::Task, "Summarize my open tasks"),
+        (Icon::Alarm, "Which tasks are overdue?"),
     ];
     let mut out = None;
     let gap = 10.0;
@@ -1542,7 +1542,7 @@ fn ai_suggestions(ui: &mut Ui, t: &Theme) -> Option<String> {
                 );
                 let ic = pos2(r.left() + 28.0, r.center().y);
                 ui.painter().circle_filled(ic, 15.0, t.accent_bg);
-                line_icon(ui.painter(), icon, ic, AI_VIOLET);
+                line_icon(ui.painter(), *icon, ic, AI_VIOLET);
                 let g = ui.painter().layout(
                     tr(s).to_string(),
                     FontId::proportional(14.0),
@@ -1588,7 +1588,7 @@ fn thinking(ui: &mut Ui, t: &Theme) {
 fn ai_row(ui: &mut Ui, t: &Theme, how: &str) -> bool {
     let label = action_label(how);
     menu_row_named(ui, t, &format!("AI {}", label), tr(label), false, |p, c| {
-        super::icons::line_icon(p, "sparkle", c, AI_VIOLET);
+        super::icons::line_icon(p, Icon::Sparkle, c, AI_VIOLET);
     })
     .clicked()
 }

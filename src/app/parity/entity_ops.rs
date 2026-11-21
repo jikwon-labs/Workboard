@@ -441,7 +441,7 @@ impl App {
                     for (fid, fname) in folders {
                         let cur = cur_folder == Some(*fid);
                         if menu_row_named(ui, t, fname, &format!("      {}", fname), cur, |p, c| {
-                            super::icons::line_icon(p, "folder", c + vec2(18.0, 0.0), t.text2);
+                            super::icons::line_icon(p, Icon::Folder, c + vec2(18.0, 0.0), t.text2);
                         })
                         .clicked()
                             && !cur

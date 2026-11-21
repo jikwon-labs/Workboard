@@ -297,7 +297,7 @@ impl App {
         field_label(ui, t, tr("When"));
         ui.horizontal(|ui| {
             let d_txt = date.map(fmt_date).unwrap_or_else(|| tr("Date").into());
-            let r = icon_button(ui, t, "calendar", &d_txt, "Reminder date", true);
+            let r = icon_button(ui, t, Icon::Calendar, &d_txt, "Reminder date", true);
             popup(ui, &r, ui.id().with("rem_date"), DATE_MENU_W, |ui| {
                 date_menu(ui, t, ui.id().with("rem_cal"), date)
             });
@@ -542,7 +542,7 @@ fn link_rows(ui: &mut Ui, t: &Theme, rows: &[(&str, &str)]) -> Option<usize> {
         );
         line_icon(
             p,
-            "chevron_right",
+            Icon::ChevronRight,
             pos2(r.right() - 18.0, r.center().y),
             t.text3,
         );

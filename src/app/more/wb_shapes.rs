@@ -1084,7 +1084,7 @@ impl App {
         );
         line_icon(
             &p,
-            "trash",
+            Icon::Trash,
             r.center(),
             if resp.hovered() { t.danger } else { t.text2 },
         );

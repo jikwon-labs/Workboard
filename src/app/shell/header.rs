@@ -13,7 +13,7 @@ pub(super) fn pill(
     shown: &str,
     active: bool,
     accent: bool,
-    icon: &str,
+    icon: Icon,
 ) -> Response {
     let font = FontId::proportional(13.0);
     let (fg, bg, stroke) = if accent {
@@ -234,7 +234,7 @@ impl App {
                             egui::StrokeKind::Inside,
                         );
                     }
-                    2 => paint_checklist_icon(ui.painter(), r.center(), t.text),
+                    2 => line_icon(ui.painter(), Icon::ChecklistSmall, r.center(), t.text),
                     _ => {}
                 }
                 let text =
@@ -253,7 +253,7 @@ impl App {
                 };
                 if last && personal {
                     let (r, lr) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                    line_icon(ui.painter(), "lock", r.center(), t.text3);
+                    line_icon(ui.painter(), Icon::Lock, r.center(), t.text3);
                     lr.on_hover_text(tr("Private: only you can see this List"));
                 }
                 if let Some(menu) = crumb_menu.filter(|_| last) {
@@ -325,10 +325,10 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let hb = |ui: &mut Ui, text: &str| -> Response {
                     let (kind, label) = match text {
-                        t if t.contains("Share") => ("share", "Share"),
-                        t if t.contains("Ask") => ("edit", "Ask"),
-                        t if t.contains("Automate") => ("robot", "Automate"),
-                        _ => ("phone", ""),
+                        t if t.contains("Share") => (Icon::Share, "Share"),
+                        t if t.contains("Ask") => (Icon::Edit, "Ask"),
+                        t if t.contains("Automate") => (Icon::Robot, "Automate"),
+                        _ => (Icon::Phone, ""),
                     };
                     let g = ui.painter().layout_no_wrap(
                         tr(label).to_string(),
@@ -375,7 +375,7 @@ impl App {
                     let r = super::icons::icon_button_ex(
                         ui,
                         &t,
-                        "dots",
+                        Icon::Dots,
                         tr("Manage"),
                         "Manage",
                         false,
@@ -510,7 +510,7 @@ impl App {
                 super::icons::icon_button_ex(
                     ui,
                     &t,
-                    "hash",
+                    Icon::Hash,
                     if short_channel { "" } else { tr("Add Channel") },
                     "Add Channel",
                     false,
@@ -713,7 +713,7 @@ impl App {
                                 short: &str,
                                 active: bool,
                                 accent: bool,
-                                icon: &str|
+                                icon: Icon|
                      -> Response {
                         if compact {
                             let r = pill(ui, &t, full, short, active, accent, icon);
@@ -723,7 +723,7 @@ impl App {
                         }
                     };
                     if grouped {
-                        let r = chip(ui, &group_label, &group_shown, "", false, true, "list");
+                        let r = chip(ui, &group_label, &group_shown, "", false, true, Icon::List);
                         popup(ui, &r, ui.id().with("group_pop"), 160.0, |ui| {
                             for g in GroupBy::ALL {
                                 if ui
@@ -742,7 +742,7 @@ impl App {
                             "",
                             self.prefs.subtasks_open,
                             false,
-                            "subtasks",
+                            Icon::Subtasks,
                         )
                         .on_hover_text(tr("Show all subtasks"))
                         .clicked()
@@ -772,7 +772,7 @@ impl App {
                             "",
                             n > 0 || extra > 0 || self.fields_open,
                             false,
-                            "columns",
+                            Icon::Columns,
                         );
                         if cr.clicked() {
                             self.fields_open = !self.fields_open;
@@ -806,7 +806,7 @@ impl App {
                         if sresp.hovered() || self.show_search {
                             ui.painter().rect_filled(sr.shrink(1.0), 6.0, t.hover);
                         }
-                        line_icon(ui.painter(), "search", sr.center(), t.text2);
+                        line_icon(ui.painter(), Icon::Search, sr.center(), t.text2);
                         name_it(&sresp, "Search tasks");
                         if sresp.on_hover_text(tr("Search tasks")).clicked() {
                             self.show_search = !self.show_search;
@@ -860,7 +860,7 @@ impl App {
                             "",
                             self.assignee_filter.is_some(),
                             false,
-                            "person",
+                            Icon::Person,
                         );
                         let data = self.data.clone();
                         popup(ui, &ar, ui.id().with("asg_filter"), 200.0, |ui| {
@@ -888,7 +888,7 @@ impl App {
                             "",
                             self.prefs.show_closed,
                             false,
-                            "check",
+                            Icon::Check,
                         )
                         .on_hover_text(tr("Show closed tasks"))
                         .clicked()
@@ -907,7 +907,7 @@ impl App {
                             &fshort,
                             nf > 0 || self.filter_open,
                             false,
-                            "filter",
+                            Icon::Filter,
                         );
                         if fr.clicked() {
                             self.filter_open = !self.filter_open;
@@ -926,7 +926,7 @@ impl App {
                             sort_arrow.trim(),
                             self.prefs.sort_by != SortBy::Manual,
                             false,
-                            "sort",
+                            Icon::Sort,
                         );
                         popup(ui, &sr, ui.id().with("sort_pop"), 160.0, |ui| {
                             for s in SortBy::ALL {

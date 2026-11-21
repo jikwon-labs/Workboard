@@ -64,7 +64,7 @@ impl App {
                                     if self.data.space_of_list(f.list_id).is_some() {
                                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                             let label = trf!("Open {}", self.data.list_name(f.list_id));
-                                            if icon_button(ui, &t, "list", &label, "Open the form's List", true).clicked() {
+                                            if icon_button(ui, &t, Icon::List, &label, "Open the form's List", true).clicked() {
                                                 self.actions.push(Action::Go(Location::List(f.list_id)));
                                             }
                                         });
@@ -76,9 +76,9 @@ impl App {
                                     return;
                                 }
                                 let items: [SegItem; 3] = [
-                                    ("", tr("All").into(), Some(tasks.len()), "All answers"),
-                                    ("", tr("Not done").into(), Some(open), "Not done answers"),
-                                    ("", tr("Done").into(), Some(tasks.len() - open), "Done answers"),
+                                    (None, tr("All").into(), Some(tasks.len()), "All answers"),
+                                    (None, tr("Not done").into(), Some(open), "Not done answers"),
+                                    (None, tr("Done").into(), Some(tasks.len() - open), "Done answers"),
                                 ];
                                 if let Some(i) = seg(ui, &t, &items, self.sweep.forms.answers_filter.min(2) as usize) {
                                     self.sweep.forms.answers_filter = i as u8;
@@ -117,7 +117,7 @@ impl App {
                     if icon_button(
                         ui,
                         t,
-                        "eye",
+                        Icon::Eye,
                         tr("Fill out the form"),
                         "Fill out the form",
                         true,

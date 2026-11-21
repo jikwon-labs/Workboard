@@ -384,11 +384,11 @@ impl App {
             // the emoji stays part of the status people see; the button
             // draws a line icon and the words
             for (kind, s) in [
-                ("calendar", tr("\u{1F4C5} In a meeting")),
-                ("bus", tr("\u{1F68C} Commuting")),
-                ("frown", tr("\u{2639} Out sick")),
-                ("plane", tr("\u{1F334} Vacationing")),
-                ("home", tr("\u{1F3E0} Working remotely")),
+                (Icon::Calendar, tr("\u{1F4C5} In a meeting")),
+                (Icon::Bus, tr("\u{1F68C} Commuting")),
+                (Icon::Frown, tr("\u{2639} Out sick")),
+                (Icon::Plane, tr("\u{1F334} Vacationing")),
+                (Icon::Home, tr("\u{1F3E0} Working remotely")),
             ] {
                 let words = s.split_once(' ').map_or(s, |x| x.1);
                 if icon_button(ui, t, kind, words, s, true).clicked() {
@@ -483,7 +483,7 @@ impl App {
                 });
                 close = true;
             }
-            if icon_button(ui, t, "link", tr("Copy link"), "Copy link", true).clicked() {
+            if icon_button(ui, t, Icon::Link, tr("Copy link"), "Copy link", true).clicked() {
                 // the same kind of link the app opens (search, messages, macOS)
                 self.copy_link(ui, super::nav::location_link(self.loc));
             }

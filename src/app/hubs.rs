@@ -10,7 +10,10 @@ pub(crate) mod side;
 use super::icons::{icon_button, icon_button_ex, line_icon, line_icon_scaled};
 use super::*;
 pub(crate) use filter::{DocFilter, HubFilters, OwnFilter, SheetsTab, TeamsPage};
-use side::{side_empty, side_heading, side_row, side_row_text, side_rule, side_search, SideFilter};
+use side::{
+    side_empty, side_heading, side_row, side_row_text, side_rule, side_search, FilterIcon,
+    SideFilter,
+};
 
 /// `dash_open` for the built-in Workspace overview (not a saved dashboard).
 pub(super) const WORKSPACE_OVERVIEW: u64 = 0;
@@ -34,25 +37,37 @@ struct HubSide<'a> {
 }
 
 /// The Docs filters in the sidebar's order: (filter, icon, name).
-const DOC_FILTERS: [(DocFilter, &str, &str); 8] = [
-    (DocFilter::All, "docs", "All Docs"),
-    (DocFilter::Mine, "@me", "My Docs"),
-    (DocFilter::Favorites, "star", "Favorites"),
-    (DocFilter::Shared, "teams", "Shared with me"),
-    (DocFilter::Private, "lock", "Private"),
-    (DocFilter::Meetings, "edit", "Meeting Notes"),
-    (DocFilter::Wikis, "notebook", "Wikis"),
-    (DocFilter::Archived, "archive", "Archived"),
+const DOC_FILTERS: [(DocFilter, FilterIcon, &str); 8] = [
+    (DocFilter::All, FilterIcon::Line(Icon::Docs), "All Docs"),
+    (DocFilter::Mine, FilterIcon::Me, "My Docs"),
+    (DocFilter::Favorites, FilterIcon::Star, "Favorites"),
+    (
+        DocFilter::Shared,
+        FilterIcon::Line(Icon::Teams),
+        "Shared with me",
+    ),
+    (DocFilter::Private, FilterIcon::Line(Icon::Lock), "Private"),
+    (
+        DocFilter::Meetings,
+        FilterIcon::Line(Icon::Edit),
+        "Meeting Notes",
+    ),
+    (DocFilter::Wikis, FilterIcon::Line(Icon::Notebook), "Wikis"),
+    (
+        DocFilter::Archived,
+        FilterIcon::Line(Icon::Archive),
+        "Archived",
+    ),
 ];
 
-/// A template card as in the galleries: round coloured icon (`glyph` is a
-/// line icon kind, or "+"), title, description.
+/// A template card as in the galleries: round coloured icon (a "+" for
+/// none), title, description.
 fn gallery_card(
     ui: &mut Ui,
     t: &Theme,
     w: f32,
     color: [u8; 3],
-    glyph: &str,
+    glyph: Option<Icon>,
     title: &str,
     sub: &str,
     ai: bool,
@@ -68,15 +83,15 @@ fn gallery_card(
         egui::StrokeKind::Inside,
     );
     let c = r.left_top() + vec2(38.0, 36.0);
-    if glyph == "+" {
-        ui.painter().circle_filled(c, 18.0, t.hover);
-        crate::app::icons::paint_plus(ui.painter(), c, 22.0, t.text2);
-    } else {
+    if let Some(glyph) = glyph {
         // a pale tile of the colour with the icon in the full colour (the
         // emoji sat on a tile of nearly its own colour and hardly showed)
         ui.painter()
             .circle_filled(c, 18.0, rgb(color).gamma_multiply(0.14));
         line_icon_scaled(ui.painter(), glyph, c, rgb(color), 1.15);
+    } else {
+        ui.painter().circle_filled(c, 18.0, t.hover);
+        crate::app::icons::paint_plus(ui.painter(), c, 22.0, t.text2);
     }
     let tc = if ai {
         Color32::from_rgb(0x9b, 0x2d, 0xd6)
@@ -225,7 +240,7 @@ impl App {
             let (r, resp) = side_row(ui, t, &format!("Open doc {}", title), sel, 30.0);
             line_icon(
                 ui.painter(),
-                if wiki { "notebook" } else { "docs" },
+                if wiki { Icon::Notebook } else { Icon::Docs },
                 r.left_center() + vec2(16.0, 0.0),
                 t.text2,
             );
@@ -245,7 +260,7 @@ impl App {
             let (r, resp) = side_row(ui, t, &format!("Popular Wiki {}", title), sel, 30.0);
             line_icon(
                 ui.painter(),
-                "notebook",
+                Icon::Notebook,
                 r.left_center() + vec2(16.0, 0.0),
                 t.text2,
             );
@@ -291,7 +306,7 @@ impl App {
             let (r, resp) = side_row(ui, t, &format!("Open dashboard {}", name), sel, 30.0);
             line_icon(
                 ui.painter(),
-                "dashboards",
+                Icon::Dashboards,
                 r.left_center() + vec2(16.0, 0.0),
                 t.text2,
             );
@@ -539,7 +554,7 @@ impl App {
                                     let r = icon_button(
                                         ui,
                                         &t,
-                                        "filter",
+                                        Icon::Filter,
                                         if self.docs.mine {
                                             tr("Filters \u{2022} 1")
                                         } else {
@@ -556,8 +571,14 @@ impl App {
                                         tr(["Date updated", "Name", "Date created"]
                                             [self.docs.sort as usize % 3])
                                     );
-                                    let sr =
-                                        icon_button(ui, &t, "sort", &sort_text, "Docs sort", true);
+                                    let sr = icon_button(
+                                        ui,
+                                        &t,
+                                        Icon::Sort,
+                                        &sort_text,
+                                        "Docs sort",
+                                        true,
+                                    );
                                     popup(ui, &sr, ui.id().with("docs_sort"), 180.0, |ui| {
                                         for (i, l) in ["Date updated", "Name", "Date created"]
                                             .iter()
@@ -579,7 +600,7 @@ impl App {
                                     let tagr = icon_button(
                                         ui,
                                         &t,
-                                        "tag",
+                                        Icon::Tag,
                                         &tag_label,
                                         "Docs tag filter",
                                         true,
@@ -866,11 +887,11 @@ impl App {
                     }
                     if self.data.docs[idx].meeting_note {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                        line_icon(ui.painter(), "edit", r.center(), t.text3);
+                        line_icon(ui.painter(), Icon::Edit, r.center(), t.text3);
                         ui.label(RichText::new(tr("Meeting Note")).small().color(t.text3));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let mr = icon_button(ui, &t, "dots", "", "Doc options", false)
+                        let mr = icon_button(ui, &t, Icon::Dots, "", "Doc options", false)
                             .on_hover_text(tr("More"));
                         click_menu(&mr, |ui| self.doc_menu(ui, id, false));
                         if ui
@@ -942,9 +963,9 @@ impl App {
                         };
                         let d = &mut self.data.docs[idx];
                         let (kind, label) = if d.private {
-                            ("lock", "Private")
+                            (Icon::Lock, "Private")
                         } else {
-                            ("teams", "Shared")
+                            (Icon::Teams, "Shared")
                         };
                         if icon_button_ex(
                             ui,
@@ -1034,19 +1055,19 @@ impl App {
         let filters = [
             SideFilter {
                 key: 0,
-                icon: "dashboards",
+                icon: FilterIcon::Line(Icon::Dashboards),
                 label: "All Dashboards",
                 count: n(0),
             },
             SideFilter {
                 key: 1,
-                icon: "@me",
+                icon: FilterIcon::Me,
                 label: "My Dashboards",
                 count: n(1),
             },
             SideFilter {
                 key: 2,
-                icon: "star",
+                icon: FilterIcon::Star,
                 label: "Favorites",
                 count: n(2),
             },
@@ -1089,22 +1110,22 @@ impl App {
                         for d in shown {
                             ui.horizontal(|ui| {
                                 self.star_toggle(ui, format!("dash:{}", d.id));
-                                if icon_button_ex(ui, &t, "dashboards", &d.name, &d.name, false, 0.0, t.text, t.text2).clicked() {
+                                if icon_button_ex(ui, &t, Icon::Dashboards, &d.name, &d.name, false, 0.0, t.text, t.text2).clicked() {
                                     self.dash_open = Some(d.id);
                                 }
                             });
                         }
-                        if icon_button_ex(ui, &t, "dashboards", tr("Workspace overview"), "Workspace overview", false, 0.0, t.text, t.text2).clicked() {
+                        if icon_button_ex(ui, &t, Icon::Dashboards, tr("Workspace overview"), "Workspace overview", false, 0.0, t.text, t.text2).clicked() {
                             self.dash_open = Some(WORKSPACE_OVERVIEW);
                         }
                     });
                 }
                 let choice = self.gallery(ui, tr("Choose a Dashboard template"), tr("Get started with a Dashboard template or create a custom Dashboard\nto fit your exact needs."), &[
-                    ([0x44, 0x66, 0xff], "dashboards", "Simple Dashboard", "Manage and prioritize tasks", false),
-                    ([0xb6, 0x60, 0xe0], "sparkle", "AI Team Center", "View team activity with AI", true),
-                    ([0x0f, 0x9d, 0x9f], "clock", "Time Tracking", "View and report on time tracking metrics", false),
-                    ([0x10, 0x90, 0xe0], "list", "Project Management", "Analyze project progress and metrics", false),
-                    ([0xb6, 0x60, 0xe0], "sparkle", "AI Personal Center", "Improve your performance and career with AI cards", true),
+                    ([0x44, 0x66, 0xff], Icon::Dashboards, "Simple Dashboard", "Manage and prioritize tasks", false),
+                    ([0xb6, 0x60, 0xe0], Icon::Sparkle, "AI Team Center", "View team activity with AI", true),
+                    ([0x0f, 0x9d, 0x9f], Icon::Clock, "Time Tracking", "View and report on time tracking metrics", false),
+                    ([0x10, 0x90, 0xe0], Icon::List, "Project Management", "Analyze project progress and metrics", false),
+                    ([0xb6, 0x60, 0xe0], Icon::Sparkle, "AI Personal Center", "Improve your performance and career with AI cards", true),
                 ]);
                 if let Some(name) = choice {
                     if name.starts_with("AI ") {
@@ -1160,7 +1181,7 @@ impl App {
         ui: &mut Ui,
         title: &str,
         sub: &str,
-        cards: &[([u8; 3], &str, &str, &str, bool)],
+        cards: &[([u8; 3], Icon, &str, &str, bool)],
     ) -> Option<String> {
         let t = self.t();
         let mut out = None;
@@ -1178,14 +1199,17 @@ impl App {
         let cols = (((w - 2.0 * margin + gap) / (200.0 + gap)).floor() as usize).clamp(1, 3);
         let cw = ((w - 2.0 * margin - gap * (cols - 1) as f32) / cols as f32).min(245.0);
         let total = cw * cols as f32 + gap * (cols - 1) as f32;
-        let mut all: Vec<([u8; 3], &str, &str, &str, bool)> = cards.to_vec();
-        all.push(([0, 0, 0], "+", "Start from scratch", "", false));
+        let mut all: Vec<([u8; 3], Option<Icon>, &str, &str, bool)> = cards
+            .iter()
+            .map(|c| (c.0, Some(c.1), c.2, c.3, c.4))
+            .collect();
+        all.push(([0, 0, 0], None, "Start from scratch", "", false));
         for row in all.chunks(cols) {
             ui.horizontal(|ui| {
                 ui.add_space(((w - total) / 2.0).max(0.0));
                 ui.spacing_mut().item_spacing.x = gap;
                 for (color, glyph, name, desc, ai) in row {
-                    if gallery_card(ui, &t, cw, *color, glyph, name, desc, *ai).clicked() {
+                    if gallery_card(ui, &t, cw, *color, *glyph, name, desc, *ai).clicked() {
                         out = Some(name.to_string());
                     }
                 }
@@ -1228,19 +1252,19 @@ impl App {
         let filters = [
             SideFilter {
                 key: 0,
-                icon: "whiteboards",
+                icon: FilterIcon::Line(Icon::Whiteboards),
                 label: "All Whiteboards",
                 count: n(0),
             },
             SideFilter {
                 key: 1,
-                icon: "@me",
+                icon: FilterIcon::Me,
                 label: "My Whiteboards",
                 count: n(1),
             },
             SideFilter {
                 key: 2,
-                icon: "star",
+                icon: FilterIcon::Star,
                 label: "Favorites",
                 count: n(2),
             },
@@ -1301,31 +1325,31 @@ impl App {
         let filters = [
             SideFilter {
                 key: 0,
-                icon: "teams",
+                icon: FilterIcon::Line(Icon::Teams),
                 label: "All Teams",
                 count: Some(self.data.extra.teams.len()),
             },
             SideFilter {
                 key: 1,
-                icon: "person",
+                icon: FilterIcon::Line(Icon::Person),
                 label: "All People",
                 count: Some(people),
             },
             SideFilter {
                 key: 2,
-                icon: "subtasks",
+                icon: FilterIcon::Line(Icon::Subtasks),
                 label: "Org Chart",
                 count: None,
             },
             SideFilter {
                 key: 3,
-                icon: "chart",
+                icon: FilterIcon::Line(Icon::Chart),
                 label: "Analytics",
                 count: None,
             },
             SideFilter {
                 key: 4,
-                icon: "@me",
+                icon: FilterIcon::Me,
                 label: "My Teams",
                 count: Some(mine),
             },
@@ -1692,7 +1716,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.set_height(40.0);
                     let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
-                    line_icon(ui.painter(), "timesheets", r.center(), t.text2);
+                    line_icon(ui.painter(), Icon::Timesheets, r.center(), t.text2);
                     ui.label(RichText::new(tr("Timesheets")).size(15.5));
                     ui.separator();
                     // no Approvals tab: submitting a week for approval isn't built
@@ -1765,8 +1789,8 @@ impl App {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             // the view shown is outlined, like the composer's tabs
                             for (on, kind, label, hint) in [
-                                (true, "list", "Time entries", "Each piece of time you tracked this week, newest first"),
-                                (false, "table", "Timesheet", "Your time on each task for each day of the week"),
+                                (true, Icon::List, "Time entries", "Each piece of time you tracked this week, newest first"),
+                                (false, Icon::Table, "Timesheet", "Your time on each task for each day of the week"),
                             ] {
                                 let sel = self.sheet_entries == on;
                                 if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, if sel { t.text } else { t.text2 }, t.text2).on_hover_text(tr(hint)).clicked() {
@@ -1787,7 +1811,7 @@ impl App {
                                 ui.set_width(ui.available_width());
                                 ui.vertical_centered(|ui| {
                                     let (r, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
-                                    line_icon_scaled(ui.painter(), "timesheets", r.center(), t.text3, 2.6);
+                                    line_icon_scaled(ui.painter(), Icon::Timesheets, r.center(), t.text3, 2.6);
                                     ui.label(RichText::new(tr("Add entries to this week's timesheet")).size(17.0));
                                     ui.add_space(4.0);
                                     // what a timesheet is for: nothing else on the page says it
@@ -1798,7 +1822,7 @@ impl App {
                                 let cw = 200.0;
                                 ui.horizontal(|ui| {
                                     ui.add_space(((w - 4.0 * cw - 30.0) / 2.0).max(0.0));
-                                    for (icon, label) in [("teams", "All assigned tasks"), ("table", "Last week's tasks"), ("check_plus", "Individual tasks"), ("clock", "Track time")] {
+                                    for (icon, label) in [(Icon::Teams, "All assigned tasks"), (Icon::Table, "Last week's tasks"), (Icon::CheckPlus, "Individual tasks"), (Icon::Clock, "Track time")] {
                                         let (r, resp) = ui.allocate_exact_size(vec2(cw, 84.0), Sense::click());
                                         name_it(&resp, label);
                                         ui.painter().rect_filled(r, 10.0, if resp.hovered() { t.sidebar } else { t.card });

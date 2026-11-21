@@ -860,7 +860,7 @@ impl App {
                             ui.painter().circle_filled(r.center(), 13.0, green);
                             super::shell::line_icon(
                                 ui.painter(),
-                                "phone",
+                                Icon::Phone,
                                 r.center(),
                                 Color32::WHITE,
                             );

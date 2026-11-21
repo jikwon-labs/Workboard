@@ -109,7 +109,13 @@ impl App {
                                 Stroke::new(1.5_f32, t.border),
                                 egui::StrokeKind::Inside,
                             );
-                            line_icon_scaled(ui.painter(), "megaphone", r.center(), t.text2, 1.6);
+                            line_icon_scaled(
+                                ui.painter(),
+                                Icon::Megaphone,
+                                r.center(),
+                                t.text2,
+                                1.6,
+                            );
                             ui.add_space(10.0);
                             // posts there, all of them filtered out
                             let say = if any {
@@ -273,7 +279,7 @@ impl App {
                                     close_popup(ui);
                                 }
                             });
-                            let em = icon_button(ui, &t, "smile", "", "Emoji", false)
+                            let em = icon_button(ui, &t, Icon::Smile, "", "Emoji", false)
                                 .on_hover_text(tr("Emoji"));
                             popup(ui, &em, egui::Id::new("post_emoji"), 248.0, |ui| {
                                 if let Some(e) = crate::app::chat::emoji_grid(ui) {
@@ -281,7 +287,7 @@ impl App {
                                     close_popup(ui);
                                 }
                             });
-                            if icon_button(ui, &t, "task", "", "Create task", false)
+                            if icon_button(ui, &t, Icon::Task, "", "Create task", false)
                                 .on_hover_text(tr("Create task"))
                                 .clicked()
                             {
@@ -445,7 +451,7 @@ impl App {
                 .clone()
                 .map(|t| tr(&t).to_string())
                 .unwrap_or_else(|| tr("Type").into());
-            let tyr = icon_button(ui, &t, "shapes", &tl, "Post type filter", true);
+            let tyr = icon_button(ui, &t, Icon::Shapes, &tl, "Post type filter", true);
             popup(ui, &tyr, ui.id().with("pf_ty"), 180.0, |ui| {
                 if ui
                     .selectable_label(self.post.f_type.is_none(), tr("Any type"))

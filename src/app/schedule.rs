@@ -257,7 +257,7 @@ impl App {
         };
         ui.horizontal(|ui| {
             let d_txt = date.map(fmt_date).unwrap_or_else(|| tr("Date").into());
-            let r = icon_button(ui, t, "calendar", &d_txt, "Schedule date", true);
+            let r = icon_button(ui, t, Icon::Calendar, &d_txt, "Schedule date", true);
             popup(ui, &r, ui.id().with("sched_date"), DATE_MENU_W, |ui| {
                 date_menu(ui, t, ui.id().with("sched_cal"), date)
             });

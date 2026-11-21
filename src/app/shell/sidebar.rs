@@ -234,7 +234,9 @@ impl App {
             if resp.hovered() || active {
                 ui.painter().rect_filled(br, 6.0, t.row_selected);
             }
-            if (hovered || active) && !line_icon(ui.painter(), glyph, br.center(), t.text2) {
+            if let Some(icon) = Icon::named(glyph).filter(|_| hovered || active) {
+                line_icon(ui.painter(), icon, br.center(), t.text2);
+            } else if hovered || active {
                 ui.painter().text(
                     br.center(),
                     Align2::CENTER_CENTER,
@@ -327,18 +329,18 @@ impl App {
         } else {
             self.unread_replies()
         };
-        let nav: [(&str, &str); 9] = [
-            ("Inbox", "\u{1F4E5}"),
-            ("Replies", "\u{21A9}"),
-            ("Assigned Comments", "\u{1F4AC}"),
-            ("Posts", "\u{1F4E2}"),
-            ("Skills", "\u{26A1}"),
-            ("Artifacts", "\u{1F496}"),
-            ("Meetings", "\u{260E}"),
-            ("My Tasks", "\u{1F464}"),
-            ("More", "\u{22EF}"),
+        let nav: [&str; 9] = [
+            "Inbox",
+            "Replies",
+            "Assigned Comments",
+            "Posts",
+            "Skills",
+            "Artifacts",
+            "Meetings",
+            "My Tasks",
+            "More",
         ];
-        for (label, icon) in nav {
+        for label in nav {
             if self.hidden(label) || !self.matches_search(label) {
                 continue;
             }
@@ -359,31 +361,21 @@ impl App {
                 _ => 0,
             };
             let kind = match label {
-                "Inbox" => "inbox",
-                "Replies" => "reply",
-                "Assigned Comments" => "person_comment",
-                "Posts" => "megaphone",
-                "Skills" => "bolt",
-                "Artifacts" => "heart",
-                "Meetings" => "phone",
-                "My Tasks" => "person",
-                _ => "dots",
+                "Inbox" => Icon::Inbox,
+                "Replies" => Icon::Reply,
+                "Assigned Comments" => Icon::PersonComment,
+                "Posts" => Icon::Megaphone,
+                "Skills" => Icon::Bolt,
+                "Artifacts" => Icon::Heart,
+                "Meetings" => Icon::Phone,
+                "My Tasks" => Icon::Person,
+                _ => Icon::Dots,
             };
             let r = self.side_row_tr(
                 ui,
                 0.0,
                 sel,
-                |p, c| {
-                    if !line_icon(p, kind, c, tc) {
-                        p.text(
-                            c,
-                            Align2::CENTER_CENTER,
-                            icon,
-                            FontId::proportional(13.0),
-                            tc,
-                        );
-                    }
-                },
+                |p, c| line_icon(p, kind, c, tc),
                 label,
                 None,
                 None,
@@ -394,14 +386,14 @@ impl App {
                 "More" => {
                     popup(ui, &r, ui.id().with("side_more"), 220.0, |ui| {
                         for (l, ic) in [
-                            ("Overview", "home"),
-                            ("Docs", "docs"),
-                            ("Dashboards", "dashboards"),
-                            ("Whiteboards", "whiteboards"),
-                            ("Forms", "forms"),
-                            ("Goals", "goals"),
-                            ("Timesheets", "timesheets"),
-                            ("People", "teams"),
+                            ("Overview", Icon::Home),
+                            ("Docs", Icon::Docs),
+                            ("Dashboards", Icon::Dashboards),
+                            ("Whiteboards", Icon::Whiteboards),
+                            ("Forms", Icon::Forms),
+                            ("Goals", Icon::Goals),
+                            ("Timesheets", Icon::Timesheets),
+                            ("People", Icon::Teams),
                         ] {
                             if menu_row(ui, &t, tr(l), false, |p, c| {
                                 line_icon(p, ic, c, t.text2);
@@ -418,7 +410,7 @@ impl App {
                         }
                         ui.separator();
                         if menu_row(ui, &t, tr("Customize your sidebar"), false, |p, c| {
-                            line_icon(p, "sidebar", c, t.text2);
+                            line_icon(p, Icon::Sidebar, c, t.text2);
                         })
                         .clicked()
                         {
@@ -471,8 +463,8 @@ impl App {
                             14.0,
                             sel,
                             |p, c| match sl {
-                                "Today & Overdue" => paint_calendar_icon(p, c, tc),
-                                _ => paint_person_icon(p, c, tc),
+                                "Today & Overdue" => line_icon(p, Icon::CalendarSmall, c, tc),
+                                _ => line_icon(p, Icon::PersonSmall, c, tc),
                             },
                             sl,
                             None,

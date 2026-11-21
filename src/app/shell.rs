@@ -13,7 +13,7 @@ mod side_tree;
 mod sidebar;
 
 pub(super) use super::icons::line_icon;
-use super::icons::{paint_calendar_icon, paint_checklist_icon, paint_person_icon, paint_view_icon};
+use super::icons::paint_view_icon;
 
 /// What is being dragged in the sidebar.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -101,23 +101,23 @@ fn paint_key_hint(p: &egui::Painter, ibox: Rect, n: usize) {
 }
 
 /// The line icon of an item the rail can hold.
-pub(super) fn rail_icon(label: &str) -> &'static str {
+pub(super) fn rail_icon(label: &str) -> Icon {
     match label {
-        "Home" => "home",
-        "Planner" => "planner",
-        "AI" => "ai",
-        "Teams" => "teams",
-        "Chat" => "chat",
-        "Docs" => "docs",
-        "Dashboards" => "dashboards",
-        "Whiteboards" => "whiteboards",
-        "Forms" => "forms",
-        "Goals" => "goals",
-        "Timesheets" => "timesheets",
-        "Clips" => "video",
-        "Apps" => "apps",
-        "Spaces" => "space",
-        _ => "dots",
+        "Home" => Icon::Home,
+        "Planner" => Icon::Planner,
+        "AI" => Icon::Ai,
+        "Teams" => Icon::Teams,
+        "Chat" => Icon::Chat,
+        "Docs" => Icon::Docs,
+        "Dashboards" => Icon::Dashboards,
+        "Whiteboards" => Icon::Whiteboards,
+        "Forms" => Icon::Forms,
+        "Goals" => Icon::Goals,
+        "Timesheets" => Icon::Timesheets,
+        "Clips" => Icon::Video,
+        "Apps" => Icon::Apps,
+        "Spaces" => Icon::Space,
+        _ => Icon::Dots,
     }
 }
 
@@ -319,7 +319,7 @@ impl App {
                 if cresp.hovered() {
                     ui.painter().rect_filled(cr, 6.0, t.hover);
                 }
-                paint_calendar_icon(ui.painter(), cr.center(), t.text2);
+                line_icon(ui.painter(), Icon::CalendarSmall, cr.center(), t.text2);
                 ui.painter().text(
                     cr.center() + vec2(0.0, 2.0),
                     Align2::CENTER_CENTER,
@@ -388,7 +388,7 @@ impl App {
                 );
                 super::icons::line_icon_scaled(
                     ui.painter(),
-                    "search",
+                    Icon::Search,
                     sr.left_center() + vec2(20.0, 0.0),
                     t.text2,
                     0.8,
@@ -430,7 +430,7 @@ impl App {
                 );
                 super::icons::line_icon_scaled(
                     ui.painter(),
-                    "sparkle",
+                    Icon::Sparkle,
                     ai_r.right_center() - vec2(12.0, 0.0),
                     Color32::from_rgb(171, 74, 186),
                     0.75,
@@ -543,7 +543,7 @@ impl App {
                             ui.painter().rect_filled(r, 6.0, t.hover);
                         }
                         // TOOLS names each tool's line icon
-                        line_icon(ui.painter(), icon, r.center(), t.text2);
+                        line_icon(ui.painter(), *icon, r.center(), t.text2);
                         if resp.on_hover_text(tr(label)).clicked() {
                             self.run_tool(tid);
                         }
@@ -567,7 +567,7 @@ impl App {
                     let br = ui.add(b);
                     super::icons::line_icon_scaled(
                         ui.painter(),
-                        "stop",
+                        Icon::Stop,
                         br.rect.left_center() + vec2(15.0, 0.0),
                         Color32::WHITE,
                         0.6,
@@ -977,7 +977,7 @@ impl App {
                 } else if resp.hovered() {
                     p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                 }
-                line_icon(&p, "more", ibox.center(), white);
+                line_icon(&p, Icon::More, ibox.center(), white);
                 p.text(
                     pos2(cx, ibox.bottom() + 10.0),
                     Align2::CENTER_CENTER,
@@ -1009,9 +1009,16 @@ impl App {
                         p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                     }
                     if label == "Invite" {
-                        paint_person_icon(&p, ibox.center() + vec2(-1.0, -1.0), white);
+                        line_icon(
+                            &p,
+                            Icon::PersonSmall,
+                            ibox.center() + vec2(-1.0, -1.0),
+                            white,
+                        );
                         super::icons::paint_plus(&p, ibox.center() + vec2(6.0, 4.0), 10.0, white);
-                    } else if !line_icon(&p, &label.to_lowercase(), ibox.center(), white) {
+                    } else if let Some(i) = Icon::named(&label.to_lowercase()) {
+                        line_icon(&p, i, ibox.center(), white);
+                    } else {
                         p.text(
                             ibox.center(),
                             Align2::CENTER_CENTER,

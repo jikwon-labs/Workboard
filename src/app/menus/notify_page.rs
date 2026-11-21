@@ -96,7 +96,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "bell",
+                Icon::Bell,
                 "Desktop notifications",
                 &mut n.desktop,
                 false,
@@ -110,7 +110,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "volume",
+                Icon::Volume,
                 "Notification sound",
                 &mut n.sound,
                 true,
@@ -125,7 +125,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "badge",
+                Icon::Badge,
                 badge,
                 &mut n.dock_badge,
                 true,
@@ -140,12 +140,12 @@ impl App {
         section_title(ui, t, "Inbox");
         caption(ui, t, "Notified and kept in your Inbox");
         card(ui, t, |ui| {
-            let rows: [(&str, &str, &mut bool); 5] = [
-                ("chat", "Comments on my tasks", &mut n.comments),
-                ("at", "Mentions", &mut n.mentions),
-                ("person", "Tasks assigned to me", &mut n.assigned),
-                ("alarm", "Reminders", &mut n.reminders),
-                ("inbox", "Unread chat count", &mut n.chat),
+            let rows: [(Icon, &str, &mut bool); 5] = [
+                (Icon::Chat, "Comments on my tasks", &mut n.comments),
+                (Icon::At, "Mentions", &mut n.mentions),
+                (Icon::Person, "Tasks assigned to me", &mut n.assigned),
+                (Icon::Alarm, "Reminders", &mut n.reminders),
+                (Icon::Inbox, "Unread chat count", &mut n.chat),
             ];
             for (i, (icon, title, on)) in rows.into_iter().enumerate() {
                 ch |= setting_row(
@@ -168,11 +168,11 @@ impl App {
         section_title(ui, t, "Chat");
         card(ui, t, |ui| {
             ch |= channel_choice(ui, t, &tn, n);
-            let rows: [(&str, &str, &mut bool); 4] = [
-                ("person_comment", "Direct messages", &mut n.direct),
-                ("reply", "Replies in threads I'm in", &mut n.replies),
-                ("smile", "Reactions to my messages", &mut n.reactions),
-                ("phone", "Huddles and calls", &mut n.huddles),
+            let rows: [(Icon, &str, &mut bool); 4] = [
+                (Icon::PersonComment, "Direct messages", &mut n.direct),
+                (Icon::Reply, "Replies in threads I'm in", &mut n.replies),
+                (Icon::Smile, "Reactions to my messages", &mut n.reactions),
+                (Icon::Phone, "Huddles and calls", &mut n.huddles),
             ];
             for (icon, title, on) in rows {
                 ch |= setting_row(
@@ -197,7 +197,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "edit",
+                Icon::Edit,
                 "Changes to my tasks",
                 &mut n.task_changes,
                 false,
@@ -212,7 +212,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "calendar",
+                Icon::Calendar,
                 "Tasks due today",
                 &mut n.due,
                 true,
@@ -227,7 +227,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "video",
+                Icon::Video,
                 "Meetings",
                 &mut n.meetings,
                 true,
@@ -241,7 +241,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "goals",
+                Icon::Goals,
                 "Goal deadlines",
                 &mut n.goals,
                 true,
@@ -255,7 +255,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "flag",
+                Icon::Flag,
                 "Goal milestones",
                 &mut n.goal_milestones,
                 true,
@@ -269,7 +269,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "warning",
+                Icon::Warning,
                 "Goals falling behind",
                 &mut n.goal_risk,
                 true,
@@ -283,7 +283,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "forms",
+                Icon::Forms,
                 "Answers to my forms",
                 &mut n.forms,
                 true,
@@ -300,7 +300,7 @@ impl App {
                     ui,
                     t,
                     &tn,
-                    "person_plus",
+                    Icon::PersonPlus,
                     "New members join",
                     &mut n.team,
                     false,
@@ -315,7 +315,7 @@ impl App {
                 ui,
                 t,
                 &tn,
-                "wifi",
+                Icon::Wifi,
                 "The team server connection drops and comes back",
                 &mut n.connection,
                 manages,
@@ -429,7 +429,7 @@ fn row_rule(ui: &Ui, t: &Theme, rect: Rect) {
     );
 }
 
-fn icon_tile(ui: &Ui, tn: &Tones, t: &Theme, icon: &str, c: Pos2) {
+fn icon_tile(ui: &Ui, tn: &Tones, t: &Theme, icon: Icon, c: Pos2) {
     let tile = Rect::from_center_size(c, vec2(ICON_TILE, ICON_TILE));
     ui.painter().rect_filled(tile, 8.0, tn.tile);
     line_icon(ui.painter(), icon, c, t.text2);
@@ -445,7 +445,7 @@ fn setting_row(
     ui: &mut Ui,
     t: &Theme,
     tn: &Tones,
-    icon: &str,
+    icon: Icon,
     title: &str,
     on: &mut bool,
     rule: bool,
@@ -672,7 +672,7 @@ fn preview(ui: &mut Ui, t: &Theme, tn: &Tones, n: &NotifySettings) {
     if n.sound && n.desktop {
         line_icon_scaled(
             p,
-            "volume",
+            Icon::Volume,
             pos2(head.right() + 10.0, head.center().y),
             t.text2,
             0.7,
@@ -768,7 +768,7 @@ fn delivery_footer(ui: &mut Ui, t: &Theme) -> (bool, bool) {
     );
     line_icon_scaled(
         ui.painter(),
-        "external",
+        Icon::External,
         pos2(link_rect.right() - 5.0, link_rect.center().y),
         color,
         0.6,
@@ -785,7 +785,7 @@ fn delivery_footer(ui: &mut Ui, t: &Theme) -> (bool, bool) {
     let test = icon_button(
         &mut sub,
         t,
-        "send",
+        Icon::Send,
         &test_label,
         "Send a test notification",
         true,
@@ -821,7 +821,7 @@ fn channel_choice(ui: &mut Ui, t: &Theme, tn: &Tones, n: &mut NotifySettings) ->
         ui,
         tn,
         t,
-        "hash",
+        Icon::Hash,
         pos2(
             rect.left() + 16.0 + ICON_TILE / 2.0,
             rect.top() + 14.0 + ICON_TILE / 2.0,
@@ -900,7 +900,7 @@ fn keywords(ui: &mut Ui, t: &Theme, tn: &Tones, n: &mut NotifySettings) -> bool 
         ui,
         tn,
         t,
-        "tag",
+        Icon::Tag,
         pos2(left + 16.0 + ICON_TILE / 2.0, top + 14.0 + ICON_TILE / 2.0),
     );
     let mut changed = false;
@@ -1040,7 +1040,7 @@ fn due_time_pick(ui: &mut Ui, t: &Theme, due_time: &mut String) -> bool {
     );
     line_icon_scaled(
         ui.painter(),
-        "chevron_down",
+        Icon::ChevronDown,
         pos2(rect.right() - 13.0, rect.center().y),
         t.text2.gamma_multiply(fade),
         0.7,

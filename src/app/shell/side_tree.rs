@@ -244,7 +244,9 @@ impl App {
             if boxed || hovered || resp.hovered() {
                 if *glyph == "+" {
                     crate::app::icons::paint_plus(ui.painter(), br.center(), 15.0, t.text2);
-                } else if !line_icon(ui.painter(), glyph, br.center(), t.text2) {
+                } else if let Some(icon) = Icon::named(glyph) {
+                    line_icon(ui.painter(), icon, br.center(), t.text2);
+                } else {
                     ui.painter().text(
                         br.center(),
                         Align2::CENTER_CENTER,
@@ -345,13 +347,13 @@ impl App {
         popup(ui, &pr, ui.id().with(("splus_pop", s.id)), 220.0, |ui| {
             ui.label(RichText::new(tr("Create")).small().color(t.text3));
             for (icon, label) in [
-                ("list", "List"),
-                ("folder", "Folder"),
-                ("docs", "Doc"),
-                ("forms", "Form"),
-                ("dashboards", "Dashboard"),
-                ("whiteboards", "Whiteboard"),
-                ("templates", "From a template"),
+                (Icon::List, "List"),
+                (Icon::Folder, "Folder"),
+                (Icon::Docs, "Doc"),
+                (Icon::Forms, "Form"),
+                (Icon::Dashboards, "Dashboard"),
+                (Icon::Whiteboards, "Whiteboard"),
+                (Icon::Templates, "From a template"),
             ] {
                 if menu_row_named(ui, &t, label, tr(label), false, |p, c| {
                     line_icon(p, icon, c, t.text2);
@@ -497,7 +499,7 @@ impl App {
                 ui.set_min_width(180.0);
                 ui.label(RichText::new(tr("Create")).small().color(t.text3));
                 if menu_row_named(ui, &t, "List", tr("List"), false, |p, c| {
-                    line_icon(p, "list", c, t.text2);
+                    line_icon(p, Icon::List, c, t.text2);
                 })
                 .clicked()
                 {
@@ -505,7 +507,7 @@ impl App {
                     ui.close_menu();
                 }
                 if menu_row_named(ui, &t, "Doc", tr("Doc"), false, |p, c| {
-                    line_icon(p, "docs", c, t.text2);
+                    line_icon(p, Icon::Docs, c, t.text2);
                 })
                 .clicked()
                 {
@@ -624,7 +626,7 @@ impl App {
             ui,
             indent,
             sel,
-            |p, c| paint_checklist_icon(p, c, ic),
+            |p, c| line_icon(p, Icon::ChecklistSmall, c, ic),
             &l.name,
             None,
             if n > 0 { Some(n.to_string()) } else { None },

@@ -5,12 +5,22 @@
 
 use super::*;
 
-/// A filter row: the value it sets, its icon ("@me" is my avatar, "star" a
-/// star), its English name (shown translated) and how many items it holds
-/// (none for a page that is not a list, like Teams' Org Chart).
+/// What a filter row shows before its name.
+#[derive(Clone, Copy)]
+pub(crate) enum FilterIcon {
+    /// My avatar.
+    Me,
+    /// A star.
+    Star,
+    Line(Icon),
+}
+
+/// A filter row: the value it sets, its icon, its English name (shown
+/// translated) and how many items it holds (none for a page that is not a
+/// list, like Teams' Org Chart).
 pub(crate) struct SideFilter<'a> {
     pub key: u8,
-    pub icon: &'a str,
+    pub icon: FilterIcon,
     pub label: &'a str,
     pub count: Option<usize>,
 }
@@ -55,12 +65,12 @@ impl App {
             let (r, resp) = side_row(ui, &t, f.label, sel, 30.0);
             let ic = r.left_center() + vec2(16.0, 0.0);
             match f.icon {
-                "@me" => {
+                FilterIcon::Me => {
                     if let Some(m) = self.data.member(self.data.me) {
                         paint_avatar(ui.painter(), ic, 8.0, m, t.sidebar);
                     }
                 }
-                "star" => {
+                FilterIcon::Star => {
                     ui.painter().text(
                         ic,
                         Align2::CENTER_CENTER,
@@ -69,7 +79,7 @@ impl App {
                         t.text2,
                     );
                 }
-                icon => {
+                FilterIcon::Line(icon) => {
                     line_icon(ui.painter(), icon, ic, t.text2);
                 }
             }
@@ -147,7 +157,7 @@ pub(crate) fn side_search(ui: &mut Ui, t: &Theme, text: &mut String, hint: &str,
     name_field(&r, name);
     line_icon_scaled(
         ui.painter(),
-        "search",
+        Icon::Search,
         // (a text field's response is its text area, inside the margin)
         pos2(r.rect.left() - 13.0, r.rect.center().y),
         t.text3,
@@ -186,7 +196,7 @@ pub(crate) fn side_heading(
         ui.label(RichText::new(heading).size(12.0).strong().color(t.text2));
         if let Some((name, tip)) = add {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                clicked = icon_button(ui, t, "plus", "", name, false)
+                clicked = icon_button(ui, t, Icon::Plus, "", name, false)
                     .on_hover_text(tip)
                     .clicked();
             });

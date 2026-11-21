@@ -1,7 +1,7 @@
 // The Board view: a column per group with its cards, dragging cards between
 // columns, and adding a task at the bottom of a column.
 
-use super::icons::{paint_calendar_icon, paint_outline_flag, paint_person_icon};
+use super::icons::line_icon;
 use super::*;
 use egui::Response;
 
@@ -435,7 +435,7 @@ impl App {
                         Stroke::new(1.0_f32, t.border),
                         egui::StrokeKind::Inside,
                     );
-                    paint_person_icon(&p, b.center(), icon_col);
+                    line_icon(&p, Icon::PersonSmall, b.center(), icon_col);
                     x += 26.0;
                     b
                 };
@@ -454,7 +454,12 @@ impl App {
                             Stroke::new(1.0_f32, t.border),
                             egui::StrokeKind::Inside,
                         );
-                        paint_calendar_icon(&p, b.left_center() + vec2(11.0, 0.0), icon_col);
+                        line_icon(
+                            &p,
+                            Icon::CalendarSmall,
+                            b.left_center() + vec2(11.0, 0.0),
+                            icon_col,
+                        );
                         let gw = g.size().x;
                         p.galley(
                             pos2(b.left() + 20.0, b.center().y - g.size().y / 2.0),
@@ -472,7 +477,7 @@ impl App {
                             Stroke::new(1.0_f32, t.border),
                             egui::StrokeKind::Inside,
                         );
-                        paint_calendar_icon(&p, b.center(), icon_col);
+                        line_icon(&p, Icon::CalendarSmall, b.center(), icon_col);
                         x += 26.0;
                         b
                     }
@@ -496,13 +501,13 @@ impl App {
                         12.0,
                     );
                 } else {
-                    paint_outline_flag(&p, b.center(), icon_col);
+                    line_icon(&p, Icon::FlagSmall, b.center(), icon_col);
                 }
                 let nsub = self.subtasks(task.id).len();
                 if nsub > 0 {
                     super::icons::icon_count(
                         &p,
-                        "subtasks",
+                        Icon::Subtasks,
                         pos2(b.right() + 8.0, r.center().y),
                         &nsub.to_string(),
                         t.text3,

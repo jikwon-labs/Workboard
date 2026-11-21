@@ -1,9 +1,7 @@
 // One task row in the List view: dragging it, the name and its tags, the
 // property and custom-field columns, the "..." menu and the selection box.
 
-use super::super::icons::{
-    paint_calendar_icon, paint_comment_icon, paint_outline_flag, paint_person_icon,
-};
+use super::super::icons::line_icon;
 use super::*;
 
 impl App {
@@ -209,7 +207,7 @@ impl App {
         if nsub > 0 {
             super::icons::icon_count(
                 ui.painter(),
-                "subtasks",
+                Icon::Subtasks,
                 pos2(x, rect.center().y),
                 &nsub.to_string(),
                 t.text3,
@@ -220,7 +218,7 @@ impl App {
             let done = task.checklist.iter().filter(|c| c.done).count();
             super::icons::icon_count(
                 ui.painter(),
-                "task",
+                Icon::Task,
                 pos2(x, rect.center().y),
                 &format!("{}/{}", done, task.checklist.len()),
                 t.text3,
@@ -280,8 +278,9 @@ impl App {
             if resp.hovered() { t.hover } else { t.bg },
         );
         if used == 0.0 {
-            paint_person_icon(
+            line_icon(
                 &ui.painter_at(cols.assignee),
+                Icon::PersonSmall,
                 cols.assignee.left_center() + vec2(12.0, 0.0),
                 icon_col,
             );
@@ -314,8 +313,9 @@ impl App {
                     col,
                 );
             }
-            None => paint_calendar_icon(
+            None => line_icon(
                 &ui.painter_at(cols.due),
+                Icon::CalendarSmall,
                 cols.due.left_center() + vec2(10.0, 0.0),
                 icon_col,
             ),
@@ -323,7 +323,7 @@ impl App {
         if task.recur.is_some() && cols.due.width() > 0.0 {
             super::icons::line_icon_scaled(
                 &ui.painter_at(cols.due),
-                "repeat",
+                Icon::Repeat,
                 cols.due.right_center() - vec2(14.0, 0.0),
                 t.text3,
                 0.7,
@@ -354,8 +354,9 @@ impl App {
                 t.text,
             );
         } else {
-            paint_outline_flag(
+            line_icon(
                 &ui.painter_at(cols.priority),
+                Icon::FlagSmall,
                 cols.priority.left_center() + vec2(8.0, 0.0),
                 icon_col,
             );
@@ -429,8 +430,9 @@ impl App {
         }
         // comments
         let comments = task.activity.iter().filter(|a| a.comment).count();
-        paint_comment_icon(
+        line_icon(
             &ui.painter_at(cols.comments),
+            Icon::CommentSmall,
             cols.comments.left_center() + vec2(10.0, 0.0),
             icon_col,
         );

@@ -541,10 +541,10 @@ impl App {
         let mut x = x;
         // painted line icons: a font glyph such as a pencil may be missing
         // and show as an empty box
-        let items: [(&str, &str); 3] = [
-            ("plus", "Add subtask"),
-            ("pen", "Rename"),
-            ("tag", "Add tag"),
+        let items: [(Icon, &str); 3] = [
+            (Icon::Plus, "Add subtask"),
+            (Icon::Pen, "Rename"),
+            (Icon::Tag, "Add tag"),
         ];
         for (icon, what) in items {
             let r = Rect::from_min_size(pos2(x, row.center().y - 10.0), vec2(20.0, 20.0));

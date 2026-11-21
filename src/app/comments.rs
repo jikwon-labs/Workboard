@@ -386,8 +386,14 @@ impl App {
                         ui.label(RichText::new(tr("(edited)")).small().color(t.text3));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let more =
-                            super::icons::icon_button(ui, &t, "dots", "", "Comment actions", false);
+                        let more = super::icons::icon_button(
+                            ui,
+                            &t,
+                            Icon::Dots,
+                            "",
+                            "Comment actions",
+                            false,
+                        );
                         click_menu(&more, |ui| {
                             if a.parent.is_none() && ui.button(tr("Reply")).clicked() {
                                 acts.push(Act::Reply(a.id));
@@ -440,8 +446,14 @@ impl App {
                                 }
                             }
                         });
-                        let react =
-                            super::icons::icon_button(ui, &t, "smile", "", "Add reaction", false);
+                        let react = super::icons::icon_button(
+                            ui,
+                            &t,
+                            Icon::Smile,
+                            "",
+                            "Add reaction",
+                            false,
+                        );
                         popup(ui, &react, ui.id().with(("react", a.id)), 180.0, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 for e in REACTIONS {

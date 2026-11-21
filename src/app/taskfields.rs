@@ -404,7 +404,7 @@ impl App {
         let b = super::icons::icon_button_ex(
             ui,
             t,
-            "eye",
+            Icon::Eye,
             tr(if on { "Watching" } else { "Watch" }),
             if on { "Stop watching" } else { "Watch task" },
             false,
@@ -437,7 +437,7 @@ impl App {
         }
         if watching.is_empty() {
             // a person, not a second eye beside the Watch button's
-            super::icons::line_icon_scaled(ui.painter(), "person", r.center(), t.text3, 0.8);
+            super::icons::line_icon_scaled(ui.painter(), Icon::Person, r.center(), t.text3, 0.8);
         } else {
             let shown: Vec<u64> = watching.iter().take(4).copied().collect();
             paint_avatars(
@@ -467,7 +467,7 @@ impl App {
                 if sel {
                     super::icons::line_icon_scaled(
                         ui.painter(),
-                        "check",
+                        Icon::Check,
                         r.rect.right_center() - vec2(16.0, 0.0),
                         t.selected_text,
                         0.8,
@@ -659,7 +659,7 @@ impl App {
                         None => {
                             super::icons::line_icon_scaled(
                                 ui.painter(),
-                                "person",
+                                Icon::Person,
                                 ar.center(),
                                 t.text3,
                                 0.8,
@@ -906,9 +906,9 @@ impl App {
                 continue;
             }
             let (head, col, kind) = match mode {
-                TaskPick::WaitingOn => ("Waiting on", WARN_ORANGE, "hourglass"),
-                TaskPick::Blocking => ("Blocking", t.danger, "warning"),
-                _ => ("Linked", t.text2, "link"),
+                TaskPick::WaitingOn => ("Waiting on", WARN_ORANGE, Icon::Hourglass),
+                TaskPick::Blocking => ("Blocking", t.danger, Icon::Warning),
+                _ => ("Linked", t.text2, Icon::Link),
             };
             super::icons::icon_label(ui, kind, RichText::new(tr(head)).small().color(col), col);
             for oid in ids.iter() {
@@ -1175,7 +1175,7 @@ impl App {
                 let b = super::icons::icon_button_ex(
                     ui,
                     t,
-                    "attach",
+                    Icon::Attach,
                     tr("Attach"),
                     "Attach file",
                     false,
@@ -1224,9 +1224,9 @@ impl App {
                         None => {
                             ui.painter().rect_filled(pic, 8.0, t.hover);
                             let kind = if a.kind == MediaKind::Video {
-                                "play"
+                                Icon::Play
                             } else {
-                                "shapes"
+                                Icon::Shapes
                             };
                             super::icons::line_icon_scaled(
                                 ui.painter(),

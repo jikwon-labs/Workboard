@@ -67,7 +67,7 @@ impl App {
     /// (hubs/side.rs).
     fn forms_sidebar(&mut self, ui: &mut Ui) {
         use crate::app::hubs::side::{
-            side_empty, side_heading, side_rule, side_search, SideFilter,
+            side_empty, side_heading, side_rule, side_search, FilterIcon, SideFilter,
         };
         self.hub_side_panel(ui, |app, ui| {
             let t = app.t();
@@ -88,9 +88,9 @@ impl App {
                 .cloned()
                 .collect();
             let filters: Vec<SideFilter> = [
-                ("forms", "All forms"),
-                ("@me", "My forms"),
-                ("star", "Favorites"),
+                (FilterIcon::Line(Icon::Forms), "All forms"),
+                (FilterIcon::Me, "My forms"),
+                (FilterIcon::Star, "Favorites"),
             ]
             .into_iter()
             .enumerate()
@@ -156,7 +156,7 @@ impl App {
         let mut right = r.right() - 8.0;
         if self.data.space_of_list(f.list_id).is_none() {
             let c = pos2(right - 8.0, r.center().y);
-            line_icon_scaled(ui.painter(), "help", c, WARN_ORANGE, 0.85);
+            line_icon_scaled(ui.painter(), Icon::Help, c, WARN_ORANGE, 0.85);
             let warn = ui.interact(
                 Rect::from_center_size(c, vec2(18.0, 18.0)),
                 ui.id().with(("form_no_list", f.id)),
@@ -223,7 +223,7 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(tr(title)).size(22.0).color(t.text));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if primary_icon(ui, &t, "plus", tr("New form"), "New form")
+                                if primary_icon(ui, &t, Icon::Plus, tr("New form"), "New form")
                                     .clicked()
                                 {
                                     self.new_form_from(None);
@@ -247,7 +247,7 @@ impl App {
                                 } else {
                                     tr("Last edited")
                                 };
-                                if icon_button(ui, &t, "sort", label, "Sort forms", false)
+                                if icon_button(ui, &t, Icon::Sort, label, "Sort forms", false)
                                     .on_hover_text(tr("Sort by last edited or by name"))
                                     .clicked()
                                 {
@@ -430,7 +430,7 @@ impl App {
             .map(|l| l.1);
         match path {
             Some(path) => {
-                line_icon_scaled(&p, "list", pos2(x + 20.0, cy), t.text2, 0.85);
+                line_icon_scaled(&p, Icon::List, pos2(x + 20.0, cy), t.text2, 0.85);
                 let font = FontId::proportional(13.0);
                 let shown = fit_text(&p, &path, &font, lw - 40.0);
                 p.text(
@@ -466,7 +466,13 @@ impl App {
                     6.0,
                     WARN_ORANGE.gamma_multiply(if c.hovered() { 0.22 } else { 0.12 }),
                 );
-                line_icon_scaled(&p, "help", pos2(cr.left() + 13.0, cy), WARN_ORANGE, 0.75);
+                line_icon_scaled(
+                    &p,
+                    Icon::Help,
+                    pos2(cr.left() + 13.0, cy),
+                    WARN_ORANGE,
+                    0.75,
+                );
                 p.galley(
                     pos2(cr.left() + 24.0, cy - g.size().y / 2.0),
                     g,
@@ -590,7 +596,7 @@ impl App {
         if more.hovered() {
             p.rect_filled(more_r, 6.0, hover_fill(ui));
         }
-        line_icon(&p, "dots", more_r.center(), t.text2);
+        line_icon(&p, Icon::Dots, more_r.center(), t.text2);
         popup(
             ui,
             &more,
@@ -598,7 +604,7 @@ impl App {
             180.0,
             |ui| {
                 if menu_row(ui, t, tr("Edit"), false, |p, c| {
-                    line_icon(p, "edit", c, t.text2);
+                    line_icon(p, Icon::Edit, c, t.text2);
                 })
                 .clicked()
                 {
@@ -606,7 +612,7 @@ impl App {
                     close_popup(ui);
                 }
                 if menu_row(ui, t, tr("Answers"), false, |p, c| {
-                    line_icon(p, "inbox", c, t.text2);
+                    line_icon(p, Icon::Inbox, c, t.text2);
                 })
                 .clicked()
                 {
@@ -615,7 +621,7 @@ impl App {
                 }
                 ui.separator();
                 let del = menu_row_named(ui, t, "Delete form", tr("Delete form"), false, |p, c| {
-                    line_icon(p, "trash", c, t.danger);
+                    line_icon(p, Icon::Trash, c, t.danger);
                 });
                 if del.clicked() {
                     self.modal = Some(Modal::ConfirmRemove {
@@ -693,7 +699,7 @@ impl App {
                 let labels: Vec<&str> = qs.iter().map(|(l, _)| form_question(l)).collect();
                 (
                     *n,
-                    (*icon, fg, bg),
+                    (Icon::named(icon).unwrap_or(Icon::Forms), fg, bg),
                     format!(
                         "{} \u{00B7} {}",
                         trf!("{} questions", qs.len()),
@@ -703,7 +709,7 @@ impl App {
             }
             None => (
                 "Blank form",
-                ("plus", t.text2, t.hover),
+                (Icon::Plus, t.text2, t.hover),
                 format!(
                     "{} \u{00B7} {}",
                     trf!("{} questions", 2),

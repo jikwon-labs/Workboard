@@ -62,7 +62,7 @@ pub struct Builtin {
     pub key: &'static str,
     /// The English name (accessibility names stay English).
     pub en: &'static str,
-    pub glyph: &'static str,
+    pub glyph: Icon,
     pub color: [u8; 3],
     /// One line for the card, in the interface language.
     pub about: &'static str,
@@ -117,7 +117,7 @@ struct Entry {
     en: String,
     name: String,
     about: String,
-    glyph: &'static str,
+    glyph: Icon,
     color: [u8; 3],
     tpl: TaskTemplate,
 }
@@ -158,7 +158,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "project-tracker",
         en: "Project tracker",
-        glyph: "list",
+        glyph: Icon::List,
         color: [0xe1, 0x6b, 0x16],
         about: tr("Plan a project from kickoff to wrap-up, with a review step"),
         tpl: TaskTemplate {
@@ -196,7 +196,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "bug-tracker",
         en: "Bug tracker",
-        glyph: "warning",
+        glyph: Icon::Warning,
         color: [0xd3, 0x3d, 0x44],
         about: tr("Report, sort and fix bugs until they are closed"),
         tpl: TaskTemplate {
@@ -225,7 +225,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "content-calendar",
         en: "Content calendar",
-        glyph: "calendar",
+        glyph: Icon::Calendar,
         color: [0x44, 0x66, 0xff],
         about: tr("Take posts from idea to published on a schedule"),
         tpl: TaskTemplate {
@@ -260,7 +260,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "onboarding",
         en: "Onboarding checklist",
-        glyph: "smile",
+        glyph: Icon::Smile,
         color: [0x3d, 0xb8, 0x8b],
         about: tr("Help a new teammate settle in during the first month"),
         tpl: TaskTemplate {
@@ -283,7 +283,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "bug-report",
         en: "Bug report",
-        glyph: "flag",
+        glyph: Icon::Flag,
         color: [0xd3, 0x3d, 0x44],
         about: tr("One bug with steps to reproduce and a fix checklist"),
         tpl: TaskTemplate {
@@ -307,7 +307,7 @@ pub fn builtins() -> Vec<Builtin> {
     v.push(Builtin {
         key: "feature-request",
         en: "Feature request",
-        glyph: "sparkle",
+        glyph: Icon::Sparkle,
         color: [0xf8, 0xae, 0x00],
         about: tr("Describe a problem and the change that would solve it"),
         tpl: TaskTemplate {
@@ -331,7 +331,7 @@ pub fn builtins() -> Vec<Builtin> {
         (
             "project-overview",
             "Project Overview",
-            "forms",
+            Icon::Forms,
             [0xe1, 0x6b, 0x16],
             tr("Summarize goals, scope, and milestones"),
             tr("Goals\n- \n\nScope\n- \n\nMilestones\n- \n\nTeam\n- "),
@@ -339,7 +339,7 @@ pub fn builtins() -> Vec<Builtin> {
         (
             "meeting-notes",
             "Meeting Notes",
-            "edit",
+            Icon::Edit,
             [0xf8, 0xae, 0x00],
             tr("Capture an agenda, notes, and action items"),
             tr("Agenda\n- \n\nNotes\n- \n\nAction items\n- [ ] "),
@@ -347,7 +347,7 @@ pub fn builtins() -> Vec<Builtin> {
         (
             "wiki",
             "Wiki",
-            "notebook",
+            Icon::Notebook,
             [0x44, 0x66, 0xff],
             tr("Organize information in one place"),
             tr("Overview\n\nHow we work\n\nLinks\n"),
@@ -404,11 +404,11 @@ pub fn merge_statuses(to: &mut Vec<Status>, add: &[Status]) {
     }
 }
 
-fn kind_glyph(kind: &str) -> (&'static str, [u8; 3]) {
+fn kind_glyph(kind: &str) -> (Icon, [u8; 3]) {
     match kind {
-        KIND_LIST => ("list", [0x5f, 0x55, 0xee]),
-        KIND_DOC => ("docs", [0x10, 0x90, 0xe0]),
-        _ => ("task", [0x0f, 0x9d, 0x9f]),
+        KIND_LIST => (Icon::List, [0x5f, 0x55, 0xee]),
+        KIND_DOC => (Icon::Docs, [0x10, 0x90, 0xe0]),
+        _ => (Icon::Task, [0x0f, 0x9d, 0x9f]),
     }
 }
 
@@ -456,7 +456,7 @@ fn template_row(
     t: &Theme,
     w: f32,
     color: [u8; 3],
-    glyph: &str,
+    glyph: Icon,
     title: &str,
     sub: &str,
     selected: bool,
@@ -1407,7 +1407,7 @@ fn template_preview(ui: &mut Ui, t: &Theme, tp: &TaskTemplate) {
                     if !x.checklist.is_empty() {
                         super::icons::icon_label(
                             ui,
-                            "task",
+                            Icon::Task,
                             RichText::new(x.checklist.len().to_string())
                                 .small()
                                 .color(t.text3),

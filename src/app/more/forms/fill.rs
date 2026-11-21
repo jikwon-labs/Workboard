@@ -66,7 +66,7 @@ impl App {
                 ui.set_width(ui.available_width());
                 ui.horizontal_top(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
-                    line_icon_scaled(ui.painter(), "help", r.center(), fg, 0.9);
+                    line_icon_scaled(ui.painter(), Icon::Help, r.center(), fg, 0.9);
                     ui.add(egui::Label::new(RichText::new(text).size(13.0).color(fg)).wrap());
                 });
             });
@@ -247,7 +247,7 @@ impl App {
                     let b = select_button(
                         ui,
                         t,
-                        "calendar",
+                        Some(Icon::Calendar),
                         t.text2,
                         &text,
                         color,
@@ -276,7 +276,7 @@ impl App {
                     } else {
                         (v.clone(), t.text)
                     };
-                    let b = select_button(ui, t, "", t.text2, &text, color, vec2(w, 38.0), &name);
+                    let b = select_button(ui, t, None, t.text2, &text, color, vec2(w, 38.0), &name);
                     popup(ui, &b, ui.id().with(("form_dd", fid, i)), w, |ui| {
                         if !fld.options.iter().any(|o| !o.trim().is_empty()) {
                             ui.label(
@@ -310,8 +310,16 @@ impl App {
                         Some(n) => (n, t.text),
                         None => (tr("Choose someone").to_string(), t.text3),
                     };
-                    let b =
-                        select_button(ui, t, "person", t.text2, &text, color, vec2(w, 38.0), &name);
+                    let b = select_button(
+                        ui,
+                        t,
+                        Some(Icon::Person),
+                        t.text2,
+                        &text,
+                        color,
+                        vec2(w, 38.0),
+                        &name,
+                    );
                     popup(ui, &b, ui.id().with(("form_who", fid, i)), w, |ui| {
                         for (id, n) in members {
                             let on = *v == id.to_string();
@@ -360,7 +368,7 @@ impl App {
             if let Some(e) = &self.sweep.form_error {
                 ui.horizontal(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-                    line_icon_scaled(ui.painter(), "help", r.center(), t.danger, 0.75);
+                    line_icon_scaled(ui.painter(), Icon::Help, r.center(), t.danger, 0.75);
                     ui.label(RichText::new(tr(e)).size(12.0).color(t.danger));
                 });
             }

@@ -403,7 +403,7 @@ impl App {
         added_targets(ui, t, d);
         self.target_setup(ui, t, d, w);
         ui.add_space(6.0);
-        let add = icons::icon_button(ui, t, "plus", tr("Target"), "Another target", true);
+        let add = icons::icon_button(ui, t, Icon::Plus, tr("Target"), "Another target", true);
         if add.clicked() && !same_range(d) {
             let tg = d.current_target();
             d.more.push(tg);

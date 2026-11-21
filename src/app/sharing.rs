@@ -332,7 +332,7 @@ impl App {
                     let r = super::icons::icon_button(
                         ui,
                         t,
-                        "close",
+                        Icon::Close,
                         "",
                         &format!("Remove {}", name),
                         false,

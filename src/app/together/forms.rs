@@ -106,7 +106,7 @@ pub(super) fn secret_edit(
     let color = if eye.hovered() { t.text } else { t.text2 };
     super::icons::line_icon(
         ui.painter(),
-        if shown { "eye_off" } else { "eye" },
+        if shown { Icon::EyeOff } else { Icon::Eye },
         er.center(),
         color,
     );

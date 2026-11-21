@@ -113,7 +113,7 @@ impl App {
                     ui.set_height(30.0);
                     ui.label(RichText::new(tr("Profile")).size(15.0).strong());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if icon_button(ui, &t, "close", "", "Close profile", false)
+                        if icon_button(ui, &t, Icon::Close, "", "Close profile", false)
                             .on_hover_text(tr("Close"))
                             .clicked()
                         {
@@ -188,7 +188,7 @@ impl App {
                     if icon_button_ex(
                         ui,
                         &t,
-                        "edit",
+                        Icon::Edit,
                         tr("Edit profile"),
                         "Edit profile",
                         true,
@@ -204,7 +204,7 @@ impl App {
                     && icon_button_ex(
                         ui,
                         &t,
-                        "chat",
+                        Icon::Chat,
                         tr("Message"),
                         &format!("Message {}", m.shown()),
                         true,

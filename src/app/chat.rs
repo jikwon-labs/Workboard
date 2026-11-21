@@ -493,7 +493,7 @@ pub(super) fn group_mention_rows(ui: &mut Ui, t: &Theme, teams: &[String]) -> Op
         ("here", "Everyone here who is online"),
     ] {
         let r = menu_row(ui, t, &format!("@{}", word), false, |p, c| {
-            line_icon(p, "teams", c, t.text2);
+            line_icon(p, Icon::Teams, c, t.text2);
         })
         .on_hover_text(tr(tip));
         if r.clicked() {
@@ -502,7 +502,7 @@ pub(super) fn group_mention_rows(ui: &mut Ui, t: &Theme, teams: &[String]) -> Op
     }
     for name in teams {
         if menu_row(ui, t, &format!("@{}", name), false, |p, c| {
-            line_icon(p, "teams", c, t.text2);
+            line_icon(p, Icon::Teams, c, t.text2);
         })
         .on_hover_text(tr("Everyone in this team"))
         .clicked()
@@ -1118,7 +1118,7 @@ impl App {
                 ui.add_space((ui.available_height() * 0.28).max(40.0));
                 let (r, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
                 ui.painter().rect_filled(r, 14.0, t.accent_bg);
-                super::shell::line_icon(ui.painter(), "chat", r.center(), t.accent_text);
+                super::shell::line_icon(ui.painter(), Icon::Chat, r.center(), t.accent_text);
                 ui.add_space(14.0);
                 ui.label(RichText::new(tr("Chat with your team")).size(22.0).color(t.text));
                 ui.add_space(4.0);
@@ -1132,10 +1132,10 @@ impl App {
                     if b.clicked() {
                         make = true;
                     }
-                    if icon_button_ex(ui, &t, "send", tr("Message someone"), "Message someone", true, 170.0, t.text, t.text2).clicked() {
+                    if icon_button_ex(ui, &t, Icon::Send, tr("Message someone"), "Message someone", true, 170.0, t.text, t.text2).clicked() {
                         self.new_message_open = true;
                     }
-                    if icon_button_ex(ui, &t, "teams", tr("Work together"), "Work together", true, 150.0, t.text, t.text2).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
+                    if icon_button_ex(ui, &t, Icon::Teams, tr("Work together"), "Work together", true, 150.0, t.text, t.text2).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
                         self.modal = Some(self.together_modal());
                     }
                 });
@@ -1339,7 +1339,7 @@ impl App {
                     }
                     if channel.kind == ChannelKind::Channel && channel.private {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                        line_icon(ui.painter(), "lock", r.center(), t.text2);
+                        line_icon(ui.painter(), Icon::Lock, r.center(), t.text2);
                     }
                     // shortened before the buttons on the right (it ran under them)
                     let buttons = if self.ai_offered() && !no_messages { 270.0 } else { 150.0 };
@@ -1352,7 +1352,7 @@ impl App {
                         if channel.kind == ChannelKind::Channel {
                             // how this channel notifies me (notify.rs)
                             let mode = self.data.extra.notify.channel_mode(cid).to_string();
-                            let bell = icon_button(ui, &t, if mode == "nothing" { "bell_off" } else { "bell" }, "", "Channel notifications", false);
+                            let bell = icon_button(ui, &t, if mode == "nothing" { Icon::BellOff } else { Icon::Bell }, "", "Channel notifications", false);
                             let bell = bell.on_hover_text(tr("Notifications for this channel"));
                             popup(ui, &bell, ui.id().with(("chan_notify", cid)), 240.0, |ui| {
                                 ui.label(RichText::new(tr("Notify me about")).small().color(t.text2));
@@ -1365,18 +1365,18 @@ impl App {
                                 }
                             });
                         }
-                        if icon_button_ex(ui, &t, "edit", tr("Ask"), "Ask", false, 0.0, t.text2, t.text2).clicked() {
+                        if icon_button_ex(ui, &t, Icon::Edit, tr("Ask"), "Ask", false, 0.0, t.text2, t.text2).clicked() {
                             self.section = Section::Ai;
                         }
                         if self.ai_offered() && !no_messages {
-                            let b = icon_button_ex(ui, &t, "sparkle", tr("Summarize"), "Summarize conversation", false, 0.0, t.text2, super::ai::AI_VIOLET)
+                            let b = icon_button_ex(ui, &t, Icon::Sparkle, tr("Summarize"), "Summarize conversation", false, 0.0, t.text2, super::ai::AI_VIOLET)
                                 .on_hover_text(tr("Sum up this conversation with AI"));
                             if b.clicked() {
                                 let label = title.clone();
                                 self.ai_summarize_channel(cid, &label);
                             }
                         }
-                        if icon_button(ui, &t, "phone", "", "Start a SyncUp", false).on_hover_text(tr("Start a SyncUp")).clicked() {
+                        if icon_button(ui, &t, Icon::Phone, "", "Start a SyncUp", false).on_hover_text(tr("Start a SyncUp")).clicked() {
                             self.open_call_dialog();
                         }
                     });
@@ -1492,7 +1492,7 @@ impl App {
                 egui::ScrollArea::vertical().id_salt(("chan_panel_scroll", cid)).auto_shrink([false, true]).show(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let rows: [(&str, &str, PanelRow); 9] = [("person", "Followers", PanelRow::Followers), ("search", "Find in channel", PanelRow::Find), ("reply", "Replies", PanelRow::Show(ChannelPanel::Replies)), ("pin", "Pinned messages", PanelRow::Show(ChannelPanel::Pinned)), ("bookmark", "Saved", PanelRow::Show(ChannelPanel::Saved)), ("attach", "Files", PanelRow::Show(ChannelPanel::Files)), ("link", "Links", PanelRow::Show(ChannelPanel::Links)), ("task", "Turned into tasks", PanelRow::Show(ChannelPanel::Tasks)), ("settings", "Settings", PanelRow::Settings)];
+                    let rows: [(Icon, &str, PanelRow); 9] = [(Icon::Person, "Followers", PanelRow::Followers), (Icon::Search, "Find in channel", PanelRow::Find), (Icon::Reply, "Replies", PanelRow::Show(ChannelPanel::Replies)), (Icon::Pin, "Pinned messages", PanelRow::Show(ChannelPanel::Pinned)), (Icon::Bookmark, "Saved", PanelRow::Show(ChannelPanel::Saved)), (Icon::Attach, "Files", PanelRow::Show(ChannelPanel::Files)), (Icon::Link, "Links", PanelRow::Show(ChannelPanel::Links)), (Icon::Task, "Turned into tasks", PanelRow::Show(ChannelPanel::Tasks)), (Icon::Settings, "Settings", PanelRow::Settings)];
                     for (icon, label, code) in rows {
                         let w = ui.available_width();
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
@@ -1664,12 +1664,12 @@ impl App {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
                                 // it brings people in: the owner's and admins' on a server
-                                if self.may_manage() && icon_button_ex(ui, &t, "download", tr("Import from Slack"), "Import from Slack", true, cw, t.text, t.text2).clicked() {
+                                if self.may_manage() && icon_button_ex(ui, &t, Icon::Download, tr("Import from Slack"), "Import from Slack", true, cw, t.text, t.text2).clicked() {
                                     self.start_slack_import();
                                 }
                                 ui.add_space(8.0);
                                 ui.separator();
-                                for (bg, icon, title, sub) in [([0xb6, 0x60, 0xe0], "list", "Track Tasks", "Manage tasks, bugs, people, and more"), ([0x10, 0x90, 0xe0], "docs", "Add Doc", "Take notes or create detailed documents"), ([0x00, 0x88, 0x44], "phone", "Start SyncUp", "Jump on a voice call or video call")] {
+                                for (bg, icon, title, sub) in [([0xb6, 0x60, 0xe0], Icon::List, "Track Tasks", "Manage tasks, bugs, people, and more"), ([0x10, 0x90, 0xe0], Icon::Docs, "Add Doc", "Take notes or create detailed documents"), ([0x00, 0x88, 0x44], Icon::Phone, "Start SyncUp", "Jump on a voice call or video call")] {
                                     let (r, resp) = ui.allocate_exact_size(vec2(cw, 54.0), Sense::click());
                                     ui.painter().rect_filled(r, 8.0, rgb(bg).gamma_multiply(if resp.hovered() { 0.14 } else { 0.07 }));
                                     let ib = Rect::from_center_size(r.left_center() + vec2(26.0, 0.0), vec2(34.0, 34.0));
@@ -1918,18 +1918,18 @@ impl App {
             let title = ui.label(RichText::new(tr("Thread")).size(15.0).strong());
             let place = ui.label(RichText::new(self.channel_label(channel)).color(t.text3));
             let buttons = ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let close = icon_button(ui, &t, "close", "", "Close thread", false);
+                let close = icon_button(ui, &t, Icon::Close, "", "Close thread", false);
                 if close.clicked() {
                     acts.push(ChatAction::CloseThread);
                 }
                 if in_window {
-                    let back = icon_button(ui, &t, "sidebar", "", "Back to the sidebar", false)
+                    let back = icon_button(ui, &t, Icon::Sidebar, "", "Back to the sidebar", false)
                         .on_hover_text(tr("Back to the sidebar"));
                     if back.clicked() {
                         acts.push(ChatAction::DockThread);
                     }
                 } else {
-                    let out = icon_button(ui, &t, "pop_out", "", "Open in new window", false)
+                    let out = icon_button(ui, &t, Icon::PopOut, "", "Open in new window", false)
                         .on_hover_text(tr("Open in new window"));
                     if out.clicked() {
                         // the window opens where the panel is, as big
@@ -1944,7 +1944,7 @@ impl App {
                     let b = icon_button_ex(
                         ui,
                         &t,
-                        "sparkle",
+                        Icon::Sparkle,
                         "",
                         "Summarize thread",
                         false,
@@ -2207,9 +2207,9 @@ impl App {
             ui.spacing_mut().item_spacing.x = 4.0;
             // Ask opens the AI page instead of a mode of its own
             for (mode, icon, label) in [
-                (Some(ComposerMode::Message), "chat", "Message"),
-                (Some(ComposerMode::Post), "megaphone", "Post"),
-                (None, "sparkle", "Ask"),
+                (Some(ComposerMode::Message), Icon::Chat, "Message"),
+                (Some(ComposerMode::Post), Icon::Megaphone, "Post"),
+                (None, Icon::Sparkle, "Ask"),
             ] {
                 let sel = mode == Some(self.composer_mode);
                 // the chosen tab is outlined, the others plain
@@ -2257,7 +2257,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         let (r, icon) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                        line_icon(ui.painter(), "megaphone", r.center(), t.primary);
+                        line_icon(ui.painter(), Icon::Megaphone, r.center(), t.primary);
                         name_it(&icon, "Post mode");
                         ui.add(
                             egui::TextEdit::singleline(&mut self.chat.post_title)
@@ -2406,10 +2406,10 @@ impl App {
                     if let Some(id) = picked {
                         self.chat.channel.picked.push(id);
                     }
-                    let itool = |ui: &mut Ui, kind: &str, tip: &str| {
+                    let itool = |ui: &mut Ui, kind: Icon, tip: &str| {
                         icon_button(ui, &t, kind, "", tip, false).on_hover_text(tr(tip))
                     };
-                    let em = itool(ui, "smile", "Emoji");
+                    let em = itool(ui, Icon::Smile, "Emoji");
                     popup(ui, &em, egui::Id::new("chat_emoji_popup"), 248.0, |ui| {
                         if let Some(e) = emoji_grid(ui) {
                             insert = Some(e.to_string());
@@ -2417,7 +2417,7 @@ impl App {
                         }
                     });
                     format_buttons(ui, &t, text_id, &mut self.chat.channel.text, "");
-                    if itool(ui, "task", "Create task").clicked() {
+                    if itool(ui, Icon::Task, "Create task").clicked() {
                         self.open_quick_add(None);
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2455,8 +2455,9 @@ impl App {
                         if self.composer_mode == ComposerMode::Message
                             && !self.chat.channel.text.trim().is_empty()
                         {
-                            let clock = icon_button(ui, &t, "clock", "", "Schedule message", false)
-                                .on_hover_text(tr("Schedule message"));
+                            let clock =
+                                icon_button(ui, &t, Icon::Clock, "", "Schedule message", false)
+                                    .on_hover_text(tr("Schedule message"));
                             popup(ui, &clock, egui::Id::new("schedule_popup"), 220.0, |ui| {
                                 ui.label(RichText::new(tr("Send later")).small().color(t.text2));
                                 for (label, at) in super::schedule::schedule_choices(now_ts()) {
@@ -2475,7 +2476,7 @@ impl App {
                             name_it(&sent, "Send");
                             line_icon(
                                 ui.painter(),
-                                "send",
+                                Icon::Send,
                                 sent.rect.center(),
                                 if ready { t.on_primary } else { t.text3 },
                             );
@@ -2833,11 +2834,11 @@ impl App {
                         }
                         if m.saved {
                             let c = WARN_ORANGE;
-                            small_icon(ui, "bookmark", c);
+                            small_icon(ui, Icon::Bookmark, c);
                             ui.label(RichText::new(tr("Saved")).small().color(c));
                         }
                         if m.pinned {
-                            small_icon(ui, "pin", t.text3);
+                            small_icon(ui, Icon::Pin, t.text3);
                             ui.label(RichText::new(tr("Pinned")).small().color(t.text3));
                         }
                     });
@@ -2845,7 +2846,7 @@ impl App {
                 if let Some(pt) = shown_post_title(m) {
                     ui.horizontal_top(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
-                        line_icon(ui.painter(), "megaphone", r.center(), t.text2);
+                        line_icon(ui.painter(), Icon::Megaphone, r.center(), t.text2);
                         // wrapped: a long one (a web address) widened the
                         // whole conversation past the window
                         ui.add(egui::Label::new(RichText::new(pt).size(16.0).color(t.text)).wrap());
@@ -2914,7 +2915,7 @@ impl App {
                                 );
                                 super::shell::line_icon(
                                     ui.painter(),
-                                    "phone",
+                                    Icon::Phone,
                                     r.center(),
                                     Color32::WHITE,
                                 );
@@ -2964,7 +2965,7 @@ impl App {
                                 );
                                 super::shell::line_icon(
                                     ui.painter(),
-                                    "phone",
+                                    Icon::Phone,
                                     r.center(),
                                     Color32::WHITE,
                                 );
@@ -3181,14 +3182,14 @@ impl App {
             let mut button = |ui: &mut Ui, label: &str, tip: &str| -> egui::Response {
                 let r = Rect::from_min_size(pos2(x, bar.top() + 2.0), vec2(bw, 24.0));
                 x += bw;
-                let icon = super::icons::KINDS.contains(&label);
+                let icon = Icon::named(label);
                 let b = put_over(
                     ui,
                     r,
-                    ghost(egui::Button::new(if icon { "" } else { label })),
+                    ghost(egui::Button::new(if icon.is_some() { "" } else { label })),
                 );
-                if icon {
-                    line_icon(ui.painter(), label, r.center(), t.text2);
+                if let Some(icon) = icon {
+                    line_icon(ui.painter(), icon, r.center(), t.text2);
                 }
                 name_it(&b, tip);
                 b.on_hover_text(tr(tip))
@@ -4403,7 +4404,7 @@ pub(super) fn shown_text(m: &Message) -> String {
 }
 
 /// A 16 pt line icon in a row of text (before "Saved", "Pinned").
-fn small_icon(ui: &mut Ui, kind: &str, color: Color32) {
+fn small_icon(ui: &mut Ui, kind: Icon, color: Color32) {
     let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
     line_icon(ui.painter(), kind, r.center(), color);
 }

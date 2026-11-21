@@ -22,7 +22,7 @@ pub enum Hit {
 }
 
 /// One search result row: (group, glyph, title, place, where it leads).
-pub type SearchRow = (&'static str, &'static str, String, String, Hit);
+pub type SearchRow = (&'static str, Option<Icon>, String, String, Hit);
 
 /// Kind chips over the results.
 pub const SEARCH_KINDS: [&str; 8] = [
@@ -78,7 +78,7 @@ impl App {
             let hit = match link {
                 super::nav::Link::Task(id) => self.task(id).map(|t| {
                     (
-                        "task",
+                        Some(Icon::Task),
                         t.name.clone(),
                         self.data.list_name(t.list_id),
                         Hit::Task(id),
@@ -87,7 +87,7 @@ impl App {
                 super::nav::Link::Loc(l @ Location::List(id)) => {
                     self.data.location_exists(l).then(|| {
                         (
-                            "list",
+                            Some(Icon::List),
                             self.data.list_name(id),
                             self.data
                                 .space_of_list(id)
@@ -100,7 +100,7 @@ impl App {
                 super::nav::Link::Loc(l @ Location::Folder(_)) => {
                     self.data.location_exists(l).then(|| {
                         (
-                            "folder",
+                            Some(Icon::Folder),
                             self.data.location_name(l),
                             tr("Folder").into(),
                             Hit::Go(l),
@@ -110,7 +110,7 @@ impl App {
                 super::nav::Link::Loc(l @ Location::Space(_)) => {
                     self.data.location_exists(l).then(|| {
                         (
-                            "space",
+                            Some(Icon::Space),
                             self.data.location_name(l),
                             tr("Space").into(),
                             Hit::Go(l),
@@ -118,23 +118,25 @@ impl App {
                     })
                 }
                 super::nav::Link::Loc(l) => Some((
-                    "arrow_right",
+                    Some(Icon::ArrowRight),
                     self.data.location_name(l),
                     String::new(),
                     Hit::Go(l),
                 )),
-                super::nav::Link::Doc(id) => self
-                    .data
-                    .docs
-                    .iter()
-                    .find(|d| d.id == id)
-                    .map(|d| ("docs", d.title.clone(), tr("Doc").into(), Hit::Doc(id))),
+                super::nav::Link::Doc(id) => self.data.docs.iter().find(|d| d.id == id).map(|d| {
+                    (
+                        Some(Icon::Docs),
+                        d.title.clone(),
+                        tr("Doc").into(),
+                        Hit::Doc(id),
+                    )
+                }),
             };
             match hit {
                 // archived, or in someone else's Personal space
                 Some(_) if self.link_shown(link) == Some(false) => rows.push((
                     "Link",
-                    "warning",
+                    Some(Icon::Warning),
                     tr("This link points to something archived or private").into(),
                     String::new(),
                     Hit::Query(String::new()),
@@ -142,7 +144,7 @@ impl App {
                 Some((g, title, place, hit)) => rows.push(("Link", g, title, place, hit)),
                 None => rows.push((
                     "Link",
-                    "warning",
+                    Some(Icon::Warning),
                     tr("Nothing with this link here (it may have been deleted)").into(),
                     String::new(),
                     Hit::Query(String::new()),
@@ -159,16 +161,16 @@ impl App {
         if ql.is_empty() && kind == 0 && !narrowed {
             for (k, id, name, place) in self.recent_items(None).into_iter().take(8) {
                 let (g, hit) = match k.as_str() {
-                    "task" => ("task", Hit::Task(id)),
-                    "doc" => ("docs", Hit::Doc(id)),
-                    _ => ("list", Hit::Go(Location::List(id))),
+                    "task" => (Some(Icon::Task), Hit::Task(id)),
+                    "doc" => (Some(Icon::Docs), Hit::Doc(id)),
+                    _ => (Some(Icon::List), Hit::Go(Location::List(id))),
                 };
                 rows.push(("Recent", g, name, place, hit));
             }
             for r in self.sweep.search_recent.iter().take(5) {
                 rows.push((
                     "Recent searches",
-                    "search",
+                    Some(Icon::Search),
                     r.clone(),
                     String::new(),
                     Hit::Query(r.clone()),
@@ -184,7 +186,7 @@ impl App {
             for s in self.data.spaces.iter().filter(|s| space_shown(s)) {
                 locs.push((
                     "Locations",
-                    "space",
+                    Some(Icon::Space),
                     s.name.clone(),
                     tr("Space").into(),
                     Hit::Go(Location::Space(s.id)),
@@ -193,7 +195,7 @@ impl App {
                 for f in &s.folders {
                     locs.push((
                         "Locations",
-                        "folder",
+                        Some(Icon::Folder),
                         format!("{} / {}", s.name, f.name),
                         tr("Folder").into(),
                         Hit::Go(Location::Folder(f.id)),
@@ -201,7 +203,7 @@ impl App {
                     for l in f.lists.iter().filter(|l| !l.archived) {
                         locs.push((
                             "Locations",
-                            "list",
+                            Some(Icon::List),
                             ListPlace {
                                 space: s,
                                 folder: Some(f),
@@ -216,7 +218,7 @@ impl App {
                 for l in s.lists.iter().filter(|l| !l.archived) {
                     locs.push((
                         "Locations",
-                        "list",
+                        Some(Icon::List),
                         ListPlace {
                             space: s,
                             folder: None,
@@ -241,7 +243,7 @@ impl App {
             rows.extend(tasks.map(|x| {
                 (
                     "Tasks",
-                    "task",
+                    Some(Icon::Task),
                     x.name.clone(),
                     self.data.list_name(x.list_id),
                     Hit::Task(x.id),
@@ -261,7 +263,7 @@ impl App {
             rows.extend(docs.map(|d| {
                 (
                     "Docs",
-                    "docs",
+                    Some(Icon::Docs),
                     d.title.clone(),
                     tr("Doc").into(),
                     Hit::Doc(d.id),
@@ -278,7 +280,7 @@ impl App {
             rows.extend(chans.map(|c| {
                 (
                     "Channels",
-                    "#",
+                    None,
                     c.name.clone(),
                     tr("Channel").into(),
                     Hit::Chat(c.id),
@@ -312,7 +314,7 @@ impl App {
                         };
                         rows.push((
                             "Messages",
-                            "chat",
+                            Some(Icon::Chat),
                             truncate(&one_line(&shown), 60),
                             place.clone(),
                             Hit::Message(c.id, m.id, thread),
@@ -331,7 +333,7 @@ impl App {
             apps.extend(x.whiteboards.iter().filter(|w| has(&w.name)).map(|w| {
                 (
                     "Apps",
-                    "whiteboards",
+                    Some(Icon::Whiteboards),
                     w.name.clone(),
                     tr("Whiteboard").into(),
                     Hit::Whiteboard(w.id),
@@ -344,7 +346,7 @@ impl App {
                     .map(|f| {
                         (
                             "Apps",
-                            "forms",
+                            Some(Icon::Forms),
                             f.name.clone(),
                             tr("Form").into(),
                             Hit::Form(f.id),
@@ -358,7 +360,7 @@ impl App {
                     .map(|d| {
                         (
                             "Apps",
-                            "dashboards",
+                            Some(Icon::Dashboards),
                             d.name.clone(),
                             tr("Dashboard").into(),
                             Hit::Dashboard(d.id),
@@ -368,7 +370,7 @@ impl App {
             apps.extend(x.goals.iter().filter(|g| has(&g.name)).map(|g| {
                 (
                     "Apps",
-                    "goals",
+                    Some(Icon::Goals),
                     g.name.clone(),
                     tr("Goal").into(),
                     Hit::Goal(g.id),
@@ -390,7 +392,7 @@ impl App {
             rows.extend(people.map(|m| {
                 (
                     "People",
-                    "person",
+                    Some(Icon::Person),
                     m.shown().to_string(),
                     if m.email.is_empty() {
                         super::menus::role_text(m.role.name()).to_string()
@@ -563,8 +565,8 @@ impl App {
                                     FontId::proportional(10.0),
                                     Color32::WHITE,
                                 );
-                            } else {
-                                line_icon(ui.painter(), glyph, ic, t.text2);
+                            } else if let Some(glyph) = glyph {
+                                line_icon(ui.painter(), *glyph, ic, t.text2);
                             }
                             // the title keeps all but 200 for the grey place after
                             // it; both are shortened with an ellipsis

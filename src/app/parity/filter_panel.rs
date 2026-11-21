@@ -132,7 +132,7 @@ impl App {
                         for (fid, name) in shown_fields {
                             let key = super::listview::field_col_key(*fid);
                             ui.horizontal(|ui| {
-                                super::icons::icon_label(ui, "fields", RichText::new(name).color(t.text), t.text2);
+                                super::icons::icon_label(ui, Icon::Fields, RichText::new(name).color(t.text), t.text2);
                                 let on_now = !self.prefs.hidden_cols.contains(&key);
                                 if on_now && !field_fits.contains(fid) {
                                     ui.label(RichText::new(tr("no room")).small().color(t.text3)).on_hover_text(tr("The List is too narrow to show this column; widen the window or turn another field off."));
@@ -353,7 +353,7 @@ impl App {
                 let x = crate::app::icons::icon_button(
                     ui,
                     t,
-                    "close",
+                    Icon::Close,
                     "",
                     &format!("Remove {} {}", prefix.to_lowercase(), n),
                     false,

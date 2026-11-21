@@ -14,7 +14,7 @@ impl App {
             if icon_button_ex(
                 ui,
                 t,
-                "sun",
+                Icon::Sun,
                 tr("Light"),
                 "Light",
                 sel,
@@ -32,7 +32,7 @@ impl App {
             if icon_button_ex(
                 ui,
                 t,
-                "moon",
+                Icon::Moon,
                 tr("Dark"),
                 "Dark",
                 sel,
@@ -49,7 +49,7 @@ impl App {
             if icon_button_ex(
                 ui,
                 t,
-                "auto",
+                Icon::Auto,
                 tr("Auto"),
                 "Auto",
                 auto,

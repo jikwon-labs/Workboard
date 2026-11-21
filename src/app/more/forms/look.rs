@@ -17,32 +17,32 @@ pub(crate) const FORM_COLORS: [(&str, [u8; 3]); 8] = [
     ("gray", [0x60, 0x60, 0x60]),
 ];
 
-/// The icons a form's tile can show (`line_icon` kinds).
-pub(crate) const FORM_ICONS: [&str; 24] = [
-    "forms",
-    "settings",
-    "smile",
-    "briefcase",
-    "person",
-    "calendar",
-    "flag",
-    "inbox",
-    "bell",
-    "heart",
-    "home",
-    "teams",
-    "hash",
-    "list",
-    "check",
-    "sparkle",
-    "edit",
-    "eye",
-    "chat",
-    "docs",
-    "goals",
-    "megaphone",
-    "bolt",
-    "tag",
+/// The icons a form's tile can show (saved by their names).
+pub(crate) const FORM_ICONS: [Icon; 24] = [
+    Icon::Forms,
+    Icon::Settings,
+    Icon::Smile,
+    Icon::Briefcase,
+    Icon::Person,
+    Icon::Calendar,
+    Icon::Flag,
+    Icon::Inbox,
+    Icon::Bell,
+    Icon::Heart,
+    Icon::Home,
+    Icon::Teams,
+    Icon::Hash,
+    Icon::List,
+    Icon::Check,
+    Icon::Sparkle,
+    Icon::Edit,
+    Icon::Eye,
+    Icon::Chat,
+    Icon::Docs,
+    Icon::Goals,
+    Icon::Megaphone,
+    Icon::Bolt,
+    Icon::Tag,
 ];
 
 /// A form's name as the pages show it: "Untitled form" when it has none,
@@ -58,12 +58,12 @@ pub(super) fn form_title(f: &Form) -> String {
 /// A form's tile as (icon, icon colour, fill). Older forms (no icon or
 /// colour saved) show the forms icon in a colour taken from their id; an
 /// icon a newer app saved that this one doesn't draw falls back the same way.
-pub(super) fn form_look(f: &Form, t: &Theme) -> (&'static str, Color32, Color32) {
+pub(super) fn form_look(f: &Form, t: &Theme) -> (Icon, Color32, Color32) {
     let icon = FORM_ICONS
         .iter()
         .copied()
-        .find(|k| *k == f.icon)
-        .unwrap_or("forms");
+        .find(|k| k.name() == f.icon)
+        .unwrap_or(Icon::Forms);
     let c = rgb(form_color(f).1);
     let fg = if t.dark { chip_text_on_dark(c) } else { c };
     (icon, fg, c.gamma_multiply(if t.dark { 0.3 } else { 0.13 }))
@@ -80,7 +80,7 @@ pub(super) fn form_color(f: &Form) -> (&'static str, [u8; 3]) {
 
 /// Paints a form's tile over `r`: the fill with rounded corners and the icon
 /// scaled to the tile.
-pub(super) fn paint_tile(p: &egui::Painter, r: Rect, look: (&str, Color32, Color32)) {
+pub(super) fn paint_tile(p: &egui::Painter, r: Rect, look: (Icon, Color32, Color32)) {
     let (icon, fg, bg) = look;
     p.rect_filled(r, (r.width() * 0.25).round(), bg);
     line_icon_scaled(p, icon, r.center(), fg, r.width() / 28.0);
@@ -135,7 +135,7 @@ pub(super) fn icon_picker(ui: &mut Ui, t: &Theme, f: &mut Form) -> bool {
             ui.spacing_mut().item_spacing.x = 4.0;
             for k in row {
                 let (r, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
-                name_it(&resp, &format!("Icon {}", k));
+                name_it(&resp, &format!("Icon {}", k.name()));
                 let on = *k == icon;
                 if on {
                     ui.painter().rect_filled(r, 8.0, bg);
@@ -148,9 +148,9 @@ pub(super) fn icon_picker(ui: &mut Ui, t: &Theme, f: &mut Form) -> bool {
                 } else if resp.hovered() {
                     ui.painter().rect_filled(r, 8.0, t.hover);
                 }
-                line_icon(ui.painter(), k, r.center(), if on { fg } else { t.text2 });
-                if resp.clicked() && f.icon != *k {
-                    f.icon = k.to_string();
+                line_icon(ui.painter(), *k, r.center(), if on { fg } else { t.text2 });
+                if resp.clicked() && f.icon != k.name() {
+                    f.icon = k.name().to_string();
                     changed = true;
                 }
             }
@@ -168,7 +168,7 @@ pub(super) fn icon_picker(ui: &mut Ui, t: &Theme, f: &mut Form) -> bool {
 pub(super) fn primary_icon(
     ui: &mut Ui,
     t: &Theme,
-    kind: &str,
+    kind: Icon,
     text: &str,
     name: &str,
 ) -> egui::Response {
@@ -196,7 +196,7 @@ pub(super) fn primary_icon(
 
 /// One item of `seg`: (line icon or "", text, count shown after it, name for
 /// screen readers and tests).
-pub(super) type SegItem<'a> = (&'a str, String, Option<usize>, &'a str);
+pub(super) type SegItem<'a> = (Option<Icon>, String, Option<usize>, &'a str);
 
 /// Segmented tabs: a grey track with the picked item raised in the page
 /// colour (the form's Edit / Fill out / Answers, the Answers filter).
@@ -231,8 +231,8 @@ pub(super) fn seg(ui: &mut Ui, t: &Theme, items: &[SegItem], sel: usize) -> Opti
             t.text2
         };
         let mut cx = r.left() + 12.0;
-        if !kind.is_empty() {
-            line_icon_scaled(&p, kind, pos2(cx + 7.0, r.center().y), color, 0.85);
+        if let Some(kind) = kind {
+            line_icon_scaled(&p, *kind, pos2(cx + 7.0, r.center().y), color, 0.85);
             cx += 20.0;
         }
         let g = p.layout_no_wrap(label.clone(), font.clone(), color);
@@ -265,7 +265,7 @@ fn seg_widths(p: &egui::Painter, t: &Theme, items: &[SegItem]) -> Vec<f32> {
             let c =
                 count.map(|n| p.layout_no_wrap(n.to_string(), FontId::proportional(11.0), t.text3));
             let text = g.size().x + c.as_ref().map_or(0.0, |c| c.size().x + 5.0);
-            24.0 + if kind.is_empty() { 0.0 } else { 20.0 } + text
+            24.0 + if kind.is_none() { 0.0 } else { 20.0 } + text
         })
         .collect()
 }
@@ -281,7 +281,7 @@ pub(super) fn seg_width(p: &egui::Painter, t: &Theme, items: &[SegItem]) -> f32 
 pub(super) fn select_button(
     ui: &mut Ui,
     t: &Theme,
-    kind: &str,
+    kind: Option<Icon>,
     icon_color: Color32,
     text: &str,
     text_color: Color32,
@@ -300,7 +300,7 @@ pub(super) fn select_button(
         egui::StrokeKind::Inside,
     );
     let mut x = r.left() + 10.0;
-    if !kind.is_empty() {
+    if let Some(kind) = kind {
         line_icon(p, kind, pos2(x + 8.0, r.center().y), icon_color);
         x += 24.0;
     }
@@ -353,7 +353,7 @@ pub(super) fn dashed_button(ui: &mut Ui, t: &Theme, text: &str, name: &str) -> e
     let g = p.layout_no_wrap(text.to_string(), FontId::proportional(14.0), t.text2);
     let content = 16.0 + 6.0 + g.size().x;
     let left = r.center().x - content / 2.0;
-    line_icon(p, "plus", pos2(left + 8.0, r.center().y), t.text2);
+    line_icon(p, Icon::Plus, pos2(left + 8.0, r.center().y), t.text2);
     p.galley(
         pos2(left + 22.0, r.center().y - g.size().y / 2.0),
         g,

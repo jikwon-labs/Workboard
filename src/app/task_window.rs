@@ -117,7 +117,7 @@ impl App {
                                     let b = icon_button_ex(
                                         ui,
                                         &t,
-                                        "sparkle",
+                                        Icon::Sparkle,
                                         tr("Write with AI"),
                                         "Description AI",
                                         false,
@@ -240,14 +240,14 @@ impl App {
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if icons::icon_button(ui, &t, "close", "", "Close task", false)
+                        if icons::icon_button(ui, &t, Icon::Close, "", "Close task", false)
                             .on_hover_text(tr("Close"))
                             .clicked()
                         {
                             close = true;
                         }
                         // the menu has "Copy ID", so no separate ID button here
-                        let r = icons::icon_button(ui, &t, "dots", "", "Task actions", false)
+                        let r = icons::icon_button(ui, &t, Icon::Dots, "", "Task actions", false)
                             .on_hover_text(tr("More"));
                         self.watchers_header(ui, &t, win_id, &mut task);
                         // a real menu, like the one a task's right click opens:
@@ -386,7 +386,7 @@ impl App {
                 // Status
                 icons::icon_label(
                     ui,
-                    "status",
+                    Icon::Status,
                     RichText::new(tr("Status")).color(t.text2),
                     t.text2,
                 );
@@ -405,7 +405,7 @@ impl App {
                 // Assignees
                 icons::icon_label(
                     ui,
-                    "person",
+                    Icon::Person,
                     RichText::new(tr("Assignees")).color(t.text2),
                     t.text2,
                 );
@@ -439,7 +439,7 @@ impl App {
                 // Dates
                 icons::icon_label(
                     ui,
-                    "calendar",
+                    Icon::Calendar,
                     RichText::new(tr("Dates")).color(t.text2),
                     t.text2,
                 );
@@ -475,7 +475,7 @@ impl App {
                     if task.recur.is_some() {
                         icons::icon_label(
                             ui,
-                            "repeat",
+                            Icon::Repeat,
                             RichText::new(tr(recur_label(&task.recur)))
                                 .small()
                                 .color(t.text2),
@@ -496,7 +496,7 @@ impl App {
                 } else {
                     icons::icon_label(
                         ui,
-                        "flag",
+                        Icon::Flag,
                         RichText::new(tr("Priority")).color(t.text2),
                         t.text2,
                     );
@@ -542,7 +542,7 @@ impl App {
                 if apps.time_estimates {
                     icons::icon_label(
                         ui,
-                        "hourglass",
+                        Icon::Hourglass,
                         RichText::new(tr("Time estimate")).color(t.text2),
                         t.text2,
                     );
@@ -569,16 +569,16 @@ impl App {
                 } else {
                     icons::icon_label(
                         ui,
-                        "clock",
+                        Icon::Clock,
                         RichText::new(tr("Track time")).color(t.text2),
                         t.text2,
                     );
                     ui.horizontal(|ui| {
                         let running = self.data.is_my_timer(&task);
                         let (kind, fill, name) = if running {
-                            ("stop", t.danger, "Stop timer")
+                            (Icon::Stop, t.danger, "Stop timer")
                         } else {
-                            ("play", t.primary, "Start timer")
+                            (Icon::Play, t.primary, "Start timer")
                         };
                         let tb = ui.add(Tint(
                             egui::Button::new("")
@@ -641,7 +641,12 @@ impl App {
                 }
                 // Tags (when the Tags ClickApp is on)
                 if apps.tags {
-                    icons::icon_label(ui, "tag", RichText::new(tr("Tags")).color(t.text2), t.text2);
+                    icons::icon_label(
+                        ui,
+                        Icon::Tag,
+                        RichText::new(tr("Tags")).color(t.text2),
+                        t.text2,
+                    );
                     ui.horizontal_wrapped(|ui| {
                         ui.set_max_width(field_w * 2.0);
                         let mut remove = None;
@@ -665,7 +670,7 @@ impl App {
                     for (i, f) in fields.iter().enumerate() {
                         icons::icon_label(
                             ui,
-                            "fields",
+                            Icon::Fields,
                             RichText::new(&f.name).color(t.text2),
                             t.text2,
                         );
@@ -757,7 +762,7 @@ impl App {
                     let b = icon_button_ex(
                         ui,
                         &t,
-                        "sparkle",
+                        Icon::Sparkle,
                         tr("Suggest subtasks"),
                         "Suggest subtasks",
                         false,
@@ -825,7 +830,7 @@ impl App {
             {
                 icons::line_icon_scaled(
                     ui.painter(),
-                    "person",
+                    Icon::Person,
                     ar.left_center() + vec2(12.0, 0.0),
                     t.text3,
                     0.8,
@@ -859,7 +864,7 @@ impl App {
                 None if hover => {
                     icons::line_icon_scaled(
                         ui.painter(),
-                        "calendar",
+                        Icon::Calendar,
                         dr.right_center() - vec2(10.0, 0.0),
                         t.text3,
                         0.8,
@@ -883,7 +888,7 @@ impl App {
             if hover {
                 // interact instead of `ui.put`: put allocates layout space,
                 // so the buttons appearing on hover pushed the rows below down
-                let mut hover_btn = |dx: f32, key: &str, icon: &str| {
+                let mut hover_btn = |dx: f32, key: &str, icon: Icon| {
                     let br = Rect::from_center_size(
                         pos2(r.right() - dx, r.center().y),
                         vec2(22.0, 22.0),
@@ -895,10 +900,10 @@ impl App {
                     icons::line_icon(ui.painter(), icon, br.center(), t.text2);
                     b
                 };
-                let b = hover_btn(162.0, "subtop", "arrow_up_left");
+                let b = hover_btn(162.0, "subtop", Icon::ArrowUpLeft);
                 name_it(&b, &format!("Make top-level {}", s.name));
                 top = b.on_hover_text(tr("Make it a task of its own")).clicked();
-                let b = hover_btn(186.0, "subdel", "close");
+                let b = hover_btn(186.0, "subdel", Icon::Close);
                 name_it(&b, &format!("Delete subtask {}", s.name));
                 del = b.on_hover_text(tr("Delete")).clicked();
             }
@@ -1067,7 +1072,7 @@ impl App {
                 );
                 name_field(&r, "Search comments");
                 focus_once(ui, &r);
-                if icons::icon_button(ui, &t, "close", "", "Close search", false)
+                if icons::icon_button(ui, &t, Icon::Close, "", "Close search", false)
                     .on_hover_text(tr("Close search"))
                     .clicked()
                 {
@@ -1136,7 +1141,7 @@ impl App {
                     assign_resp = Some(icons::icon_button(
                         bui,
                         &t,
-                        "person",
+                        Icon::Person,
                         tr("Assign this task"),
                         "Assign this task",
                         true,
@@ -1165,7 +1170,8 @@ impl App {
                 post = true;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let r = icons::icon_button(ui, &t, "search", "", "Search comments button", false);
+                let r =
+                    icons::icon_button(ui, &t, Icon::Search, "", "Search comments button", false);
                 if r.on_hover_text(tr("Search comments")).clicked() {
                     find = if find.is_some() {
                         None
@@ -1250,7 +1256,7 @@ impl App {
                     }
                 }
             });
-            let em = icons::icon_button(ui, &t, "smile", "", "Emoji", false);
+            let em = icons::icon_button(ui, &t, Icon::Smile, "", "Emoji", false);
             popup(ui, &em, win_id.with("emoji_popup"), 180.0, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     for e in super::comments::REACTIONS {
@@ -1264,7 +1270,7 @@ impl App {
                     }
                 });
             });
-            let ck = icons::icon_button(ui, &t, "task", "", "Checklist item in comment", false);
+            let ck = icons::icon_button(ui, &t, Icon::Task, "", "Checklist item in comment", false);
             if ck.on_hover_text(tr("Add a checklist item")).clicked() {
                 let lead = if self.comment.text.is_empty() || self.comment.text.ends_with('\n') {
                     ""

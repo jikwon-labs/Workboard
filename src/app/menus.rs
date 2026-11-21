@@ -243,14 +243,14 @@ pub const ROLES: [(&str, &str); 4] = [
 /// online service" note (clips, talk to text, AI notetaker) and ones the
 /// sidebar already reaches (My Work, People) are left out to keep it short;
 /// a pin saved for one of them is kept in the file but draws nothing.
-pub const TOOLS: [(&str, &str, &str); 7] = [
-    ("create_task", "Create task", "check_plus"),
-    ("track_time", "Track Time", "clock"),
-    ("notepad", "Notepad", "edit"),
-    ("reminder", "Create Reminder", "alarm"),
-    ("doc", "Create Doc", "docs"),
-    ("whiteboard", "Create Whiteboard", "whiteboards"),
-    ("dashboard", "Create Dashboard", "dashboards"),
+pub const TOOLS: [(&str, &str, Icon); 7] = [
+    ("create_task", "Create task", Icon::CheckPlus),
+    ("track_time", "Track Time", Icon::Clock),
+    ("notepad", "Notepad", Icon::Edit),
+    ("reminder", "Create Reminder", Icon::Alarm),
+    ("doc", "Create Doc", Icon::Docs),
+    ("whiteboard", "Create Whiteboard", Icon::Whiteboards),
+    ("dashboard", "Create Dashboard", Icon::Dashboards),
 ];
 
 pub fn unavailable(what: &str) -> Modal {
@@ -265,7 +265,7 @@ pub fn unavailable(what: &str) -> Modal {
 
 /// A menu row: a line icon (`icon` is its kind), the label and an optional
 /// hint on the right.
-fn menu_item(ui: &mut Ui, t: &Theme, icon: &str, label: &str, right: &str) -> Response {
+fn menu_item(ui: &mut Ui, t: &Theme, icon: Icon, label: &str, right: &str) -> Response {
     let w = ui.available_width().max(200.0);
     let (r, resp) = ui.allocate_exact_size(vec2(w, 27.0), Sense::click());
     name_it(&resp, label);
@@ -297,7 +297,7 @@ fn menu_item(ui: &mut Ui, t: &Theme, icon: &str, label: &str, right: &str) -> Re
     resp
 }
 
-fn menu_item2(ui: &mut Ui, t: &Theme, icon: &str, label: &str, sub: &str) -> Response {
+fn menu_item2(ui: &mut Ui, t: &Theme, icon: Icon, label: &str, sub: &str) -> Response {
     let w = ui.available_width().max(200.0);
     let (r, resp) = ui.allocate_exact_size(vec2(w, 44.0), Sense::click());
     name_it(&resp, label);
@@ -541,7 +541,7 @@ impl App {
             if icon_button_ex(
                 ui,
                 &t,
-                "settings",
+                Icon::Settings,
                 tr("Settings"),
                 "Settings",
                 true,
@@ -557,7 +557,7 @@ impl App {
             if icon_button_ex(
                 ui,
                 &t,
-                "teams",
+                Icon::Teams,
                 tr("People"),
                 "People",
                 true,
@@ -573,12 +573,12 @@ impl App {
         });
         ui.separator();
         section_label(ui, &t, tr("Manage"));
-        let items: [(&str, &str); 5] = [
-            ("apps", "Apps"),
-            ("templates", "Templates"),
-            ("fields", "Custom fields"),
-            ("robot", "Automations"),
-            ("tag", "Tag manager"),
+        let items: [(Icon, &str); 5] = [
+            (Icon::Apps, "Apps"),
+            (Icon::Templates, "Templates"),
+            (Icon::Fields, "Custom fields"),
+            (Icon::Robot, "Automations"),
+            (Icon::Tag, "Tag manager"),
         ];
         let manages = self.may_manage();
         for (icon, label) in items {
@@ -605,7 +605,7 @@ impl App {
         } else {
             tr("Work together")
         };
-        if menu_item(ui, &t, "teams", label, "").clicked() {
+        if menu_item(ui, &t, Icon::Teams, label, "").clicked() {
             self.modal = Some(self.together_modal());
             close_popup(ui);
         }
@@ -631,20 +631,20 @@ impl App {
             for w in all {
                 // workspaces often share a name ("My Workspace"): say where each one lives
                 let place = self.workspace_place(&w.file);
-                if menu_item(ui, &t, "building", &w.name, tr(place)).clicked() {
+                if menu_item(ui, &t, Icon::Building, &w.name, tr(place)).clicked() {
                     self.switch_workspace(&w.file);
                     close_popup(ui);
                 }
             }
         }
         ui.separator();
-        if menu_item(ui, &t, "plus", tr("Create Workspace"), "").clicked() {
+        if menu_item(ui, &t, Icon::Plus, tr("Create Workspace"), "").clicked() {
             self.modal = Some(Modal::new_workspace());
             close_popup(ui);
         }
         // someone else's team: it opens as another workspace here, and the
         // ones already on this computer (on a server or not) stay as they are
-        if menu_item(ui, &t, "login", tr("Join a team"), "").clicked() {
+        if menu_item(ui, &t, Icon::Login, tr("Join a team"), "").clicked() {
             self.open_join_team(String::new());
             close_popup(ui);
         }
@@ -781,7 +781,7 @@ impl App {
         if icon_button_ex(
             ui,
             &t,
-            "smile",
+            Icon::Smile,
             tr("Set status"),
             "Set status",
             true,
@@ -801,7 +801,7 @@ impl App {
         }
         // a flyout beside the row (egui's sub menu drew over this menu): to the
         // right when it fits, otherwise to the left of the whole menu
-        let mr = menu_item(ui, &t, "bell_off", tr("Mute notifications"), "\u{203A}");
+        let mr = menu_item(ui, &t, Icon::BellOff, tr("Mute notifications"), "\u{203A}");
         let fly = ui.id().with("mute_fly");
         let keep: bool = ui.data(|d| d.get_temp(fly)).unwrap_or(false);
         let fly_w: f32 = ui.data(|d| d.get_temp(fly.with("w"))).unwrap_or(170.0);
@@ -872,11 +872,11 @@ impl App {
         ui.separator();
         // notifications, themes, keyboard shortcuts and the profile are
         // sections of Settings, so they aren't rows of their own here
-        let rows: [(&str, &str); 4] = [
-            ("settings", "Settings"),
-            ("sparkle", "Labs"),
-            ("refresh", "Check for updates"),
-            ("help", "Help"),
+        let rows: [(Icon, &str); 4] = [
+            (Icon::Settings, "Settings"),
+            (Icon::Sparkle, "Labs"),
+            (Icon::Refresh, "Check for updates"),
+            (Icon::Help, "Help"),
         ];
         for (icon, label) in rows {
             let resp = menu_item(ui, &t, icon, tr(label), "");
@@ -950,7 +950,7 @@ impl App {
                 let pin = icon_button_ex(
                     ui,
                     &t,
-                    "pin",
+                    Icon::Pin,
                     "",
                     "Pin",
                     false,
@@ -976,14 +976,14 @@ impl App {
             });
         }
         ui.separator();
-        if menu_item(ui, &t, "trash", tr("Trash"), "").clicked() {
+        if menu_item(ui, &t, Icon::Trash, tr("Trash"), "").clicked() {
             self.modal = Some(Modal::Trash);
             close_popup(ui);
         }
         // it changes who uses the app on this computer without signing out;
         // on a team server the person is who signed in, so it isn't there
         if !self.on_team_server()
-            && menu_item(ui, &t, "person", tr("Switch person"), "")
+            && menu_item(ui, &t, Icon::Person, tr("Switch person"), "")
                 .on_hover_text(tr("Switch to another person on this computer"))
                 .clicked()
         {
@@ -992,7 +992,7 @@ impl App {
         }
         // signs this computer out of the team server (login.rs)
         if self.on_team_server()
-            && menu_item(ui, &t, "logout", tr("Log out"), "")
+            && menu_item(ui, &t, Icon::Logout, tr("Log out"), "")
                 .on_hover_text(tr("Sign this computer out of the team server"))
                 .clicked()
         {
@@ -1120,11 +1120,11 @@ impl App {
         }
         ui.separator();
         section_label(ui, &t, tr("Create"));
-        if menu_item(ui, &t, "task", tr("Task"), "\u{2325}T").clicked() {
+        if menu_item(ui, &t, Icon::Task, tr("Task"), "\u{2325}T").clicked() {
             self.open_quick_add(None);
             close_popup(ui);
         }
-        if menu_item(ui, &t, "send", tr("Message"), "\u{2318}G").clicked() {
+        if menu_item(ui, &t, Icon::Send, tr("Message"), "\u{2318}G").clicked() {
             self.new_message_open = true;
             close_popup(ui);
         }
@@ -1135,7 +1135,7 @@ impl App {
         if menu_item2(
             ui,
             &t,
-            "list",
+            Icon::List,
             tr("List"),
             tr("Track tasks, projects, people & more"),
         )
@@ -1153,7 +1153,7 @@ impl App {
         if menu_item2(
             ui,
             &t,
-            "hash",
+            Icon::Hash,
             tr("Channel"),
             tr("Conversations on specific topics"),
         )
@@ -1169,7 +1169,7 @@ impl App {
         if menu_item2(
             ui,
             &t,
-            "space",
+            Icon::Space,
             tr("Space"),
             tr("Organize work by team or department"),
         )
@@ -1183,22 +1183,22 @@ impl App {
             close_popup(ui);
         }
         ui.separator();
-        if menu_item(ui, &t, "sparkle", tr("Create with AI"), "").clicked() {
+        if menu_item(ui, &t, Icon::Sparkle, tr("Create with AI"), "").clicked() {
             self.modal = Some(unavailable("Create with AI"));
             close_popup(ui);
         }
-        if menu_item(ui, &t, "robot", tr("Super Agent"), tr("Hot")).clicked() {
+        if menu_item(ui, &t, Icon::Robot, tr("Super Agent"), tr("Hot")).clicked() {
             self.modal = Some(unavailable("Super Agent"));
             close_popup(ui);
         }
         ui.separator();
         for (icon, label) in [
-            ("docs", "Doc"),
-            ("heart", "Artifact"),
-            ("forms", "Form"),
-            ("dashboards", "Dashboard"),
-            ("whiteboards", "Whiteboard"),
-            ("video", "Clip"),
+            (Icon::Docs, "Doc"),
+            (Icon::Heart, "Artifact"),
+            (Icon::Forms, "Form"),
+            (Icon::Dashboards, "Dashboard"),
+            (Icon::Whiteboards, "Whiteboard"),
+            (Icon::Video, "Clip"),
         ] {
             if menu_item(ui, &t, icon, tr(label), "").clicked() {
                 match label {
@@ -1217,7 +1217,7 @@ impl App {
             }
         }
         ui.separator();
-        if menu_item(ui, &t, "sidebar", tr("Customize your sidebar"), "").clicked() {
+        if menu_item(ui, &t, Icon::Sidebar, tr("Customize your sidebar"), "").clicked() {
             self.modal = Some(Modal::CustomizeSidebar);
             close_popup(ui);
         }
@@ -1226,7 +1226,7 @@ impl App {
             if icon_button_ex(
                 ui,
                 &t,
-                "download",
+                Icon::Download,
                 tr("Import"),
                 "Import",
                 true,
@@ -1245,7 +1245,7 @@ impl App {
             if icon_button_ex(
                 ui,
                 &t,
-                "templates",
+                Icon::Templates,
                 tr("Templates"),
                 "Templates",
                 true,
@@ -1330,7 +1330,7 @@ impl App {
                 if icon_button_ex(
                     ui,
                     &t,
-                    "pin",
+                    Icon::Pin,
                     "",
                     "Pin",
                     false,
@@ -1351,7 +1351,7 @@ impl App {
             });
         }
         ui.separator();
-        if menu_item(ui, &t, "settings", tr("Customize navigation"), "").clicked() {
+        if menu_item(ui, &t, Icon::Settings, tr("Customize navigation"), "").clicked() {
             self.modal = Some(Modal::CustomizeNav);
             close_popup(ui);
         }

@@ -11,109 +11,496 @@ mod painted;
 
 pub(super) use painted::*;
 
-/// Every kind `line_icon` draws (checked by a test, so a misspelt kind shows up).
-pub(super) const KINDS: &[&str] = &[
-    "home",
-    "planner",
-    "ai",
-    "teams",
-    "more",
-    "chat",
-    "docs",
-    "dashboards",
-    "whiteboards",
-    "forms",
-    "goals",
-    "timesheets",
-    "clock",
-    "upgrade",
-    "check_plus",
-    "video",
-    "mic",
-    "phone",
-    "robot",
-    "edit",
-    "share",
-    "inbox",
-    "reply",
-    "person",
-    "person_comment",
-    "megaphone",
-    "bolt",
-    "heart",
-    "dots",
-    "settings",
-    "apps",
-    "templates",
-    "fields",
-    "tag",
-    "building",
-    "smile",
-    "frown",
-    "bell",
-    "bell_off",
-    "palette",
-    "sparkle",
-    "keyboard",
-    "download",
-    "upload",
-    "refresh",
-    "help",
-    "task",
-    "send",
-    "list",
-    "hash",
-    "space",
-    "sidebar",
-    "briefcase",
-    "alarm",
-    "notebook",
-    "pin",
-    "calendar",
-    "link",
-    "play",
-    "stop",
-    "sun",
-    "moon",
-    "auto",
-    "bus",
-    "plane",
-    "search",
-    "lock",
-    "filter",
-    "columns",
-    "table",
-    "subtasks",
-    "check",
-    "flag",
-    "status",
-    "hourglass",
-    "repeat",
-    "attach",
-    "eye",
-    "eye_off",
-    "bookmark",
-    "pen",
-    "sticky",
-    "eraser",
-    "move",
-    "shapes",
-    "chart",
-    "trash",
-    "logout",
-    "plus",
-    "login",
-    "undo",
-    "redo",
-    "fit",
-    "at",
-    "volume",
-    "badge",
-    "wifi",
-    "person_plus",
-    "external",
-    "chevron_down",
-];
+/// A line icon (see `line_icon`). The last few are the smaller, thinner
+/// ones the List, the Board and the shell draw beside their text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Icon {
+    Home,
+    Planner,
+    Ai,
+    Teams,
+    More,
+    Chat,
+    Docs,
+    Dashboards,
+    Whiteboards,
+    Forms,
+    Goals,
+    Timesheets,
+    Clock,
+    Upgrade,
+    CheckPlus,
+    Video,
+    Mic,
+    Phone,
+    Robot,
+    Edit,
+    Share,
+    Inbox,
+    Reply,
+    Person,
+    PersonComment,
+    Megaphone,
+    Bolt,
+    Heart,
+    Dots,
+    Settings,
+    Apps,
+    Templates,
+    Fields,
+    Tag,
+    Building,
+    Smile,
+    Frown,
+    Bell,
+    BellOff,
+    Palette,
+    Sparkle,
+    Keyboard,
+    Download,
+    Upload,
+    Refresh,
+    Help,
+    Task,
+    Send,
+    List,
+    Hash,
+    Space,
+    Sidebar,
+    Briefcase,
+    Alarm,
+    Notebook,
+    Pin,
+    Calendar,
+    Link,
+    Play,
+    Stop,
+    Sun,
+    Moon,
+    Auto,
+    Bus,
+    Plane,
+    Search,
+    Lock,
+    Filter,
+    Columns,
+    Table,
+    Subtasks,
+    Check,
+    Flag,
+    Status,
+    Hourglass,
+    Repeat,
+    Attach,
+    Eye,
+    EyeOff,
+    Bookmark,
+    Pen,
+    Sticky,
+    Eraser,
+    Connector,
+    Move,
+    Shapes,
+    Chart,
+    Trash,
+    Logout,
+    Plus,
+    Undo,
+    Redo,
+    Fit,
+    Login,
+    Sort,
+    Archive,
+    Close,
+    PopOut,
+    ArrowUpLeft,
+    Folder,
+    At,
+    Volume,
+    Badge,
+    Wifi,
+    PersonPlus,
+    External,
+    Warning,
+    ArrowRight,
+    ChevronLeft,
+    ChevronRight,
+    ChevronDown,
+    ChecklistSmall,
+    CalendarSmall,
+    PersonSmall,
+    CommentSmall,
+    FlagSmall,
+}
+
+impl Icon {
+    /// Every icon (a test draws each).
+    #[cfg(test)]
+    pub(crate) const ALL: &'static [Icon] = &[
+        Icon::Home,
+        Icon::Planner,
+        Icon::Ai,
+        Icon::Teams,
+        Icon::More,
+        Icon::Chat,
+        Icon::Docs,
+        Icon::Dashboards,
+        Icon::Whiteboards,
+        Icon::Forms,
+        Icon::Goals,
+        Icon::Timesheets,
+        Icon::Clock,
+        Icon::Upgrade,
+        Icon::CheckPlus,
+        Icon::Video,
+        Icon::Mic,
+        Icon::Phone,
+        Icon::Robot,
+        Icon::Edit,
+        Icon::Share,
+        Icon::Inbox,
+        Icon::Reply,
+        Icon::Person,
+        Icon::PersonComment,
+        Icon::Megaphone,
+        Icon::Bolt,
+        Icon::Heart,
+        Icon::Dots,
+        Icon::Settings,
+        Icon::Apps,
+        Icon::Templates,
+        Icon::Fields,
+        Icon::Tag,
+        Icon::Building,
+        Icon::Smile,
+        Icon::Frown,
+        Icon::Bell,
+        Icon::BellOff,
+        Icon::Palette,
+        Icon::Sparkle,
+        Icon::Keyboard,
+        Icon::Download,
+        Icon::Upload,
+        Icon::Refresh,
+        Icon::Help,
+        Icon::Task,
+        Icon::Send,
+        Icon::List,
+        Icon::Hash,
+        Icon::Space,
+        Icon::Sidebar,
+        Icon::Briefcase,
+        Icon::Alarm,
+        Icon::Notebook,
+        Icon::Pin,
+        Icon::Calendar,
+        Icon::Link,
+        Icon::Play,
+        Icon::Stop,
+        Icon::Sun,
+        Icon::Moon,
+        Icon::Auto,
+        Icon::Bus,
+        Icon::Plane,
+        Icon::Search,
+        Icon::Lock,
+        Icon::Filter,
+        Icon::Columns,
+        Icon::Table,
+        Icon::Subtasks,
+        Icon::Check,
+        Icon::Flag,
+        Icon::Status,
+        Icon::Hourglass,
+        Icon::Repeat,
+        Icon::Attach,
+        Icon::Eye,
+        Icon::EyeOff,
+        Icon::Bookmark,
+        Icon::Pen,
+        Icon::Sticky,
+        Icon::Eraser,
+        Icon::Connector,
+        Icon::Move,
+        Icon::Shapes,
+        Icon::Chart,
+        Icon::Trash,
+        Icon::Logout,
+        Icon::Plus,
+        Icon::Undo,
+        Icon::Redo,
+        Icon::Fit,
+        Icon::Login,
+        Icon::Sort,
+        Icon::Archive,
+        Icon::Close,
+        Icon::PopOut,
+        Icon::ArrowUpLeft,
+        Icon::Folder,
+        Icon::At,
+        Icon::Volume,
+        Icon::Badge,
+        Icon::Wifi,
+        Icon::PersonPlus,
+        Icon::External,
+        Icon::Warning,
+        Icon::ArrowRight,
+        Icon::ChevronLeft,
+        Icon::ChevronRight,
+        Icon::ChevronDown,
+        Icon::ChecklistSmall,
+        Icon::CalendarSmall,
+        Icon::PersonSmall,
+        Icon::CommentSmall,
+        Icon::FlagSmall,
+    ];
+
+    /// The icon named `name` ("home", "check_plus"), for a name made at run
+    /// time; None for a name no icon has.
+    pub(crate) fn named(name: &str) -> Option<Icon> {
+        Some(match name {
+            "home" => Icon::Home,
+            "planner" => Icon::Planner,
+            "ai" => Icon::Ai,
+            "teams" => Icon::Teams,
+            "more" => Icon::More,
+            "chat" => Icon::Chat,
+            "docs" => Icon::Docs,
+            "dashboards" => Icon::Dashboards,
+            "whiteboards" => Icon::Whiteboards,
+            "forms" => Icon::Forms,
+            "goals" => Icon::Goals,
+            "timesheets" => Icon::Timesheets,
+            "clock" => Icon::Clock,
+            "upgrade" => Icon::Upgrade,
+            "check_plus" => Icon::CheckPlus,
+            "video" => Icon::Video,
+            "mic" => Icon::Mic,
+            "phone" => Icon::Phone,
+            "robot" => Icon::Robot,
+            "edit" => Icon::Edit,
+            "share" => Icon::Share,
+            "inbox" => Icon::Inbox,
+            "reply" => Icon::Reply,
+            "person" => Icon::Person,
+            "person_comment" => Icon::PersonComment,
+            "megaphone" => Icon::Megaphone,
+            "bolt" => Icon::Bolt,
+            "heart" => Icon::Heart,
+            "dots" => Icon::Dots,
+            "settings" => Icon::Settings,
+            "apps" => Icon::Apps,
+            "templates" => Icon::Templates,
+            "fields" => Icon::Fields,
+            "tag" => Icon::Tag,
+            "building" => Icon::Building,
+            "smile" => Icon::Smile,
+            "frown" => Icon::Frown,
+            "bell" => Icon::Bell,
+            "bell_off" => Icon::BellOff,
+            "palette" => Icon::Palette,
+            "sparkle" => Icon::Sparkle,
+            "keyboard" => Icon::Keyboard,
+            "download" => Icon::Download,
+            "upload" => Icon::Upload,
+            "refresh" => Icon::Refresh,
+            "help" => Icon::Help,
+            "task" => Icon::Task,
+            "send" => Icon::Send,
+            "list" => Icon::List,
+            "hash" => Icon::Hash,
+            "space" => Icon::Space,
+            "sidebar" => Icon::Sidebar,
+            "briefcase" => Icon::Briefcase,
+            "alarm" => Icon::Alarm,
+            "notebook" => Icon::Notebook,
+            "pin" => Icon::Pin,
+            "calendar" => Icon::Calendar,
+            "link" => Icon::Link,
+            "play" => Icon::Play,
+            "stop" => Icon::Stop,
+            "sun" => Icon::Sun,
+            "moon" => Icon::Moon,
+            "auto" => Icon::Auto,
+            "bus" => Icon::Bus,
+            "plane" => Icon::Plane,
+            "search" => Icon::Search,
+            "lock" => Icon::Lock,
+            "filter" => Icon::Filter,
+            "columns" => Icon::Columns,
+            "table" => Icon::Table,
+            "subtasks" => Icon::Subtasks,
+            "check" => Icon::Check,
+            "flag" => Icon::Flag,
+            "status" => Icon::Status,
+            "hourglass" => Icon::Hourglass,
+            "repeat" => Icon::Repeat,
+            "attach" => Icon::Attach,
+            "eye" => Icon::Eye,
+            "eye_off" => Icon::EyeOff,
+            "bookmark" => Icon::Bookmark,
+            "pen" => Icon::Pen,
+            "sticky" => Icon::Sticky,
+            "eraser" => Icon::Eraser,
+            "connector" => Icon::Connector,
+            "move" => Icon::Move,
+            "shapes" => Icon::Shapes,
+            "chart" => Icon::Chart,
+            "trash" => Icon::Trash,
+            "logout" => Icon::Logout,
+            "plus" => Icon::Plus,
+            "undo" => Icon::Undo,
+            "redo" => Icon::Redo,
+            "fit" => Icon::Fit,
+            "login" => Icon::Login,
+            "sort" => Icon::Sort,
+            "archive" => Icon::Archive,
+            "close" => Icon::Close,
+            "pop_out" => Icon::PopOut,
+            "arrow_up_left" => Icon::ArrowUpLeft,
+            "folder" => Icon::Folder,
+            "at" => Icon::At,
+            "volume" => Icon::Volume,
+            "badge" => Icon::Badge,
+            "wifi" => Icon::Wifi,
+            "person_plus" => Icon::PersonPlus,
+            "external" => Icon::External,
+            "warning" => Icon::Warning,
+            "arrow_right" => Icon::ArrowRight,
+            "chevron_left" => Icon::ChevronLeft,
+            "chevron_right" => Icon::ChevronRight,
+            "chevron_down" => Icon::ChevronDown,
+            "checklist_small" => Icon::ChecklistSmall,
+            "calendar_small" => Icon::CalendarSmall,
+            "person_small" => Icon::PersonSmall,
+            "comment_small" => Icon::CommentSmall,
+            "flag_small" => Icon::FlagSmall,
+            _ => return None,
+        })
+    }
+
+    /// Its name, as `named` takes it (and as a form saves its icon).
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Icon::Home => "home",
+            Icon::Planner => "planner",
+            Icon::Ai => "ai",
+            Icon::Teams => "teams",
+            Icon::More => "more",
+            Icon::Chat => "chat",
+            Icon::Docs => "docs",
+            Icon::Dashboards => "dashboards",
+            Icon::Whiteboards => "whiteboards",
+            Icon::Forms => "forms",
+            Icon::Goals => "goals",
+            Icon::Timesheets => "timesheets",
+            Icon::Clock => "clock",
+            Icon::Upgrade => "upgrade",
+            Icon::CheckPlus => "check_plus",
+            Icon::Video => "video",
+            Icon::Mic => "mic",
+            Icon::Phone => "phone",
+            Icon::Robot => "robot",
+            Icon::Edit => "edit",
+            Icon::Share => "share",
+            Icon::Inbox => "inbox",
+            Icon::Reply => "reply",
+            Icon::Person => "person",
+            Icon::PersonComment => "person_comment",
+            Icon::Megaphone => "megaphone",
+            Icon::Bolt => "bolt",
+            Icon::Heart => "heart",
+            Icon::Dots => "dots",
+            Icon::Settings => "settings",
+            Icon::Apps => "apps",
+            Icon::Templates => "templates",
+            Icon::Fields => "fields",
+            Icon::Tag => "tag",
+            Icon::Building => "building",
+            Icon::Smile => "smile",
+            Icon::Frown => "frown",
+            Icon::Bell => "bell",
+            Icon::BellOff => "bell_off",
+            Icon::Palette => "palette",
+            Icon::Sparkle => "sparkle",
+            Icon::Keyboard => "keyboard",
+            Icon::Download => "download",
+            Icon::Upload => "upload",
+            Icon::Refresh => "refresh",
+            Icon::Help => "help",
+            Icon::Task => "task",
+            Icon::Send => "send",
+            Icon::List => "list",
+            Icon::Hash => "hash",
+            Icon::Space => "space",
+            Icon::Sidebar => "sidebar",
+            Icon::Briefcase => "briefcase",
+            Icon::Alarm => "alarm",
+            Icon::Notebook => "notebook",
+            Icon::Pin => "pin",
+            Icon::Calendar => "calendar",
+            Icon::Link => "link",
+            Icon::Play => "play",
+            Icon::Stop => "stop",
+            Icon::Sun => "sun",
+            Icon::Moon => "moon",
+            Icon::Auto => "auto",
+            Icon::Bus => "bus",
+            Icon::Plane => "plane",
+            Icon::Search => "search",
+            Icon::Lock => "lock",
+            Icon::Filter => "filter",
+            Icon::Columns => "columns",
+            Icon::Table => "table",
+            Icon::Subtasks => "subtasks",
+            Icon::Check => "check",
+            Icon::Flag => "flag",
+            Icon::Status => "status",
+            Icon::Hourglass => "hourglass",
+            Icon::Repeat => "repeat",
+            Icon::Attach => "attach",
+            Icon::Eye => "eye",
+            Icon::EyeOff => "eye_off",
+            Icon::Bookmark => "bookmark",
+            Icon::Pen => "pen",
+            Icon::Sticky => "sticky",
+            Icon::Eraser => "eraser",
+            Icon::Connector => "connector",
+            Icon::Move => "move",
+            Icon::Shapes => "shapes",
+            Icon::Chart => "chart",
+            Icon::Trash => "trash",
+            Icon::Logout => "logout",
+            Icon::Plus => "plus",
+            Icon::Undo => "undo",
+            Icon::Redo => "redo",
+            Icon::Fit => "fit",
+            Icon::Login => "login",
+            Icon::Sort => "sort",
+            Icon::Archive => "archive",
+            Icon::Close => "close",
+            Icon::PopOut => "pop_out",
+            Icon::ArrowUpLeft => "arrow_up_left",
+            Icon::Folder => "folder",
+            Icon::At => "at",
+            Icon::Volume => "volume",
+            Icon::Badge => "badge",
+            Icon::Wifi => "wifi",
+            Icon::PersonPlus => "person_plus",
+            Icon::External => "external",
+            Icon::Warning => "warning",
+            Icon::ArrowRight => "arrow_right",
+            Icon::ChevronLeft => "chevron_left",
+            Icon::ChevronRight => "chevron_right",
+            Icon::ChevronDown => "chevron_down",
+            Icon::ChecklistSmall => "checklist_small",
+            Icon::CalendarSmall => "calendar_small",
+            Icon::PersonSmall => "person_small",
+            Icon::CommentSmall => "comment_small",
+            Icon::FlagSmall => "flag_small",
+        }
+    }
+}
 
 /// Points on a circle around `c` of radius `r`, from angle `a0` to `a1`
 /// (radians, clockwise on screen when `a1 > a0`).
@@ -129,28 +516,21 @@ fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32) -> Vec<Pos2> {
 
 /// `line_icon` drawn `scale` times larger around `c` (the big icon of an
 /// empty page), with the stroke kept at about the usual weight.
-pub(super) fn line_icon_scaled(
-    p: &egui::Painter,
-    kind: &str,
-    c: Pos2,
-    color: Color32,
-    scale: f32,
-) -> bool {
+pub(crate) fn line_icon_scaled(p: &egui::Painter, kind: Icon, c: Pos2, color: Color32, scale: f32) {
     let layer = p.layer_id();
     let start = p.ctx().graphics_mut(|g| g.entry(layer).next_idx());
-    let ok = line_icon(p, kind, c, color);
+    line_icon(p, kind, c, color);
     let end = p.ctx().graphics_mut(|g| g.entry(layer).next_idx());
     let tf = egui::emath::TSTransform::new(c.to_vec2() * (1.0 - scale), scale);
     p.ctx()
         .graphics_mut(|g| g.entry(layer).transform_range(start, end, tf));
-    ok
 }
 
 /// A line icon before a label, in one row (a field's name in the task
 /// window, "Drop on a day").
 pub(super) fn icon_label(
     ui: &mut Ui,
-    kind: &str,
+    kind: Icon,
     text: impl Into<egui::WidgetText>,
     color: Color32,
 ) -> Response {
@@ -167,7 +547,7 @@ pub(super) fn icon_label(
 /// left centre `at`; returns the width used.
 pub(super) fn icon_count(
     p: &egui::Painter,
-    kind: &str,
+    kind: Icon,
     at: Pos2,
     text: &str,
     color: Color32,
@@ -187,10 +567,10 @@ pub(super) fn icon_count(
 /// Planner, Timesheets): framed, square, as tall as the other controls.
 /// Returns (back clicked, forward clicked).
 pub(super) fn period_arrows(ui: &mut Ui, t: &Theme) -> (bool, bool) {
-    let back = icon_button(ui, t, "chevron_left", "", "Previous period", true)
+    let back = icon_button(ui, t, Icon::ChevronLeft, "", "Previous period", true)
         .on_hover_text(tr("Previous"))
         .clicked();
-    let fwd = icon_button(ui, t, "chevron_right", "", "Next period", true)
+    let fwd = icon_button(ui, t, Icon::ChevronRight, "", "Next period", true)
         .on_hover_text(tr("Next"))
         .clicked();
     (back, fwd)
@@ -206,7 +586,7 @@ pub(super) const ICON_GAP: f32 = 6.0;
 pub(super) fn icon_button(
     ui: &mut Ui,
     t: &Theme,
-    kind: &str,
+    kind: Icon,
     text: &str,
     name: &str,
     framed: bool,
@@ -220,7 +600,7 @@ pub(super) fn icon_button(
 pub(super) fn icon_button_ex(
     ui: &mut Ui,
     t: &Theme,
-    kind: &str,
+    kind: Icon,
     text: &str,
     name: &str,
     framed: bool,
@@ -274,8 +654,6 @@ pub(super) fn icon_button_ex(
     resp
 }
 
-/// Thin outline icons in the style of the original (1.5 px strokes), drawn
-/// in a 16 pt square around `c`. Returns false for a kind it does not know.
 /// A "+" drawn as two lines centred on `c`, about as big as the "+"
 /// character of a `size` px font. The character sits below the middle of
 /// its line (by about a tenth of the size in the system font), so in a box,
@@ -354,11 +732,13 @@ pub(super) fn paint_sign(ui: &Ui, resp: &Response, minus: bool, color: Option<Co
     }
 }
 
-pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) -> bool {
+/// Draws a thin outline icon in the style of the original (1.5 px strokes)
+/// in a 16 pt square around `c` (the `*Small` ones are 12 pt, 1.2 px).
+pub(crate) fn line_icon(p: &egui::Painter, kind: Icon, c: Pos2, color: Color32) {
     let s = Stroke::new(1.5_f32, color);
     let line = |a: egui::Vec2, b: egui::Vec2| p.line_segment([c + a, c + b], s);
     match kind {
-        "home" => {
+        Icon::Home => {
             let pts = vec![
                 c + vec2(-7.0, -1.0),
                 c + vec2(0.0, -7.5),
@@ -371,7 +751,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-2.5, 2.5), vec2(2.5, 2.5));
             line(vec2(2.5, 2.5), vec2(2.5, 7.0));
         }
-        "planner" => {
+        Icon::Planner => {
             let r = Rect::from_center_size(c + vec2(0.0, 0.5), vec2(15.0, 14.0));
             p.rect_stroke(r, 3.0, s, egui::StrokeKind::Middle);
             line(vec2(-7.5, -3.0), vec2(7.5, -3.0));
@@ -385,7 +765,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 color,
             );
         }
-        "ai" => {
+        Icon::Ai => {
             for k in 0..4 {
                 let a = std::f32::consts::FRAC_PI_2 * k as f32 + std::f32::consts::FRAC_PI_4;
                 let d = vec2(a.cos(), a.sin());
@@ -393,7 +773,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             }
             p.circle_filled(c, 1.6, color);
         }
-        "teams" => {
+        Icon::Teams => {
             p.circle_stroke(c + vec2(-2.5, -3.0), 3.0, s);
             let mut arc = vec![];
             for i in 0..=10 {
@@ -404,7 +784,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.circle_stroke(c + vec2(4.5, -2.0), 2.4, s);
             line(vec2(4.5, 2.5), vec2(8.0, 6.5));
         }
-        "more" => {
+        Icon::More => {
             for i in 0..3 {
                 for j in 0..3 {
                     p.circle_filled(
@@ -415,13 +795,13 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 }
             }
         }
-        "chat" => {
+        Icon::Chat => {
             let r = Rect::from_center_size(c + vec2(0.0, -1.0), vec2(15.0, 11.0));
             p.rect_stroke(r, 3.5, s, egui::StrokeKind::Middle);
             line(vec2(-3.0, 4.5), vec2(-5.0, 8.0));
             line(vec2(-5.0, 8.0), vec2(0.0, 4.5));
         }
-        "docs" => {
+        Icon::Docs => {
             let pts = vec![
                 c + vec2(-5.5, -7.5),
                 c + vec2(2.0, -7.5),
@@ -433,7 +813,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-2.5, 0.0), vec2(2.5, 0.0));
             line(vec2(-2.5, 3.5), vec2(2.5, 3.5));
         }
-        "dashboards" => {
+        Icon::Dashboards => {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(15.0, 15.0)),
                 3.0,
@@ -444,7 +824,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(0.5, 4.0), vec2(0.5, -3.5));
             line(vec2(4.0, 4.0), vec2(4.0, 1.5));
         }
-        "whiteboards" => {
+        Icon::Whiteboards => {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(15.0, 15.0)),
                 3.0,
@@ -459,7 +839,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::line(pts, s));
         }
-        "forms" => {
+        Icon::Forms => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(0.0, 0.5), vec2(13.0, 15.0)),
                 3.0,
@@ -470,7 +850,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-0.8, 3.2), vec2(3.5, -1.5));
             line(vec2(-2.5, -7.5), vec2(2.5, -7.5));
         }
-        "goals" => {
+        Icon::Goals => {
             let pts = vec![
                 c + vec2(-5.0, -7.0),
                 c + vec2(5.0, -7.0),
@@ -482,13 +862,13 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(0.0, 2.0), vec2(0.0, 6.0));
             line(vec2(-3.5, 7.0), vec2(3.5, 7.0));
         }
-        "timesheets" | "clock" => {
+        Icon::Timesheets | Icon::Clock => {
             p.circle_stroke(c + vec2(0.0, 1.0), 6.5, s);
             line(vec2(0.0, 1.0), vec2(0.0, -2.5));
             line(vec2(0.0, 1.0), vec2(2.5, 2.5));
             line(vec2(-2.0, -7.5), vec2(2.0, -7.5));
         }
-        "upgrade" => {
+        Icon::Upgrade => {
             let pts = vec![
                 c + vec2(0.0, -8.0),
                 c + vec2(7.0, -1.0),
@@ -509,7 +889,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 Color32::from_rgb(171, 140, 255),
             );
         }
-        "check_plus" => {
+        Icon::CheckPlus => {
             let mut arc = vec![];
             for i in 0..=22 {
                 let a = std::f32::consts::TAU * (0.1 + 0.75 * i as f32 / 22.0);
@@ -521,7 +901,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(5.5, -8.0), vec2(5.5, -3.0));
             line(vec2(3.0, -5.5), vec2(8.0, -5.5));
         }
-        "video" => {
+        Icon::Video => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(-2.0, 0.0), vec2(12.0, 10.0)),
                 2.5,
@@ -536,7 +916,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::line(pts, s));
         }
-        "mic" => {
+        Icon::Mic => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(0.0, -2.5), vec2(6.0, 10.0)),
                 3.0,
@@ -551,7 +931,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::line(arc, s));
             line(vec2(0.0, 4.5), vec2(0.0, 7.5));
         }
-        "phone" => {
+        Icon::Phone => {
             let pts = vec![
                 c + vec2(-6.0, -6.0),
                 c + vec2(-3.0, -7.0),
@@ -566,7 +946,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::closed_line(pts, s));
         }
-        "robot" => {
+        Icon::Robot => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(0.0, 1.5), vec2(13.0, 10.0)),
                 3.0,
@@ -578,7 +958,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(0.0, -3.5), vec2(0.0, -6.5));
             p.circle_filled(c + vec2(0.0, -7.0), 1.2, color);
         }
-        "edit" => {
+        Icon::Edit => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(-1.0, 1.0), vec2(12.0, 12.0)),
                 2.5,
@@ -587,7 +967,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             );
             line(vec2(0.0, 0.0), vec2(6.5, -6.5));
         }
-        "share" => {
+        Icon::Share => {
             p.circle_stroke(c + vec2(-1.5, -3.0), 3.0, s);
             let mut arc = vec![];
             for i in 0..=10 {
@@ -597,7 +977,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::line(arc, s));
             p.circle_stroke(c + vec2(5.0, -2.0), 2.2, s);
         }
-        "inbox" => {
+        Icon::Inbox => {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(15.0, 13.0)),
                 3.0,
@@ -614,7 +994,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::line(pts, s));
         }
-        "reply" => {
+        Icon::Reply => {
             let mut arc = vec![];
             for i in 0..=10 {
                 let a = std::f32::consts::PI * (1.5 + 0.5 * i as f32 / 10.0);
@@ -625,7 +1005,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-6.0, -2.0), vec2(-3.0, -5.0));
             line(vec2(-6.0, -2.0), vec2(-3.0, 1.0));
         }
-        "person" => {
+        Icon::Person => {
             p.circle_stroke(c + vec2(0.0, -3.5), 3.2, s);
             let mut arc = vec![];
             for i in 0..=10 {
@@ -634,7 +1014,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             }
             p.add(egui::Shape::line(arc, s));
         }
-        "person_comment" => {
+        Icon::PersonComment => {
             p.circle_stroke(c + vec2(-2.0, -3.5), 3.0, s);
             let mut arc = vec![];
             for i in 0..=10 {
@@ -649,7 +1029,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 egui::StrokeKind::Middle,
             );
         }
-        "megaphone" => {
+        Icon::Megaphone => {
             let pts = vec![
                 c + vec2(-6.0, -2.0),
                 c + vec2(3.0, -6.5),
@@ -660,7 +1040,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-4.0, 2.0), vec2(-2.5, 7.0));
             line(vec2(5.5, -2.0), vec2(5.5, 2.0));
         }
-        "bolt" => {
+        Icon::Bolt => {
             let pts = vec![
                 c + vec2(1.5, -8.0),
                 c + vec2(-5.0, 1.0),
@@ -671,7 +1051,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::closed_line(pts, s));
         }
-        "heart" => {
+        Icon::Heart => {
             let col = Color32::from_rgb(233, 61, 130);
             p.circle_filled(c + vec2(-3.0, -2.0), 3.6, Color32::from_rgb(171, 74, 186));
             p.circle_filled(c + vec2(3.0, -2.0), 3.6, col);
@@ -685,13 +1065,13 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 Stroke::NONE,
             ));
         }
-        "dots" => {
+        Icon::Dots => {
             for k in -1..=1 {
                 p.circle_filled(c + vec2(5.0 * k as f32, 0.0), 1.4, color);
             }
         }
         // ------------------------------------------------ menus and toolbars
-        "settings" => {
+        Icon::Settings => {
             p.circle_stroke(c, 4.8, s);
             p.circle_stroke(c, 1.9, s);
             for i in 0..8 {
@@ -700,7 +1080,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 p.line_segment([c + d * 4.8, c + d * 7.3], Stroke::new(2.2_f32, color));
             }
         }
-        "apps" => {
+        Icon::Apps => {
             for (x, y) in [(-3.8, -3.8), (3.8, -3.8), (-3.8, 3.8), (3.8, 3.8)] {
                 p.rect_stroke(
                     Rect::from_center_size(c + vec2(x, y), vec2(5.5, 5.5)),
@@ -710,7 +1090,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 );
             }
         }
-        "templates" => {
+        Icon::Templates => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(1.5, 1.5), vec2(11.0, 11.0)),
                 2.5,
@@ -724,7 +1104,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::line(pts, s));
         }
-        "fields" => {
+        Icon::Fields => {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(15.0, 10.0)),
                 2.5,
@@ -734,7 +1114,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-4.0, -2.0), vec2(-4.0, 2.0));
             line(vec2(-1.0, 0.0), vec2(4.0, 0.0));
         }
-        "tag" => {
+        Icon::Tag => {
             let pts = vec![
                 c + vec2(-7.0, -7.0),
                 c + vec2(0.5, -7.0),
@@ -745,7 +1125,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::closed_line(pts, s));
             p.circle_filled(c + vec2(-3.2, -3.2), 1.3, color);
         }
-        "building" => {
+        Icon::Building => {
             p.rect_stroke(
                 Rect::from_min_max(c + vec2(-6.0, -7.5), c + vec2(6.0, 7.5)),
                 1.5,
@@ -759,11 +1139,11 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-1.5, 3.5), vec2(1.5, 3.5));
             line(vec2(1.5, 3.5), vec2(1.5, 7.5));
         }
-        "smile" | "frown" => {
+        Icon::Smile | Icon::Frown => {
             p.circle_stroke(c, 7.0, s);
             p.circle_filled(c + vec2(-2.5, -2.0), 1.0, color);
             p.circle_filled(c + vec2(2.5, -2.0), 1.0, color);
-            let up = kind == "smile";
+            let up = kind == Icon::Smile;
             let mut arc = vec![];
             for i in 0..=8 {
                 let a = std::f32::consts::PI * (0.2 + 0.6 * i as f32 / 8.0);
@@ -772,7 +1152,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             }
             p.add(egui::Shape::line(arc, s));
         }
-        "bell" | "bell_off" => {
+        Icon::Bell | Icon::BellOff => {
             let mut pts = vec![c + vec2(-6.0, 4.0)];
             for i in 0..=10 {
                 let a = std::f32::consts::PI * (1.0 + i as f32 / 10.0);
@@ -783,18 +1163,18 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             pts.insert(pts.len() - 1, c + vec2(4.5, 1.0));
             p.add(egui::Shape::closed_line(pts, s));
             line(vec2(-1.8, 6.8), vec2(1.8, 6.8));
-            if kind == "bell_off" {
+            if kind == Icon::BellOff {
                 line(vec2(-7.0, -7.0), vec2(7.0, 7.0));
             }
         }
-        "palette" => {
+        Icon::Palette => {
             p.circle_stroke(c, 7.0, s);
             for (x, y) in [(-3.0, -2.5), (1.0, -4.0), (3.8, -0.5)] {
                 p.circle_filled(c + vec2(x, y), 1.2, color);
             }
             p.circle_stroke(c + vec2(-1.5, 3.0), 1.6, Stroke::new(1.2_f32, color));
         }
-        "sparkle" => {
+        Icon::Sparkle => {
             let star = |o: egui::Vec2, r: f32| {
                 let k = r * 0.28;
                 let pts = vec![
@@ -812,7 +1192,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             star(vec2(-1.5, 1.0), 6.0);
             p.circle_filled(c + vec2(5.5, -5.5), 1.3, color);
         }
-        "keyboard" => {
+        Icon::Keyboard => {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(16.0, 11.0)),
                 2.5,
@@ -824,8 +1204,8 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             }
             line(vec2(-3.5, 2.0), vec2(3.5, 2.0));
         }
-        "download" | "upload" => {
-            let (a, b) = if kind == "download" {
+        Icon::Download | Icon::Upload => {
+            let (a, b) = if kind == Icon::Download {
                 (vec2(0.0, -7.0), vec2(0.0, 2.5))
             } else {
                 (vec2(0.0, 2.5), vec2(0.0, -7.0))
@@ -833,17 +1213,17 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(a, b);
             line(
                 b,
-                b + vec2(-3.5, if kind == "download" { -3.5 } else { 3.5 }),
+                b + vec2(-3.5, if kind == Icon::Download { -3.5 } else { 3.5 }),
             );
             line(
                 b,
-                b + vec2(3.5, if kind == "download" { -3.5 } else { 3.5 }),
+                b + vec2(3.5, if kind == Icon::Download { -3.5 } else { 3.5 }),
             );
             line(vec2(-6.5, 4.0), vec2(-6.5, 7.0));
             line(vec2(-6.5, 7.0), vec2(6.5, 7.0));
             line(vec2(6.5, 7.0), vec2(6.5, 4.0));
         }
-        "refresh" => {
+        Icon::Refresh => {
             let (a0, a1) = (-1.2f32, 3.9f32);
             let arc: Vec<Pos2> = (0..=20)
                 .map(|i| a0 + (a1 - a0) * i as f32 / 20.0)
@@ -857,7 +1237,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.line_segment([tip, tip - back * 3.2 + out * 2.6], s);
             p.line_segment([tip, tip - back * 3.2 - out * 2.6], s);
         }
-        "help" => {
+        Icon::Help => {
             p.circle_stroke(c, 7.0, s);
             p.text(
                 c + vec2(0.2, 0.3),
@@ -867,7 +1247,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 color,
             );
         }
-        "task" => {
+        Icon::Task => {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(14.0, 14.0)),
                 3.0,
@@ -877,7 +1257,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-3.5, 0.0), vec2(-1.0, 2.6));
             line(vec2(-1.0, 2.6), vec2(3.8, -2.4));
         }
-        "send" => {
+        Icon::Send => {
             let pts = vec![
                 c + vec2(-7.0, -6.0),
                 c + vec2(7.5, 0.0),
@@ -887,19 +1267,19 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::closed_line(pts, s));
             line(vec2(-4.5, 0.0), vec2(1.0, 0.0));
         }
-        "list" => {
+        Icon::List => {
             for y in [-4.5, 0.0, 4.5] {
                 p.circle_filled(c + vec2(-5.5, y), 1.1, color);
                 line(vec2(-2.5, y), vec2(7.0, y));
             }
         }
-        "hash" => {
+        Icon::Hash => {
             line(vec2(-2.0, -7.0), vec2(-3.5, 7.0));
             line(vec2(3.5, -7.0), vec2(2.0, 7.0));
             line(vec2(-6.5, -2.5), vec2(7.0, -2.5));
             line(vec2(-7.0, 2.5), vec2(6.5, 2.5));
         }
-        "space" => {
+        Icon::Space => {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(14.0, 14.0)),
                 4.0,
@@ -908,7 +1288,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             );
             p.circle_stroke(c, 2.5, s);
         }
-        "sidebar" => {
+        Icon::Sidebar => {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(16.0, 13.0)),
                 2.5,
@@ -917,7 +1297,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             );
             line(vec2(-2.5, -6.5), vec2(-2.5, 6.5));
         }
-        "briefcase" => {
+        Icon::Briefcase => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(0.0, 1.5), vec2(16.0, 11.0)),
                 2.5,
@@ -932,14 +1312,14 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             );
             line(vec2(-8.0, 1.5), vec2(8.0, 1.5));
         }
-        "alarm" => {
+        Icon::Alarm => {
             p.circle_stroke(c + vec2(0.0, 1.0), 6.0, s);
             line(vec2(0.0, 1.0), vec2(0.0, -2.0));
             line(vec2(0.0, 1.0), vec2(2.2, 2.4));
             line(vec2(-7.0, -4.5), vec2(-4.5, -7.0));
             line(vec2(7.0, -4.5), vec2(4.5, -7.0));
         }
-        "notebook" => {
+        Icon::Notebook => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(1.0, 0.0), vec2(12.0, 15.0)),
                 2.0,
@@ -951,7 +1331,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             }
             line(vec2(0.5, -2.0), vec2(4.0, -2.0));
         }
-        "pin" => {
+        Icon::Pin => {
             let pts = vec![
                 c + vec2(-3.0, -7.0),
                 c + vec2(3.0, -7.0),
@@ -963,14 +1343,14 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::closed_line(pts, s));
             line(vec2(0.0, 1.5), vec2(0.0, 7.5));
         }
-        "calendar" => {
+        Icon::Calendar => {
             let r = Rect::from_center_size(c + vec2(0.0, 0.5), vec2(15.0, 14.0));
             p.rect_stroke(r, 3.0, s, egui::StrokeKind::Middle);
             line(vec2(-7.5, -3.0), vec2(7.5, -3.0));
             line(vec2(-3.5, -8.5), vec2(-3.5, -5.0));
             line(vec2(3.5, -8.5), vec2(3.5, -5.0));
         }
-        "link" => {
+        Icon::Link => {
             for x in [-3.2, 3.2] {
                 p.rect_stroke(
                     Rect::from_center_size(c + vec2(x, 0.0), vec2(9.0, 6.5)),
@@ -980,7 +1360,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 );
             }
         }
-        "play" => {
+        Icon::Play => {
             p.add(egui::Shape::convex_polygon(
                 vec![
                     c + vec2(-4.0, -6.0),
@@ -991,10 +1371,10 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 Stroke::NONE,
             ));
         }
-        "stop" => {
+        Icon::Stop => {
             p.rect_filled(Rect::from_center_size(c, vec2(10.0, 10.0)), 2.0, color);
         }
-        "sun" => {
+        Icon::Sun => {
             p.circle_stroke(c, 3.5, s);
             for i in 0..8 {
                 let a = std::f32::consts::TAU * i as f32 / 8.0;
@@ -1002,7 +1382,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 p.line_segment([c + d * 5.8, c + d * 7.8], s);
             }
         }
-        "moon" => {
+        Icon::Moon => {
             // a crescent: the part of one circle outside a second, offset one
             let (r1, o2, r2) = (7.0, vec2(3.2, -2.6), 5.6);
             let n = 72;
@@ -1051,7 +1431,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             pts.extend(inner);
             p.add(egui::Shape::closed_line(pts, s));
         }
-        "auto" => {
+        Icon::Auto => {
             p.circle_stroke(c, 7.0, s);
             let mut pts = vec![c + vec2(0.0, -7.0)];
             for i in 0..=12 {
@@ -1060,7 +1440,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             }
             p.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
         }
-        "bus" => {
+        Icon::Bus => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(0.0, -0.5), vec2(13.0, 13.0)),
                 3.0,
@@ -1073,7 +1453,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-4.0, 6.0), vec2(-4.0, 8.0));
             line(vec2(4.0, 6.0), vec2(4.0, 8.0));
         }
-        "plane" => {
+        Icon::Plane => {
             let pts = vec![
                 c + vec2(7.5, -7.5),
                 c + vec2(-7.0, -1.5),
@@ -1083,11 +1463,11 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::closed_line(pts, s));
             line(vec2(-1.0, 1.0), vec2(7.5, -7.5));
         }
-        "search" => {
+        Icon::Search => {
             p.circle_stroke(c + vec2(-1.5, -1.5), 5.0, s);
             line(vec2(2.2, 2.2), vec2(6.5, 6.5));
         }
-        "lock" => {
+        Icon::Lock => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(0.0, 2.5), vec2(12.0, 9.0)),
                 2.0,
@@ -1103,33 +1483,33 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             arc.push(c + vec2(3.5, -2.0));
             p.add(egui::Shape::line(arc, s));
         }
-        "filter" => {
+        Icon::Filter => {
             line(vec2(-7.0, -4.5), vec2(7.0, -4.5));
             line(vec2(-4.5, 0.0), vec2(4.5, 0.0));
             line(vec2(-2.0, 4.5), vec2(2.0, 4.5));
         }
-        "columns" | "table" => {
+        Icon::Columns | Icon::Table => {
             let r = Rect::from_center_size(c, vec2(15.0, 13.0));
             p.rect_stroke(r, 2.5, s, egui::StrokeKind::Middle);
             line(vec2(-2.5, -6.5), vec2(-2.5, 6.5));
             line(vec2(2.5, -6.5), vec2(2.5, 6.5));
-            if kind == "table" {
+            if kind == Icon::Table {
                 line(vec2(-7.5, -2.0), vec2(7.5, -2.0));
                 line(vec2(-7.5, 2.5), vec2(7.5, 2.5));
             }
         }
-        "subtasks" => {
+        Icon::Subtasks => {
             line(vec2(-5.0, -7.0), vec2(-5.0, 4.5));
             line(vec2(-5.0, -2.0), vec2(1.0, -2.0));
             line(vec2(-5.0, 4.5), vec2(1.0, 4.5));
             p.circle_stroke(c + vec2(4.0, -2.0), 2.3, s);
             p.circle_stroke(c + vec2(4.0, 4.5), 2.3, s);
         }
-        "check" => {
+        Icon::Check => {
             line(vec2(-6.0, 0.5), vec2(-2.0, 4.5));
             line(vec2(-2.0, 4.5), vec2(6.5, -4.5));
         }
-        "flag" => {
+        Icon::Flag => {
             line(vec2(-5.0, -7.5), vec2(-5.0, 7.5));
             let pts = vec![
                 c + vec2(-5.0, -7.0),
@@ -1140,11 +1520,11 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::line(pts, s));
         }
-        "status" => {
+        Icon::Status => {
             p.circle_stroke(c, 6.5, s);
             p.circle_filled(c, 2.4, color);
         }
-        "hourglass" => {
+        Icon::Hourglass => {
             line(vec2(-5.0, -7.5), vec2(5.0, -7.5));
             line(vec2(-5.0, 7.5), vec2(5.0, 7.5));
             let pts = vec![
@@ -1155,7 +1535,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::closed_line(pts, s));
         }
-        "repeat" => {
+        Icon::Repeat => {
             line(vec2(-6.5, 1.0), vec2(-6.5, -3.0));
             line(vec2(-6.5, -3.0), vec2(5.5, -3.0));
             line(vec2(5.5, -3.0), vec2(3.0, -5.5));
@@ -1163,7 +1543,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(6.5, 3.0), vec2(-5.5, 3.0));
             line(vec2(-5.5, 3.0), vec2(-3.0, 5.5));
         }
-        "attach" => {
+        Icon::Attach => {
             let mut pts = vec![c + vec2(4.0, -2.0), c + vec2(4.0, 3.5)];
             for i in 0..=8 {
                 let a = std::f32::consts::PI * (i as f32 / 8.0);
@@ -1177,7 +1557,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             pts.push(c + vec2(1.0, 3.0));
             p.add(egui::Shape::line(pts, s));
         }
-        "eye" => {
+        Icon::Eye => {
             // two wide arcs meeting in small round tips (the usual eye
             // outline), in a 20-unit box scaled to the icon size
             let k = 0.75;
@@ -1197,11 +1577,11 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::closed_line(pts, s));
             p.circle_stroke(c, 2.2, s);
         }
-        "eye_off" => {
-            line_icon(p, "eye", c, color);
+        Icon::EyeOff => {
+            line_icon(p, Icon::Eye, c, color);
             line(vec2(-6.5, 6.5), vec2(6.5, -6.5));
         }
-        "bookmark" => {
+        Icon::Bookmark => {
             let pts = vec![
                 c + vec2(-5.0, -7.5),
                 c + vec2(5.0, -7.5),
@@ -1211,7 +1591,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::closed_line(pts, s));
         }
-        "pen" => {
+        Icon::Pen => {
             let pts = vec![
                 c + vec2(4.0, -7.0),
                 c + vec2(7.0, -4.0),
@@ -1222,7 +1602,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::closed_line(pts, s));
             line(vec2(2.0, -5.0), vec2(5.0, -2.0));
         }
-        "sticky" => {
+        Icon::Sticky => {
             let pts = vec![
                 c + vec2(-7.0, -7.0),
                 c + vec2(7.0, -7.0),
@@ -1234,7 +1614,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(2.0, 7.0), vec2(2.0, 2.0));
             line(vec2(2.0, 2.0), vec2(7.0, 2.0));
         }
-        "eraser" => {
+        Icon::Eraser => {
             let pts = vec![
                 c + vec2(-1.0, -7.0),
                 c + vec2(7.0, 1.0),
@@ -1246,7 +1626,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-4.5, -3.5), vec2(3.5, 4.5));
             line(vec2(1.5, 7.5), vec2(7.5, 7.5));
         }
-        "connector" => {
+        Icon::Connector => {
             // two boxes joined by a line that turns a corner
             for k in [vec2(-4.5, -4.5), vec2(4.5, 4.5)] {
                 p.rect_stroke(
@@ -1259,7 +1639,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-1.5, -4.5), vec2(4.5, -4.5));
             line(vec2(4.5, -4.5), vec2(4.5, 1.5));
         }
-        "move" => {
+        Icon::Move => {
             line(vec2(0.0, -7.5), vec2(0.0, 7.5));
             line(vec2(-7.5, 0.0), vec2(7.5, 0.0));
             for d in [
@@ -1274,7 +1654,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 line(tip, tip - d * 2.5 - side);
             }
         }
-        "shapes" => {
+        Icon::Shapes => {
             p.circle_stroke(c + vec2(-3.0, -3.0), 3.8, s);
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(3.0, 3.0), vec2(7.5, 7.5)),
@@ -1283,13 +1663,13 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 egui::StrokeKind::Middle,
             );
         }
-        "chart" => {
+        Icon::Chart => {
             line(vec2(-7.0, 7.0), vec2(7.5, 7.0));
             line(vec2(-4.0, 7.0), vec2(-4.0, 1.0));
             line(vec2(0.5, 7.0), vec2(0.5, -6.0));
             line(vec2(5.0, 7.0), vec2(5.0, -1.5));
         }
-        "trash" => {
+        Icon::Trash => {
             line(vec2(-7.0, -4.5), vec2(7.0, -4.5));
             line(vec2(-2.5, -4.5), vec2(-2.0, -7.0));
             line(vec2(-2.0, -7.0), vec2(2.0, -7.0));
@@ -1302,7 +1682,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::line(pts, s));
         }
-        "logout" => {
+        Icon::Logout => {
             let pts = vec![
                 c + vec2(1.0, -7.0),
                 c + vec2(-6.0, -7.0),
@@ -1314,14 +1694,14 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(7.0, 0.0), vec2(4.0, -3.0));
             line(vec2(7.0, 0.0), vec2(4.0, 3.0));
         }
-        "plus" => {
+        Icon::Plus => {
             line(vec2(0.0, -6.5), vec2(0.0, 6.5));
             line(vec2(-6.5, 0.0), vec2(6.5, 0.0));
         }
-        "undo" | "redo" => {
+        Icon::Undo | Icon::Redo => {
             // a hook from the left arrow head round to the bottom; Redo's
             // is the same turned to face right
-            let m = if kind == "redo" { -1.0 } else { 1.0 };
+            let m = if kind == Icon::Redo { -1.0 } else { 1.0 };
             let v = |x: f32, y: f32| vec2(x * m, y);
             let mut pts = vec![c + v(-6.5, -2.5)];
             for i in 0..=10 {
@@ -1333,7 +1713,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(v(-6.5, -2.5), v(-3.0, -6.0));
             line(v(-6.5, -2.5), v(-3.0, 1.0));
         }
-        "fit" => {
+        Icon::Fit => {
             // four corners: the whole board in view
             for (sx, sy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
                 let k = c + vec2(6.5 * sx, 6.5 * sy);
@@ -1341,7 +1721,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 p.line_segment([k, k - vec2(0.0, 4.0 * sy)], s);
             }
         }
-        "login" => {
+        Icon::Login => {
             let pts = vec![
                 c + vec2(-1.0, -7.0),
                 c + vec2(6.0, -7.0),
@@ -1353,7 +1733,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(2.0, 0.0), vec2(-1.0, -3.0));
             line(vec2(2.0, 0.0), vec2(-1.0, 3.0));
         }
-        "sort" => {
+        Icon::Sort => {
             line(vec2(-3.5, -7.0), vec2(-3.5, 7.0));
             line(vec2(-3.5, -7.0), vec2(-6.5, -4.0));
             line(vec2(-3.5, -7.0), vec2(-0.5, -4.0));
@@ -1361,7 +1741,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(3.5, 7.0), vec2(0.5, 4.0));
             line(vec2(3.5, 7.0), vec2(6.5, 4.0));
         }
-        "archive" => {
+        Icon::Archive => {
             p.rect_stroke(
                 Rect::from_center_size(c + vec2(0.0, -4.5), vec2(16.0, 4.5)),
                 1.0,
@@ -1377,11 +1757,11 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::line(pts, s));
             line(vec2(-2.5, 1.5), vec2(2.5, 1.5));
         }
-        "close" => {
+        Icon::Close => {
             line(vec2(-5.0, -5.0), vec2(5.0, 5.0));
             line(vec2(5.0, -5.0), vec2(-5.0, 5.0));
         }
-        "pop_out" => {
+        Icon::PopOut => {
             // a window with an arrow leaving it by the top right corner
             let pts = vec![
                 c + vec2(-1.0, -6.0),
@@ -1395,13 +1775,13 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(6.5, -6.5), vec2(2.0, -6.5));
             line(vec2(6.5, -6.5), vec2(6.5, -2.0));
         }
-        "arrow_up_left" => {
+        Icon::ArrowUpLeft => {
             line(vec2(5.0, 6.0), vec2(5.0, -1.0));
             line(vec2(5.0, -1.0), vec2(-5.0, -1.0));
             line(vec2(-5.0, -1.0), vec2(-1.5, -4.5));
             line(vec2(-5.0, -1.0), vec2(-1.5, 2.5));
         }
-        "folder" => {
+        Icon::Folder => {
             let pts = vec![
                 c + vec2(-7.5, -5.5),
                 c + vec2(-2.5, -5.5),
@@ -1412,7 +1792,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             ];
             p.add(egui::Shape::closed_line(pts, s));
         }
-        "at" => {
+        Icon::At => {
             use std::f32::consts::PI;
             p.circle_stroke(c, 2.7, s);
             line(vec2(2.7, -2.7), vec2(2.7, 0.7));
@@ -1427,7 +1807,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
                 s,
             ));
         }
-        "volume" => {
+        Icon::Volume => {
             let pts = vec![
                 c + vec2(-7.0, -2.5),
                 c + vec2(-4.0, -2.5),
@@ -1441,7 +1821,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::line(arc_points(c, 3.6, a, b), s));
             p.add(egui::Shape::line(arc_points(c, 6.8, a, b), s));
         }
-        "badge" => {
+        Icon::Badge => {
             use std::f32::consts::{FRAC_PI_2, PI};
             // an app icon with a dot on its corner: the outline stops short
             // of the dot
@@ -1453,7 +1833,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             p.add(egui::Shape::line(pts, s));
             p.circle_stroke(c + vec2(5.0, -4.5), 2.6, s);
         }
-        "wifi" => {
+        Icon::Wifi => {
             let (a, b) = (-130_f32.to_radians(), -50_f32.to_radians());
             let o = c + vec2(0.0, 6.5);
             for r in [4.0, 8.0, 12.0] {
@@ -1461,7 +1841,7 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             }
             p.circle_filled(o, 1.1, color);
         }
-        "person_plus" => {
+        Icon::PersonPlus => {
             p.circle_stroke(c + vec2(-2.5, -3.5), 3.0, s);
             let mut arc = vec![];
             for i in 0..=10 {
@@ -1472,61 +1852,132 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(5.5, -4.0), vec2(5.5, 2.0));
             line(vec2(2.5, -1.0), vec2(8.5, -1.0));
         }
-        "external" => {
+        Icon::External => {
             line(vec2(-4.5, 4.5), vec2(5.0, -5.0));
             line(vec2(-0.5, -5.0), vec2(5.0, -5.0));
             line(vec2(5.0, -5.0), vec2(5.0, 0.5));
         }
-        "warning" => {
+        Icon::Warning => {
             let pts = vec![c + vec2(0.0, -7.0), c + vec2(7.5, 6.5), c + vec2(-7.5, 6.5)];
             p.add(egui::Shape::closed_line(pts, s));
             line(vec2(0.0, -2.5), vec2(0.0, 2.0));
             p.circle_filled(c + vec2(0.0, 4.3), 0.9, color);
         }
-        "arrow_right" => {
+        Icon::ArrowRight => {
             line(vec2(-6.5, 0.0), vec2(6.5, 0.0));
             line(vec2(6.5, 0.0), vec2(2.5, -4.0));
             line(vec2(6.5, 0.0), vec2(2.5, 4.0));
         }
-        "chevron_left" => {
+        Icon::ChevronLeft => {
             line(vec2(2.5, -5.0), vec2(-2.5, 0.0));
             line(vec2(-2.5, 0.0), vec2(2.5, 5.0));
         }
-        "chevron_right" => {
+        Icon::ChevronRight => {
             line(vec2(-2.5, -5.0), vec2(2.5, 0.0));
             line(vec2(2.5, 0.0), vec2(-2.5, 5.0));
         }
-        "chevron_down" => {
+        Icon::ChevronDown => {
             line(vec2(-5.0, -2.5), vec2(0.0, 2.5));
             line(vec2(0.0, 2.5), vec2(5.0, -2.5));
         }
-        _ => return false,
+        Icon::ChecklistSmall => {
+            let s = Stroke::new(1.3_f32, color);
+            p.line_segment([c + vec2(-6.0, -3.5), c + vec2(-4.5, -2.0)], s);
+            p.line_segment([c + vec2(-4.5, -2.0), c + vec2(-2.0, -5.0)], s);
+            p.line_segment([c + vec2(0.0, -3.5), c + vec2(6.0, -3.5)], s);
+            p.line_segment([c + vec2(-6.0, 3.0), c + vec2(6.0, 3.0)], s);
+        }
+        Icon::CalendarSmall => {
+            let r = Rect::from_center_size(c + vec2(0.0, 0.5), vec2(12.0, 11.0));
+            p.rect_stroke(
+                r,
+                2.0,
+                Stroke::new(1.2_f32, color),
+                egui::StrokeKind::Inside,
+            );
+            p.line_segment(
+                [
+                    pos2(r.left(), r.top() + 3.5),
+                    pos2(r.right(), r.top() + 3.5),
+                ],
+                Stroke::new(1.2_f32, color),
+            );
+            p.line_segment(
+                [
+                    pos2(r.left() + 3.0, r.top() - 1.5),
+                    pos2(r.left() + 3.0, r.top() + 1.0),
+                ],
+                Stroke::new(1.2_f32, color),
+            );
+            p.line_segment(
+                [
+                    pos2(r.right() - 3.0, r.top() - 1.5),
+                    pos2(r.right() - 3.0, r.top() + 1.0),
+                ],
+                Stroke::new(1.2_f32, color),
+            );
+        }
+        Icon::PersonSmall => {
+            p.circle_stroke(c + vec2(0.0, -3.0), 3.0, Stroke::new(1.2_f32, color));
+            let mut pts = vec![];
+            for i in 0..=10 {
+                let a = std::f32::consts::PI * (1.0 + i as f32 / 10.0);
+                pts.push(c + vec2(0.0, 6.5) + vec2(a.cos() * 5.5, a.sin() * 4.0));
+            }
+            p.add(egui::Shape::line(pts, Stroke::new(1.2_f32, color)));
+        }
+        Icon::CommentSmall => {
+            let r = Rect::from_center_size(c + vec2(0.0, -1.0), vec2(12.0, 9.0));
+            p.rect_stroke(
+                r,
+                2.5,
+                Stroke::new(1.2_f32, color),
+                egui::StrokeKind::Inside,
+            );
+            p.line_segment(
+                [
+                    pos2(r.left() + 3.0, r.bottom()),
+                    pos2(r.left() + 2.0, r.bottom() + 3.0),
+                ],
+                Stroke::new(1.2_f32, color),
+            );
+        }
+        Icon::FlagSmall => {
+            let top = c + vec2(-4.0, -6.0);
+            p.line_segment([top, top + vec2(0.0, 12.0)], Stroke::new(1.2_f32, color));
+            p.add(egui::Shape::closed_line(
+                vec![
+                    top,
+                    top + vec2(8.5, 0.5),
+                    top + vec2(6.5, 3.5),
+                    top + vec2(8.5, 6.5),
+                    top + vec2(0.0, 6.5),
+                ],
+                Stroke::new(1.2_f32, color),
+            ));
+        }
     }
-    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every listed kind draws, and the menus only name listed kinds.
+    /// Every icon draws something, and its name finds it again.
     #[test]
-    fn every_icon_kind_draws() {
+    fn every_icon_draws() {
         let ctx = egui::Context::default();
         let _ = ctx.run(Default::default(), |ctx| {
             let p = ctx.layer_painter(egui::LayerId::background());
-            for k in KINDS {
-                assert!(line_icon(&p, k, pos2(20.0, 20.0), Color32::GRAY), "{}", k);
+            for &k in Icon::ALL {
+                let layer = p.layer_id();
+                let before = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+                line_icon(&p, k, pos2(20.0, 20.0), Color32::GRAY);
+                let after = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+                assert!(after != before, "{:?} draws nothing", k);
+                assert_eq!(Icon::named(k.name()), Some(k));
             }
-            assert!(!line_icon(
-                &p,
-                "no such icon",
-                pos2(20.0, 20.0),
-                Color32::GRAY
-            ));
         });
-        for (_, _, kind) in super::super::menus::TOOLS {
-            assert!(KINDS.contains(&kind), "tool icon {}", kind);
-        }
+        assert_eq!(Icon::named("no such icon"), None);
     }
 }

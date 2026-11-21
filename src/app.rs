@@ -29,6 +29,7 @@ mod files;
 mod hubs;
 mod huddle;
 mod icons;
+use icons::Icon;
 mod ime;
 mod integrations;
 mod listview;
@@ -3398,7 +3399,7 @@ impl App {
                     .show(ui.ctx(), |ui| {
                         icons::icon_label(
                             ui,
-                            "calendar",
+                            Icon::Calendar,
                             RichText::new(tr("Drop on a day")).small(),
                             t.text2,
                         );
@@ -3580,7 +3581,7 @@ impl App {
                             if *nsub > 0 {
                                 icons::line_icon_scaled(
                                     ui.painter(),
-                                    "subtasks",
+                                    Icon::Subtasks,
                                     pos2(nr.right() + 12.0, r.center().y),
                                     t.text3,
                                     0.75,
@@ -4048,7 +4049,7 @@ impl App {
                                         );
                                         icons::line_icon_scaled(
                                             ui.painter(),
-                                            "pen",
+                                            Icon::Pen,
                                             pen.center(),
                                             t.text2,
                                             0.8,
@@ -4948,7 +4949,7 @@ impl App {
                                     vec2(26.0, 26.0),
                                 );
                                 let b = put_over(ui, br, ghost(egui::Button::new("")));
-                                icons::line_icon(ui.painter(), "task", br.center(), t.text2);
+                                icons::line_icon(ui.painter(), Icon::Task, br.center(), t.text2);
                                 name_it(&b, &format!("Resolve comment on {}", tname));
                                 if b.on_hover_text(tr("Resolve")).clicked() {
                                     if let Some(c) =
@@ -5137,7 +5138,7 @@ impl App {
                                     }
                                 }
                             });
-                            if n > 1 && icons::icon_button(ui, &t, "close", "", "Remove status", false).clicked() {
+                            if n > 1 && icons::icon_button(ui, &t, Icon::Close, "", "Remove status", false).clicked() {
                                 remove = Some(i);
                             }
                         });
@@ -5266,7 +5267,7 @@ impl App {
                             .collect();
                         truncate(&names.join(", "), 20)
                     };
-                    let r = icons::icon_button(ui, &t, "person", &a_txt, "Assignee", true);
+                    let r = icons::icon_button(ui, &t, Icon::Person, &a_txt, "Assignee", true);
                     let data = &app.data;
                     popup(ui, &r, egui::Id::new("qa_as"), 220.0, |ui| {
                         assignee_menu(ui, &t, data, &mut qa.assignees)
@@ -5275,7 +5276,7 @@ impl App {
                         .due
                         .map(fmt_date)
                         .unwrap_or_else(|| tr("Due date").into());
-                    let r = icons::icon_button(ui, &t, "calendar", &d_txt, "Due date", true);
+                    let r = icons::icon_button(ui, &t, Icon::Calendar, &d_txt, "Due date", true);
                     popup(ui, &r, egui::Id::new("qa_due"), DATE_MENU_W, |ui| {
                         date_menu(ui, &t, egui::Id::new("qa_cal"), &mut qa.due)
                     });
@@ -5284,11 +5285,11 @@ impl App {
                     } else {
                         tr("Priority").into()
                     };
-                    let r = icons::icon_button(ui, &t, "flag", &p_txt, "Priority", true);
+                    let r = icons::icon_button(ui, &t, Icon::Flag, &p_txt, "Priority", true);
                     popup(ui, &r, egui::Id::new("qa_pr"), 180.0, |ui| {
                         priority_menu(ui, &t, &mut qa.priority)
                     });
-                    let r = icons::icon_button(ui, &t, "tag", tr("Tags"), "Tags", true);
+                    let r = icons::icon_button(ui, &t, Icon::Tag, tr("Tags"), "Tags", true);
                     popup(ui, &r, egui::Id::new("qa_tags"), 220.0, |ui| {
                         let tag_r = ui.add(
                             field(&mut qa.tag_text)

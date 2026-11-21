@@ -406,20 +406,24 @@ impl App {
                             ("\u{2014}", "Divider"),
                         ] {
                             // link and checklist are line icons; the rest characters
-                            let icon = short == "link" || short == "task";
+                            let icon = match short {
+                                "link" => Some(Icon::Link),
+                                "task" => Some(Icon::Task),
+                                _ => None,
+                            };
                             let txt = match short {
                                 "B" => RichText::new(short).strong(),
                                 "I" => RichText::new(short).italics(),
                                 "S" => RichText::new(short).strikethrough(),
-                                _ if icon => RichText::new(""),
+                                _ if icon.is_some() => RichText::new(""),
                                 _ => RichText::new(short),
                             };
                             let b =
                                 ui.add(ghost(egui::Button::new(txt).min_size(vec2(26.0, 24.0))));
-                            if icon {
+                            if let Some(icon) = icon {
                                 super::icons::line_icon(
                                     ui.painter(),
-                                    short,
+                                    icon,
                                     b.rect.center(),
                                     t.text,
                                 );
@@ -461,7 +465,7 @@ impl App {
                             let ar = icon_button_ex(
                                 ui,
                                 &t,
-                                "sparkle",
+                                Icon::Sparkle,
                                 tr("AI"),
                                 "Doc AI",
                                 false,
@@ -746,10 +750,13 @@ impl App {
         let mut add_table = false;
         let mut add_sub = false;
         ui.horizontal(|ui| {
-            if super::icons::icon_button(ui, &t, "table", tr("Table"), "Table", true).clicked() {
+            if super::icons::icon_button(ui, &t, Icon::Table, tr("Table"), "Table", true).clicked()
+            {
                 add_table = true;
             }
-            if super::icons::icon_button(ui, &t, "docs", tr("Subpage"), "Subpage", true).clicked() {
+            if super::icons::icon_button(ui, &t, Icon::Docs, tr("Subpage"), "Subpage", true)
+                .clicked()
+            {
                 add_sub = true;
             }
         });

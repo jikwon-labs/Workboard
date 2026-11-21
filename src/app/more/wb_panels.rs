@@ -26,13 +26,13 @@ const TOOL: f32 = 40.0;
 const PCT_W: f32 = 54.0;
 const ZOOM_W: f32 = 6.0 + BTN + PCT_W + BTN + 9.0 + BTN + 6.0;
 /// The tools, top to bottom: (tool, icon, name).
-const TOOLS: [(WbTool, &str, &str); 6] = [
-    (WbTool::Select, "move", "Select"),
-    (WbTool::Pen, "pen", "Pen"),
-    (WbTool::Eraser, "eraser", "Eraser"),
-    (WbTool::Sticky, "sticky", "Sticky note"),
-    (WbTool::Shape, "shapes", "Shape"),
-    (WbTool::Line, "connector", "Line"),
+const TOOLS: [(WbTool, Icon, &str); 6] = [
+    (WbTool::Select, Icon::Move, "Select"),
+    (WbTool::Pen, Icon::Pen, "Pen"),
+    (WbTool::Eraser, Icon::Eraser, "Eraser"),
+    (WbTool::Sticky, Icon::Sticky, "Sticky note"),
+    (WbTool::Shape, Icon::Shapes, "Shape"),
+    (WbTool::Line, Icon::Connector, "Line"),
 ];
 /// The note a black pen colour makes (black paper would hide the text).
 const STICKY_FOR_BLACK: [u8; 3] = [0xf8, 0xae, 0x00];
@@ -117,7 +117,7 @@ pub(super) fn bar_sep(p: &egui::Painter, t: &Theme, x: f32, cy: f32) {
 }
 
 /// A menu row in the danger colour (Delete).
-fn danger_row(ui: &mut Ui, t: &Theme, name: &str, label: &str, icon: &str) -> Response {
+fn danger_row(ui: &mut Ui, t: &Theme, name: &str, label: &str, icon: Icon) -> Response {
     let w = ui.available_width().max(160.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
     name_it(&resp, name);
@@ -298,7 +298,7 @@ impl App {
             false,
             true,
             |p, c, fg| {
-                line_icon(p, "dots", c, fg);
+                line_icon(p, Icon::Dots, c, fg);
             },
         );
         if menu.clicked() && self.sweep.confirm == Some(Confirm::WbClear(wid)) {
@@ -377,7 +377,7 @@ impl App {
             return;
         }
         if menu_row_named(ui, t, "Reset view", tr("Reset view"), false, |p, c| {
-            line_icon(p, "fit", c, t.text2);
+            line_icon(p, Icon::Fit, c, t.text2);
         })
         .clicked()
         {
@@ -385,14 +385,22 @@ impl App {
             close_popup(ui);
         }
         if menu_row_named(ui, t, "Clear board", tr("Clear board"), false, |p, c| {
-            line_icon(p, "eraser", c, t.text2);
+            line_icon(p, Icon::Eraser, c, t.text2);
         })
         .clicked()
         {
             self.sweep.confirm = Some(Confirm::WbClear(wid));
         }
         ui.separator();
-        if danger_row(ui, t, "Delete whiteboard", tr("Delete whiteboard"), "trash").clicked() {
+        if danger_row(
+            ui,
+            t,
+            "Delete whiteboard",
+            tr("Delete whiteboard"),
+            Icon::Trash,
+        )
+        .clicked()
+        {
             if let Some(w) = self.data.extra.whiteboards.iter().find(|w| w.id == wid) {
                 self.modal = Some(Modal::ConfirmRemove {
                     kind: "whiteboard",
@@ -503,7 +511,7 @@ impl App {
             false,
             true,
             |p, c, fg| {
-                line_icon(p, "fit", c, fg);
+                line_icon(p, Icon::Fit, c, fg);
             },
         )
         .clicked()
@@ -568,7 +576,7 @@ impl App {
             false,
             can_undo,
             |p, c, fg| {
-                line_icon(p, "undo", c, fg);
+                line_icon(p, Icon::Undo, c, fg);
             },
         )
         .clicked()
@@ -589,7 +597,7 @@ impl App {
             false,
             can_redo,
             |p, c, fg| {
-                line_icon(p, "redo", c, fg);
+                line_icon(p, Icon::Redo, c, fg);
             },
         )
         .clicked()
@@ -931,7 +939,7 @@ impl App {
         };
         let badge = pos2(cx, y + 20.0);
         p.circle_filled(badge, 20.0, green.gamma_multiply(0.16));
-        line_icon_scaled(&p, "check", badge, green, 1.3);
+        line_icon_scaled(&p, Icon::Check, badge, green, 1.3);
         y += 40.0 + 14.0;
         p.text(
             pos2(cx, y),
@@ -947,8 +955,8 @@ impl App {
 
         let bw = (cw - 48.0 - 10.0) / 2.0;
         for (k, (icon, name, tool)) in [
-            ("pen", "Draw with the pen", WbTool::Pen),
-            ("sticky", "Add sticky notes", WbTool::Sticky),
+            (Icon::Pen, "Draw with the pen", WbTool::Pen),
+            (Icon::Sticky, "Add sticky notes", WbTool::Sticky),
         ]
         .into_iter()
         .enumerate()

@@ -145,7 +145,7 @@ impl App {
                         if super::icons::icon_button(
                             ui,
                             &t,
-                            "eye_off",
+                            Icon::EyeOff,
                             "",
                             "Hide recent tasks",
                             false,
@@ -425,7 +425,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr("Analytics")).size(20.0));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if super::icons::icon_button(ui, &t, "teams", tr("Manage people"), "Manage people", true)
+                        if super::icons::icon_button(ui, &t, Icon::Teams, tr("Manage people"), "Manage people", true)
                             .clicked()
                         {
                             // the People settings page: server roles, removal with a question
@@ -546,9 +546,9 @@ impl App {
                                     self.star_toggle(ui, format!("dash:{}", id));
                                     let d = &mut self.data.extra.dashboards[di];
                                     let (kind, label) = if d.private {
-                                        ("lock", "Private")
+                                        (Icon::Lock, "Private")
                                     } else {
-                                        ("teams", "Shared")
+                                        (Icon::Teams, "Shared")
                                     };
                                     if super::icons::icon_button_ex(
                                         ui,
@@ -798,7 +798,7 @@ impl App {
                                             if icon {
                                                 super::icons::line_icon_scaled(
                                                     ui.painter(),
-                                                    "pen",
+                                                    Icon::Pen,
                                                     b.rect.center(),
                                                     t.text3,
                                                     0.7,

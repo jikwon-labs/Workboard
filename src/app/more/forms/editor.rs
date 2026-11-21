@@ -408,7 +408,7 @@ impl App {
             let kind = select_button(
                 ui,
                 t,
-                kind_icon(&k),
+                Some(kind_icon(&k)),
                 icon_color,
                 tr(form_kind_label(&k)),
                 t.text,
@@ -433,7 +433,7 @@ impl App {
             ui.add_space(52.0);
             let hint = kind_hint(&self.data.extra.forms[fi].fields[i]);
             let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-            line_icon_scaled(ui.painter(), "arrow_right", r.center(), t.text3, 0.75);
+            line_icon_scaled(ui.painter(), Icon::ArrowRight, r.center(), t.text3, 0.75);
             // wrapped before Required and the menu, so it never runs under them
             let room = (ui.available_width() - 150.0).max(60.0);
             ui.scope(|ui| {
@@ -444,7 +444,7 @@ impl App {
                 let more = icon_button(
                     ui,
                     t,
-                    "dots",
+                    Icon::Dots,
                     "",
                     &format!("Question {} menu", i + 1),
                     false,
@@ -455,30 +455,30 @@ impl App {
                     ui.id().with(("form_q_menu", fid, i)),
                     190.0,
                     |ui| {
-                        let rows: [(&str, String, &str, bool, QuestionAct); 4] = [
+                        let rows: [(Icon, String, &str, bool, QuestionAct); 4] = [
                             (
-                                "arrow_up_left",
+                                Icon::ArrowUpLeft,
                                 format!("Move question {} up", i + 1),
                                 "Move up",
                                 i > 0,
                                 QuestionAct::Up(i),
                             ),
                             (
-                                "arrow_right",
+                                Icon::ArrowRight,
                                 format!("Move question {} down", i + 1),
                                 "Move down",
                                 i + 1 < n,
                                 QuestionAct::Down(i),
                             ),
                             (
-                                "templates",
+                                Icon::Templates,
                                 format!("Duplicate question {}", i + 1),
                                 "Duplicate",
                                 true,
                                 QuestionAct::Copy(i),
                             ),
                             (
-                                "trash",
+                                Icon::Trash,
                                 format!("Delete question {}", i + 1),
                                 "Delete question",
                                 true,
@@ -486,7 +486,7 @@ impl App {
                             ),
                         ];
                         for (icon, name, label, ok, a) in rows {
-                            let danger = icon == "trash";
+                            let danger = icon == Icon::Trash;
                             let r = ui
                                 .add_enabled_ui(ok, |ui| {
                                     menu_row_named(ui, t, &name, tr(label), false, |p, c| {
@@ -614,7 +614,7 @@ impl App {
                 let x = icon_button(
                     ui,
                     t,
-                    "close",
+                    Icon::Close,
                     "",
                     &format!("Stop adding choices {}", i + 1),
                     false,
@@ -626,7 +626,7 @@ impl App {
                 let b = icon_button(
                     ui,
                     t,
-                    "plus",
+                    Icon::Plus,
                     tr("Add choice"),
                     &format!("Add choice {}", i + 1),
                     false,
@@ -744,7 +744,7 @@ impl App {
             let r = select_button(
                 ui,
                 &t,
-                "list",
+                Some(Icon::List),
                 t.text2,
                 &text,
                 color,
@@ -857,7 +857,7 @@ impl App {
             };
             ui.horizontal_top(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
-                line_icon(ui.painter(), "bell", r.center(), t.text2);
+                line_icon(ui.painter(), Icon::Bell, r.center(), t.text2);
                 ui.add(egui::Label::new(RichText::new(text).size(13.0).color(t.text)).wrap());
             });
             ui.add_space(6.0);
@@ -883,7 +883,7 @@ impl App {
             if icon_button_ex(
                 ui,
                 &t,
-                "trash",
+                Icon::Trash,
                 tr("Delete form"),
                 "Delete form",
                 false,

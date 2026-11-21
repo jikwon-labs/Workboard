@@ -91,7 +91,7 @@ impl App {
                 // ---- back to the Goals page: laid out as a form's header (the
                 // arrow, the hub's name, "/" right after it)
                 ui.spacing_mut().item_spacing.x = 4.0;
-                let b = icons::icon_button(ui, &t, "chevron_left", "", "Back to goals", false)
+                let b = icons::icon_button(ui, &t, Icon::ChevronLeft, "", "Back to goals", false)
                     .on_hover_text(tr("Goals"));
                 let crumb = ui.add(ghost(egui::Button::new(
                     RichText::new(tr("Goals")).size(13.0).color(t.text2),
@@ -108,7 +108,7 @@ impl App {
                     ui.add(egui::Label::new(RichText::new(&g.name).color(t.text)).truncate());
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let b = icons::icon_button(ui, &t, "dots", "", "Goal settings", false);
+                    let b = icons::icon_button(ui, &t, Icon::Dots, "", "Goal settings", false);
                     if b.clicked() {
                         head_act = Some(PageAct::Settings);
                     }
@@ -374,7 +374,7 @@ impl App {
                                                 );
                                                 icons::line_icon(
                                                     ui.painter(),
-                                                    "calendar",
+                                                    Icon::Calendar,
                                                     r.center(),
                                                     t.text2,
                                                 );
@@ -404,7 +404,7 @@ impl App {
                                                 );
                                                 icons::line_icon(
                                                     ui.painter(),
-                                                    "hourglass",
+                                                    Icon::Hourglass,
                                                     r.center(),
                                                     t.text2,
                                                 );
@@ -565,7 +565,7 @@ impl App {
                             ui.label(RichText::new(views.len().to_string()).size(12.5).color(t.text2).strong());
                         });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let r = icons::icon_button(ui, t, "plus", tr("Target"), "Add target", true);
+                        let r = icons::icon_button(ui, t, Icon::Plus, tr("Target"), "Add target", true);
                         popup(ui, &r, ui.id().with(("add target", gid)), 200.0, |ui| {
                             for k in TargetType::ALL {
                                 let label = k.label();
@@ -982,7 +982,7 @@ impl App {
                             (GoalChange::Milestone(_) | GoalChange::Tracked, _) | (_, None) => {
                                 let (bg, fg) = pace_colors(Pace::Done, t);
                                 p.circle_filled(r.center(), 14.0, bg);
-                                icons::line_icon(p, "flag", r.center(), fg);
+                                icons::line_icon(p, Icon::Flag, r.center(), fg);
                             }
                             (_, Some(m)) => paint_avatar(p, r.center(), 14.0, m, t.card),
                         }
@@ -1045,7 +1045,7 @@ impl App {
                 let txt = cur
                     .map(|d| d.text("%b %-d"))
                     .unwrap_or_else(|| tr("Pick a date").into());
-                let r = icons::icon_button(c, t, "calendar", &txt, name, true);
+                let r = icons::icon_button(c, t, Icon::Calendar, &txt, name, true);
                 let mut d = cur;
                 if let Some(true) = popup(c, &r, c.id().with((name, gid)), DATE_MENU_W, |ui| {
                     date_menu(ui, t, ui.id().with((name, "cal", gid)), &mut d)
@@ -1299,7 +1299,7 @@ fn milestone_float(
                     ui.horizontal(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
                         ui.painter().circle_filled(r.center(), 16.0, fg);
-                        icons::line_icon(ui.painter(), "flag", r.center(), bg);
+                        icons::line_icon(ui.painter(), Icon::Flag, r.center(), bg);
                         let text_w = ui.available_width() - 36.0;
                         ui.vertical(|ui| {
                             ui.set_width(text_w);

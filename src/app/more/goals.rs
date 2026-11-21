@@ -45,11 +45,11 @@ impl TargetType {
         }
     }
 
-    pub(crate) fn icon(self) -> &'static str {
+    pub(crate) fn icon(self) -> Icon {
         match self {
-            TargetType::Number => "hash",
-            TargetType::Done => "check",
-            TargetType::Tasks => "list",
+            TargetType::Number => Icon::Hash,
+            TargetType::Done => Icon::Check,
+            TargetType::Tasks => Icon::List,
         }
     }
 }
@@ -1015,7 +1015,7 @@ impl App {
                                     ui.allocate_exact_size(vec2(46.0, 46.0), Sense::hover());
                                 let (bg, fg) = gold(t);
                                 ui.painter().rect_filled(r, 14.0, bg);
-                                icons::line_icon(ui.painter(), "goals", r.center(), fg);
+                                icons::line_icon(ui.painter(), Icon::Goals, r.center(), fg);
                                 ui.add_space(6.0);
                                 ui.label(
                                     RichText::new(year_done.len().to_string())
@@ -1224,9 +1224,9 @@ impl App {
                 _ => {
                     let p = ui.painter();
                     let kind = if matches!(tg.kind, TargetKind::Number { .. }) {
-                        "hash"
+                        Icon::Hash
                     } else {
-                        "list"
+                        Icon::List
                     };
                     // three quarters size, the height of the name beside it
                     icons::line_icon_scaled(
@@ -1338,7 +1338,7 @@ impl App {
                 .width();
             // the 16 pt icon, the usual gap before the date
             let icon_x = inner.right() - dw - 8.0 - tw - icons::ICON_GAP - 8.0;
-            icons::line_icon(p, "calendar", pos2(icon_x, fy), t.text2);
+            icons::line_icon(p, Icon::Calendar, pos2(icon_x, fy), t.text2);
             right = icon_x - 8.0 - 12.0;
         }
         let done = r.targets.iter().filter(|s| s.done).count();
@@ -2077,8 +2077,8 @@ fn view_switch(ui: &mut Ui, t: &Theme, list: bool) -> Option<GoalsView> {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let mut both = vec![
-                    (GoalsView::Cards, "apps", "Show as cards", !list),
-                    (GoalsView::List, "list", "Show as list", list),
+                    (GoalsView::Cards, Icon::Apps, "Show as cards", !list),
+                    (GoalsView::List, Icon::List, "Show as list", list),
                 ];
                 if ui.layout().prefer_right_to_left() {
                     both.reverse();
@@ -2170,7 +2170,7 @@ fn achieved_shelf(
                     let c = pos2(r.left() + 38.0, r.center().y);
                     p.circle_filled(c, 24.0, t.card);
                     p.circle_filled(c, 20.0, color);
-                    icons::line_icon(p, "check", c, ink_on(color));
+                    icons::line_icon(p, Icon::Check, c, ink_on(color));
                     let nf = FontId::proportional(15.0);
                     p.text(
                         pos2(r.left() + 72.0, r.center().y - 9.0),
@@ -2226,7 +2226,7 @@ fn achieved_shelf(
                     );
                     let c = pos2(r.left() + 38.0, r.center().y);
                     crate::widgets::paint_dashed(p, c, 20.0, t.text3);
-                    icons::line_icon(p, "flag", c, t.text2);
+                    icons::line_icon(p, Icon::Flag, c, t.text2);
                     p.text(
                         pos2(r.left() + 72.0, r.center().y - 9.0),
                         Align2::LEFT_CENTER,

@@ -76,10 +76,10 @@ impl App {
         let (tabs_r, _) = ui.allocate_exact_size(vec2(w, 50.0), Sense::hover());
         let tw = (w - 20.0) / 4.0;
         for (i, (icon, label)) in [
-            ("inbox", "Primary"),
-            ("bolt", "Other"),
-            ("alarm", "Later"),
-            ("check", "Cleared"),
+            (Icon::Inbox, "Primary"),
+            (Icon::Bolt, "Other"),
+            (Icon::Alarm, "Later"),
+            (Icon::Check, "Cleared"),
         ]
         .iter()
         .enumerate()
@@ -96,7 +96,7 @@ impl App {
             }
             line_icon(
                 ui.painter(),
-                icon,
+                *icon,
                 r.left_center() + vec2(26.0, 0.0),
                 if sel { t.text } else { t.text2 },
             );
@@ -147,7 +147,7 @@ impl App {
                     let label = ["Filter", "Comments", "Mentions", "Assigned"]
                         [self.inbox_filter as usize % 4];
                     // framed like the buttons on the right of this row
-                    let fr = icon_button(ui, &t, "filter", tr(label), label, true);
+                    let fr = icon_button(ui, &t, Icon::Filter, tr(label), label, true);
                     popup(ui, &fr, ui.id().with("inbox_filter"), 180.0, |ui| {
                         for (i, l) in ["Everything", "Comments", "Mentions", "Assigned to me"]
                             .iter()
@@ -169,7 +169,7 @@ impl App {
                                 icon_button(
                                     ui,
                                     &t,
-                                    "check",
+                                    Icon::Check,
                                     crate::i18n::tr_ctx("Clear all (inbox)", "Clear all"),
                                     "Clear all",
                                     true,
@@ -181,13 +181,14 @@ impl App {
                         {
                             clear_all = true;
                         }
-                        if icon_button(ui, &t, "settings", "", "Notification settings", true)
+                        if icon_button(ui, &t, Icon::Settings, "", "Notification settings", true)
                             .on_hover_text(tr("Notification settings"))
                             .clicked()
                         {
                             self.modal = Some(Modal::Notifications);
                         }
-                        if icon_button(ui, &t, "alarm", tr("Reminder"), "Reminder", true).clicked()
+                        if icon_button(ui, &t, Icon::Alarm, tr("Reminder"), "Reminder", true)
+                            .clicked()
                         {
                             self.modal = Some(Modal::reminder(String::new(), today()));
                         }
@@ -224,37 +225,37 @@ impl App {
             _ if filtered_out => (
                 "Nothing matches this filter",
                 "This tab has items the filter hides.",
-                "filter",
+                Icon::Filter,
             ),
             InboxTab::Primary if point_to_due => (
                 "Nothing from other people",
                 "The Inbox collects comments, mentions and assignments from others.",
-                "check",
+                Icon::Check,
             ),
             InboxTab::Primary if invite => (
                 "Looking to collaborate?",
                 "Collaboration is one invite away.",
-                "teams",
+                Icon::Teams,
             ),
             InboxTab::Primary => (
                 "You're all caught up",
                 "New comments, mentions and assignments show up here.",
-                "check",
+                Icon::Check,
             ),
             InboxTab::Other => (
                 "Nothing in Other",
                 "Updates that don't need you show up here.",
-                "inbox",
+                Icon::Inbox,
             ),
             InboxTab::Later => (
                 "Nothing saved for later",
                 "Use Later on an item to come back to it.",
-                "alarm",
+                Icon::Alarm,
             ),
             InboxTab::Cleared => (
                 "Nothing cleared yet",
                 "Cleared items show up here.",
-                "check",
+                Icon::Check,
             ),
         };
         let (r, _) = ui.allocate_exact_size(vec2(60.0, 60.0), Sense::hover());

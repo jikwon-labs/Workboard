@@ -483,12 +483,12 @@ impl App {
             .map(|f| f.id);
         ui.label(RichText::new(tr("Create")).small().color(self.t().text3));
         for (icon, label) in [
-            ("task", "Task"),
-            ("list", "List"),
-            ("docs", "Doc"),
-            ("dashboards", "Dashboard"),
-            ("whiteboards", "Whiteboard"),
-            ("forms", "Form"),
+            (Icon::Task, "Task"),
+            (Icon::List, "List"),
+            (Icon::Docs, "Doc"),
+            (Icon::Dashboards, "Dashboard"),
+            (Icon::Whiteboards, "Whiteboard"),
+            (Icon::Forms, "Form"),
         ] {
             let t = self.t();
             let b = menu_row_named(

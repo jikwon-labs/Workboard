@@ -59,7 +59,7 @@ pub const T: &[(&str, &str)] = &[
     ("Unread", "읽지 않음"),
     ("Read", "읽음"),
     ("Assigned to me", "나에게 할당됨"),
-    ("Delegated by me", "내가 맡김"),
+    ("Delegated by me", "내가 할당함"),
     ("Mark all as read", "모두 읽음으로 표시"),
     ("You're all caught up", "모두 확인했습니다"),
     ("{} commented: {}", "{}님의 댓글: {}"),

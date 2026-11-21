@@ -674,3 +674,21 @@ fn an_imported_row_saved_for_later_offers_no_primary_it_cannot_go_to() {
     h.click("Clear");
     assert!(h.app.data.extra.inbox_later.is_empty());
 }
+
+#[test]
+fn the_comments_filter_shows_task_comments_only() {
+    let mut h = inbox(|d| {
+        comment_on(d, CASE, "Over to you", 60);
+        mention_in_general(d, 2, "@Me look", 120);
+    });
+    h.click("Filter");
+    h.click("Comments");
+    assert!(h.has(CASE), "a comment on a task");
+    assert!(
+        !h.has("#general"),
+        "a chat mention is under Mentions, not Comments"
+    );
+    h.click("Comments");
+    h.click("Mentions");
+    assert!(h.has("#general") && !h.has(CASE));
+}

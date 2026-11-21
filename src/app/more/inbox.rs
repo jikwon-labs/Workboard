@@ -78,7 +78,8 @@ impl App {
             .collect();
         let on_tab = items.len();
         match self.inbox_filter {
-            1 => items.retain(|x| x.comment),
+            // comments on tasks: chat mentions are under Mentions
+            1 => items.retain(|x| x.comment && matches!(x.src, super::nav::InboxSrc::Task(_))),
             2 => items.retain(|x| x.mention),
             3 => items.retain(|x| x.assigned),
             _ => {}

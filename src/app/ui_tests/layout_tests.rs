@@ -1347,3 +1347,32 @@ fn timeline_edge_marks_and_toolbar_do_not_overlap() {
         assert!(over.is_empty(), "{}x{}: {:?}", w, hh, over);
     }
 }
+
+/// In the smallest window the view tabs (longer in English) used to run past
+/// the edge with "+ View": they now keep only their icons when the words
+/// don't fit, and every tab and "+ View" can be pressed.
+#[test]
+fn small_window_view_tabs_and_add_view_fit() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        let mut h = Ui1::sized(900.0, 560.0);
+        crate::i18n::set_lang(lang);
+        let list = h.app.data.first_list().unwrap();
+        h.app.loc = Location::List(list);
+        h.app.view = ViewKind::List;
+        h.settle();
+        for v in ["List", "Board", "Calendar", "Gantt", "Timeline", "Table"] {
+            let r = h.rect(&format!("View {}", v));
+            assert!(r.right() <= h.size.x - 8.0, "{:?} {}: {:?}", lang, v, r);
+        }
+        let plus = h.rect(tr("+  View"));
+        assert!(
+            plus.right() <= h.size.x - 8.0,
+            "{:?}: + View at {:?}",
+            lang,
+            plus
+        );
+        h.click("View Timeline");
+        assert!(h.app.view == ViewKind::Timeline);
+        crate::i18n::set_lang(crate::i18n::Lang::En);
+    }
+}

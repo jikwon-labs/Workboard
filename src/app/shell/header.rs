@@ -440,10 +440,47 @@ impl App {
     fn header_view_tabs(&mut self, ui: &mut Ui, t: Theme) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            // in a narrow window (or with longer words, as in English) the row
+            // ran past the edge and took "+ View" with it: Add Channel keeps
+            // only its icon, then the tabs not chosen keep only theirs
+            // the tabs shown: Overview only covers a space or a folder
+            let personal = self.on_personal_list();
+            let is_list = !matches!(self.loc, Location::Space(_) | Location::Folder(_));
+            let shown: Vec<ViewKind> = ViewKind::ALL
+                .into_iter()
+                .filter(|v| {
+                    !((*v == ViewKind::Overview && is_list)
+                        || (*v != self.view
+                            && self.data.extra.hidden_views.iter().any(|h| h == v.label()))
+                        || (personal && !matches!(v, ViewKind::Board | ViewKind::List)))
+                })
+                .collect();
+            let tabs_w = |short: bool| {
+                shown
+                    .iter()
+                    .map(|v| {
+                        if short && *v != self.view {
+                            28.0
+                        } else {
+                            ui.painter()
+                                .layout_no_wrap(
+                                    tr(v.label()).to_string(),
+                                    FontId::proportional(14.0),
+                                    t.text,
+                                )
+                                .size()
+                                .x
+                                + 34.0
+                        }
+                    })
+                    .sum::<f32>()
+            };
+            let room = ui.available_width() - 80.0;
+            let short_channel = 130.0 + tabs_w(false) > room;
+            let short_tabs = 40.0 + tabs_w(false) > room;
             // "Add Channel": a chat channel for this location (not on the
             // Personal List, as in the original, nor on the views that
             // gather tasks from everywhere, which aren't a place to talk about)
-            let personal = self.on_personal_list();
             let gathered = matches!(
                 self.loc,
                 Location::TodayOverdue | Location::MyTasks | Location::Everything
@@ -457,13 +494,14 @@ impl App {
                     ui,
                     &t,
                     "hash",
-                    tr("Add Channel"),
+                    if short_channel { "" } else { tr("Add Channel") },
                     "Add Channel",
                     false,
                     0.0,
                     t.text2,
                     t.text2,
                 )
+                .on_hover_text(tr("Add Channel"))
             };
             if ac.clicked() {
                 let name = self
@@ -499,29 +537,31 @@ impl App {
                 self.chat.open = Some(id);
             }
             ui.add_space(8.0);
-            // Overview only covers a space or a folder
-            let is_list = !matches!(self.loc, Location::Space(_) | Location::Folder(_));
             if is_list && self.view == ViewKind::Overview {
                 self.view = ViewKind::List;
             }
-            for v in ViewKind::ALL {
-                if (v == ViewKind::Overview && is_list)
-                    || (v != self.view
-                        && self.data.extra.hidden_views.iter().any(|h| h == v.label()))
-                {
-                    continue;
-                }
-                if personal && !matches!(v, ViewKind::Board | ViewKind::List) {
-                    continue;
-                }
+            for v in shown {
                 let sel = self.view == v;
                 let g = ui.painter().layout_no_wrap(
-                    tr(v.label()).to_string(),
+                    if short_tabs && !sel {
+                        String::new()
+                    } else {
+                        tr(v.label()).to_string()
+                    },
                     FontId::proportional(14.0),
                     if sel { t.text } else { t.text2 },
                 );
-                let (r, resp) =
-                    ui.allocate_exact_size(vec2(g.size().x + 32.0, 34.0), Sense::click());
+                let w = if g.size().x > 0.0 {
+                    g.size().x + 32.0
+                } else {
+                    26.0
+                };
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 34.0), Sense::click());
+                let resp = if g.size().x > 0.0 {
+                    resp
+                } else {
+                    resp.on_hover_text(tr(v.label()))
+                };
                 name_it(&resp, &format!("View {}", v.label()));
                 if resp.hovered() && !sel {
                     ui.painter()

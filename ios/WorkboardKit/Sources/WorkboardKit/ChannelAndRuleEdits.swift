@@ -151,12 +151,25 @@ extension Edits {
 extension WorkspaceView {
     /// My saved messages, newest first.
     public func savedMessages(_ data: JSON, me: UInt64) -> [(channel: ChannelView, message: MessageView)] {
-        let saved = Set((data["channels"]?.array ?? []).flatMap { c in
-            ((c["messages"]?.array ?? []) + (c["messages"]?.array ?? []).flatMap { $0["replies"]?.array ?? [] })
-                .filter { $0["saved"]?.bool == true }.compactMap { $0["id"]?.uint }
-        })
-        return visibleChannels(me: me).flatMap { c in (c.messages + c.messages.flatMap(\.replies)).filter { saved.contains($0.id) }.map { (c, $0) } }
-            .sorted { $0.1.ts > $1.1.ts }
+        // step by step with the types spelled out: as one expression Swift
+        // 6.1 gave up type-checking it ("unable to type-check this
+        // expression in reasonable time") and the kit did not build
+        var saved = Set<UInt64>()
+        for c in data["channels"]?.array ?? [] {
+            let messages: [JSON] = c["messages"]?.array ?? []
+            let replies: [JSON] = messages.flatMap { (m: JSON) -> [JSON] in m["replies"]?.array ?? [] }
+            for m in messages + replies where m["saved"]?.bool == true {
+                if let id = m["id"]?.uint { saved.insert(id) }
+            }
+        }
+        var out: [(channel: ChannelView, message: MessageView)] = []
+        for c in visibleChannels(me: me) {
+            let all: [MessageView] = c.messages + c.messages.flatMap(\.replies)
+            for m in all where saved.contains(m.id) {
+                out.append((channel: c, message: m))
+            }
+        }
+        return out.sorted { $0.message.ts > $1.message.ts }
     }
 
     /// Every post in the channels I can see, newest first.

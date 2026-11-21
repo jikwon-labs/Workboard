@@ -1621,6 +1621,10 @@ impl App {
                                 Layout::left_to_right(Align::Min).with_main_wrap(true),
                                 |ui| {
                                     for m in people {
+                                        // a framed card isn't wrapped by egui: one
+                                        // that doesn't fit starts the next row (they
+                                        // ran off the right edge in one row)
+                                        crate::widgets::wrap_unless_room(ui, 170.0 + 26.0);
                                         egui::Frame::new()
                                             .fill(t.card)
                                             .stroke(Stroke::new(1.0_f32, t.border))

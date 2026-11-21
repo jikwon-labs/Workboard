@@ -1299,3 +1299,32 @@ fn small_window_dashboards_stay_inside() {
     h.click("+ Dashboard");
     assert!(matches!(h.app.modal, Some(Modal::NewDashboard { .. })));
 }
+
+/// With many members the Org Chart's cards wrap onto more rows instead of
+/// running past the window in one row.
+#[test]
+fn org_chart_cards_wrap_inside_the_window() {
+    for (w, hh) in [(1440.0, 900.0), (900.0, 560.0)] {
+        let mut h = Ui1::sized(w, hh);
+        for k in 0..12u64 {
+            h.app.data.members.push(Member {
+                id: 900 + k,
+                name: format!("Teammate {}", k),
+                color: [120, 80, 200],
+                role: "Member".into(),
+                ..Default::default()
+            });
+        }
+        h.app.section = Section::Teams;
+        h.app.hub_filter = 2;
+        h.settle();
+        let mut right = 0.0f32;
+        each_text(&h.shapes, |ts, _| {
+            if ts.galley.text().starts_with("Teammate") {
+                right = right.max(ts.visual_bounding_rect().right());
+            }
+        });
+        assert!(right > 0.0);
+        assert!(right <= w, "{}x{}: a card's name reaches {}", w, hh, right);
+    }
+}

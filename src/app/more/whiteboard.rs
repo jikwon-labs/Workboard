@@ -24,6 +24,10 @@ pub struct WbNew {
     /// one picked fills this board (it used to go to the list of boards,
     /// where a template made another board and left this one empty).
     pub all_templates: bool,
+    /// A template renamed it: if the name field still has the focus, its
+    /// selection is put over the whole new name (it covered the old one,
+    /// and typing would have left the end of the new name behind).
+    pub renamed: bool,
 }
 
 /// The colour board ink `c` is drawn in: black (the pen's first colour,

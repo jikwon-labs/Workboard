@@ -922,6 +922,25 @@ fn more_templates_fill_the_board_just_made() {
     assert!(!h.has("Draw with the pen"), "the card has gone");
 }
 
+/// A template picked while the new board's name is still being typed (a
+/// screen reader presses its button without taking the focus) puts the
+/// selection over the whole new name. It covered only as many letters as
+/// the old name had, so typing left the new name's end behind ("Test석").
+#[test]
+fn a_template_renaming_the_board_being_named_selects_the_new_name() {
+    let mut h = Ui1::new();
+    open_whiteboards(&mut h);
+    h.click("New whiteboard");
+    let wid = h.app.wb_open.unwrap();
+    h.settle();
+    assert!(h.app.data.extra.whiteboards.iter().any(|w| w.id == wid));
+    h.app.wb_fill_template(wid, "Root Cause Analysis");
+    h.settle();
+    assert_eq!(board_of(&h, wid).name, "Root Cause Analysis");
+    h.type_text("Fishbone");
+    assert_eq!(board_of(&h, wid).name, "Fishbone");
+}
+
 /// The "Clear the whole board?" question in the board menu has room inside
 /// the menu's edge, the words on one line and the buttons just under them.
 /// The buttons were centred in the height the menu had before, far below

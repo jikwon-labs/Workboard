@@ -221,14 +221,16 @@ impl App {
                 egui::StrokeKind::Inside,
             );
         }
-        // a board just made: its name is ready to type over
+        // a board just made: its name is ready to type over (again after a
+        // template renamed it, while the name is still being typed)
         if let Some(n) = self
             .sweep
             .wb_new
             .as_mut()
-            .filter(|n| n.id == wid && n.focus)
+            .filter(|n| n.id == wid && (n.focus || (n.renamed && resp.has_focus())))
         {
             n.focus = false;
+            n.renamed = false;
             resp.request_focus();
             let len = self.data.extra.whiteboards[wi].name.chars().count();
             let mut st = egui::TextEdit::load_state(ui.ctx(), te_id).unwrap_or_default();
@@ -237,6 +239,9 @@ impl App {
                 egui::text::CCursor::new(len),
             )));
             st.store(ui.ctx(), te_id);
+        } else if let Some(n) = self.sweep.wb_new.as_mut().filter(|n| n.id == wid) {
+            // renamed while the name wasn't being typed: nothing to fix
+            n.renamed = false;
         }
 
         let key = format!("wb:{}", wid);

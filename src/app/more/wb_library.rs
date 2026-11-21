@@ -371,6 +371,7 @@ impl App {
                 // made in the language of the person making it, like a new task's name
                 w.name = tr(name).to_string();
                 n.name = w.name.clone();
+                n.renamed = true;
             }
         }
         let made: Vec<WbShape> = shapes

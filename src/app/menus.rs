@@ -991,6 +991,7 @@ impl App {
             start: true,
             name,
             all_templates: false,
+            renamed: false,
         });
         self.wb_open = Some(id);
         self.section = Section::Whiteboards;

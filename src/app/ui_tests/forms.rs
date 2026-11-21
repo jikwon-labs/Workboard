@@ -800,3 +800,32 @@ fn a_long_form_name_leaves_the_tabs_room_in_a_small_window() {
         assert!(answers.right() <= 900.0 && edit.left() > crumb.right());
     }
 }
+
+/// In the smallest window the editor's settings go under the questions
+/// instead of beside them, so each question's Required switch and menu
+/// stay on screen and work (beside them they were under the panel), and
+/// the line saying where an answer goes doesn't run under the switch.
+#[test]
+fn the_editor_fits_the_smallest_window() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.new_form_from(Some(4));
+    h.settle();
+    h.hover(pos2(600.0, 300.0));
+    let fid = h.app.form_open.unwrap();
+    let hint = h.painted_text("Saved as the priority: Urgent, High, Normal or Low");
+    let req = h.rect("Required 2");
+    assert!(
+        hint.iter().all(|(r, _)| r.right() <= req.left()),
+        "the hint ends at {:?}, the switch starts at {}",
+        hint.iter().map(|x| x.0.right()).collect::<Vec<_>>(),
+        req.left()
+    );
+    h.click("Required 2");
+    assert!(form(&h, fid).fields[1].required);
+    h.click("Question 1 menu");
+    h.click("Duplicate question 1");
+    assert_eq!(form(&h, fid).fields.len(), 4);
+    // the settings are further down the same page
+    h.click("Pick the List for new tasks");
+    assert!(h.has(&h.app.all_list_paths()[0].1.clone()));
+}

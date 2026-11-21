@@ -94,15 +94,25 @@ fn kind_menu(ui: &mut Ui, t: &Theme, taken: &[String], current: &str) -> Option<
 impl App {
     pub(super) fn form_editor(&mut self, ui: &mut Ui, fi: usize) {
         let t = self.t();
-        egui::SidePanel::right("form_settings")
-            .resizable(false)
-            .exact_width(300.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(t.bg)
-                    .inner_margin(egui::Margin::symmetric(20, 20)),
-            )
-            .show_inside(ui, |ui| self.form_settings(ui, fi));
+        // the settings beside the questions when both fit, else under them
+        // (beside them in a small window the questions ran under the panel)
+        let beside = ui.available_width() >= 760.0;
+        if beside {
+            egui::SidePanel::right("form_settings")
+                .resizable(false)
+                .exact_width(300.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(t.bg)
+                        .inner_margin(egui::Margin::symmetric(20, 20)),
+                )
+                .show_inside(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("form_settings_scroll")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| self.form_settings(ui, fi));
+                });
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.column_bg))
             .show_inside(ui, |ui| {
@@ -119,6 +129,18 @@ impl App {
                             ui.vertical(|ui| {
                                 ui.set_width(col);
                                 self.form_questions(ui, &t, fi);
+                                if !beside {
+                                    ui.add_space(24.0);
+                                    egui::Frame::new()
+                                        .fill(t.card)
+                                        .stroke(Stroke::new(1.0_f32, t.border))
+                                        .corner_radius(12)
+                                        .inner_margin(egui::Margin::same(20))
+                                        .show(ui, |ui| {
+                                            ui.set_width(ui.available_width());
+                                            self.form_settings(ui, fi);
+                                        });
+                                }
                                 ui.add_space(48.0);
                             });
                         });
@@ -400,7 +422,12 @@ impl App {
             let hint = kind_hint(&self.data.extra.forms[fi].fields[i]);
             let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
             line_icon_scaled(ui.painter(), "arrow_right", r.center(), t.text3, 0.75);
-            ui.label(RichText::new(hint).size(12.0).color(t.text2));
+            // wrapped before Required and the menu, so it never runs under them
+            let room = (ui.available_width() - 150.0).max(60.0);
+            ui.scope(|ui| {
+                ui.set_max_width(room);
+                ui.add(egui::Label::new(RichText::new(hint).size(12.0).color(t.text2)).wrap());
+            });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let more = icon_button(
                     ui,
@@ -670,8 +697,9 @@ impl App {
         ch
     }
 
-    /// The panel beside the editor: the List new tasks go to, the task an
-    /// answer makes, who is told, who made the form, and Delete.
+    /// The editor's settings, beside the questions or under them: the List
+    /// new tasks go to, the task an answer makes, who is told, who made the
+    /// form, and Delete.
     fn form_settings(&mut self, ui: &mut Ui, fi: usize) {
         let t = self.t();
         let f = self.data.extra.forms[fi].clone();
@@ -684,10 +712,7 @@ impl App {
                 trf!("{} (archived)", self.data.list_name(f.list_id)),
             ));
         }
-        egui::ScrollArea::vertical()
-            .id_salt("form_settings_scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
+        ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = 8.0;
                 panel_heading(ui, &t, tr("List for new tasks"));
                 let cur = lists.iter().find(|l| l.0 == f.list_id).map(|l| l.1.clone());

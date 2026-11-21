@@ -45,6 +45,8 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 
 - iOS 27 에서 켜진다(2026-11-22). iOS 27 은 UIScene 으로 화면을 띄우지 않는 앱을 시작하자마자 끄는데(`UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`), winit 0.30 은 장면 없이 창을 만든다. 그래서 Info.plist 에 장면 설정(`UIApplicationSceneManifest`, 담당 클래스 `WBSceneDelegate`)을 넣고, `src/os.rs` 의 `adopt_scenes` 가 그 클래스를 만들어 winit 의 창을 장면에 붙인다. 장면에 붙인 창에서는 키보드가 뜬 채로 iPad 를 돌리면 키보드가 처음 모양 그대로 남아서, 돌릴 때 키보드를 내렸다가 0.5초 뒤 다시 올린다(`follow_rotation`). iOS 26.5 와 27 시뮬레이터에서 둘 다 확인했다.
 
+- 손가락(2026-11-22): egui-winit 은 첫 손가락을 마우스로 바꿔서, 사이드바를 쓸면 줄 끌기가 잡혀 스크롤이 안 됐다. `src/app/touch.rs` 가 egui 보다 먼저 입력을 고친다. 바로 움직이면 스크롤(빠르게 쓸면 관성), 움직이지 않고 떼면 클릭, 0.35초 누르고 있다가 움직이면 예전처럼 끌기. 손가락을 대고 있는 동안에는 그 줄이 hover 처럼 밝아진다.
+
 ## 아직 안 되는 것
 
 - **단축키:** iPad 하드웨어 키보드의 Cmd 는 egui 명령 키로 잡히지 않고 Ctrl 이 그 역할을 한다(egui-winit 이 macOS 에서만 Cmd 를 쓴다). 표기도 "Ctrl+J".

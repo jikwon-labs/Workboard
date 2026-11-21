@@ -56,6 +56,7 @@ mod tests;
 mod timebar;
 mod timeline;
 mod together;
+mod touch;
 mod typing;
 #[cfg(test)]
 mod ui_tests;
@@ -590,6 +591,8 @@ pub struct App {
     v_typed: bool,
     /// Input method fixes for the raw input (see ime.rs).
     ime: ime::ImeFix,
+    /// iPad: a finger scrolls, taps and drags like an iPad app (touch.rs)
+    touch: touch::TouchScroll,
     new_channel: Option<String>,
     /// Tasks ticked for bulk editing.
     selected: HashSet<u64>,
@@ -1110,6 +1113,7 @@ impl App {
             paste_cmd: false,
             v_typed: false,
             ime: Default::default(),
+            touch: touch::TouchScroll::new(),
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,

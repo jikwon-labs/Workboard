@@ -506,3 +506,79 @@ fn the_ipad_keyboard_leaves_the_message_box_in_view() {
     h.click("Send");
     assert!(h.has("over the keyboard"));
 }
+
+/// What egui-winit sends for one finger (the first, which is also the mouse).
+fn finger(phase: egui::TouchPhase, p: egui::Pos2) -> Vec<egui::Event> {
+    let mut v = vec![egui::Event::Touch {
+        device_id: egui::TouchDeviceId(1),
+        id: egui::TouchId(1),
+        phase,
+        pos: p,
+        force: None,
+    }];
+    match phase {
+        egui::TouchPhase::Start => {
+            v.push(egui::Event::PointerMoved(p));
+            v.push(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            });
+        }
+        egui::TouchPhase::Move => v.push(egui::Event::PointerMoved(p)),
+        _ => {
+            v.push(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            });
+            v.push(egui::Event::PointerGone);
+        }
+    }
+    v
+}
+
+#[test]
+fn a_finger_swiping_the_sidebar_scrolls_it_and_a_tap_opens_a_row() {
+    use egui::TouchPhase::*;
+    let mut h = Ui1::sized(1133.0, 600.0);
+    h.app.touch.enabled = true;
+    let before = h.rect("general");
+    let where_ = h.app.loc.clone();
+    // a swipe up from a row: the list moves with the finger, no row is dragged or opened
+    let start = egui::pos2(before.center().x, 450.0);
+    assert!(before.top() > 600.0, "below the window, to be scrolled to");
+    h.frame(finger(Start, start));
+    for i in 1..=8 {
+        h.frame(finger(Move, start - egui::vec2(0.0, 15.0 * i as f32)));
+    }
+    h.frame(finger(End, start - egui::vec2(0.0, 120.0)));
+    for _ in 0..90 {
+        h.frame(vec![]);
+    }
+    let after = h.rect("general");
+    assert!(after.top() < before.top() - 40.0, "{before:?} -> {after:?}");
+    assert_eq!(h.app.loc, where_, "nothing opened");
+    // keep going until it shows, then a tap on it opens it
+    for _ in 0..6 {
+        if h.rect("general").bottom() < 590.0 {
+            break;
+        }
+        h.frame(finger(Start, start));
+        for i in 1..=8 {
+            h.frame(finger(Move, start - egui::vec2(0.0, 15.0 * i as f32)));
+        }
+        h.frame(finger(End, start - egui::vec2(0.0, 120.0)));
+        for _ in 0..90 {
+            h.frame(vec![]);
+        }
+    }
+    let p = h.rect("general").center();
+    assert!(p.y < 590.0, "{p:?}");
+    h.frame(finger(Start, p));
+    h.frame(finger(End, p));
+    h.settle();
+    assert!(h.app.chat.open.is_some(), "the tap opened the channel");
+}

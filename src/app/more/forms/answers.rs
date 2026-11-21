@@ -45,7 +45,11 @@ impl App {
                                 ui.horizontal(|ui| {
                                     ui.vertical(|ui| {
                                         ui.label(
-                                            RichText::new(trf!("{} answers", tasks.len()))
+                                            RichText::new(if tasks.len() == 1 {
+                                                tr("1 answer").to_string()
+                                            } else {
+                                                trf!("{} answers", tasks.len())
+                                            })
                                                 .size(20.0)
                                                 .color(t.text),
                                         );

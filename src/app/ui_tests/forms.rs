@@ -501,3 +501,21 @@ fn a_form_without_a_name_shows_as_untitled() {
     h.type_text("untitled");
     assert!(h.has("Form Untitled form"), "found by what it shows");
 }
+
+/// Counts read right with one: "1 form", "1 answer", as "1 member" does.
+#[test]
+fn one_form_and_one_answer_are_counted_in_the_singular() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    h.click("IT Requests");
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("Screen flickers");
+    h.click("Submit");
+    h.click("Answers");
+    assert!(!h.painted_text("1 answer").is_empty());
+    assert!(h.painted_text("1 answers").is_empty());
+    h.click("Back to all forms");
+    assert!(!h.painted_text("1 form").is_empty());
+    assert!(h.painted_text("1 forms").is_empty());
+}

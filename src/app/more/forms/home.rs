@@ -232,7 +232,11 @@ impl App {
                         ui.add_space(14.0);
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new(trf!("{} forms", forms.len()))
+                                RichText::new(if forms.len() == 1 {
+                                    tr("1 form").to_string()
+                                } else {
+                                    trf!("{} forms", forms.len())
+                                })
                                     .size(13.0)
                                     .color(t.text2),
                             );

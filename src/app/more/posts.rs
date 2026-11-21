@@ -420,8 +420,9 @@ impl App {
                                                 Sense::hover(),
                                             );
                                             paint_avatar(ui.painter(), r.center(), 12.0, a, t.card);
-                                            ui.label(RichText::new(a.shown()).strong());
                                         }
+                                        // "Someone" for a person no longer here, as in the channel
+                                        ui.label(RichText::new(self.who(m.author)).strong());
                                         ui.label(
                                             RichText::new(trf!(
                                                 "{} in {} \u{2022} {}",

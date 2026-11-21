@@ -345,3 +345,21 @@ fn a_post_without_a_title_shows_the_default_title() {
     h.settle();
     assert_eq!(h.painted_text("Update").len(), 2, "in the channel");
 }
+
+/// A post by someone no longer in the workspace names them as the channel
+/// does ("Someone"), so its card doesn't start with "Announcement in".
+#[test]
+fn a_post_by_someone_who_left_names_them_as_someone() {
+    let mut h = posts_page();
+    let id = channel_id(&h, "general");
+    let mut m = crate::app::slack::new_message(9001, 77, "Bye all".into(), now_ts());
+    m.post_title = Some("Farewell".into());
+    let c = h.app.data.channels.iter_mut().find(|c| c.id == id).unwrap();
+    c.messages.push(m);
+    h.settle();
+    assert!(!h.painted_text("Farewell").is_empty());
+    assert!(
+        !h.painted_text("Someone").is_empty(),
+        "the author is Someone"
+    );
+}

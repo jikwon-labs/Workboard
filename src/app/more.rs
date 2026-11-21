@@ -904,9 +904,17 @@ impl App {
     pub(super) fn planner_add_row(&mut self, ui: &mut Ui, d: NaiveDate, w: f32) {
         let t = self.t();
         let Some((_, text)) = self.sweep.planner_add.as_mut().filter(|p| p.0 == d) else {
-            let b = ui.add(ghost(
-                egui::Button::new(RichText::new(tr("+ Add task")).color(t.text3)).truncate(),
-            ));
+            // in from the day's edge like the task cards' text, so its hover
+            // fill has room before the "+" and stays off the day's outline
+            let b = ui
+                .horizontal(|ui| {
+                    ui.add_space(8.0);
+                    ui.add(ghost(
+                        egui::Button::new(RichText::new(tr("+ Add task")).color(t.text3))
+                            .truncate(),
+                    ))
+                })
+                .inner;
             name_it(&b, &format!("Add task on {}", d.format("%a %-d")));
             if b.clicked() {
                 self.sweep.planner_add = Some((d, String::new()));

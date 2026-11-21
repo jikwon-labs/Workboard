@@ -543,8 +543,17 @@ impl egui::Widget for Ghost<'_> {
                 if r.rect.width() < 28.0 { 3.0 } else { 6.0 },
                 if r.rect.height() < 22.0 { 2.0 } else { 0.0 },
             );
-            // a button laid over an exact cell (put_over) keeps the fill inside it
-            let rect = r.rect.expand2(pad).intersect(ui.max_rect().union(r.rect));
+            // a button laid over an exact cell (put_over) or stretched across
+            // its column keeps the fill inside it; any other one keeps its room
+            // on both sides, so a button at the left edge of a box is not cut
+            // off right at its first letter
+            let full = r.rect.width() >= ui.max_rect().width() - 0.5;
+            let bound = if full {
+                ui.max_rect().union(r.rect)
+            } else {
+                ui.clip_rect()
+            };
+            let rect = r.rect.expand2(pad).intersect(bound);
             paint_hover_slot(ui, slot, rect, fill);
         }
         r

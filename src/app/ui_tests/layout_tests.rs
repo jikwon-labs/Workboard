@@ -275,6 +275,46 @@ fn planner_days_share_the_width_and_today_scrolls() {
 }
 
 #[test]
+fn planner_add_task_fill_has_room_before_the_plus() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Planner;
+    h.settle();
+    let week = h.app.planner_week;
+    let b = h.rect(&format!("Add task on {}", week.format("%a %-d")));
+    h.hover(b.center());
+    let fill = crate::widgets::hover_fill_for(false);
+    let fill_rect = h
+        .shapes
+        .iter()
+        .find_map(|c| match &c.shape {
+            egui::Shape::Rect(r) if r.fill == fill && r.rect.contains(b.center()) => Some(r.rect),
+            _ => None,
+        })
+        .expect("the add button's hover fill");
+    let text = h
+        .painted_text(tr("+ Add task"))
+        .into_iter()
+        .map(|(r, _)| r)
+        .find(|r| b.contains(r.center()))
+        .expect("the add button's text");
+    // the fill reaches past the "+" on the left, as on the right (it was cut
+    // off at the day's inner edge, right at the "+")
+    assert!(
+        text.left() - fill_rect.left() >= 5.0,
+        "room before the text inside the fill ({:?} in {:?})",
+        text,
+        fill_rect
+    );
+    // and stays inside the day's box: the box's 6 pt margin is before the button's 8 pt indent
+    assert!(
+        fill_rect.left() >= b.left() - 8.0,
+        "the fill stays off the day's outline ({:?}, button {:?})",
+        fill_rect,
+        b
+    );
+}
+
+#[test]
 fn planner_without_unscheduled_tasks_says_so() {
     let mut h = Ui1::new();
     let me = h.app.data.me;

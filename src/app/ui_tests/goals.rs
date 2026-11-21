@@ -758,9 +758,9 @@ fn the_new_goal_dialog_keeps_its_numbers_finite() {
     let (mut h, _, _) = two_goals();
     h.click("New goal");
     h.type_text("Infinite");
-    h.click("Target value");
+    h.click("Target value entry");
     h.type_text("inf");
-    h.click("Start value");
+    h.click("Start value entry");
     h.type_text("-1e999");
     h.click("Create goal");
     let g = h.app.data.extra.goals.last().unwrap().clone();
@@ -1542,4 +1542,54 @@ fn goal_header_slash_follows_the_hub_name() {
     );
     h.click("Goals crumb");
     assert!(h.app.goal_open.is_none());
+}
+
+#[test]
+fn a_number_target_cant_start_where_it_ends() {
+    let (mut h, _, _) = two_goals();
+    let n = h.app.data.extra.goals.len();
+    h.click("New goal");
+    h.type_text("Zero to zero");
+    // from 0 to 0: it can't be measured, so the goal can't be made yet
+    h.click("Target value entry");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("0");
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(
+        !h.painted_text("The start and target values are the same")
+            .is_empty(),
+        "it says why"
+    );
+    h.click("Create goal");
+    h.click("Another target");
+    assert_eq!(h.app.data.extra.goals.len(), n, "not made");
+    let Some(Modal::NewGoal(d)) = &h.app.modal else {
+        panic!("still open")
+    };
+    assert!(d.more.is_empty(), "nor set aside as another target");
+    // a target to aim for: it can be made
+    h.click("Target value entry");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("5");
+    h.key(egui::Key::Enter);
+    h.click("Create goal");
+    assert_eq!(h.app.data.extra.goals.len(), n + 1);
+
+    // on a goal's page: a target value equal to the start isn't taken
+    let id = add_goal_with(&mut h, "Signups", vec![number("People", 10.0, 50.0, 20.0)]);
+    h.app.goal_open = Some(id);
+    h.settle();
+    h.click("Edit People");
+    h.click("Number target");
+    h.type_text("10");
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(matches!(
+        goal(&h, id).targets[0].kind,
+        TargetKind::Number { target, .. } if target == 50.0
+    ));
+    assert!(!h
+        .painted_text("The start and target values are the same")
+        .is_empty());
 }

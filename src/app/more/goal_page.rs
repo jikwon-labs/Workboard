@@ -728,8 +728,13 @@ impl App {
                         .min_size(vec2(0.0, 32.0)),
                 );
                 name_it(&e, &format!("Edit {}", v.name));
+                let warn_id = egui::Id::new(("goal number same", gid, i));
+                if e.clicked() {
+                    ui.data_mut(|d| d.remove_temp::<bool>(warn_id));
+                }
                 popup(ui, &e, ui.id().with(("edit number", gid, i)), 260.0, |ui| {
                     let mut ch = false;
+                    let mut same = false;
                     if let Some(TargetKind::Number {
                         start,
                         target,
@@ -755,22 +760,45 @@ impl App {
                                     act = Some(PageAct::Goal(GoalAct::SetNumber { g: gid, i, to }));
                                 }
                                 ui.end_row();
+                                // a start equal to the target (or the other
+                                // way round) isn't taken: nothing would be
+                                // left to measure
                                 ui.label(tr("Start value"));
                                 let id = egui::Id::new(("goal number start", gid, i));
                                 if let Some(v) = number_let_go(ui, id, *start, "Number start") {
-                                    act = Some(PageAct::SetRange(i, Some(v), None));
+                                    if (v - *target).abs() < f64::EPSILON {
+                                        same = true;
+                                    } else {
+                                        act = Some(PageAct::SetRange(i, Some(v), None));
+                                    }
                                 }
                                 ui.end_row();
                                 ui.label(tr("Target value"));
                                 let id = egui::Id::new(("goal number target", gid, i));
                                 if let Some(v) = number_let_go(ui, id, *target, "Number target") {
-                                    act = Some(PageAct::SetRange(i, None, Some(v)));
+                                    if (v - *start).abs() < f64::EPSILON {
+                                        same = true;
+                                    } else {
+                                        act = Some(PageAct::SetRange(i, None, Some(v)));
+                                    }
                                 }
                                 ui.end_row();
                                 ui.label(tr("Unit"));
                                 ch |= ui.add(field(unit).desired_width(80.0)).changed();
                                 ui.end_row();
                             });
+                    }
+                    if same {
+                        ui.data_mut(|d| d.insert_temp(warn_id, true));
+                    } else if act.is_some() {
+                        ui.data_mut(|d| d.remove_temp::<bool>(warn_id));
+                    }
+                    if ui.data(|d| d.get_temp::<bool>(warn_id)).unwrap_or(false) {
+                        ui.label(
+                            RichText::new(tr("The start and target values are the same"))
+                                .size(12.5)
+                                .color(t.danger),
+                        );
                     }
                     if ch {
                         self.dirty = true;

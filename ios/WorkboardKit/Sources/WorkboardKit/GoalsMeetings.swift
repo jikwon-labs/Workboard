@@ -42,6 +42,13 @@ public struct GoalTargetView: Hashable, Sendable {
         self.name = name
         self.kind = kind
     }
+
+    /// A number from a value to the same value: nothing to measure, so it
+    /// can't be added (it would read as met from the start), as on the Mac.
+    public var startsWhereItEnds: Bool {
+        if case .number(let s, let t, _, _) = kind { return abs(t - s) < .ulpOfOne }
+        return false
+    }
 }
 
 public struct GoalView: Identifiable, Hashable, Sendable {
@@ -165,7 +172,7 @@ extension Edits {
 
     @discardableResult
     public static func addTarget(_ data: inout JSON, goal: UInt64, _ target: GoalTargetView) -> Bool {
-        guard !target.name.isBlank else { return false }
+        guard !target.name.isBlank, !target.startsWhereItEnds else { return false }
         return changeGoal(&data, goal) { g in
             var t = g["targets"]?.array ?? []
             t.append(target.json)

@@ -6703,6 +6703,16 @@
         }
       }
     },
+    "The start and target values are the same": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "시작값과 목표값이 같습니다"
+          }
+        }
+      }
+    },
     "The server emails you a code to set a new password.": {
       "localizations": {
         "ko": {

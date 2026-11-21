@@ -182,6 +182,19 @@ private struct NewTargetView: View {
     @State private var target = "100"
     @State private var unit = ""
 
+    /// The target as filled in so far.
+    private var made: GoalTargetView {
+        let k: GoalTargetView.Kind
+        switch kind {
+        case 0:
+            let s = Double(start) ?? 0
+            k = .number(start: s, target: Double(target) ?? 100, current: s, unit: unit)
+        case 1: k = .trueFalse(done: false)
+        default: k = .tasks(ids: [])
+        }
+        return GoalTargetView(name: name, kind: k)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -196,6 +209,9 @@ private struct NewTargetView: View {
                     LabeledContent("Start") { TextField("0", text: $start).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
                     LabeledContent("Target") { TextField("100", text: $target).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
                     LabeledContent("Unit") { TextField("e.g. users", text: $unit).multilineTextAlignment(.trailing) }
+                    if made.startsWhereItEnds {
+                        Text("The start and target values are the same").font(.footnote).foregroundStyle(.red)
+                    }
                 }
             }
             .navigationTitle("New target")
@@ -204,18 +220,11 @@ private struct NewTargetView: View {
                 CancelButton { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        let k: GoalTargetView.Kind
-                        switch kind {
-                        case 0:
-                            let s = Double(start) ?? 0
-                            k = .number(start: s, target: Double(target) ?? 100, current: s, unit: unit)
-                        case 1: k = .trueFalse(done: false)
-                        default: k = .tasks(ids: [])
-                        }
-                        client.edit { d, _ in Edits.addTarget(&d, goal: goal, GoalTargetView(name: name, kind: k)) }
+                        let t = made
+                        client.edit { d, _ in Edits.addTarget(&d, goal: goal, t) }
                         dismiss()
                     }
-                    .disabled(name.isBlank)
+                    .disabled(name.isBlank || made.startsWhereItEnds)
                     .accessibilityIdentifier("targetAdd")
                 }
             }

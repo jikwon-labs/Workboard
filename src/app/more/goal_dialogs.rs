@@ -78,6 +78,12 @@ impl GoalDraft {
     }
 }
 
+/// The number target being set up starts where it ends: there is nothing
+/// to measure, so it can't be added (it would read as met from the start).
+fn same_range(d: &GoalDraft) -> bool {
+    d.kind == 0 && (d.from - d.to).abs() < f64::EPSILON
+}
+
 /// The last day of this month (0), this quarter (1) or next quarter (2).
 fn due_preset(which: u8, day: NaiveDate) -> NaiveDate {
     let (y, m) = (day.year(), day.month());
@@ -391,12 +397,12 @@ impl App {
                             ui.vertical(|ui| {
                                 small(ui, "Start value");
                                 let r = ui.add_sized(vec2(64.0, 26.0), number_box(&mut d.from));
-                                name_it(&r, "Start value");
+                                name_it(&r, "Start value entry");
                             });
                             ui.vertical(|ui| {
                                 small(ui, "Target value");
                                 let r = ui.add_sized(vec2(64.0, 26.0), number_box(&mut d.to));
-                                name_it(&r, "Target value");
+                                name_it(&r, "Target value entry");
                             });
                             ui.vertical(|ui| {
                                 small(ui, "Unit");
@@ -410,15 +416,25 @@ impl App {
                         });
                         ui.add_space(4.0);
                         let unit = d.unit.trim();
-                        ui.label(
-                            RichText::new(trf!(
-                                "{} → {}, progress counted from where it starts",
-                                format!("{} {}", fmt_num(d.from), unit).trim_end(),
-                                format!("{} {}", fmt_num(d.to), unit).trim_end()
-                            ))
-                            .size(12.5)
-                            .color(t.text2),
-                        );
+                        if same_range(d) {
+                            // nothing to measure between them: it would read
+                            // as met from the start
+                            ui.label(
+                                RichText::new(tr("The start and target values are the same"))
+                                    .size(12.5)
+                                    .color(t.danger),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(trf!(
+                                    "{} → {}, progress counted from where it starts",
+                                    format!("{} {}", fmt_num(d.from), unit).trim_end(),
+                                    format!("{} {}", fmt_num(d.to), unit).trim_end()
+                                ))
+                                .size(12.5)
+                                .color(t.text2),
+                            );
+                        }
                     }
                     1 => {
                         small(ui, "Target name");
@@ -484,7 +500,7 @@ impl App {
             });
         ui.add_space(6.0);
         let add = icons::icon_button(ui, t, "plus", tr("Target"), "Another target", true);
-        if add.clicked() {
+        if add.clicked() && !same_range(d) {
             let tg = d.current_target();
             d.more.push(tg);
             d.reset_target();
@@ -545,7 +561,7 @@ impl App {
                     .color(t.text2),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let named = !d.name.trim().is_empty();
+                let named = !d.name.trim().is_empty() && !same_range(d);
                 let create = ui
                     .add_enabled_ui(named, |ui| primary_button(ui, t, tr("Create goal")))
                     .inner;

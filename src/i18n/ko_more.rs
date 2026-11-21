@@ -93,6 +93,7 @@ pub const T: &[(&str, &str)] = &[
     ("Achieved goals gather at the bottom of the Goals page.", "달성한 목표는 목표 화면 아래에 모입니다."),
     ("Achieved this year", "올해 달성"),
     ("Achieved {}", "{} 달성"),
+    ("The start and target values are the same", "시작값과 목표값이 같습니다"),
     ("Achieved {}, {} days early", "{} 달성 · 마감 {}일 전"),
     ("{}: {} achieved", "{}: {}개 달성"),
     ("Add a start and due date to see the pace", "시작일과 마감일을 정하면 진행 상태를 볼 수 있습니다"),

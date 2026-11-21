@@ -49,16 +49,31 @@ final class GoalsMeetingsTests: XCTestCase {
         XCTAssertEqual(WorkspaceView(d).percent(of: goal(802)), 99)
         Edits.setTarget(&d, goal: 802, index: 0, to: GoalTargetView(name: "N", kind: .number(start: 0, target: 1000, current: 1000, unit: "")))
         XCTAssertEqual(WorkspaceView(d).percent(of: goal(802)), 100)
-        // from 0 to 0: met; going down from 400 to 100, at 250: half
+        // from 0 to 0 (can't be added any more, but older data has it):
+        // met; going down from 400 to 100, at 250: half
         Edits.addGoal(&d, name: "Edge", me: 1, id: 803)
-        Edits.addTarget(&d, goal: 803, GoalTargetView(name: "Zero", kind: .number(start: 0, target: 0, current: 0, unit: "")))
         Edits.addTarget(&d, goal: 803, GoalTargetView(name: "Down", kind: .number(start: 400, target: 100, current: 250, unit: "")))
+        var goals = d.at("extra.goals")!.array!
+        let gi = goals.firstIndex { $0["id"]?.uint == 803 }!
+        goals[gi]["targets"] = .array([GoalTargetView(name: "Zero", kind: .number(start: 0, target: 0, current: 0, unit: "")).json] + goals[gi]["targets"]!.array!)
+        d.set("extra.goals", .array(goals))
         XCTAssertEqual(WorkspaceView(d).progress(of: goal(803)), 0.75, accuracy: 0.0001)
         // no targets, or only deleted tasks: nothing yet
         Edits.addGoal(&d, name: "Empty", me: 1, id: 804)
         XCTAssertEqual(WorkspaceView(d).percent(of: goal(804)), 0)
         Edits.addTarget(&d, goal: 804, GoalTargetView(name: "Gone", kind: .tasks(ids: [99999])))
         XCTAssertEqual(WorkspaceView(d).percent(of: goal(804)), 0)
+    }
+
+    /// A number from a value to the same value can't be added, as on the Mac.
+    func testANumberTargetCantStartWhereItEnds() {
+        var d = SampleWorkspace.make()
+        Edits.addGoal(&d, name: "G", me: 1, id: 805)
+        let same = GoalTargetView(name: "Zero", kind: .number(start: 0, target: 0, current: 0, unit: ""))
+        XCTAssertTrue(same.startsWhereItEnds)
+        XCTAssertFalse(Edits.addTarget(&d, goal: 805, same))
+        XCTAssertTrue(Edits.addTarget(&d, goal: 805, GoalTargetView(name: "Five", kind: .number(start: 0, target: 5, current: 0, unit: ""))))
+        XCTAssertEqual(WorkspaceView(d).goals(d).first { $0.id == 805 }!.targets.map(\.name), ["Five"])
     }
 
     func testMeetingActionItemsBecomeTasksForTheAttendees() {

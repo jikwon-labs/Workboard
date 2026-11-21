@@ -372,6 +372,61 @@ impl PushPrefs {
     }
 }
 
+/// What the AI is asked to do (`Msg::Ai`; the server's ai.rs does it).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AiAsk {
+    /// Sum up a channel or DM: its newest messages, with their threads.
+    SummarizeChannel { channel: u64 },
+    /// Sum up the thread under message `message` of `channel`.
+    SummarizeThread { channel: u64, message: u64 },
+    /// Do `how` (one of `AI_WRITE`) to a piece of writing: a doc page, a
+    /// part of it, or a task description. `title` says what it is about.
+    Write {
+        how: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        title: String,
+    },
+    /// Subtasks for a task; the answer is JSON `{"subtasks": [names]}`.
+    Subtasks {
+        name: String,
+        #[serde(default)]
+        description: String,
+    },
+    /// A question about the workspace (what the asker may see of it), after
+    /// the questions and answers before it in the same conversation.
+    Question {
+        question: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        history: Vec<AiTurn>,
+    },
+}
+
+/// One earlier question and its answer (`AiAsk::Question`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AiTurn {
+    pub question: String,
+    pub answer: String,
+}
+
+/// What `AiAsk::Write` can do with a piece of writing.
+pub const AI_WRITE: [&str; 9] = [
+    "improve",
+    "fix",
+    "shorter",
+    "longer",
+    "summarize",
+    "korean",
+    "english",
+    "continue",
+    "draft",
+];
+
+/// The longest text one AI request may carry (characters): writing to
+/// change, a question, a task's name and description together.
+pub const AI_MAX_TEXT: usize = 60_000;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Msg {
@@ -667,6 +722,37 @@ pub enum Msg {
     /// none. Never sent to anyone else. Older servers and apps ignore it.
     Mine {
         data: Value,
+    },
+    /// Sent after `welcome` when the server can ask an AI (its ai.json has
+    /// a key): the app shows its AI tools. Servers without it never send it;
+    /// older apps ignore it.
+    AiReady {
+        model: String,
+    },
+    /// Ask the AI. `id` is the app's own number for the request; the answer
+    /// comes as `ai_text` pieces and one `ai_done` with the same id.
+    /// `lang` is the language to answer in ("ko", "en").
+    Ai {
+        id: u64,
+        ask: AiAsk,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        lang: String,
+    },
+    /// The answer to request `id` isn't wanted any more (the window asking
+    /// closed): the server stops it and sends nothing more for it.
+    AiStop {
+        id: u64,
+    },
+    /// The next piece of an answer, to add to what came before.
+    AiText {
+        id: u64,
+        text: String,
+    },
+    /// The answer is complete, or (`error`) it failed or was turned down.
+    AiDone {
+        id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
     Error {
         message: String,
@@ -1011,6 +1097,18 @@ pub enum Event {
     Integrations {
         hooks: Vec<HookInfo>,
         commands: Vec<CommandInfo>,
+    },
+    /// The server can ask an AI, with this model (`Msg::AiReady`).
+    AiReady(String),
+    /// More of the answer to AI request `id`.
+    AiText {
+        id: u64,
+        text: String,
+    },
+    /// AI request `id` is answered, or failed with `error`.
+    AiDone {
+        id: u64,
+        error: Option<String>,
     },
 }
 
@@ -1569,6 +1667,9 @@ fn on_server_msg(
         Some(Msg::IntegrationList { hooks, commands }) => {
             emit(Event::Integrations { hooks, commands })
         }
+        Some(Msg::AiReady { model }) => emit(Event::AiReady(model)),
+        Some(Msg::AiText { id, text }) => emit(Event::AiText { id, text }),
+        Some(Msg::AiDone { id, error }) => emit(Event::AiDone { id, error }),
         Some(Msg::Typing {
             channel,
             member: Some(member),
@@ -1605,6 +1706,66 @@ fn on_server_msg(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AI requests and answers on the wire: the kind of request rides in
+    /// `kind`, empty extras stay out, and the answer's pieces and end carry
+    /// the app's own request number.
+    #[test]
+    fn ai_messages_on_the_wire() {
+        let ask = Msg::Ai {
+            id: 7,
+            ask: AiAsk::SummarizeThread {
+                channel: 3,
+                message: 9,
+            },
+            lang: "ko".into(),
+        };
+        let v: Value = serde_json::from_str(&ask.to_json()).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"type": "ai", "id": 7, "lang": "ko",
+                "ask": {"kind": "summarize_thread", "channel": 3, "message": 9}})
+        );
+        assert_eq!(Msg::parse(&ask.to_json()), Some(ask));
+        let q = Msg::parse(r#"{"type":"ai","id":1,"ask":{"kind":"question","question":"Who?"}}"#);
+        assert_eq!(
+            q,
+            Some(Msg::Ai {
+                id: 1,
+                ask: AiAsk::Question {
+                    question: "Who?".into(),
+                    history: vec![]
+                },
+                lang: String::new()
+            })
+        );
+        let w = Msg::Ai {
+            id: 2,
+            ask: AiAsk::Write {
+                how: "fix".into(),
+                text: "teh".into(),
+                title: String::new(),
+            },
+            lang: String::new(),
+        };
+        assert!(!w.to_json().contains("title") && !w.to_json().contains("lang"));
+        assert_eq!(
+            Msg::AiDone { id: 2, error: None }.to_json(),
+            r#"{"type":"ai_done","id":2}"#
+        );
+        assert_eq!(
+            Msg::AiText {
+                id: 2,
+                text: "the".into()
+            }
+            .to_json(),
+            r#"{"type":"ai_text","id":2,"text":"the"}"#
+        );
+        assert_eq!(
+            Msg::parse(r#"{"type":"ai_ready","model":"m"}"#),
+            Some(Msg::AiReady { model: "m".into() })
+        );
+    }
 
     #[test]
     fn web_addresses_on_the_server() {

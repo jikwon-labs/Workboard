@@ -64,6 +64,12 @@ struct App {
     heard: Vec<String>,
     /// my own reading state, from the last `mine` message
     mine: Option<Value>,
+    /// the server's AI model, once it said it has one
+    ai_model: Option<String>,
+    /// each AI request's answer so far, and its pieces in order
+    ai_text: std::collections::HashMap<u64, Vec<String>>,
+    /// AI requests answered: their error, if any
+    ai_done: std::collections::HashMap<u64, Option<String>>,
 }
 
 impl App {
@@ -154,6 +160,9 @@ impl App {
             updates: vec![],
             heard: vec![],
             mine: None,
+            ai_model: None,
+            ai_text: Default::default(),
+            ai_done: Default::default(),
         }
     }
 
@@ -315,6 +324,14 @@ impl App {
                 Event::Mine(m) => self.mine = Some(m),
                 Event::Integrations { hooks, commands } => {
                     self.integrations = Some((hooks, commands))
+                }
+                Event::AiReady(model) => self.ai_model = Some(model),
+                Event::AiText { id, text } => self.ai_text.entry(id).or_default().push(text),
+                Event::AiDone { id, error } => {
+                    assert!(
+                        self.ai_done.insert(id, error).is_none(),
+                        "one ai_done for request {id}"
+                    );
                 }
             }
         }
@@ -6332,5 +6349,243 @@ fn deleted_workspaces_stay_deleted_after_a_restart() {
     );
     assert!(!gone.join("abc.100").exists());
     assert!(gone.join(format!("def.{}", recent)).is_dir());
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ------------------------------------------------------------------ AI
+
+impl App {
+    /// Ask the AI and wait for the whole answer: its text, or its error.
+    fn ask_ai(&mut self, id: u64, ask: wb_net::AiAsk) -> Result<String, String> {
+        self.client.send(Msg::Ai {
+            id,
+            ask,
+            lang: "en".into(),
+        });
+        self.until("the AI's answer", |a| a.ai_done.contains_key(&id));
+        match self.ai_done[&id].clone() {
+            Some(e) => Err(e),
+            None => Ok(self
+                .ai_text
+                .get(&id)
+                .map(|p| p.concat())
+                .unwrap_or_default()),
+        }
+    }
+}
+
+/// A workspace with a private channel only Ann (1) is in.
+fn ai_workspace() -> Value {
+    let mut w = workspace();
+    w["channels"].as_array_mut().unwrap().push(json!({
+        "id": 12, "name": "leads", "kind": "Channel", "topic": "", "private": true,
+        "members": [1], "messages": [{"id": 13, "author": 1, "text": "the secret plan", "ts": 2}],
+        "last_read": 0
+    }));
+    w["docs"] = json!([{"id": 50, "title": "Handbook", "body": "Plan reviews happen on Fridays.",
+                        "created": 1, "updated": 1}]);
+    w
+}
+
+/// A server with an AI says so to every app, answers a request in pieces
+/// that add up to the whole answer, and reads only what the asker may see:
+/// a private channel someone isn't in is "not there" for them and never
+/// reaches the AI, nor does it go along with their questions. The owner's
+/// question takes it along.
+#[test]
+fn the_ai_answers_in_pieces_from_what_the_asker_may_see() {
+    use wb_net::AiAsk;
+    use workboard_server::ai;
+    let fake = workboard_server::testing::FakeClaude::new("Ann said |hi to |everyone.");
+    let server = Server::with_ai(fake.clone());
+    let mut a = App::connect(server.port, Some(ai_workspace()));
+    a.wait("A's copy on the server", |_| true);
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let code = a.invite(2, Role::Member);
+    let mut b = App::join(server.port, &code);
+    b.wait("B gets the team's copy", |d| !task_names(d).is_empty());
+    for app in [&mut a, &mut b] {
+        app.until("the server has an AI", |a| a.ai_model.is_some());
+        assert_eq!(app.ai_model.as_deref(), Some("test-model"));
+    }
+
+    // a summary, in pieces
+    let got = b.ask_ai(1, AiAsk::SummarizeChannel { channel: 10 });
+    assert_eq!(got.as_deref(), Ok("Ann said hi to everyone."));
+    assert!(b.ai_text[&1].len() >= 2, "in pieces: {:?}", b.ai_text[&1]);
+    assert_eq!(fake.asked().len(), 1);
+    let sent = fake.last_text();
+    assert!(
+        sent.contains("Conversation: #general") && sent.contains("Ann: hi"),
+        "{sent}"
+    );
+    assert_eq!(fake.asked()[0]["model"], "test-model");
+    assert_eq!(fake.asked()[0]["stream"], true);
+    assert!(a.ai_text.is_empty(), "the answer goes only to who asked");
+
+    // the private channel isn't there for B, and nothing goes to the AI
+    for (id, ask) in [
+        (2, AiAsk::SummarizeChannel { channel: 12 }),
+        (
+            3,
+            AiAsk::SummarizeThread {
+                channel: 12,
+                message: 13,
+            },
+        ),
+    ] {
+        assert_eq!(b.ask_ai(id, ask), Err(ai::AI_NOT_FOUND.to_string()));
+    }
+    assert_eq!(fake.asked().len(), 1);
+
+    // questions: B's leaves the private channel out, A's has it
+    let q = || AiAsk::Question {
+        question: "What is the plan?".into(),
+        history: vec![],
+    };
+    b.ask_ai(4, q()).unwrap();
+    let sent = fake.last_text();
+    assert!(
+        sent.contains("Plan reviews happen on Fridays."),
+        "the doc matches: {sent}"
+    );
+    assert!(
+        !sent.contains("secret") && !sent.contains("leads"),
+        "{sent}"
+    );
+    a.ask_ai(5, q()).unwrap();
+    assert!(fake.last_text().contains("[msg:12:13]"));
+    assert!(fake.last_text().contains("the secret plan"));
+
+    // a failure says why, and nothing else comes for it
+    *fake.fail.lock().unwrap() = Some(ai::AI_FAILED.into());
+    assert_eq!(
+        b.ask_ai(
+            6,
+            AiAsk::Write {
+                how: "fix".into(),
+                text: "teh".into(),
+                title: String::new()
+            }
+        ),
+        Err(ai::AI_FAILED.to_string())
+    );
+    assert!(!b.ai_text.contains_key(&6));
+    *fake.fail.lock().unwrap() = None;
+    // a request the server can't make sense of is turned down before the AI
+    let n = fake.asked().len();
+    assert_eq!(
+        b.ask_ai(
+            7,
+            AiAsk::Write {
+                how: "sing".into(),
+                text: "x".into(),
+                title: String::new()
+            }
+        ),
+        Err(ai::AI_UNKNOWN.to_string())
+    );
+    assert_eq!(fake.asked().len(), n);
+    assert_eq!(b.status, Some(Status::Connected), "the connection stays");
+}
+
+/// An answer nobody wants any more stops: when the app says stop, or when
+/// it goes away. Nothing more comes for a stopped request, and the person
+/// may ask again right away.
+#[test]
+fn an_ai_answer_stops_when_the_app_stops_it_or_leaves() {
+    use std::sync::atomic::Ordering;
+    use wb_net::AiAsk;
+    let fake = workboard_server::testing::FakeClaude::new("first |second");
+    fake.hold.store(true, Ordering::SeqCst);
+    let server = Server::with_ai(fake.clone());
+    let mut a = App::connect(server.port, Some(ai_workspace()));
+    a.until("the server has an AI", |a| a.ai_model.is_some());
+    let ask = || AiAsk::SummarizeChannel { channel: 10 };
+    a.client.send(Msg::Ai {
+        id: 1,
+        ask: ask(),
+        lang: String::new(),
+    });
+    a.until("the first piece", |a| a.ai_text.contains_key(&1));
+    a.client.send(Msg::AiStop { id: 1 });
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(20), || {
+            fake.stopped.load(Ordering::SeqCst) == 1
+        }),
+        "stopped"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    a.pump();
+    assert!(!a.ai_done.contains_key(&1), "nothing more for it");
+    assert_eq!(a.ai_text[&1], ["first "]);
+
+    // a new one goes as usual
+    fake.hold.store(false, Ordering::SeqCst);
+    assert_eq!(a.ask_ai(2, ask()).as_deref(), Ok("first second"));
+
+    // the app leaves in the middle of one
+    fake.hold.store(true, Ordering::SeqCst);
+    a.client.send(Msg::Ai {
+        id: 3,
+        ask: ask(),
+        lang: String::new(),
+    });
+    a.until("the first piece", |a| a.ai_text.contains_key(&3));
+    drop(a);
+    assert!(
+        wait_until(Duration::from_secs(5), Duration::from_millis(20), || {
+            fake.stopped.load(Ordering::SeqCst) == 2
+        }),
+        "stopped when the app left"
+    );
+}
+
+/// A server without an AI never says it has one, and turns requests down
+/// with why. With one, each person may ask so many times an hour.
+#[test]
+fn ai_requests_without_an_ai_or_beyond_the_hour_are_turned_down() {
+    use wb_net::AiAsk;
+    use workboard_server::ai;
+    let server = Server::start();
+    let mut a = App::connect(server.port, Some(ai_workspace()));
+    a.wait("A's copy on the server", |_| true);
+    // the welcome, presence and reading state have come: no ai_ready among them
+    a.until("my reading state", |a| a.mine.is_some());
+    assert_eq!(a.ai_model, None);
+    assert_eq!(
+        a.ask_ai(1, AiAsk::SummarizeChannel { channel: 10 }),
+        Err(ai::AI_OFF.to_string())
+    );
+
+    let fake = workboard_server::testing::FakeClaude::new("ok");
+    let home = temp_home("ai-hour");
+    let limited = Server::start_with(
+        &home,
+        0,
+        workboard_server::Options {
+            ai: Some(workboard_server::testing::ai_setup(fake.clone(), 2)),
+            ..Default::default()
+        },
+    );
+    let mut a = App::connect(limited.port, Some(ai_workspace()));
+    a.wait("A's copy on the server", |_| true);
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let code = a.invite(2, Role::Member);
+    let mut b = App::join(limited.port, &code);
+    b.wait("B gets the team's copy", |_| true);
+    let ask = || AiAsk::SummarizeChannel { channel: 10 };
+    // turned down for what it asks: it doesn't count for the hour
+    assert_eq!(
+        a.ask_ai(9, AiAsk::SummarizeChannel { channel: 999 }),
+        Err(ai::AI_NOT_FOUND.to_string())
+    );
+    assert!(a.ask_ai(1, ask()).is_ok());
+    assert!(a.ask_ai(2, ask()).is_ok());
+    assert_eq!(a.ask_ai(3, ask()), Err(ai::AI_TOO_MANY.to_string()));
+    assert!(b.ask_ai(1, ask()).is_ok(), "someone else still may");
+    // a request turned down for what it asks doesn't use up the hour
+    assert_eq!(fake.asked().len(), 3);
+    drop(limited);
     let _ = std::fs::remove_dir_all(&home);
 }

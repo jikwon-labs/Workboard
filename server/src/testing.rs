@@ -4,9 +4,13 @@
 // tests and wb-voice's tests; built only with the `testing` feature, which
 // their dev-dependencies turn on.
 
+use crate::ai::{AiSetup, Claude, Usage, AI_STOPPED};
 use crate::{serve_with, Options, MAIL_FILE, OUTBOX_DIR};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// A new temporary folder path, wb-<tag>-<random>; not made yet.
@@ -53,6 +57,19 @@ impl TestServer {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join(MAIL_FILE), r#"{"transport": "folder"}"#).unwrap();
         Self::start_in(&home)
+    }
+
+    /// `start`, with `ai` answering the apps' AI requests.
+    pub fn with_ai(ai: Arc<FakeClaude>) -> TestServer {
+        Self::spawn(
+            &temp_home("ai"),
+            0,
+            Options {
+                ai: Some(ai_setup(ai, 100)),
+                ..Options::default()
+            },
+            true,
+        )
     }
 
     /// A server on a free port with its data in `home`, a folder the test
@@ -215,4 +232,101 @@ pub fn start_livekit(bin: &str, key: &str, secret: &str) -> std::io::Result<Live
     });
     assert!(up, "livekit-server didn't start");
     Ok(lk)
+}
+
+/// An AI for tests: it keeps every request and answers each with `answer`,
+/// a piece at a time (the pieces split at '|', a tenth of a second apart).
+#[derive(Debug)]
+pub struct FakeClaude {
+    /// every request body it was sent, in order
+    pub asked: Mutex<Vec<Value>>,
+    pub answer: Mutex<String>,
+    /// fail with this instead of answering
+    pub fail: Mutex<Option<String>>,
+    /// while set, wait after the first piece (until stopped or cleared)
+    pub hold: AtomicBool,
+    /// answers stopped because nobody wanted them any more
+    pub stopped: AtomicUsize,
+}
+
+impl FakeClaude {
+    pub fn new(answer: &str) -> Arc<FakeClaude> {
+        Arc::new(FakeClaude {
+            asked: Mutex::new(vec![]),
+            answer: Mutex::new(answer.to_string()),
+            fail: Mutex::new(None),
+            hold: AtomicBool::new(false),
+            stopped: AtomicUsize::new(0),
+        })
+    }
+
+    /// The requests it got so far.
+    pub fn asked(&self) -> Vec<Value> {
+        self.asked.lock().unwrap().clone()
+    }
+
+    /// Every text the last request carries (system and messages), joined.
+    pub fn last_text(&self) -> String {
+        let asked = self.asked();
+        let Some(b) = asked.last() else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for s in b["system"].as_array().into_iter().flatten() {
+            out.push_str(s["text"].as_str().unwrap_or(""));
+            out.push('\n');
+        }
+        for m in b["messages"].as_array().into_iter().flatten() {
+            out.push_str(m["content"].as_str().unwrap_or(""));
+            out.push('\n');
+        }
+        out
+    }
+}
+
+impl Claude for FakeClaude {
+    fn stream(
+        &self,
+        body: &Value,
+        text: &mut dyn FnMut(&str),
+        stop: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Usage, String> {
+        self.asked.lock().unwrap().push(body.clone());
+        if let Some(e) = self.fail.lock().unwrap().clone() {
+            return Err(e);
+        }
+        let answer = self.answer.lock().unwrap().clone();
+        let stopped = || {
+            self.stopped.fetch_add(1, Ordering::SeqCst);
+            Err(AI_STOPPED.to_string())
+        };
+        for (i, piece) in answer.split('|').enumerate() {
+            if stop() {
+                return stopped();
+            }
+            text(piece);
+            std::thread::sleep(Duration::from_millis(100));
+            while i == 0 && self.hold.load(Ordering::SeqCst) {
+                if stop() {
+                    return stopped();
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        Ok(Usage {
+            input: 10,
+            cached: 0,
+            output: 5,
+        })
+    }
+}
+
+/// The AI setup for a server with `ai` answering, `per_hour` requests a
+/// person an hour.
+pub fn ai_setup(ai: Arc<FakeClaude>, per_hour: u32) -> AiSetup {
+    AiSetup {
+        claude: ai,
+        model: "test-model".into(),
+        per_hour,
+    }
 }

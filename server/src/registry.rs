@@ -112,11 +112,15 @@ impl Registry {
     /// The first workspace in `root` and every one in root/workspaces.
     pub(crate) fn open(
         root: PathBuf,
-        options: Options,
+        mut options: Options,
         stop: watch::Receiver<bool>,
     ) -> std::io::Result<Registry> {
         std::fs::create_dir_all(&root)?;
         let pusher = options.push.clone().or_else(|| apns_sender(&root));
+        // read once: every workspace of the server shares it
+        if options.ai.is_none() {
+            options.ai = crate::ai::from_setup(&root);
+        }
         let first = Arc::new(Hub::open(
             root.clone(),
             root.clone(),

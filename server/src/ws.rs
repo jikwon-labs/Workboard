@@ -305,9 +305,85 @@ struct Conn {
     /// the conversation this connection's typing was last passed on for,
     /// and when (see TYPING_GAP)
     typed: Option<(u64, Option<u64>, std::time::Instant)>,
+    /// where AI answers go on their way to the app (see `ask_ai`)
+    ai_out: tokio::sync::mpsc::UnboundedSender<String>,
+    /// AI requests still being answered, by the app's id: set to stop one
+    ai_going: std::collections::HashMap<u64, Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Conn {
+    /// Starts answering AI request `id` (ai.rs). The answer goes to the app
+    /// in pieces through `ai_out`, then `ai_done`, while this connection
+    /// goes on with everything else; nothing more is sent once the app
+    /// stopped it (`ai_stop`) or left.
+    fn ask_ai(&mut self, id: u64, ask: wb_net::AiAsk, lang: String) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        // forget the requests that are done
+        self.ai_going.retain(|_, s| Arc::strong_count(s) > 1);
+        let stop = Arc::new(AtomicBool::new(false));
+        if let Some(old) = self.ai_going.insert(id, stop.clone()) {
+            // the same id again: the earlier answer isn't wanted
+            old.store(true, Ordering::Relaxed);
+        }
+        let (hub, member, out) = (self.hub.clone(), self.member, self.ai_out.clone());
+        tokio::task::spawn_blocking(move || {
+            let done = |error: Option<String>| Msg::AiDone { id, error }.to_json();
+            let wanted = || !stop.load(Ordering::Relaxed) && !out.is_closed();
+            let started = match hub.ai_start(member, &ask, &lang) {
+                Ok(s) => s,
+                Err(why) => {
+                    if wanted() {
+                        let _ = out.send(done(Some(why)));
+                    }
+                    return;
+                }
+            };
+            // pieces go a few a second, not one message per word: what came
+            // meanwhile goes every PIECE_GAP, even while the model pauses
+            let waiting = Mutex::new(String::new());
+            let streaming = std::sync::atomic::AtomicBool::new(true);
+            let send_waiting = || {
+                let text = std::mem::take(&mut *waiting.locked());
+                if !text.is_empty() && wanted() {
+                    let _ = out.send(Msg::AiText { id, text }.to_json());
+                }
+            };
+            let result = std::thread::scope(|s| {
+                s.spawn(|| {
+                    while streaming.load(Ordering::Relaxed) {
+                        std::thread::sleep(ai::PIECE_GAP);
+                        send_waiting();
+                    }
+                });
+                let r = started.claude.stream(
+                    &started.body,
+                    &mut |piece| waiting.locked().push_str(piece),
+                    &|| !wanted(),
+                );
+                streaming.store(false, Ordering::Relaxed);
+                r
+            });
+            if !wanted() {
+                return;
+            }
+            send_waiting();
+            match result {
+                Ok(u) => {
+                    println!(
+                        "AI: {} for member {}: {} tokens in ({} from the cache), {} out",
+                        started.kind, member, u.input, u.cached, u.output
+                    );
+                    let _ = out.send(done(None));
+                }
+                Err(why) => {
+                    eprintln!("AI: {} for member {} failed: {}", started.kind, member, why);
+                    let _ = out.send(done(Some(why)));
+                }
+            }
+            drop(started.ticket);
+        });
+    }
+
     /// The `integrations` answer for `member`.
     fn integrations(&self, hub: &Arc<Hub>, member: u64) -> String {
         let (hooks, commands) = hub.integrations(member);
@@ -424,6 +500,16 @@ impl Conn {
                 })
             }
             Some(Msg::CreateLinkCode) => Some(hub.new_link(member, &self.device).to_json()),
+            Some(Msg::Ai { id, ask, lang }) => {
+                self.ask_ai(id, ask, lang);
+                None
+            }
+            Some(Msg::AiStop { id }) => {
+                if let Some(s) = self.ai_going.remove(&id) {
+                    s.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                None
+            }
             Some(Msg::SetPassword {
                 email,
                 password,
@@ -555,6 +641,13 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     if !send(&mut socket, &hub.mine_for(member)).await {
         return;
     }
+    // the AI tools, when this server has them
+    if let Some(model) = hub.ai_model() {
+        if !send(&mut socket, &Msg::AiReady { model }.to_json()).await {
+            return;
+        }
+    }
+    let (ai_out, mut ai_answers) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut me = Conn {
         hub: hub.clone(),
         member,
@@ -566,6 +659,8 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         told_put_back: None,
         was_hidden,
         typed: None,
+        ai_out,
+        ai_going: Default::default(),
     };
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
     loop {
@@ -639,6 +734,11 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
                 if !send(&mut socket, &Msg::Mine { data }.to_json()).await {
+                    break;
+                }
+            }
+            Some(a) = ai_answers.recv() => {
+                if !send(&mut socket, &a).await {
                     break;
                 }
             }

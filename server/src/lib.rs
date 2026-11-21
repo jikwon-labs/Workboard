@@ -10,6 +10,8 @@
 //   mail.json             how to send email (see mail.rs); optional
 //   apns.json             how to reach Apple's push service, for
 //                         notifications on iPhones (see push.rs); optional
+//   ai.json               the Anthropic API key for the apps' AI tools
+//                         (see ai.rs); optional
 //   outbox/               mails written here instead of sent (mail.json
 //                         "transport": "folder")
 //   backups/              hourly-YYYYMMDD-HH.json (48 kept),
@@ -61,6 +63,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 use wb_net::{Backup, Msg, Person, Role, SignIn, CODE_AUTH, CODE_DENIED, MIN_PASSWORD};
 
+pub mod ai;
 mod files;
 pub use files::{collect_garbage, file_name_ok, parse_range, FILES_DIR, FILE_KEEP_DAYS, MAX_FILE};
 pub mod mail;
@@ -417,6 +420,10 @@ struct Hub {
     pusher: Option<Arc<dyn push::Sender>>,
     /// sends outgoing webhooks and slash commands (hooks.rs)
     poster: Arc<dyn hooks::Poster>,
+    /// asks the AI for the apps' AI tools; None when ai.json has no key
+    ai: Option<ai::AiSetup>,
+    /// how much each person asks the AI (ai.rs)
+    ai_allowance: Arc<ai::Allowance>,
     /// device id -> its open connections (connected devices get no pushes)
     online: Mutex<std::collections::HashMap<String, usize>>,
     /// member id -> their open connections; `presence` holds its keys
@@ -480,6 +487,8 @@ impl Hub {
                 .poster
                 .clone()
                 .unwrap_or_else(|| Arc::new(hooks::Curl)),
+            ai: options.ai.clone(),
+            ai_allowance: Default::default(),
             online: Mutex::new(Default::default()),
             members_online: Mutex::new(Default::default()),
             presence: watch::channel(vec![]).0,
@@ -664,6 +673,9 @@ pub struct Options {
     pub push: Option<Arc<dyn push::Sender>>,
     /// What sends outgoing webhooks and slash commands. None: curl.
     pub poster: Option<Arc<dyn hooks::Poster>>,
+    /// What answers the apps' AI requests. None: Anthropic's API as ai.json
+    /// or ANTHROPIC_API_KEY say (or no AI when they don't).
+    pub ai: Option<ai::AiSetup>,
 }
 
 impl Default for Options {
@@ -673,6 +685,7 @@ impl Default for Options {
             claim_wait: Duration::from_secs(CLAIM_WAIT_SECS),
             push: None,
             poster: None,
+            ai: None,
         }
     }
 }

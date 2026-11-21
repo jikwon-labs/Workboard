@@ -6159,10 +6159,17 @@ fn truncate(s: &str, n: usize) -> String {
 pub(crate) fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     // The original uses the system UI font (-apple-system / Segoe UI); use it when present.
-    for p in [
-        "/System/Library/Fonts/SFNS.ttf",
-        "C:\\Windows\\Fonts\\segoeui.ttf",
-    ] {
+    // (on iPad iOS says where its own fonts are: crate::os::ios_font_files)
+    let ios = crate::os::ios_font_files();
+    let ui_fonts = ios
+        .iter()
+        .map(String::as_str)
+        .filter(|p| !p.contains("AppleSDGothicNeo"))
+        .chain([
+            "/System/Library/Fonts/SFNS.ttf",
+            "C:\\Windows\\Fonts\\segoeui.ttf",
+        ]);
+    for p in ui_fonts {
         if let Ok(bytes) = std::fs::read(p) {
             fonts.font_data.insert(
                 "system-ui".into(),
@@ -6197,18 +6204,23 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
         let list = fonts.families.entry(fam).or_default();
         list.insert(1.min(list.len()), "emoji-joiners".into());
     }
-    let candidates = [
-        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-        "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
-        "C:\\Windows\\Fonts\\malgun.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    ];
-    for p in candidates {
+    let candidates: Vec<&str> = ios
+        .iter()
+        .map(String::as_str)
+        .filter(|p| p.contains("AppleSDGothicNeo"))
+        .chain([
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+            "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+            "C:\\Windows\\Fonts\\malgun.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        ])
+        .collect();
+    for p in candidates.iter().copied() {
         // read once per run and shared: the Korean font is large (55 MB),
         // and its Bold face also comes from it
         static CJK: std::sync::OnceLock<Option<&'static [u8]>> = std::sync::OnceLock::new();
-        let bytes = if p == candidates[0] {
+        let bytes = if p.ends_with("AppleSDGothicNeo.ttc") {
             *CJK.get_or_init(|| {
                 std::fs::read(p)
                     .ok()
@@ -6234,7 +6246,7 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
         // Gothic Neo's Bold face, with the usual fonts after it
         if let Some(b) = bytes {
             let mut bold = egui::FontData::from_static(b);
-            bold.index = 6;
+            bold.index = bold_face(b);
             fonts
                 .font_data
                 .insert("cjk-bold".into(), std::sync::Arc::new(bold));
@@ -6256,6 +6268,17 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
     // egui draws glyphs in one color; emoji get color pictures over them
     crate::emoji::install(ctx);
+}
+
+/// The Bold face in a font collection: Apple SD Gothic Neo keeps it at 6 on
+/// macOS and at 9 on iPad, after the weights' other faces.
+pub(crate) fn bold_face(collection: &[u8]) -> u32 {
+    (0..ttf_parser::fonts_in_collection(collection).unwrap_or(1))
+        .find(|&i| {
+            ttf_parser::Face::parse(collection, i)
+                .is_ok_and(|f| f.weight() == ttf_parser::Weight::Bold)
+        })
+        .unwrap_or(0)
 }
 
 /// The share of a font's line that sits above its baseline, as egui lays

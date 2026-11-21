@@ -6276,6 +6276,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "ttf-parser",
  "wb-net",
  "wb-sync",
  "wb-voice",

@@ -589,6 +589,19 @@ pub fn fake_keyboard(cover: f32) {
     FAKE_KEYBOARD.with(|k| k.set(cover));
 }
 
+/// iPad: the font files of the system font and of Apple SD Gothic Neo
+/// (Korean), as iOS keeps them somewhere else than macOS. Empty elsewhere.
+pub fn ios_font_files() -> Vec<String> {
+    #[cfg(target_os = "ios")]
+    {
+        ios::font_files()
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        Vec::new()
+    }
+}
+
 /// iPad: iOS 27 ends an app at start unless it shows its window in a
 /// UIScene, which winit 0.30 doesn't do. Info.plist names a scene delegate
 /// (`WBSceneDelegate`, declared here before the event loop starts); the
@@ -626,6 +639,57 @@ mod ios {
     static WINDOW: AtomicPtr<Object> = AtomicPtr::new(null_mut());
     static SCENE: AtomicPtr<Object> = AtomicPtr::new(null_mut());
     static DELEGATE: AtomicPtr<Object> = AtomicPtr::new(null_mut());
+
+    #[link(name = "CoreText", kind = "framework")]
+    extern "C" {
+        static kCTFontURLAttribute: *const std::ffi::c_void;
+        fn CTFontCopyAttribute(
+            font: *const std::ffi::c_void,
+            attribute: *const std::ffi::c_void,
+        ) -> *mut Object;
+    }
+
+    /// Where the font a UIFont comes from is kept (UIFont is a CTFont).
+    unsafe fn font_file(font: *mut Object) -> Option<String> {
+        if font.is_null() {
+            return None;
+        }
+        let url = CTFontCopyAttribute(font as *const _, kCTFontURLAttribute);
+        if url.is_null() {
+            return None;
+        }
+        let path: *mut Object = msg_send![url, path];
+        let utf8: *const std::os::raw::c_char = if path.is_null() {
+            std::ptr::null()
+        } else {
+            msg_send![path, UTF8String]
+        };
+        let out = (!utf8.is_null()).then(|| {
+            std::ffi::CStr::from_ptr(utf8)
+                .to_string_lossy()
+                .into_owned()
+        });
+        let _: () = msg_send![url, release];
+        out
+    }
+
+    pub fn font_files() -> Vec<String> {
+        // SAFETY: UIFont class methods, returning autoreleased fonts
+        unsafe {
+            let system: *mut Object = msg_send![class!(UIFont), systemFontOfSize: 14.0f64];
+            let name = objc_string("AppleSDGothicNeo-Regular");
+            let korean: *mut Object = msg_send![class!(UIFont), fontWithName: name size: 14.0f64];
+            [font_file(system), font_file(korean)]
+                .into_iter()
+                .flatten()
+                .collect()
+        }
+    }
+
+    unsafe fn objc_string(s: &str) -> *mut Object {
+        let c = std::ffi::CString::new(s).unwrap();
+        msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()]
+    }
 
     pub fn adopt_scenes() {
         let Some(mut decl) = ClassDecl::new("WBSceneDelegate", class!(UIResponder)) else {

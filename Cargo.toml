@@ -25,6 +25,8 @@ winit = "0.30"
 egui = "0.31"
 # font metrics, to line up the Korean font with the system font (setup_fonts)
 ab_glyph = "0.2"
+# which face of a font collection is Bold (setup_fonts); the version ab_glyph uses
+ttf-parser = "0.25"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }

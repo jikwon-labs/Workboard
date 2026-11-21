@@ -19,6 +19,7 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 - iPad 를 케이블로 연결하고 "이 컴퓨터를 신뢰", 설정 > 개인정보 보호 및 보안 > 개발자 모드를 켠다.
 - 서명 프로파일은 Xcode 자동 서명으로 만든다. iPhone 앱 프로젝트를 이 앱의 번들 ID 로 한 번 빌드하면 iPad 가 팀에 등록되고 개발용 프로파일이 생긴다(`target/ipad-device/desk.mobileprovision`, iPad 가 바뀌면 다시 만든다).
 - 앱은 LiveKit 의 WebRTC 를 거쳐 Swift 라이브러리를 쓰므로, 실기기에서는 `/usr/lib/swift` 를 찾게 해야 한다(`build.rs`). 없으면 "Library not loaded: @rpath/libswiftCoreMedia.dylib" 로 시작하자마자 꺼진다.
+- 글꼴: 맥은 `/System/Library/Fonts/SFNS.ttf`·`AppleSDGothicNeo.ttc` 를 읽지만 iPad 에는 그 경로가 없어 글자가 모두 네모로 나왔다. iPad 에서는 iOS 에 글꼴 파일 위치를 물어(`os::ios_font_files`, CoreText) `/System/Library/Fonts/Core/SFUI.ttf` 와 `.../Core/AppleSDGothicNeo.ttc` 를 읽는다. 시뮬레이터는 맥의 파일을 그대로 읽어서 이 차이가 보이지 않는다. 굵은 한글 제목은 묶음 안의 Bold 를 무게로 찾는다(맥 6번, iPad 9번).
 - 2026-11-22 iPad mini 6세대(iPad14,1, iPadOS 27.2.1)에 설치해 실행되는 것까지 확인했다.
 
 ## 손으로 누르는 시험

@@ -1792,3 +1792,16 @@ fn every_offered_emoji_has_a_glyph_in_the_built_in_fonts() {
         );
     }
 }
+
+#[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "reads Apple SD Gothic Neo from macOS's fonts"
+)]
+fn the_bold_heading_font_is_the_bold_face_of_the_collection() {
+    // 6 on the Mac; iPad's copy orders it differently (9) and the same
+    // lookup finds it there (scripts/ipad-device)
+    let b = std::fs::read("/System/Library/Fonts/AppleSDGothicNeo.ttc").unwrap();
+    assert_eq!(crate::app::bold_face(&b), 6);
+    assert_eq!(crate::app::bold_face(b"not a font"), 0);
+}

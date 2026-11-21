@@ -1802,6 +1802,10 @@ impl App {
     /// Before egui sees the input (eframe's raw_input_hook): the input
     /// method fixes, then a paste of files or a picture.
     pub(super) fn fix_input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // every text box: a syllable left open in one isn't typed into the next
+        if self.ime.ends_syllable(ctx.memory(|m| m.focused()), raw) {
+            crate::os::end_composition();
+        }
         if self.ime.fix(raw) {
             ctx.request_repaint();
         }

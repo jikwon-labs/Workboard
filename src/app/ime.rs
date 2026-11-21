@@ -26,6 +26,12 @@
 //   the window first has the keyboard the IME is handed one key and the
 //   syllable taken back (`os::wake_input_method`); the IME events that
 //   leaves are dropped here.
+// - A syllable still open when the keyboard moves to another box, or when
+//   a click comes, is ended (`ends_syllable`, `os::end_composition`). egui
+//   leaves the syllable in the box it was typed in, but the IME kept it
+//   open: the next key typed anywhere finished it again into the new box
+//   ("안녕하세요" in one box, then "안녕" in the next gave "요안녕"), or
+//   at the click in the same box.
 
 use egui::{Event, ImeEvent, Key, RawInput};
 
@@ -45,6 +51,10 @@ pub(super) struct ImeFix {
     pub(super) woken: bool,
     /// the IME events the waking left are still to come: drop them
     pub(super) drop_wake: bool,
+    /// a syllable is open: the last IME event the app got was a preedit
+    composing: bool,
+    /// the widget that had the keyboard when the last input came
+    focus: Option<egui::Id>,
 }
 
 /// The character a key types, when it is one the Korean IME passes over
@@ -116,6 +126,24 @@ fn typed_char(key: Key, physical: Option<Key>, modifiers: egui::Modifiers) -> Op
 }
 
 impl ImeFix {
+    /// Before this frame's input (and `fix`): true when the open syllable
+    /// has to be ended in the IME, because the keyboard moved to another
+    /// box or none (`focus`, the widget that has it now) or a click came.
+    /// What was typed stays in the box it was typed in.
+    pub(super) fn ends_syllable(&mut self, focus: Option<egui::Id>, raw: &RawInput) -> bool {
+        let moved = focus != self.focus;
+        self.focus = focus;
+        let click = raw
+            .events
+            .iter()
+            .any(|e| matches!(e, Event::PointerButton { pressed: true, .. }));
+        let end = self.composing && (moved || click);
+        if end {
+            self.composing = false;
+        }
+        end
+    }
+
     /// Fix up this frame's input. True when some of it waits for the next
     /// frame (so one has to be drawn).
     pub(super) fn fix(&mut self, raw: &mut RawInput) -> bool {
@@ -143,6 +171,13 @@ impl ImeFix {
         if !raw.focused {
             // releases of keys held while the window lost focus never come
             self.down.clear();
+        }
+        for e in &raw.events {
+            match e {
+                Event::Ime(ImeEvent::Preedit(s)) => self.composing = !s.is_empty(),
+                Event::Ime(ImeEvent::Commit(_) | ImeEvent::Disabled) => self.composing = false,
+                _ => {}
+            }
         }
         let mut i = 0;
         while i < raw.events.len() {
@@ -439,6 +474,50 @@ mod tests {
         // typing after that is left alone
         let (now, _) = run(&mut fix, vec![ime(ImeEvent::Preedit("ㅇ".into()))]);
         assert_eq!(now.len(), 1);
+    }
+
+    #[test]
+    fn an_open_syllable_ends_when_the_keyboard_moves_or_a_click_comes() {
+        let mut fix = ImeFix::default();
+        let a = Some(egui::Id::new("a"));
+        let b = Some(egui::Id::new("b"));
+        let raw = |events| RawInput {
+            events,
+            ..Default::default()
+        };
+        let click = Event::PointerButton {
+            pos: egui::pos2(1.0, 1.0),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        };
+        assert!(!fix.ends_syllable(a, &raw(vec![])));
+        // "요" still open in box a, then box b takes the keyboard
+        run(&mut fix, vec![ime(ImeEvent::Preedit("요".into()))]);
+        assert!(!fix.ends_syllable(a, &raw(vec![])), "still in box a");
+        assert!(fix.ends_syllable(b, &raw(vec![])), "moved to box b");
+        assert!(!fix.ends_syllable(b, &raw(vec![])), "ended once");
+        // a click while a syllable is open, even in the same box
+        run(&mut fix, vec![ime(ImeEvent::Preedit("안".into()))]);
+        assert!(fix.ends_syllable(b, &raw(vec![click.clone()])));
+        // nothing open: a finished syllable, or one taken back to nothing
+        run(
+            &mut fix,
+            vec![
+                ime(ImeEvent::Preedit("녕".into())),
+                ime(ImeEvent::Commit("녕".into())),
+            ],
+        );
+        run(&mut fix, vec![]);
+        assert!(!fix.ends_syllable(a, &raw(vec![click.clone()])));
+        run(
+            &mut fix,
+            vec![
+                ime(ImeEvent::Preedit("ㅎ".into())),
+                ime(ImeEvent::Preedit(String::new())),
+            ],
+        );
+        assert!(!fix.ends_syllable(b, &raw(vec![click])));
     }
 
     #[test]

@@ -163,6 +163,37 @@ pub fn wake_input_method() -> bool {
     false
 }
 
+/// End the syllable the Mac's input method has open, without typing it:
+/// the box it was typed in already shows it (see `ImeFix::ends_syllable`).
+/// The window's view drops its marked text first, so the input method
+/// finishing the syllable on the way out types nothing either.
+#[cfg(all(target_os = "macos", not(test)))]
+pub fn end_composition() {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let window: *mut Object = msg_send![app, keyWindow];
+        if window.is_null() {
+            return;
+        }
+        let view: *mut Object = msg_send![window, contentView];
+        if view.is_null() {
+            return;
+        }
+        // winit's unmarkText needs the context (it would panic without one)
+        let context: *mut Object = msg_send![view, inputContext];
+        if context.is_null() {
+            return;
+        }
+        let _: () = msg_send![view, unmarkText];
+    }
+}
+
+/// Mac only for now: Windows' input method hasn't been tried with this.
+#[cfg(any(not(target_os = "macos"), test))]
+pub fn end_composition() {}
+
 /// Where the pointer is on the screen, in egui points (`ppp` is egui's
 /// pixels per point, `zoom` its zoom factor), or None where that isn't
 /// known. While files are dragged in from Finder or File Explorer the window

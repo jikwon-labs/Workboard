@@ -429,7 +429,7 @@ fn calendar_multi_day_bar_keeps_one_line() {
         h.app.data.tasks.push(x);
     }
     h.click("View Calendar");
-    h.app.cal_week = true;
+    h.app.cal.week = true;
     // the week of that Monday (weeks start on Sunday)
     h.ctx
         .data_mut(|d| d.insert_temp(egui::Id::new("cal_week_anchor"), mon));

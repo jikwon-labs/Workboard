@@ -460,7 +460,6 @@ pub struct App {
     collapsed: HashSet<String>,
     expanded_tasks: HashSet<u64>,
     adding: Option<(String, String)>,
-    cal_month: NaiveDate,
     rename: Option<(Target, String)>,
     confirm_delete: Option<Target>,
     edit_statuses: Option<u64>,
@@ -594,10 +593,6 @@ pub struct App {
     /// Group and "Date created" column to restore when leaving the Personal
     /// List (it shows Group: None and Date created, as in the original).
     personal_saved: Option<(GroupBy, bool)>,
-    cal_week: bool,
-    /// The Gantt's scale.
-    gantt_zoom: timebar::Zoom,
-    gantt_jump: bool,
     timeline: timeline::TimelineState,
     doc_preview: bool,
     settings_tab: settings::SettingsTab,
@@ -640,6 +635,10 @@ pub struct App {
     paste: PasteState,
     /// Pictures of the window: a screenshot run and Ctrl+Option+Cmd+S.
     shots: Screenshots,
+    /// The Calendar view's month or week.
+    cal: CalendarUi,
+    /// The Gantt view's scale.
+    gantt: GanttUi,
 }
 
 /// Quitting (`ask_before_quit`).
@@ -681,6 +680,22 @@ struct Screenshots {
     sent: bool,
     /// Ctrl+Option+Cmd+S: save a picture of the window next to the data file.
     snap_pending: bool,
+}
+
+/// The Calendar view: the month shown, or a week.
+struct CalendarUi {
+    /// The first day of the month shown.
+    month: NaiveDate,
+    /// A week is shown instead of the month.
+    week: bool,
+}
+
+/// The Gantt view's scale.
+struct GanttUi {
+    zoom: timebar::Zoom,
+    /// Scroll to today on the next draw (on opening, and after the scale
+    /// changes or Today is pressed).
+    jump: bool,
 }
 
 /// The open channel and thread: what is being written, edited or deleted.
@@ -1047,7 +1062,6 @@ impl App {
             collapsed: HashSet::new(),
             expanded_tasks: HashSet::new(),
             adding: None,
-            cal_month: NaiveDate::from_ymd_opt(t.year(), t.month(), 1).unwrap(),
             rename: None,
             confirm_delete: None,
             edit_statuses: None,
@@ -1157,6 +1171,14 @@ impl App {
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,
+            gantt: GanttUi {
+                zoom: Default::default(),
+                jump: true,
+            },
+            cal: CalendarUi {
+                month: NaiveDate::from_ymd_opt(t.year(), t.month(), 1).unwrap(),
+                week: false,
+            },
             shots: Screenshots {
                 path: screenshot,
                 ..Default::default()
@@ -1171,9 +1193,6 @@ impl App {
             list_width: 0.0,
             filter_open: false,
             personal_saved: None,
-            cal_week: false,
-            gantt_zoom: Default::default(),
-            gantt_jump: true,
             timeline: Default::default(),
             doc_preview: false,
             settings_tab: Default::default(),
@@ -2943,39 +2962,39 @@ impl App {
         let mut week_anchor = week_anchor;
         ui.horizontal(|ui| {
             if ui.button(tr("Today")).clicked() {
-                self.cal_month = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
+                self.cal.month = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
                 week_anchor = td;
             }
             let (back, fwd) = icons::period_arrows(ui, &t);
             if back {
-                if self.cal_week {
+                if self.cal.week {
                     week_anchor -= Duration::days(7);
                 } else {
-                    self.cal_month = add_months(self.cal_month, -1);
+                    self.cal.month = add_months(self.cal.month, -1);
                 }
             }
             if fwd {
-                if self.cal_week {
+                if self.cal.week {
                     week_anchor += Duration::days(7);
                 } else {
-                    self.cal_month = add_months(self.cal_month, 1);
+                    self.cal.month = add_months(self.cal.month, 1);
                 }
             }
-            let title = if self.cal_week {
+            let title = if self.cal.week {
                 week_range(sunday_week_start(week_anchor))
             } else {
-                self.cal_month.text("%B %Y")
+                self.cal.month.text("%B %Y")
             };
             ui.label(RichText::new(title).size(17.0).strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.selectable_label(!self.cal_week, tr("Month")).clicked() {
-                    self.cal_week = false;
-                    self.cal_month =
+                if ui.selectable_label(!self.cal.week, tr("Month")).clicked() {
+                    self.cal.week = false;
+                    self.cal.month =
                         NaiveDate::from_ymd_opt(week_anchor.year(), week_anchor.month(), 1)
                             .unwrap();
                 }
-                if ui.selectable_label(self.cal_week, tr("Week")).clicked() {
-                    self.cal_week = true;
+                if ui.selectable_label(self.cal.week, tr("Week")).clicked() {
+                    self.cal.week = true;
                 }
             });
         });
@@ -2987,8 +3006,8 @@ impl App {
         let side = Rect::from_min_max(pos2(full.right() - side_w, full.top()), full.max);
         let cw = avail.width() / 7.0;
         let head = 26.0;
-        let rows = if self.cal_week { 1 } else { 6 };
-        let ch = if self.cal_week {
+        let rows = if self.cal.week { 1 } else { 6 };
+        let ch = if self.cal.week {
             (avail.height() - head - 10.0).max(200.0)
         } else {
             ((avail.height() - head - 34.0) / 6.0).max(96.0)
@@ -3012,10 +3031,10 @@ impl App {
             );
         }
         // the grid begins on Sunday (its weekday labels are fixed)
-        let start = sunday_week_start(if self.cal_week {
+        let start = sunday_week_start(if self.cal.week {
             week_anchor
         } else {
-            self.cal_month
+            self.cal.month
         });
         // a task dragged from the Unscheduled panel or another day
         let dragging = egui::DragAndDrop::has_payload_of_type::<u64>(ui.ctx());
@@ -3099,7 +3118,7 @@ impl App {
                 ),
                 vec2(cw, ch),
             );
-            let in_month = self.cal_week || d.month() == self.cal_month.month();
+            let in_month = self.cal.week || d.month() == self.cal.month.month();
             if !in_month {
                 p.rect_filled(cell, 0.0, t.column_bg);
             }
@@ -3435,14 +3454,14 @@ impl App {
             (rows, undated)
         };
         let td = today();
-        let sc = timebar::DayScale::new(self.gantt_zoom, td);
+        let sc = timebar::DayScale::new(self.gantt.zoom, td);
         let (start, cw) = (sc.start, sc.cw);
         let rh = 34.0;
         let name_w = 260.0;
         let head = 44.0;
         ui.horizontal(|ui| {
-            if timebar::zoom_buttons(ui, &mut self.gantt_zoom) {
-                self.gantt_jump = true;
+            if timebar::zoom_buttons(ui, &mut self.gantt.zoom) {
+                self.gantt.jump = true;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
@@ -3611,9 +3630,9 @@ impl App {
                         vr.top()..=vr.top() + rows_h,
                         Stroke::new(1.0_f32, t.border),
                     );
-                    let jump = std::mem::take(&mut self.gantt_jump);
+                    let jump = std::mem::take(&mut self.gantt.jump);
                     let mut sa = egui::ScrollArea::horizontal()
-                        .id_salt(("gantt_h", self.gantt_zoom))
+                        .id_salt(("gantt_h", self.gantt.zoom))
                         .auto_shrink([false, true]);
                     if jump {
                         sa = sa.horizontal_scroll_offset(sc.today_offset(td, vr.width()));

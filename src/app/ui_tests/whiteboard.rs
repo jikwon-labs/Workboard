@@ -1493,6 +1493,40 @@ fn a_note_is_resized_by_its_corner() {
 
 // ------------------------------------------------------------ QA round 1
 
+fn view_of(h: &Ui1, wid: u64) -> crate::app::more::WbView {
+    h.app.sweep.wb_view.get(&wid).copied().unwrap_or_default()
+}
+
+fn space_key(h: &mut Ui1, pressed: bool) {
+    h.frame(vec![egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: Default::default(),
+    }]);
+}
+
+fn push_note(h: &mut Ui1, wid: u64, pos: [f32; 2], text: &str) -> u64 {
+    let id = h.app.data.new_id();
+    h.app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap()
+        .notes
+        .push(Sticky {
+            id,
+            pos,
+            text: text.into(),
+            color: [0xf8, 0xae, 0x00],
+            ..Default::default()
+        });
+    id
+}
+
 /// While the board menu or a dialog is open, Delete and Backspace are
 /// theirs: the shape picked on the board behind them stays. It was deleted
 /// out of sight, with its lines.
@@ -1528,12 +1562,77 @@ fn delete_keys_leave_the_board_alone_while_a_menu_or_dialog_is_open() {
 fn a_board_deleted_by_a_teammate_while_open_goes_back_to_the_list() {
     let mut h = Ui1::new();
     let wid = shared_board(&mut h);
-    let team = teammate_change(&h.app.data, |d| {
-        d.extra.whiteboards.retain(|w| w.id != wid)
-    });
+    let team = teammate_change(&h.app.data, |d| d.extra.whiteboards.retain(|w| w.id != wid));
     h.app.merge_in(&[team], &[]);
     h.settle();
     assert!(h.app.data.extra.whiteboards.iter().all(|w| w.id != wid));
     assert_eq!(h.app.wb_open, None);
     assert!(h.has("Start from scratch"), "the list of boards shows");
+}
+
+/// The middle button and Space + drag move the view wherever the drag
+/// starts on the board: on a shape (which moved instead), on a note's text
+/// (nothing happened), on a picked shape's corner (which resized). Only the
+/// left button moves a shape.
+#[test]
+fn panning_works_over_shapes_notes_and_handles() {
+    let mut h = Ui1::new();
+    let wid = template_board(&mut h, "Flow Chart");
+    let nid = push_note(&mut h, wid, [100.0, 320.0], "Idea");
+    h.settle();
+    let shapes = board_of(&h, wid).shapes;
+    let note = |h: &Ui1| {
+        board_of(h, wid)
+            .notes
+            .into_iter()
+            .find(|n| n.id == nid)
+            .unwrap()
+    };
+    let moved_by = |h: &Ui1, from: egui::Vec2, d: egui::Vec2| {
+        let got = view_of(h, wid).pan - from;
+        assert!((got - d).length() < 1.0, "panned {got:?}, not {d:?}");
+    };
+    // the middle button on a shape
+    let pan = view_of(&h, wid).pan;
+    let at = h.rect("Shape Step").center();
+    h.drag_with(at, at + vec2(100.0, 50.0), egui::PointerButton::Middle);
+    assert_eq!(board_of(&h, wid).shapes, shapes, "the shape stays");
+    moved_by(&h, pan, vec2(100.0, 50.0));
+    // the middle button on a note's text
+    let pan = view_of(&h, wid).pan;
+    let x = h.rect("Delete note 0");
+    let text = pos2(x.center().x - 100.0, x.center().y + 40.0);
+    h.drag_with(text, text + vec2(-60.0, 40.0), egui::PointerButton::Middle);
+    moved_by(&h, pan, vec2(-60.0, 40.0));
+    assert_eq!(note(&h).pos, [100.0, 320.0]);
+    let typing = h.ctx.memory(|m| m.focused());
+    assert_eq!(typing, None, "the middle button doesn't start typing");
+    // Space + drag on a note's text
+    let pan = view_of(&h, wid).pan;
+    let x = h.rect("Delete note 0");
+    let text = pos2(x.center().x - 100.0, x.center().y + 40.0);
+    h.hover(text);
+    space_key(&mut h, true);
+    h.drag_by(text, text + vec2(50.0, -30.0));
+    space_key(&mut h, false);
+    h.settle();
+    moved_by(&h, pan, vec2(50.0, -30.0));
+    assert_eq!(note(&h).text, "Idea");
+    // Space + drag on a picked shape's corner
+    h.click("Shape Step");
+    let pan = view_of(&h, wid).pan;
+    let corner = h.rect("Resize shape 3").center();
+    h.hover(corner);
+    space_key(&mut h, true);
+    h.drag_by(corner, corner + vec2(60.0, 30.0));
+    space_key(&mut h, false);
+    h.settle();
+    assert_eq!(board_of(&h, wid).shapes, shapes, "not resized");
+    moved_by(&h, pan, vec2(60.0, 30.0));
+    // the right button doesn't move a shape either; the left one does
+    let at = h.rect("Shape Step").center();
+    h.drag_with(at, at + vec2(40.0, 0.0), egui::PointerButton::Secondary);
+    assert_eq!(board_of(&h, wid).shapes, shapes);
+    h.drag_by(at, at + vec2(40.0, 0.0));
+    assert_ne!(board_of(&h, wid).shapes, shapes, "the left button moves it");
 }

@@ -184,6 +184,7 @@ impl App {
         let w = 6.0 + name_w + 4.0 + BTN + 2.0 + BTN + 6.0;
         let bar = Rect::from_min_size(rect.min + vec2(EDGE, EDGE), vec2(w, BAR_H));
         card(ui, t, bar, 12.0, ui.id().with(("wb_name_bar", wid)));
+        self.sweep.wb_bars.push(bar);
 
         let nr = Rect::from_min_size(
             pos2(bar.left() + 6.0, bar.center().y - 15.0),
@@ -402,6 +403,7 @@ impl App {
             vec2(w, BAR_H),
         );
         card(ui, t, bar, 12.0, ui.id().with(("wb_zoom_bar", wid)));
+        self.sweep.wb_bars.push(bar);
         let mut view = self.sweep.wb_view.get(&wid).copied().unwrap_or_default();
         let before = view;
         let y = bar.center().y - BTN / 2.0;
@@ -510,6 +512,7 @@ impl App {
         let top = (rect.center().y - h / 2.0).max(rect.top() + EDGE + BAR_H + 12.0);
         let bar = Rect::from_min_size(pos2(rect.left() + EDGE, top), vec2(TOOL + 12.0, h));
         card(ui, t, bar, 14.0, ui.id().with(("wb_tool_bar", wid)));
+        self.sweep.wb_bars.push(bar);
         let mut y = bar.top() + 6.0;
         for (tool, icon, name) in TOOLS {
             let r = Rect::from_min_size(pos2(bar.left() + 6.0, y), vec2(TOOL, TOOL));
@@ -625,6 +628,7 @@ impl App {
             vec2(w, OPTIONS_H),
         );
         card(ui, t, bar, 14.0, ui.id().with("wb_tool_options"));
+        self.sweep.wb_bars.push(bar);
         let cy = bar.center().y;
         let mut x = bar.left() + 16.0;
         p.galley(pos2(x, cy - label.size().y / 2.0), label.clone(), t.text);
@@ -860,6 +864,7 @@ impl App {
         );
         c.multiply_opacity(e);
         card(&c, t, cr, 16.0, c.id().with("card"));
+        self.sweep.wb_bars.push(cr);
         let p = c.painter().clone();
         let cx = cr.center().x;
         let mut y = cr.top() + 24.0;

@@ -77,6 +77,9 @@ pub struct SweepUi {
     pub wb_line_style: WbLineStyle,
     /// The line being dragged out with the Line tool.
     pub wb_link: Option<WbLink>,
+    /// Where the whiteboard's floating bars were on screen last frame: a
+    /// middle-button drag that starts on one doesn't move the board.
+    pub wb_bars: Vec<egui::Rect>,
     /// The form `form_fill` holds answers for.
     pub form_for: Option<u64>,
     pub form_error: Option<String>,

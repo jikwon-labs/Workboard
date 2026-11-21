@@ -277,11 +277,23 @@ impl App {
                 let mut view = self.sweep.wb_view.get(&wid).copied().unwrap_or_default();
                 let space =
                     !ui.ctx().wants_keyboard_input() && ui.input(|i| i.key_down(egui::Key::Space));
-                let panning = resp.dragged_by(egui::PointerButton::Middle)
-                    || (space && resp.dragged_by(egui::PointerButton::Primary));
-                if panning {
-                    let started = resp.drag_started_by(egui::PointerButton::Middle)
-                        || resp.drag_started_by(egui::PointerButton::Primary);
+                // the middle button moves the view from wherever on the board
+                // its drag starts, a shape, a note or a handle too (which
+                // took the drag: a shape moved instead), but not from a
+                // floating bar, a menu or a dialog
+                let bars = std::mem::take(&mut self.sweep.wb_bars);
+                let middle_down = ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
+                let middle = middle_down
+                    && self.modal.is_none()
+                    && !ui.memory(|m| m.any_popup_open())
+                    && ui
+                        .input(|i| i.pointer.press_origin())
+                        .is_some_and(|o| rect.contains(o) && !bars.iter().any(|b| b.contains(o)));
+                let panning = middle || (space && resp.dragged_by(egui::PointerButton::Primary));
+                if middle {
+                    view.pan += ui.input(|i| i.pointer.delta());
+                } else if panning {
+                    let started = resp.drag_started_by(egui::PointerButton::Primary);
                     // the first step counts from where the button went down
                     let from_press = ui.input(|i| {
                         i.pointer
@@ -305,7 +317,7 @@ impl App {
                         view.pan += scroll;
                     }
                 }
-                if space && ui.rect_contains_pointer(rect) {
+                if (space || middle) && ui.rect_contains_pointer(rect) {
                     ui.ctx().set_cursor_icon(if panning {
                         egui::CursorIcon::Grabbing
                     } else {
@@ -446,7 +458,7 @@ impl App {
                         Sense::click(),
                     );
                     crate::widgets::no_pointer(&body);
-                    if body.clicked() && typable {
+                    if body.clicked() && typable && !space {
                         type_in = Some((text_id, n.text.chars().count()));
                     }
                     let mut child = ui.new_child(
@@ -463,7 +475,10 @@ impl App {
                                     .frame(false)
                                     .font(FontId::proportional(13.0 * z))
                                     .desired_width((wh[0] - 16.0) * z)
-                                    .desired_rows((((wh[1] - 26.0) / 18.0) as usize).max(1)),
+                                    .desired_rows((((wh[1] - 26.0) / 18.0) as usize).max(1))
+                                    // with Space or the middle button down a
+                                    // drag over the text moves the board
+                                    .interactive(!space && !middle_down),
                             )
                             .changed()
                     {
@@ -498,7 +513,7 @@ impl App {
                             Sense::click_and_drag(),
                         );
                         crate::widgets::no_pointer(&h);
-                        if h.drag_started() {
+                        if h.drag_started_by(egui::PointerButton::Primary) {
                             move_from = Some((n.id, n.pos));
                         }
                         if h.clicked() && typable {
@@ -630,10 +645,10 @@ impl App {
                                 );
                             }
                         }
-                        if g.drag_started() {
+                        if g.drag_started_by(egui::PointerButton::Primary) {
                             size_from = Some((n.id, n.size));
                         }
-                        if g.dragged() {
+                        if g.dragged_by(egui::PointerButton::Primary) {
                             size_note = Some((i, g.drag_delta() / z));
                         }
                     }

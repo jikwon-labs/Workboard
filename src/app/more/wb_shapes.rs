@@ -436,6 +436,11 @@ fn small_button(
     resp.on_hover_text(tip)
 }
 
+/// Space is held for moving the board (not typed into a text box).
+fn space_down(ui: &Ui) -> bool {
+    !ui.ctx().wants_keyboard_input() && ui.input(|i| i.key_down(egui::Key::Space))
+}
+
 /// What was pressed on the bar over a pick.
 enum BarHit {
     Colour([u8; 3]),
@@ -615,13 +620,16 @@ impl App {
                     if h.hovered() && !h.dragged() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
                     }
-                    if h.drag_started() {
+                    // only the left button moves it (the middle one moves
+                    // the board)
+                    let left = egui::PointerButton::Primary;
+                    if h.drag_started_by(left) {
                         grab = Some(s.clone());
                     }
-                    if h.dragged() {
+                    if h.dragged_by(left) {
                         moved = Some((i, h.drag_delta() / z));
                     }
-                    if h.clicked() || h.drag_started() {
+                    if h.clicked() || h.drag_started_by(left) {
                         pick = Some(s.id);
                     }
                     if h.double_clicked() {
@@ -719,6 +727,8 @@ impl App {
     ) {
         let wid = self.data.extra.whiteboards[wi].id;
         let z = view.zoom;
+        // with Space down a drag on a handle moves the board
+        let space = space_down(ui);
         let shapes = &self.data.extra.whiteboards[wi].shapes;
         let Some(si) = shapes.iter().position(|s| s.id == id) else {
             return;
@@ -802,7 +812,7 @@ impl App {
         .enumerate()
         {
             let hr = Rect::from_center_size(corner, vec2(10.0, 10.0));
-            if !rect.contains_rect(hr) {
+            if !rect.contains_rect(hr) || space {
                 continue;
             }
             let h = ui.interact(
@@ -825,10 +835,10 @@ impl App {
                     egui::CursorIcon::ResizeNeSw
                 });
             }
-            if h.drag_started() {
+            if h.drag_started_by(egui::PointerButton::Primary) {
                 self.sweep.wb_undo.push((wid, WbUndo::ShapeWas(s.clone())));
             }
-            if h.dragged() {
+            if h.dragged_by(egui::PointerButton::Primary) {
                 if let Some(at) = h.interact_pointer_pos() {
                     resized = Some((k, view.to_board(origin, at)));
                 }
@@ -895,6 +905,7 @@ impl App {
         id: u64,
     ) {
         let wid = self.data.extra.whiteboards[wi].id;
+        let space = space_down(ui);
         let wb = &self.data.extra.whiteboards[wi];
         let Some(li) = wb.lines.iter().position(|l| l.id == id) else {
             return;
@@ -910,7 +921,7 @@ impl App {
         for (k, free) in [(0usize, l.from == 0), (1, l.to == 0)] {
             let c = if k == 0 { pts[0] } else { pts[pts.len() - 1] };
             let hr = Rect::from_center_size(c, vec2(14.0, 14.0));
-            if !free || !rect.contains_rect(hr) {
+            if !free || !rect.contains_rect(hr) || space {
                 continue;
             }
             let h = ui.interact(hr, ui.id().with(("wb_line_end", wid, id, k)), Sense::drag());
@@ -920,10 +931,10 @@ impl App {
             if h.hovered() || h.dragged() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
             }
-            if h.drag_started() {
+            if h.drag_started_by(egui::PointerButton::Primary) {
                 self.sweep.wb_undo.push((wid, WbUndo::LineWas(l.clone())));
             }
-            if h.dragged() {
+            if h.dragged_by(egui::PointerButton::Primary) {
                 if let Some(at) = h.interact_pointer_pos() {
                     moved = Some((k, view.to_board(origin, at)));
                 }
@@ -1003,6 +1014,7 @@ impl App {
         }
         let bar = Rect::from_min_size(pos2(left, top), vec2(w, H));
         card(ui, t, bar, 10.0, ui.id().with(("wb_pick_bar", wid)));
+        self.sweep.wb_bars.push(bar);
         let p = ui.painter().clone();
         let cy = bar.center().y;
         let mut x = bar.left() + 8.0;

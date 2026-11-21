@@ -265,3 +265,38 @@ fn a_form_without_a_list_gets_one() {
     h.click(&path);
     assert_eq!(form(&h, fid).list_id, list);
 }
+
+/// The hubs share one filter value (Docs' Archived is 6, a team's page 9).
+/// Coming back to Forms from another hub other than by its own button (a
+/// search result, Back) starts on All forms, not on whatever the other
+/// hub's filter would mean here (Favorites, empty).
+#[test]
+fn forms_dont_take_another_hubs_filter() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    h.click("Feedback Form");
+    h.click("Back to all forms");
+    assert!(h.has("Form Feedback Form"));
+    // Docs' Archived, then the form from the search
+    h.click("Rail More");
+    h.click("Docs");
+    h.click("Archived");
+    assert_eq!(h.app.section, Section::Docs);
+    h.click("Search");
+    h.type_text("Feedback");
+    h.click("Feedback Form");
+    assert_eq!(h.app.section, Section::Forms);
+    h.click("Back to all forms");
+    assert!(h.has("Form Feedback Form"), "All forms, not Favorites");
+    assert!(!h.painted_text("All forms").is_empty());
+    // and with Back
+    h.click("Rail More");
+    h.click("Docs");
+    h.click("Archived");
+    h.click("Go back");
+    assert_eq!(h.app.section, Section::Forms);
+    assert!(h.has("Form Feedback Form"), "All forms after Back too");
+    // the hub's own filter still holds while it is shown
+    h.click("Favorites");
+    assert!(!h.has("Form Feedback Form"));
+}

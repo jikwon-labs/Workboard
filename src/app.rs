@@ -5403,6 +5403,7 @@ impl App {
 
     fn ui_frame_inner(&mut self, ctx: &egui::Context) {
         self.menu_was_open = any_menu_was_open(ctx);
+        self.fit_hub_filter();
         self.bring_back_drafts();
         self.drafts.chat.swap(self.chat.open, &mut self.chat.text);
         self.drafts

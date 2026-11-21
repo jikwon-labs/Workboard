@@ -94,6 +94,8 @@ pub struct SweepUi {
     /// What each hub sidebar's search holds, by hub ("docs", "dash", "wb",
     /// "teams", "meetings"; Forms keeps its own in `forms`).
     pub side_find: HashMap<&'static str, String>,
+    /// The hub last shown and its filter then (`App::fit_hub_filter`).
+    pub hub_filter_was: Option<(Section, u8)>,
     /// Dashboard card being renamed: (index, text).
     pub card_rename: Option<(usize, String)>,
     /// Time entry being changed.

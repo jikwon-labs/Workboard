@@ -113,6 +113,34 @@ pub(super) fn wiki_badge(p: &egui::Painter, t: &Theme, left_center: egui::Pos2) 
 }
 
 impl App {
+    /// The hubs share `hub_filter`, but each reads it its own way (Docs'
+    /// Archived is 6, a team's page 9, which Forms would show as Favorites).
+    /// A hub that comes up after another without its filter being set (a
+    /// search result, Back, a form made from a + menu) starts on its first
+    /// filter instead of the other hub's; back on the hub that set it,
+    /// after pages without filters (Home), the filter is still there. Run
+    /// at the start of each frame.
+    pub(super) fn fit_hub_filter(&mut self) {
+        let hub = matches!(
+            self.section,
+            Section::Docs
+                | Section::Dashboards
+                | Section::Whiteboards
+                | Section::Forms
+                | Section::Teams
+                | Section::Timesheets
+        );
+        if !hub {
+            return;
+        }
+        if let Some((owner, filter)) = self.sweep.hub_filter_was {
+            if owner != self.section && filter == self.hub_filter {
+                self.hub_filter = 0;
+            }
+        }
+        self.sweep.hub_filter_was = Some((self.section, self.hub_filter));
+    }
+
     /// The Wikis I can see, most popular first: views in the last 30 days,
     /// then the latest edit. (id, title, views)
     pub(super) fn popular_wikis(&self, now: i64) -> Vec<(u64, String, usize)> {

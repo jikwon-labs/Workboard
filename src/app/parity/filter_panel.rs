@@ -209,11 +209,10 @@ impl App {
                 v.push(("none".into(), tr("Unassigned").into()));
                 v
             }
-            FilterField::DueDate => DUE_FILTERS
+            FilterField::DueDate => DueFilter::ALL
                 .iter()
-                .enumerate()
                 .skip(1)
-                .map(|(i, l)| (i.to_string(), tr(l).to_string()))
+                .map(|c| (c.key(), tr(c.label()).to_string()))
                 .collect(),
             FilterField::Tags => {
                 let mut tags: Vec<String> = self
@@ -226,17 +225,15 @@ impl App {
                 tags.dedup();
                 tags.into_iter().map(|g| (g.clone(), g)).collect()
             }
-            FilterField::StartDate => START_FILTERS
+            FilterField::StartDate => StartFilter::ALL
                 .iter()
-                .enumerate()
                 .skip(1)
-                .map(|(i, l)| (i.to_string(), tr(l).to_string()))
+                .map(|c| (c.key(), tr(c.label()).to_string()))
                 .collect(),
-            FilterField::Created | FilterField::Updated => AGE_FILTERS
+            FilterField::Created | FilterField::Updated => AgeFilter::ALL
                 .iter()
-                .enumerate()
                 .skip(1)
-                .map(|(i, l)| (i.to_string(), tr(l).to_string()))
+                .map(|c| (c.key(), tr(c.label()).to_string()))
                 .collect(),
             FilterField::CreatedBy => self
                 .data

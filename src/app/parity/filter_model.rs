@@ -3,33 +3,79 @@
 
 use super::*;
 
-pub const DUE_FILTERS: [&str; 6] = [
-    "Any time",
-    "Overdue",
-    "Today",
-    "This week",
-    "Next week",
-    "No due date",
-];
+/// Defines a date filter's choices: saved in a filter row as their place
+/// in the list ("1", "2", ...), with 0 (or anything unknown) as Any time.
+macro_rules! date_choices {
+    ($(#[$doc:meta])* $name:ident { $($v:ident => $label:literal),+ $(,)? }) => {
+        $(#[$doc])*
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+        pub enum $name {
+            #[default]
+            $($v),+
+        }
 
-/// Choices for the start date filter (index = stored value).
-pub const START_FILTERS: [&str; 6] = [
-    "Any time",
-    "Started",
-    "Today",
-    "This week",
-    "Next week",
-    "No start date",
-];
+        impl $name {
+            pub const ALL: &'static [$name] = &[$($name::$v),+];
 
-/// Choices for the date created / updated filters (index = stored value).
-pub const AGE_FILTERS: [&str; 5] = [
-    "Any time",
-    "Today",
-    "Yesterday",
-    "Last 7 days",
-    "Last 30 days",
-];
+            /// Its name in English (shown through `tr`).
+            pub fn label(self) -> &'static str {
+                match self {
+                    $($name::$v => $label),+
+                }
+            }
+
+            /// The value saved for it in a filter row.
+            pub fn key(self) -> String {
+                (self as u8).to_string()
+            }
+
+            /// The choice a saved value stands for: Any time for one this
+            /// app doesn't know.
+            pub fn of(saved: &str) -> $name {
+                saved
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|i| Self::ALL.get(i).copied())
+                    .unwrap_or_default()
+            }
+        }
+    };
+}
+
+date_choices! {
+    /// The due date filter's choices.
+    DueFilter {
+        Any => "Any time",
+        Overdue => "Overdue",
+        Today => "Today",
+        ThisWeek => "This week",
+        NextWeek => "Next week",
+        None => "No due date",
+    }
+}
+
+date_choices! {
+    /// The start date filter's choices.
+    StartFilter {
+        Any => "Any time",
+        Started => "Started",
+        Today => "Today",
+        ThisWeek => "This week",
+        NextWeek => "Next week",
+        None => "No start date",
+    }
+}
+
+date_choices! {
+    /// The date created / updated filters' choices.
+    AgeFilter {
+        Any => "Any time",
+        Today => "Today",
+        Yesterday => "Yesterday",
+        Last7Days => "Last 7 days",
+        Last30Days => "Last 30 days",
+    }
+}
 
 impl FilterField {
     pub const ALL: [FilterField; 10] = [
@@ -104,20 +150,20 @@ impl FilterRow {
             FilterField::DueDate => self
                 .values
                 .iter()
-                .any(|v| due_matches(v.parse().unwrap_or(0), t, data)),
+                .any(|v| due_matches(DueFilter::of(v), t, data)),
             FilterField::Tags => self.values.iter().any(|v| t.tags.contains(v)),
             FilterField::StartDate => self
                 .values
                 .iter()
-                .any(|v| start_matches(v.parse().unwrap_or(0), t.start, data)),
+                .any(|v| start_matches(StartFilter::of(v), t.start, data)),
             FilterField::Created => self
                 .values
                 .iter()
-                .any(|v| age_matches(v.parse().unwrap_or(0), t.created)),
+                .any(|v| age_matches(AgeFilter::of(v), t.created)),
             FilterField::Updated => self
                 .values
                 .iter()
-                .any(|v| age_matches(v.parse().unwrap_or(0), t.updated)),
+                .any(|v| age_matches(AgeFilter::of(v), t.updated)),
             // the creator is whoever wrote the first activity line ("created this task")
             FilterField::CreatedBy => self
                 .values
@@ -147,47 +193,49 @@ impl FilterGroup {
     }
 }
 
-fn start_matches(which: u8, start: Option<NaiveDate>, data: &Data) -> bool {
+fn start_matches(which: StartFilter, start: Option<NaiveDate>, data: &Data) -> bool {
     let td = today();
     let week_start = data.week_start(td);
     match which {
-        1 => start.is_some_and(|d| d <= td),
-        2 => start == Some(td),
-        3 => start.is_some_and(|d| d >= week_start && d < week_start + Duration::days(7)),
-        4 => start.is_some_and(|d| {
+        StartFilter::Started => start.is_some_and(|d| d <= td),
+        StartFilter::Today => start == Some(td),
+        StartFilter::ThisWeek => {
+            start.is_some_and(|d| d >= week_start && d < week_start + Duration::days(7))
+        }
+        StartFilter::NextWeek => start.is_some_and(|d| {
             d >= week_start + Duration::days(7) && d < week_start + Duration::days(14)
         }),
-        5 => start.is_none(),
-        _ => true,
+        StartFilter::None => start.is_none(),
+        StartFilter::Any => true,
     }
 }
 
-fn age_matches(which: u8, ts: i64) -> bool {
+fn age_matches(which: AgeFilter, ts: i64) -> bool {
     let day = local_date(ts);
     let age = (today() - day).num_days();
     match which {
-        1 => age == 0,
-        2 => age == 1,
-        3 => age < 7,
-        4 => age < 30,
-        _ => true,
+        AgeFilter::Today => age == 0,
+        AgeFilter::Yesterday => age == 1,
+        AgeFilter::Last7Days => age < 7,
+        AgeFilter::Last30Days => age < 30,
+        AgeFilter::Any => true,
     }
 }
 
-fn due_matches(due: u8, t: &Task, data: &Data) -> bool {
+fn due_matches(due: DueFilter, t: &Task, data: &Data) -> bool {
     let td = today();
     let week_start = data.week_start(td);
     match due {
-        1 => t.is_overdue() && !data.is_closed(t),
-        2 => t.due == Some(td),
-        3 => t.due.map_or(false, |d| {
+        DueFilter::Overdue => t.is_overdue() && !data.is_closed(t),
+        DueFilter::Today => t.due == Some(td),
+        DueFilter::ThisWeek => t.due.map_or(false, |d| {
             d >= week_start && d < week_start + Duration::days(7)
         }),
-        4 => t.due.map_or(false, |d| {
+        DueFilter::NextWeek => t.due.map_or(false, |d| {
             d >= week_start + Duration::days(7) && d < week_start + Duration::days(14)
         }),
-        5 => t.due.is_none(),
-        _ => true,
+        DueFilter::None => t.due.is_none(),
+        DueFilter::Any => true,
     }
 }
 
@@ -223,7 +271,7 @@ pub struct TaskFilter {
     #[serde(skip)]
     pub tags: Vec<String>,
     #[serde(skip)]
-    pub due: u8,
+    pub due: DueFilter,
     #[serde(default)]
     pub archived: bool,
 }
@@ -260,7 +308,7 @@ impl TaskFilter {
                 !self.priorities.is_empty(),
                 !self.assignees.is_empty() || self.unassigned,
                 !self.tags.is_empty(),
-                self.due != 0,
+                self.due != DueFilter::Any,
                 self.archived,
             ]
             .iter()

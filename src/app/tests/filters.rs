@@ -70,12 +70,12 @@ fn filter_conditions_status_priority_due_and_sort_direction() {
     assert!(!a.filtered().is_empty());
     assert!(a.filtered().iter().all(|t| t.status == "in progress"));
     a.prefs.filter = Default::default();
-    a.prefs.filter.due = 1;
+    a.prefs.filter.due = parity::DueFilter::Overdue;
     assert!(a
         .filtered()
         .iter()
         .all(|t| t.due.map_or(false, |d| d < today())));
-    a.prefs.filter.due = 5;
+    a.prefs.filter.due = parity::DueFilter::None;
     assert!(a.filtered().iter().all(|t| t.due.is_none()));
     a.prefs.filter = Default::default();
     assert_eq!(a.filtered().len(), all);
@@ -283,6 +283,21 @@ fn week_start_follows_the_labs_option_and_keeps_unknown_labs() {
     assert_eq!(sunday_week_start(day(11, 25)), day(11, 22), "fixed Sunday");
     d.set_lab(Lab::WeekMonday, false);
     assert_eq!(d.extra.labs, vec!["from_a_newer_app".to_string()]);
+}
+
+#[test]
+fn date_filter_choices_keep_their_saved_numbers() {
+    use parity::{AgeFilter, DueFilter, StartFilter};
+    assert_eq!(DueFilter::Overdue.key(), "1");
+    assert_eq!(DueFilter::of("5"), DueFilter::None);
+    assert_eq!(StartFilter::of("1"), StartFilter::Started);
+    assert_eq!(AgeFilter::of("4"), AgeFilter::Last30Days);
+    // a value from a newer app, or none at all, is Any time as before
+    assert_eq!(DueFilter::of("9"), DueFilter::Any);
+    assert_eq!(AgeFilter::of("x"), AgeFilter::Any);
+    for c in DueFilter::ALL {
+        assert_eq!(DueFilter::of(&c.key()), *c);
+    }
 }
 
 #[test]

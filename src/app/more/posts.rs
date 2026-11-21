@@ -213,6 +213,15 @@ impl App {
                         .filter(|c| c.kind == ChannelKind::Channel && self.can_see(c))
                         .map(|c| (c.id, c.name.clone()))
                         .collect();
+                    // a channel deleted or left since it was picked: the
+                    // filter lets go (the button already reads "#  Channel")
+                    if self
+                        .post
+                        .f_channel
+                        .is_some_and(|id| !chans.iter().any(|c| c.0 == id))
+                    {
+                        self.post.f_channel = None;
+                    }
                     let cl = self
                         .post
                         .f_channel
@@ -247,6 +256,14 @@ impl App {
                         .iter()
                         .map(|m| (m.id, m.shown().to_string()))
                         .collect();
+                    // the same for someone no longer in the workspace
+                    if self
+                        .post
+                        .f_author
+                        .is_some_and(|id| !members.iter().any(|m| m.0 == id))
+                    {
+                        self.post.f_author = None;
+                    }
                     let al = self
                         .post
                         .f_author

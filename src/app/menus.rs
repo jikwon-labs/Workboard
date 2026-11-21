@@ -639,6 +639,11 @@ impl App {
             self.section = Section::Home;
             self.open_task = None;
             self.chat.open = None;
+            // the Posts page's channel and filters name this workspace's
+            // channels and people (the post being written stays)
+            self.post.channel = 0;
+            self.post.f_channel = None;
+            self.post.f_author = None;
             self.recent.clear();
             self.clear_history();
             // the AI conversation stays with the workspace it was about

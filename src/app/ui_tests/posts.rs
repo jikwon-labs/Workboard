@@ -43,6 +43,17 @@ fn pick_channel(h: &mut Ui1, name: &str) {
     h.settle();
 }
 
+/// Pick `item` in the filter that opens from `button` (in its pop-up, not
+/// a sidebar row of the same name).
+fn pick_filter(h: &mut Ui1, button: &str, item: &str) {
+    let b = h.rect(button);
+    h.click(button);
+    let below = Rect::from_min_size(pos2(b.left() - 20.0, b.bottom()), vec2(420.0, 420.0));
+    let at = h.rect_in(item, below).center();
+    h.click_at(at);
+    h.settle();
+}
+
 /// Write a post in the box (channel, title, text) without sending it.
 fn write_post(h: &mut Ui1, channel: &str, title: &str, text: &str) {
     pick_channel(h, channel);
@@ -171,4 +182,66 @@ fn the_posts_page_and_the_channel_post_box_keep_their_own_titles() {
         "the page's title stays"
     );
     assert!(!h.painted_text("Draft on the page").is_empty());
+}
+
+/// A channel or person picked in the filters goes away (deleted, left, or
+/// taken out of the workspace): the filter lets go and the posts show
+/// again. The buttons already looked unfiltered ("#  Channel", "@  Author")
+/// while every post stayed hidden.
+#[test]
+fn a_filter_on_a_channel_or_person_that_is_gone_lets_go() {
+    let mut h = posts_page();
+    write_post(&mut h, "general", "Office move", "Monday");
+    h.click("Post");
+    pick_filter(&mut h, "#  Channel", "# website-redesign");
+    assert!(h.painted_text("Office move").is_empty(), "filtered out");
+    let id = channel_id(&h, "website-redesign");
+    h.app.data.channels.retain(|c| c.id != id);
+    h.settle();
+    assert!(h.has("#  Channel"));
+    assert!(
+        !h.painted_text("Office move").is_empty(),
+        "the post shows again"
+    );
+
+    pick_filter(&mut h, "@  Author", "Alex Kim");
+    assert!(h.painted_text("Office move").is_empty(), "filtered out");
+    h.app.data.members.retain(|m| m.id != 2);
+    h.settle();
+    assert!(h.has("@  Author"));
+    assert!(
+        !h.painted_text("Office move").is_empty(),
+        "the post shows again"
+    );
+}
+
+/// Another workspace opened: its channels and people are others, so the
+/// channel picked for the post and the channel and person filters start
+/// over (another workspace's ids may name something else there). What was
+/// written stays, to be sent once a channel of this workspace is picked.
+#[test]
+fn another_workspace_starts_the_posts_page_channel_and_filters_over() {
+    let _home = crate::app::tests::HOME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let home = temp_home("home-posts-ws");
+    std::fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    let mut h = posts_page();
+    write_post(&mut h, "general", "Office move", "Monday");
+    pick_filter(&mut h, "#  Channel", "# general");
+    pick_filter(&mut h, "@  Author", "Alex Kim");
+    assert!(h.app.post.f_channel.is_some() && h.app.post.f_author.is_some());
+    h.click("Workspace menu");
+    h.click("Create Workspace");
+    h.type_text("Side Biz");
+    h.click("Next");
+    h.click("Create");
+    h.settle();
+    assert_eq!(h.app.data.workspace, "Side Biz");
+    assert_eq!(h.app.post.channel, 0, "no channel picked here yet");
+    assert_eq!(h.app.post.f_channel, None);
+    assert_eq!(h.app.post.f_author, None);
+    assert_eq!(h.app.post.title, "Office move", "what was written stays");
+    assert_eq!(h.app.post.body, "Monday");
 }

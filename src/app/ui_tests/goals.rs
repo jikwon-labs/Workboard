@@ -1185,3 +1185,17 @@ fn the_goals_page_fits_the_narrowest_window() {
         assert!(!h.painted_text(n).is_empty(), "{n} in full");
     }
 }
+
+#[test]
+fn a_goal_without_targets_says_so_in_the_list_too() {
+    let (mut h, _, _) = two_goals();
+    add_goal_with(&mut h, "Blank", vec![]);
+    assert!(!h.painted_text("No targets yet").is_empty(), "on its card");
+    h.click("Show as list");
+    assert!(h.has("Goal row Blank"));
+    assert!(
+        h.painted_text("0 of 0 targets done").is_empty(),
+        "not \"0 of 0 targets done\""
+    );
+    assert!(!h.painted_text("No targets yet").is_empty(), "in its row");
+}

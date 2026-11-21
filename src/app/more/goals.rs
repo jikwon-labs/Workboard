@@ -1316,10 +1316,16 @@ impl App {
                         t.text,
                     );
                     let done = r.targets.iter().filter(|s| s.done).count();
+                    // as its card says it
+                    let summary = if g.targets.is_empty() {
+                        tr("No targets yet").to_string()
+                    } else {
+                        trf!("{} of {} targets done", done, g.targets.len())
+                    };
                     p.text(
                         pos2(rr.left() + 56.0, cy + 10.0),
                         Align2::LEFT_CENTER,
-                        trf!("{} of {} targets done", done, g.targets.len()),
+                        summary,
                         FontId::proportional(12.0),
                         t.text2,
                     );

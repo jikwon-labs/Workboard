@@ -1783,3 +1783,45 @@ fn undo_puts_a_notes_colour_back() {
     h.click("Undo");
     assert_eq!(board_of(&h, wid).notes[0].color, [0xf8, 0xae, 0x00]);
 }
+
+/// A Line tool drag that starts and ends on the same shape draws nothing:
+/// it made a short line stuck inside the shape.
+#[test]
+fn a_line_dragged_within_one_shape_is_not_drawn() {
+    let mut h = Ui1::new();
+    let wid = template_board(&mut h, "Flow Chart");
+    h.app.wb_tool = 5;
+    h.settle();
+    let s = shape(&board_of(&h, wid), "Step").clone();
+    let from = on_screen(&h, [s.pos[0] + 20.0, s.pos[1] + 15.0]);
+    let to = on_screen(
+        &h,
+        [s.pos[0] + s.size[0] - 20.0, s.pos[1] + s.size[1] - 15.0],
+    );
+    // while it is held there no line shows either, only the shape's outline
+    let lines = |h: &Ui1| {
+        h.shapes
+            .iter()
+            .filter(
+                |c| matches!(&c.shape, egui::Shape::Path(p) if !p.closed && p.points.len() == 2),
+            )
+            .count()
+    };
+    h.hover(from);
+    let before = lines(&h);
+    h.frame(vec![button(from, true)]);
+    for k in 1..=12 {
+        h.frame(vec![egui::Event::PointerMoved(
+            from + (to - from) * (k as f32 / 12.0),
+        )]);
+    }
+    assert!(h.app.sweep.wb_link.is_some(), "a line is being dragged out");
+    assert_eq!(lines(&h), before, "no line is shown");
+    h.frame(vec![button(to, false)]);
+    h.settle();
+    assert_eq!(board_of(&h, wid).lines.len(), 2);
+    assert!(!h.app.sweep.wb_undo.iter().any(|u| matches!(
+        u,
+        (w, crate::app::more::WbUndo::Added(s, l)) if *w == wid && s.is_empty() && !l.is_empty()
+    )));
+}

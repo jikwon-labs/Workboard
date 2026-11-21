@@ -532,8 +532,13 @@ impl App {
                         );
                     }
                 }
-                let pts: Vec<Pos2> = line_path(&l, &wb.shapes).iter().map(to_screen).collect();
-                paint_line(&p, &l, &pts, lw, rgb(l.color));
+                // back over the shape it started from, letting go draws
+                // nothing, so no line shows
+                let home = link.from != 0 && shape_at(&wb.shapes, bpos(b)) == Some(link.from);
+                if !home {
+                    let pts: Vec<Pos2> = line_path(&l, &wb.shapes).iter().map(to_screen).collect();
+                    paint_line(&p, &l, &pts, lw, rgb(l.color));
+                }
             }
         }
 
@@ -1217,9 +1222,13 @@ impl App {
         let Some(link) = self.sweep.wb_link.take().filter(|k| k.wid == wid) else {
             return;
         };
-        let to = shape_at(&self.data.extra.whiteboards[wi].shapes, bpos(at))
-            .filter(|&s| s != link.from)
-            .unwrap_or(0);
+        let on = shape_at(&self.data.extra.whiteboards[wi].shapes, bpos(at));
+        // let go on the shape it started from: no line (it made a short
+        // one stuck inside the shape)
+        if link.from != 0 && on == Some(link.from) {
+            return;
+        }
+        let to = on.unwrap_or(0);
         if to == 0 && (bpos(at) - bpos(link.a)).length() < 12.0 {
             return;
         }

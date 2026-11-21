@@ -3566,3 +3566,36 @@ fn trailing_mention_is_the_at_word_at_the_end() {
     assert_eq!(trailing_mention("@Al done"), None);
     assert_eq!(trailing_mention("안녕 @민"), Some((7, "민")));
 }
+
+/// An empty direct message says "Chat with" the person, not "Chat in" them
+/// as a channel does.
+#[test]
+fn an_empty_direct_message_is_a_chat_with_someone() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let other = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Jordan Park")
+        .unwrap()
+        .clone();
+    let id = h.app.data.new_id();
+    h.app.data.channels.push(Channel {
+        id,
+        name: String::new(),
+        kind: ChannelKind::Direct,
+        members: vec![me, other.id],
+        ..Default::default()
+    });
+    h.app.section = Section::Chat;
+    h.app.chat.open = Some(id);
+    h.settle();
+    let head = trf!("Chat with {}", other.shown());
+    assert!(
+        !h.painted_text(&head).is_empty(),
+        "{:?}",
+        drawn_texts(&h.shapes)
+    );
+}

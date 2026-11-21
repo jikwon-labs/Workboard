@@ -1421,7 +1421,9 @@ impl App {
                             ui.add_space(pad);
                             ui.vertical(|ui| {
                                 ui.set_width(cw);
-                                ui.label(RichText::new(trf!("Chat in {}", name)).size(16.0).color(t.text));
+                                // a direct message is with someone, not in a place
+                                let head = if channel.kind == ChannelKind::Channel { trf!("Chat in {}", name) } else { trf!("Chat with {}", name) };
+                                ui.label(RichText::new(head).size(16.0).color(t.text));
                                 ui.label(RichText::new(tr("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.")).color(t.text2));
                                 ui.add_space(10.0);
                                 // alone in the workspace there is nobody to add: invite instead

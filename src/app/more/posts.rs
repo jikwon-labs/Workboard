@@ -9,6 +9,17 @@ const POST_TEXT: &str = "post_text";
 const POST_MENTIONS: &str = "post_mentions";
 
 impl App {
+    /// Another workspace is open: the Posts page's picked channel, its
+    /// channel and author filters and the people picked from its @ list
+    /// named this one's channels and people (the same ids may name others
+    /// there). What is being written stays.
+    pub(crate) fn posts_in_another_workspace(&mut self) {
+        self.post.channel = 0;
+        self.post.f_channel = None;
+        self.post.f_author = None;
+        self.post.picked.clear();
+    }
+
     /// The text box's cursor: where it is (the end when the box never had
     /// it), and the selection it replaces, as char indexes.
     fn post_cursor(&self, ctx: &egui::Context) -> (usize, usize) {

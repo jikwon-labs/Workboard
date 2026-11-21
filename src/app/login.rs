@@ -715,6 +715,7 @@ impl App {
         self.section = Section::Home;
         self.open_task = None;
         self.chat.open = None;
+        self.posts_in_another_workspace();
         self.chat.thread_open = None;
         self.chat.thread_window = None;
         self.recent.clear();

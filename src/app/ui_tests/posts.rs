@@ -232,6 +232,7 @@ fn another_workspace_starts_the_posts_page_channel_and_filters_over() {
     pick_filter(&mut h, "#  Channel", "# general");
     pick_filter(&mut h, "@  Author", "Alex Kim");
     assert!(h.app.post.f_channel.is_some() && h.app.post.f_author.is_some());
+    h.app.post.picked = vec![2];
     h.click("Workspace menu");
     h.click("Create Workspace");
     h.type_text("Side Biz");
@@ -242,6 +243,10 @@ fn another_workspace_starts_the_posts_page_channel_and_filters_over() {
     assert_eq!(h.app.post.channel, 0, "no channel picked here yet");
     assert_eq!(h.app.post.f_channel, None);
     assert_eq!(h.app.post.f_author, None);
+    assert!(
+        h.app.post.picked.is_empty(),
+        "nobody picked from its @ list"
+    );
     assert_eq!(h.app.post.title, "Office move", "what was written stays");
     assert_eq!(h.app.post.body, "Monday");
 }
@@ -965,4 +970,30 @@ fn search_leaves_out_the_default_post_title() {
         "not in the channel's finds: {:?}",
         h.painted_text("Lunch is here")
     );
+}
+
+/// Logging out of the team (another workspace opens, with the sign-in
+/// screen) starts the Posts page's channel, filters and @ picks over as
+/// switching workspaces does.
+#[test]
+fn logging_out_starts_the_posts_page_channel_and_filters_over() {
+    let mut h = posts_page();
+    write_post(&mut h, "general", "Office move", "Monday");
+    pick_filter(&mut h, "#  Channel", "# general");
+    h.app.post.picked = vec![2];
+    let addr = "127.0.0.1:1";
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev-posts-out".into(),
+        tag: 5,
+        server: Some(addr.into()),
+    });
+    together::save_token(addr, "dev-posts-out", "token-1");
+    h.click("Profile menu");
+    h.click("Log out");
+    h.click("Log out");
+    assert!(h.app.data.extra.shared.is_none(), "logged out");
+    assert_eq!(h.app.post.channel, 0);
+    assert_eq!(h.app.post.f_channel, None);
+    assert!(h.app.post.picked.is_empty());
 }

@@ -479,6 +479,7 @@ impl App {
         self.section = Section::Home;
         self.open_task = None;
         self.chat.open = None;
+        self.posts_in_another_workspace();
         self.recent.clear();
         self.clear_history();
         // a workspace I just joined: what is in it already isn't news

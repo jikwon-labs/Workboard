@@ -1767,3 +1767,39 @@ fn targets_and_history_lines_get_ids_as_they_are_made() {
     h.click("Create goal");
     assert!(all_have(&h));
 }
+
+#[test]
+fn a_milestone_noted_on_two_computers_shows_once() {
+    let (mut h, _, _) = two_goals();
+    let id = add_goal_with(&mut h, "Signups", vec![number("People", 0.0, 10.0, 6.0)]);
+    h.app.goal_watch(now_ts());
+    // both computers noted 50% before seeing each other's line; merged,
+    // both lines are there
+    let t = now_ts();
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == id) {
+        g.log
+            .retain(|e| !matches!(e.what, GoalChange::Milestone(_)));
+        for (ts, who, line) in [(t - 5, 2, 9_001), (t - 9, 3, 9_002)] {
+            g.log.push(GoalEvent {
+                id: line,
+                ts,
+                who,
+                what: GoalChange::Milestone(50),
+                pct: 60,
+            });
+        }
+        g.reached = 50;
+    }
+    h.app.goal_watch(now_ts());
+    let lines: Vec<(u64, u64)> = goal(&h, id)
+        .log
+        .iter()
+        .filter(|e| e.what == GoalChange::Milestone(50))
+        .map(|e| (e.id, e.who))
+        .collect();
+    assert_eq!(
+        lines,
+        [(9_002, 3)],
+        "the first one stays, on every computer"
+    );
+}

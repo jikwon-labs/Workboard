@@ -442,6 +442,22 @@ impl App {
             g.done_on = None;
             changed = true;
         }
+        // the same milestone noted on two computers before either saw the
+        // other's line: both come in (lines merge one by one), and every
+        // computer keeps the first, by time and then id
+        let mut first: std::collections::HashMap<u8, (i64, u64)> = Default::default();
+        for e in &g.log {
+            if let GoalChange::Milestone(m) = e.what {
+                let k = (e.ts, e.id);
+                first.entry(m).and_modify(|f| *f = (*f).min(k)).or_insert(k);
+            }
+        }
+        let lines = g.log.len();
+        g.log.retain(|e| match e.what {
+            GoalChange::Milestone(m) => first.get(&m) == Some(&(e.ts, e.id)),
+            _ => true,
+        });
+        changed |= g.log.len() != lines;
         if g.days.last().map(|x| x.1) != Some(pct) {
             if g.days.last().map(|x| x.0) == Some(day) {
                 g.days.last_mut().unwrap().1 = pct;

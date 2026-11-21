@@ -725,8 +725,13 @@ impl Files {
     }
 
     /// The cached file under a name with the attachment's extension, for
-    /// AVFoundation (which goes by the extension, not the contents).
+    /// AVFoundation (which goes by the extension, not the contents). None
+    /// unless the name really is a picture's or a video's: this path is
+    /// handed to the system to open, and a program must never get there.
     pub fn playable(&self, a: &Attachment) -> Option<PathBuf> {
+        if !opens_as_media(a) {
+            return None;
+        }
         touch(&self.local(&a.file)?);
         Some(with_ext(&self.dir, &a.file, &ext_of(&a.name)))
     }
@@ -1152,6 +1157,14 @@ pub(super) fn paint_file_tile(painter: &egui::Painter, rect: Rect, name: &str, t
         FontId::proportional(if small { 9.5 } else { 11.0 }),
         t.text3,
     );
+}
+
+/// The attachment is a picture or a video by its name too, not only by the
+/// kind it came with. The kind travels with the message from whoever sent
+/// it, so "run.command" marked as a picture is still a program: it is saved
+/// to Downloads like any other file, never opened.
+pub(super) fn opens_as_media(a: &Attachment) -> bool {
+    a.kind != MediaKind::File && media::kind_of(Path::new(&a.name)) == a.kind
 }
 
 fn ext_of(name: &str) -> String {

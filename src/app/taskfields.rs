@@ -1250,9 +1250,9 @@ impl App {
         if let Some(i) = remove {
             task.attachments.remove(i);
         }
-        if let Some(a) = open.as_ref().filter(|a| a.kind == MediaKind::File) {
+        if let Some(a) = open.as_ref().filter(|a| !files::opens_as_media(a)) {
             // a plain file is saved to Downloads, never opened from here (it
-            // may be a program)
+            // may be a program, even one marked as a picture)
             self.save_file(a);
         } else if let Some(a) = open {
             // the picture or video opens in the system's own viewer

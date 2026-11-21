@@ -537,6 +537,54 @@ fn pictures_look_the_same_under_the_pointer() {
 }
 
 #[test]
+fn a_program_marked_as_a_picture_is_saved_not_opened() {
+    // the kind comes with the message from whoever sent it: a script that
+    // says it's a picture must not reach the system's "open"
+    let att = |name: &str, file: &str| Attachment {
+        file: file.into(),
+        name: name.into(),
+        kind: MediaKind::Image,
+        bytes: 10,
+        w: 400,
+        h: 300,
+        secs: 0.0,
+        thumb: None,
+    };
+    let mut h = Ui1::new();
+    let id = open_design_task(&mut h);
+    let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    t.attachments.push(att("run.command", "fake-picture"));
+    t.attachments.push(att("plan.png", "real-picture"));
+    h.settle();
+
+    h.scroll_into_view("Attachment run.command");
+    h.click("Attachment run.command");
+    assert!(
+        h.app.file_saves.iter().any(|a| a.name == "run.command"),
+        "it goes to Downloads like any file"
+    );
+    assert!(
+        !h.app
+            .toast
+            .as_ref()
+            .is_some_and(|(t, _)| t.contains("still downloading")),
+        "never on its way to be opened"
+    );
+    assert!(h.app.files.playable(&att("run.command", "x")).is_none());
+
+    // a real picture still opens in the system's viewer once it's here
+    h.app.toast = None;
+    h.scroll_into_view("Attachment plan.png");
+    h.click("Attachment plan.png");
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(t, _)| t.contains("plan.png is still downloading")));
+    assert!(!h.app.file_saves.iter().any(|a| a.name == "plan.png"));
+}
+
+#[test]
 fn files_dragged_over_an_open_thread_light_up_only_the_thread() {
     let mut h = Ui1::new();
     h.click("general");

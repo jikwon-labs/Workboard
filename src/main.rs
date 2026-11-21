@@ -106,6 +106,7 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
     links::listen();
+    os::adopt_scenes();
     let run = eframe::run_native(
         "Workboard",
         options,

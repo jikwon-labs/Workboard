@@ -848,6 +848,7 @@ impl App {
         setup_fonts(&cc.egui_ctx);
         crate::links::wake(&cc.egui_ctx);
         crate::notifier::attach(cc);
+        crate::os::attach_window(cc);
         Self::build(screenshot, None)
     }
 

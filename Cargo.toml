@@ -94,9 +94,11 @@ eframe = { version = "0.31", default-features = false, features = ["glow"] }
 [target.'cfg(target_os = "ios")'.dependencies]
 eframe = { version = "0.31", default-features = false, features = ["wgpu"] }
 wgpu = { version = "24", default-features = false, features = ["metal"] }
-# the system language (src/i18n.rs) and the keyboard's height (src/os.rs)
+# the system language (src/i18n.rs), the keyboard's height and the window's
+# scene (src/os.rs)
 objc = "0.2"
 block = "0.1"
+raw-window-handle = "0.6"
 
 # the icon inside workboard.exe (build.rs)
 [target.'cfg(windows)'.build-dependencies]

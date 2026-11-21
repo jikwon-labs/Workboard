@@ -32,9 +32,10 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 - 앱을 다시 열어도 데이터가 남는다.
 - 화면 키보드가 뜨면 앱이 키보드 위 영역만 쓴다(2026-11-22). iOS 의 키보드 알림으로 높이를 받아(`src/os.rs` `keyboard_cover`) egui 화면 높이를 줄인다(`src/app/files.rs` `make_room_for_keyboard`). 로그인 화면은 키보드가 뜰 때 시작·계속 버튼까지 스크롤하고, 채널 오른쪽 목록은 짧은 화면에서 스크롤된다. 가로 iPad mini 에서 키보드는 744pt 중 390pt 를 가린다. 맥에서는 `os::fake_keyboard` 로 같은 상황을 만들어 시험한다(`src/app/ui_tests/sign_in.rs` 의 `the_ipad_keyboard_*`).
 
+- iOS 27 에서 켜진다(2026-11-22). iOS 27 은 UIScene 으로 화면을 띄우지 않는 앱을 시작하자마자 끄는데(`UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`), winit 0.30 은 장면 없이 창을 만든다. 그래서 Info.plist 에 장면 설정(`UIApplicationSceneManifest`, 담당 클래스 `WBSceneDelegate`)을 넣고, `src/os.rs` 의 `adopt_scenes` 가 그 클래스를 만들어 winit 의 창을 장면에 붙인다. 장면에 붙인 창에서는 키보드가 뜬 채로 iPad 를 돌리면 키보드가 처음 모양 그대로 남아서, 돌릴 때 키보드를 내렸다가 0.5초 뒤 다시 올린다(`follow_rotation`). iOS 26.5 와 27 시뮬레이터에서 둘 다 확인했다.
+
 ## 아직 안 되는 것
 
-- **iOS 27 에서 바로 꺼진다:** iOS 27 은 UIScene 방식으로 화면을 띄우지 않는 앱을 시작하자마자 끈다(`UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption`). winit 0.30 은 그 방식을 쓰지 않는다. 시험은 iOS 26.5 시뮬레이터로 했다. winit 을 UIScene 을 쓰는 판으로 올리거나 고쳐야 한다.
 - **단축키:** iPad 하드웨어 키보드의 Cmd 는 egui 명령 키로 잡히지 않고 Ctrl 이 그 역할을 한다(egui-winit 이 macOS 에서만 Cmd 를 쓴다). 표기도 "Ctrl+J".
 - **마우스 올리기 전용 UI:** 올려야 보이는 버튼은 손가락으로 열 수 없다. 트랙패드에서는 된다. 버튼이 손가락에 작다.
 - **맥 전용 기능:** 사진 고르기·붙여 넣기, 알림, 카메라, 화면 공유(`crates/wb-voice/src/screen.rs` 에서 iOS 는 "아직 안 됨"), 업데이트 확인, 파일 열기.

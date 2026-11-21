@@ -563,6 +563,7 @@ mod mac_emoji {
 pub fn keyboard_cover(ctx: &egui::Context, native_ppp: f32) -> f32 {
     #[cfg(target_os = "ios")]
     {
+        ios::follow_rotation();
         ios::keyboard_cover(ctx) * native_ppp / ctx.pixels_per_point()
     }
     #[cfg(all(not(target_os = "ios"), test))]
@@ -588,6 +589,24 @@ pub fn fake_keyboard(cover: f32) {
     FAKE_KEYBOARD.with(|k| k.set(cover));
 }
 
+/// iPad: iOS 27 ends an app at start unless it shows its window in a
+/// UIScene, which winit 0.30 doesn't do. Info.plist names a scene delegate
+/// (`WBSceneDelegate`, declared here before the event loop starts); the
+/// window winit made is put in the scene once both exist. Does nothing
+/// elsewhere.
+pub fn adopt_scenes() {
+    #[cfg(target_os = "ios")]
+    ios::adopt_scenes();
+}
+
+/// The app's window, for `adopt_scenes` (iPad only).
+pub fn attach_window(cc: &eframe::CreationContext<'_>) {
+    #[cfg(target_os = "ios")]
+    ios::attach_window(cc);
+    #[cfg(not(target_os = "ios"))]
+    let _ = cc;
+}
+
 // objc 0.2's macros check a cfg this crate doesn't declare
 #[cfg(target_os = "ios")]
 #[allow(unexpected_cfgs)]
@@ -598,6 +617,95 @@ mod ios {
     use std::ptr::null_mut;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Once, OnceLock};
+
+    use objc::declare::ClassDecl;
+    use objc::runtime::{Protocol, Sel};
+    use std::sync::atomic::AtomicPtr;
+
+    /// The window winit made and the scene iOS made, as they come.
+    static WINDOW: AtomicPtr<Object> = AtomicPtr::new(null_mut());
+    static SCENE: AtomicPtr<Object> = AtomicPtr::new(null_mut());
+    static DELEGATE: AtomicPtr<Object> = AtomicPtr::new(null_mut());
+
+    pub fn adopt_scenes() {
+        let Some(mut decl) = ClassDecl::new("WBSceneDelegate", class!(UIResponder)) else {
+            return;
+        };
+        decl.add_ivar::<*mut Object>("wbWindow");
+        extern "C" fn will_connect(
+            this: &mut Object,
+            _: Sel,
+            scene: *mut Object,
+            _session: *mut Object,
+            _options: *mut Object,
+        ) {
+            SCENE.store(scene, Ordering::SeqCst);
+            DELEGATE.store(this as *mut Object, Ordering::SeqCst);
+            put_in_scene();
+        }
+        extern "C" fn window(this: &Object, _: Sel) -> *mut Object {
+            // SAFETY: declared above
+            unsafe { *this.get_ivar::<*mut Object>("wbWindow") }
+        }
+        extern "C" fn set_window(this: &mut Object, _: Sel, w: *mut Object) {
+            // SAFETY: declared above
+            unsafe { this.set_ivar("wbWindow", w) };
+        }
+        // SAFETY: the methods match the selectors' signatures
+        unsafe {
+            decl.add_method(
+                sel!(scene:willConnectToSession:options:),
+                will_connect
+                    as extern "C" fn(&mut Object, Sel, *mut Object, *mut Object, *mut Object),
+            );
+            decl.add_method(
+                sel!(window),
+                window as extern "C" fn(&Object, Sel) -> *mut Object,
+            );
+            decl.add_method(
+                sel!(setWindow:),
+                set_window as extern "C" fn(&mut Object, Sel, *mut Object),
+            );
+        }
+        if let Some(p) = Protocol::get("UIWindowSceneDelegate") {
+            decl.add_protocol(p);
+        }
+        decl.register();
+    }
+
+    pub fn attach_window(cc: &eframe::CreationContext<'_>) {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let Ok(handle) = cc.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::UiKit(h) = handle.as_raw() else {
+            return;
+        };
+        // SAFETY: the handle's view is winit's UIView, inside its UIWindow,
+        // both alive for as long as the app runs
+        let window: *mut Object = unsafe { msg_send![h.ui_view.as_ptr() as *mut Object, window] };
+        WINDOW.store(window, Ordering::SeqCst);
+        put_in_scene();
+    }
+
+    /// Once there is a window and a scene: show the window in the scene.
+    fn put_in_scene() {
+        let window = WINDOW.load(Ordering::SeqCst);
+        let scene = SCENE.load(Ordering::SeqCst);
+        if window.is_null() || scene.is_null() {
+            return;
+        }
+        // SAFETY: both are live UIKit objects, used on the main thread; the
+        // delegate's ivar was declared in adopt_scenes
+        unsafe {
+            let delegate = DELEGATE.load(Ordering::SeqCst);
+            if !delegate.is_null() {
+                (*delegate).set_ivar("wbWindow", window);
+            }
+            let _: () = msg_send![window, setWindowScene: scene];
+            let _: () = msg_send![window, makeKeyAndVisible];
+        }
+    }
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -619,6 +727,49 @@ mod ios {
     static COVER: AtomicU32 = AtomicU32::new(0);
     static CTX: OnceLock<egui::Context> = OnceLock::new();
     static WATCH: Once = Once::new();
+
+    /// The scene's orientation last frame (UIInterfaceOrientation; 0 unknown).
+    static ORIENTATION: AtomicU32 = AtomicU32::new(0);
+    /// When to bring the keyboard back after a turn.
+    static REFOCUS_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+    /// In a scene the keyboard keeps the shape it came up in when the iPad
+    /// turns, over the app turned the other way. So it goes down at the
+    /// turn and comes back once the turn is over, the new way round.
+    pub fn follow_rotation() {
+        let window = WINDOW.load(Ordering::SeqCst);
+        let scene = SCENE.load(Ordering::SeqCst);
+        if window.is_null() || scene.is_null() {
+            return;
+        }
+        // SAFETY: live UIKit objects, on the main thread (egui's input hook)
+        unsafe {
+            let root: *mut Object = msg_send![window, rootViewController];
+            if root.is_null() {
+                return;
+            }
+            let view: *mut Object = msg_send![root, view];
+            let mut at = REFOCUS_AT.lock().unwrap();
+            if at.is_some_and(|t| std::time::Instant::now() >= t) {
+                *at = None;
+                let _: bool = msg_send![view, becomeFirstResponder];
+            }
+            let now: i64 = msg_send![scene, interfaceOrientation];
+            let before = ORIENTATION.swap(now as u32, Ordering::Relaxed);
+            if before == 0 || before == now as u32 {
+                return;
+            }
+            let first: bool = msg_send![view, isFirstResponder];
+            if first || at.is_some() {
+                let _: bool = msg_send![view, resignFirstResponder];
+                let wait = std::time::Duration::from_millis(500);
+                *at = Some(std::time::Instant::now() + wait);
+                if let Some(ctx) = CTX.get() {
+                    ctx.request_repaint_after(wait);
+                }
+            }
+        }
+    }
 
     pub fn keyboard_cover(ctx: &egui::Context) -> f32 {
         WATCH.call_once(|| {

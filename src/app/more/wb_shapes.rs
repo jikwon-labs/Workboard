@@ -1002,6 +1002,11 @@ impl App {
         icon: impl Fn(&egui::Painter, usize, Pos2, Color32),
     ) -> Option<BarHit> {
         const H: f32 = 40.0;
+        // a pick scrolled off the page takes its bar along (it stayed at
+        // the page's edge, over nothing)
+        if !over.intersects(rect) {
+            return None;
+        }
         let mut w = 8.0 + WB_COLORS.len() as f32 * DOT + 9.0;
         if !toggles.is_empty() {
             w += toggles.len() as f32 * SMALL + 9.0;
@@ -1020,6 +1025,10 @@ impl App {
         if top < rect.top() + 8.0 || under_bars {
             top = over.bottom() + 46.0;
         }
+        // a pick taller than the page: over it, above the bar along the
+        // bottom, rather than off the page (out of reach)
+        let lowest = rect.bottom() - 16.0 - 48.0 - 12.0 - H;
+        top = top.min(lowest).max(rect.top() + 8.0);
         let bar = Rect::from_min_size(pos2(left, top), vec2(w, H));
         card(ui, t, bar, 10.0, ui.id().with(("wb_pick_bar", wid)));
         self.sweep.wb_bars.push(bar);

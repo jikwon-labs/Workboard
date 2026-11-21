@@ -1980,3 +1980,65 @@ fn the_tool_options_bar_stays_on_the_page_in_a_small_window() {
     h.settle();
     assert!(!h.painted_text("Drag from one shape to another").is_empty());
 }
+
+/// The bar over a picked shape stays on screen when the shape is taller
+/// than the page: it went below the window, out of reach.
+#[test]
+fn the_bar_over_a_tall_picked_shape_stays_on_screen() {
+    let mut h = Ui1::new();
+    let wid = template_board(&mut h, "Flow Chart");
+    let wb = h
+        .app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap();
+    wb.shapes[2].pos = [460.0, -100.0];
+    wb.shapes[2].size = [300.0, 1200.0];
+    h.settle();
+    h.hover(h.rect("Whiteboard canvas").center());
+    h.click("Shape Step");
+    let canvas = h.rect("Whiteboard canvas");
+    let del = h.rect("Delete shape");
+    assert!(canvas.contains_rect(del), "{del:?} in {canvas:?}");
+    // clear of the bar along the bottom
+    assert!(del.bottom() < canvas.bottom() - 64.0, "{del:?}");
+    // scrolled away, the shape takes its bar along
+    let c = canvas.center();
+    h.frame(vec![egui::Event::PointerMoved(c)]);
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(-900.0, 0.0),
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    assert!(
+        h.find("Delete shape").is_none_or(|p| !canvas.contains(p)),
+        "no bar left on the page"
+    );
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(900.0, 0.0),
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    h.click("Delete shape");
+    assert_eq!(board_of(&h, wid).shapes.len(), 2);
+    // a shape of the usual size scrolled off to the side: its bar goes too
+    // (it stayed at the page's edge, over nothing)
+    h.click("Shape Start");
+    assert!(h.has("Delete shape"));
+    h.frame(vec![egui::Event::PointerMoved(c)]);
+    h.frame(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: vec2(-1000.0, 0.0),
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    assert!(
+        h.find("Delete shape").is_none_or(|p| !canvas.contains(p)),
+        "no bar left at the page's edge"
+    );
+}

@@ -1769,3 +1769,18 @@ fn on_a_full_bar_a_dragged_item_stays_above_more() {
     assert!(h.has("Rail Docs"), "still in the bar, after {last}");
     assert!(h.rect("Rail Docs").bottom() <= h.rect("Rail More").top());
 }
+
+/// The shortcuts list names Cmd+Left / Cmd+Right for back and forward, which
+/// work as Cmd+[ / Cmd+] do.
+#[test]
+fn shortcuts_list_names_cmd_arrows_for_back_and_forward() {
+    let mut h = Ui1::new();
+    h.app.open_settings("Keyboard shortcuts");
+    h.settle();
+    let keys = crate::os::keys("\u{2318}\u{2190}");
+    assert!(
+        drawn_texts(&h.shapes).iter().any(|s| s.contains(&keys)),
+        "{:?} is listed",
+        keys
+    );
+}

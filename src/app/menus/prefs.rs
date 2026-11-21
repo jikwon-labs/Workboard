@@ -149,7 +149,11 @@ impl App {
                     ("\u{2303}1 \u{2013} \u{2303}9", "Go to a left bar item"),
                     ("\u{2318}/\u{21E7} click", "Select several tasks"),
                     ("/", "Commands in a Doc"),
-                    ("\u{2318}[  /  \u{2318}]", "Back / forward"),
+                    // Cmd+Left / Cmd+Right do it too (parity.rs), like Safari
+                    (
+                        "\u{2318}[  /  \u{2318}]  /  \u{2318}\u{2190}  /  \u{2318}\u{2192}",
+                        "Back / forward",
+                    ),
                     ("\u{2318}Z", "Undo on a whiteboard"),
                     ("\u{2318},", "Settings"),
                     ("Enter", "Send a message or save a new task"),

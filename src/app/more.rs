@@ -183,9 +183,18 @@ impl App {
         };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::new().inner_margin(margin).show(ui, |ui| {
+                let about = RichText::new(trf!("Manage who can access {}", self.data.workspace)).color(t.text2);
                 ui.horizontal(|ui| {
                     if !in_settings {
                         ui.label(RichText::new(tr("People")).size(20.0));
+                    } else {
+                        // under Settings' own "People" title: the line beside the
+                        // button, not a row with the button alone above it
+                        let w = (ui.available_width() - 130.0).max(40.0);
+                        ui.scope(|ui| {
+                            ui.set_max_width(w);
+                            ui.add(egui::Label::new(about.clone()).truncate());
+                        });
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if self.may_manage() && primary_button(ui, &t, tr("Invite people")).clicked() {
@@ -193,7 +202,9 @@ impl App {
                         }
                     });
                 });
-                ui.label(RichText::new(trf!("Manage who can access {}", self.data.workspace)).color(t.text2));
+                if !in_settings {
+                    ui.label(about);
+                }
                 let server = self.on_server();
                 if server && self.sync_rt.role.is_none() {
                     // the server says who may manage people, once it's reached

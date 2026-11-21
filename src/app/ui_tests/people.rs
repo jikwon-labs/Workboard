@@ -1291,3 +1291,29 @@ fn work_together_shows_a_code_that_signs_a_phone_in_as_me() {
     let fourth = wait_code(&mut h, Some(&third));
     assert_eq!(phone(&fourth).map(|r| r.0), Ok(me));
 }
+
+/// In Settings > People the "Manage who can access" line sits beside Invite
+/// people, not under a row that holds the button alone.
+#[test]
+fn settings_people_puts_the_line_beside_invite() {
+    for (w, hh) in [(1440.0, 900.0), (900.0, 560.0)] {
+        let mut h = Ui1::sized(w, hh);
+        h.app.open_settings("People");
+        h.settle();
+        let button = h.rect("Invite people");
+        let line = h
+            .painted_text(&trf!("Manage who can access {}", h.app.data.workspace))
+            .first()
+            .expect("the line")
+            .0;
+        assert!(
+            (line.center().y - button.center().y).abs() < 6.0,
+            "{}x{}: the line at {:?}, the button at {:?}",
+            w,
+            hh,
+            line,
+            button
+        );
+        assert!(line.right() <= button.left(), "{}x{}: not under it", w, hh);
+    }
+}

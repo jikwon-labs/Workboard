@@ -49,7 +49,7 @@ impl App {
                                         .find(|c| c.0 == self.post.channel)
                                         .map(|c| format!("# {}", c.1))
                                         .unwrap_or_else(|| tr("Select Channel").into());
-                                    egui::ComboBox::from_id_salt("post_ch")
+                                    let pick = egui::ComboBox::from_id_salt("post_ch")
                                         .selected_text(cur)
                                         .show_ui(ui, |ui| {
                                             for (id, n) in &chans {
@@ -60,11 +60,12 @@ impl App {
                                                 );
                                             }
                                         });
+                                    name_it(&pick.response, "Post channel");
                                 });
                                 ui.separator();
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(tr("Type:")).color(t.text2));
-                                    egui::ComboBox::from_id_salt("post_type")
+                                    let pick = egui::ComboBox::from_id_salt("post_type")
                                         .selected_text(tr(&self.post.kind))
                                         .show_ui(ui, |ui| {
                                             for k in ["Announcement", "Update", "Idea", "Question"]
@@ -76,6 +77,7 @@ impl App {
                                                 );
                                             }
                                         });
+                                    name_it(&pick.response, "Post type");
                                 });
                                 ui.separator();
                                 ui.horizontal(|ui| {
@@ -90,13 +92,14 @@ impl App {
                                     name_field(&r, "Post title");
                                 });
                                 ui.separator();
-                                ui.add(
+                                let r = ui.add(
                                     egui::TextEdit::multiline(&mut self.post.body)
                                         .hint_text(tr("Share an announcement..."))
                                         .frame(false)
                                         .desired_rows(3)
                                         .desired_width(f32::INFINITY),
                                 );
+                                name_field(&r, "Post text");
                                 ui.horizontal(|ui| {
                                     // "@" is a character, "+" two lines; the others line icons
                                     for (g, tip) in [

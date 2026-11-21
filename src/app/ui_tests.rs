@@ -26,6 +26,7 @@ mod media;
 mod navigation;
 mod notify_settings;
 mod people;
+mod posts;
 mod profile;
 mod quit;
 mod sign_in;

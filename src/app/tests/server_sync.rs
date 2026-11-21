@@ -1524,3 +1524,118 @@ fn my_reading_state_goes_between_my_mac_and_my_phone() {
     a.send_mine();
     assert_eq!(a.data.extra.mine_sync, before);
 }
+
+/// Two computers on one goal through a server: what one records reaches
+/// the other with its history and milestone, edits to different parts of
+/// it both stay, and a goal one of them deletes stays deleted even if the
+/// other was changing it. Two changes to its targets at once keep one of
+/// them (the targets go between copies as one field), but both copies
+/// always end up the same.
+#[test]
+fn a_goal_is_worked_on_from_two_computers() {
+    use crate::app::more::GoalAct;
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A shared", |a| a.data.extra.shared.is_some());
+    let code = invite_code_for_sam(&mut a, &server);
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
+    b.connect_server(&addr, &code.to_lowercase()).unwrap();
+    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    let (ann, sam) = (a.data.me, b.data.me);
+    let push = |x: &mut App| {
+        x.sync_note_change();
+        x.write_shared();
+    };
+    // both send, then both take in what the other sent
+    let settle = |a: &mut App, b: &mut App| {
+        for _ in 0..60 {
+            a.net_tick(None);
+            b.net_tick(None);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    let gid = a.add_goal(Goal {
+        name: "Shared goal".into(),
+        owner: ann,
+        due: Some(today() + chrono::Duration::days(30)),
+        targets: vec![
+            GoalTarget {
+                name: "Signups".into(),
+                kind: TargetKind::Number {
+                    start: 0.0,
+                    target: 10.0,
+                    current: 0.0,
+                    unit: String::new(),
+                },
+            },
+            GoalTarget {
+                name: "Review".into(),
+                kind: TargetKind::TrueFalse { done: false },
+            },
+        ],
+        ..Default::default()
+    });
+    push(&mut a);
+    let g_of = |x: &App| x.data.extra.goals.iter().find(|g| g.id == gid).cloned();
+    net_until(&mut b, "the goal at B", |b| g_of(b).is_some());
+
+    // Ann records 6 of 10 (30%): Sam sees it, her line and the 25% milestone
+    a.goal_apply(GoalAct::SetNumber { g: gid, i: 0, to: 6.0 });
+    push(&mut a);
+    net_until(&mut b, "6 at B", |b| {
+        matches!(g_of(b).unwrap().targets[0].kind,
+            TargetKind::Number { current, .. } if current == 6.0)
+    });
+    let g = g_of(&b).unwrap();
+    assert!(g.log.iter().any(|e| e.who == ann
+        && matches!(e.what, GoalChange::Number { to, .. } if to == 6.0)));
+    assert!(g.log.iter().any(|e| e.who == ann && e.what == GoalChange::Milestone(25)));
+    // Sam's app takes it as it is: no second milestone of its own
+    b.goal_watch(now_ts());
+    assert_eq!(g_of(&b).unwrap().log.len(), g.log.len());
+
+    // at once: Ann renames it, Sam ticks the review (80%): both stay
+    for g in a.data.extra.goals.iter_mut().filter(|g| g.id == gid) {
+        g.name = "Renamed by Ann".into();
+    }
+    b.goal_apply(GoalAct::ToggleDone { g: gid, i: 1 });
+    push(&mut a);
+    push(&mut b);
+    settle(&mut a, &mut b);
+    for x in [&a, &b] {
+        let g = g_of(x).unwrap();
+        assert_eq!(g.name, "Renamed by Ann");
+        assert!(matches!(g.targets[1].kind, TargetKind::TrueFalse { done: true }));
+        assert_eq!(g.reached, 75);
+        let m75 = g
+            .log
+            .iter()
+            .filter(|e| e.what == GoalChange::Milestone(75))
+            .count();
+        assert_eq!(m75, 1, "one 75% milestone, Sam's: {:?}", g.log);
+        assert!(g.log.iter().any(|e| e.who == sam && e.what == GoalChange::Milestone(75)));
+    }
+
+    // at once, both on its targets: the copies end up the same
+    a.goal_apply(GoalAct::SetNumber { g: gid, i: 0, to: 8.0 });
+    b.goal_apply(GoalAct::ToggleDone { g: gid, i: 1 });
+    push(&mut a);
+    push(&mut b);
+    settle(&mut a, &mut b);
+    let (ga, gb) = (g_of(&a).unwrap(), g_of(&b).unwrap());
+    assert_eq!(
+        serde_json::to_value(&ga).unwrap(),
+        serde_json::to_value(&gb).unwrap(),
+        "one goal on both"
+    );
+
+    // Ann deletes it while Sam records: it stays deleted on both
+    a.remove_item("goal", gid);
+    b.goal_apply(GoalAct::SetNumber { g: gid, i: 0, to: 2.0 });
+    push(&mut a);
+    push(&mut b);
+    settle(&mut a, &mut b);
+    assert!(g_of(&a).is_none() && g_of(&b).is_none());
+}

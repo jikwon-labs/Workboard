@@ -175,6 +175,44 @@ fn time_on_archived_tasks_counts_on_the_dashboard_and_is_marked_in_timesheets() 
 }
 
 #[test]
+fn dashboard_time_this_week_follows_monday_weeks() {
+    // "Time tracked this week" counts the same week as the "This week"
+    // filter: from Monday with the Labs option (it used to start on Sunday)
+    let mut h = Ui1::new();
+    h.app.data.set_lab(Lab::WeekMonday, true);
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Week");
+    let did = h.app.dash_open.unwrap();
+    let d = h
+        .app
+        .data
+        .extra
+        .dashboards
+        .iter_mut()
+        .find(|d| d.id == did)
+        .unwrap();
+    d.cards = Some(vec![DashCard {
+        kind: "time".into(),
+        title: String::new(),
+    }]);
+    h.settle();
+    let ws = h.app.data.week_start(today());
+    assert_eq!(ws.weekday(), chrono::Weekday::Mon);
+    let texts = drawn_texts(&h.shapes);
+    let day = |d: NaiveDate| d.format("%a %-d").to_string();
+    for i in 0..7 {
+        let d = ws + Duration::days(i);
+        assert!(texts.contains(&day(d)), "{} on the card", day(d));
+    }
+    let before = ws - Duration::days(1);
+    assert!(
+        !texts.contains(&day(before)),
+        "{} is last week",
+        day(before)
+    );
+}
+
+#[test]
 fn move_dialogs_leave_out_archived_lists_and_say_when_there_is_nowhere_else() {
     let mut h = archived_workspace();
     let ideas = list_id(&h, "Ideas");

@@ -1024,7 +1024,7 @@ impl App {
                 }
             }
             "time_people" => {
-                let ws = sunday_week_start(td);
+                let ws = self.data.week_start(td);
                 let solo = self.data.solo();
                 let me = self.data.me;
                 let mut per: HashMap<u64, i64> = HashMap::new();
@@ -1065,7 +1065,7 @@ impl App {
                 }
             }
             "time" => {
-                let ws = sunday_week_start(td);
+                let ws = self.data.week_start(td);
                 let mut per_day = [0i64; 7];
                 for task in scope {
                     for e in &task.time_entries {

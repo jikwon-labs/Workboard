@@ -1647,3 +1647,118 @@ fn holding_cmd_numbers_the_rail_and_cmd_number_opens_that_item() {
     h.key_with(egui::Key::Num2, egui::Modifiers::COMMAND);
     assert_eq!(h.app.section, Section::Home);
 }
+
+// the open slot the rail shows while one of its items is dragged
+fn rail_drop_slot(h: &Ui1) -> Option<Rect> {
+    h.shapes.iter().find_map(|c| match &c.shape {
+        egui::Shape::Rect(r) if r.fill == Color32::from_white_alpha(18) => Some(r.rect),
+        _ => None,
+    })
+}
+
+#[test]
+fn dragging_a_rail_item_shows_where_it_lands_and_moves_it_there() {
+    let mut h = Ui1::new();
+    assert_eq!(h.app.rail_order(), ["Home", "Planner", "AI", "Teams"]);
+    let planner = h.rect("Rail Planner");
+    let ai = h.rect("Rail AI");
+    let teams = h.rect("Rail Teams");
+    assert_eq!(
+        rail_drop_slot(&h),
+        None,
+        "no slot until something is dragged"
+    );
+
+    // pick Teams up and carry it over Planner without letting go
+    let (from, to) = (teams.center(), planner.center());
+    h.frame(vec![egui::Event::PointerMoved(from)]);
+    h.frame(vec![egui::Event::PointerButton {
+        pos: from,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    }]);
+    for i in 1..=12 {
+        h.frame(vec![egui::Event::PointerMoved(
+            from + (to - from) * (i as f32 / 12.0),
+        )]);
+    }
+    h.settle();
+    let slot = rail_drop_slot(&h).expect("the slot it would land in is shown");
+    assert!(
+        (slot.center().y - planner.center().y).abs() < 2.0,
+        "the slot is where Planner was: {slot:?} vs {planner:?}"
+    );
+    // Planner and AI moved down a place to leave the slot open
+    assert!((h.rect("Rail Planner").center().y - ai.center().y).abs() < 1.0);
+    assert!((h.rect("Rail AI").center().y - teams.center().y).abs() < 1.0);
+    // Teams follows the mouse
+    assert!((h.rect("Rail Teams").center().y - to.y).abs() < 1.0);
+    // nothing is moved until it is let go
+    assert_eq!(h.app.data.extra.rail_items, ["Planner", "AI", "Teams"]);
+    assert_eq!(h.app.section, Section::Home, "a drag doesn't open the item");
+
+    h.frame(vec![egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    }]);
+    h.settle();
+    assert_eq!(h.app.data.extra.rail_items, ["Teams", "Planner", "AI"]);
+    assert_eq!(rail_drop_slot(&h), None, "the slot goes away when let go");
+    assert!((h.rect("Rail Teams").center().y - planner.center().y).abs() < 1.0);
+    assert!((h.rect("Rail AI").center().y - teams.center().y).abs() < 1.0);
+    assert_eq!(h.app.section, Section::Home, "a drop doesn't open the item");
+
+    // Home moves too; it is only written down while it isn't on top
+    h.drag("Rail Home", "Rail AI");
+    assert_eq!(h.app.rail_order(), ["Teams", "Planner", "AI", "Home"]);
+    assert_eq!(
+        h.app.data.extra.rail_items,
+        ["Teams", "Planner", "AI", "Home"]
+    );
+    h.drag("Rail Home", "Rail Teams");
+    assert_eq!(h.app.data.extra.rail_items, ["Teams", "Planner", "AI"]);
+
+    // let go where it was picked up: nothing changes
+    h.drag("Rail Planner", "Rail Planner");
+    assert_eq!(h.app.data.extra.rail_items, ["Teams", "Planner", "AI"]);
+    // and a plain click still opens the item
+    h.click("Rail AI");
+    assert_eq!(h.app.section, Section::Ai);
+}
+
+#[test]
+fn on_a_full_bar_a_dragged_item_stays_above_more() {
+    // the smallest window: some pinned apps are hidden in More's menu
+    let mut h = Ui1::sized(900.0, 560.0);
+    let pinned = [
+        "Docs",
+        "Dashboards",
+        "Forms",
+        "Goals",
+        "AI",
+        "Teams",
+        "Chat",
+    ];
+    h.app.data.extra.rail_items = pinned.map(String::from).to_vec();
+    h.settle();
+    let shown: Vec<&str> = pinned
+        .into_iter()
+        .filter(|l| h.has(&format!("Rail {}", l)))
+        .collect();
+    assert!(shown.len() >= 2 && shown.len() < pinned.len(), "{shown:?}");
+    let last = *shown.last().unwrap();
+
+    // carried far below the bar, the first app lands in the last place shown,
+    // not among the hidden ones
+    let from = h.rect("Rail Docs").center();
+    h.drag_by(from, pos2(from.x, 555.0));
+    let mut want: Vec<&str> = shown[1..].to_vec();
+    want.push("Docs");
+    want.extend(&pinned[shown.len()..]);
+    assert_eq!(h.app.data.extra.rail_items, want);
+    assert!(h.has("Rail Docs"), "still in the bar, after {last}");
+    assert!(h.rect("Rail Docs").bottom() <= h.rect("Rail More").top());
+}

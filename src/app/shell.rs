@@ -61,6 +61,18 @@ fn paint_rail_badge(p: &egui::Painter, danger: Color32, rail: Color32, icon: Pos
     p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
 }
 
+/// The distance from one rail item's top to the next one's.
+const RAIL_STEP: f32 = 62.0;
+
+/// A rail item being dragged: its place in the bar's order, the top it
+/// floats at under the mouse, and the place it would take if let go.
+#[derive(Clone, Copy)]
+struct RailLift {
+    from: usize,
+    at: f32,
+    to: usize,
+}
+
 /// The keys that open the rail's items, top to bottom.
 const RAIL_KEYS: [egui::Key; 9] = [
     egui::Key::Num1,
@@ -586,6 +598,34 @@ impl App {
         }
     }
 
+    /// The rail's items from the top: Home and the pinned apps. Home is
+    /// first unless it was dragged further down, the only time it is kept
+    /// in `rail_items`.
+    pub(super) fn rail_order(&self) -> Vec<String> {
+        let pinned = &self.data.extra.rail_items;
+        let mut v = Vec::with_capacity(pinned.len() + 1);
+        if !pinned.iter().any(|r| r == "Home") {
+            v.push("Home".to_string());
+        }
+        v.extend(pinned.iter().cloned());
+        v
+    }
+
+    /// Moves the rail item at `from` to `to`, both places in `rail_order`.
+    pub(super) fn move_rail_item(&mut self, from: usize, to: usize) {
+        let mut order = self.rail_order();
+        if from == to || from >= order.len() || to >= order.len() {
+            return;
+        }
+        let item = order.remove(from);
+        order.insert(to, item);
+        if order.first().map(String::as_str) == Some("Home") {
+            order.remove(0);
+        }
+        self.data.extra.rail_items = order;
+        self.dirty = true;
+    }
+
     /// Whether Cmd+1..9 go to the rail's items now. Not while a dialog, the
     /// command palette or quick add is up, nor while a task is open: there
     /// Cmd+1..4 set its priority.
@@ -645,8 +685,7 @@ impl App {
                     &[]
                 };
                 let bottom_top = rect.bottom() - bottom.len() as f32 * 56.0 - 2.0;
-                let mut items: Vec<String> = vec!["Home".into()];
-                items.extend(self.data.extra.rail_items.iter().cloned());
+                let items = self.rail_order();
                 let section_of = |l: &str| -> Option<Section> {
                     match l {
                         "Home" => Some(Section::Home),
@@ -686,13 +725,78 @@ impl App {
                 }
                 // as many as fit above the bottom group (62 px each, the last
                 // 60), More always among them; the rest are in More's menu
-                let mut y = rect.top() + 4.0;
-                let fits = (((bottom_top - y - 2.0) / 62.0).floor() as usize).max(2);
+                let top = rect.top() + 4.0;
+                let fits = (((bottom_top - top - 2.0) / RAIL_STEP).floor() as usize).max(2);
                 let hidden: Vec<String> = rows
                     .split_off((fits - 1).min(rows.len()))
                     .into_iter()
                     .map(|(l, _)| l)
                     .collect();
+                let slot_y = |i: usize| top + i as f32 * RAIL_STEP;
+                let item_id = |l: &str| ui.id().with(("rail", l));
+                // an item dragged up or down the bar floats under the mouse
+                // while the others move aside to leave its slot open; let go,
+                // it takes that slot. The pinned items shown come first in
+                // `rows`, in the bar's order; the app opened from More and
+                // those hidden in More's menu stay where they are
+                let pinned_shown = rows.iter().take_while(|(_, tmp)| tmp.is_none()).count();
+                let grab_key = ui.id().with("rail_grab");
+                let dragged = rows[..pinned_shown]
+                    .iter()
+                    .position(|(l, _)| ctx.is_being_dragged(item_id(l)));
+                let dropped = rows[..pinned_shown]
+                    .iter()
+                    .position(|(l, _)| ctx.drag_stopped_id() == Some(item_id(l)));
+                let lift = dragged.or(dropped).and_then(|from| {
+                    // how far below the item's top it was picked up, kept
+                    // for the whole drag so it doesn't jump to the mouse
+                    let grab = match ui.data(|d| d.get_temp::<f32>(grab_key)) {
+                        Some(g) => g,
+                        None => {
+                            let g = ctx.input(|i| i.pointer.press_origin())?.y - slot_y(from);
+                            ui.data_mut(|d| d.insert_temp(grab_key, g));
+                            g
+                        }
+                    };
+                    let py = ctx.input(|i| i.pointer.latest_pos())?.y;
+                    let at = (py - grab).clamp(slot_y(0), slot_y(pinned_shown - 1));
+                    let to = (((at - top) / RAIL_STEP).round() as usize).min(pinned_shown - 1);
+                    Some(RailLift { from, at, to })
+                });
+                if dragged.is_none() {
+                    ui.data_mut(|d| d.remove::<f32>(grab_key));
+                }
+                let lift = match lift {
+                    Some(l) if dropped.is_some() => {
+                        self.move_rail_item(l.from, l.to);
+                        // the same items, a new order among them
+                        for ((label, _), now) in rows.iter_mut().zip(self.rail_order()) {
+                            *label = now;
+                        }
+                        None
+                    }
+                    l => l,
+                };
+                // the order drawn: the dragged item taken out and put back
+                // at the slot it would drop into
+                let mut drawn: Vec<usize> = (0..rows.len()).collect();
+                if let Some(l) = lift {
+                    let ix = drawn.remove(l.from);
+                    drawn.insert(l.to, ix);
+                    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                    // the open slot: where the item lands when let go
+                    let r = Rect::from_min_size(
+                        pos2(rect.left() + 3.0, slot_y(l.to)),
+                        vec2(rect.width() - 6.0, 60.0),
+                    );
+                    p.rect_filled(r, 10.0, Color32::from_white_alpha(18));
+                    p.rect_stroke(
+                        r,
+                        10.0,
+                        Stroke::new(1.0_f32, Color32::from_white_alpha(110)),
+                        egui::StrokeKind::Inside,
+                    );
+                }
                 // red counts on Home (the Inbox) and Chat (unread messages);
                 // Chat counts on Home while it isn't in the bar of its own,
                 // and on More while it's pinned but hidden there
@@ -713,8 +817,27 @@ impl App {
                     }
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key))
                 };
-                for (label, temp) in &rows {
+                for (slot, &ix) in drawn.iter().enumerate() {
+                    let (label, temp) = &rows[ix];
                     let label = label.as_str();
+                    let lifted = lift.filter(|l| l.from == ix);
+                    // the others glide to their places while an item is
+                    // dragged; otherwise the slot is kept in step so the next
+                    // drag starts from where they are
+                    let y_id = ui.id().with(("rail_y", label));
+                    let y = match lifted {
+                        Some(l) => {
+                            ctx.animate_value_with_time(y_id, l.at, 0.0);
+                            l.at
+                        }
+                        None if lift.is_some() => {
+                            ctx.animate_value_with_time(y_id, slot_y(slot), 0.12)
+                        }
+                        None => {
+                            ctx.animate_value_with_time(y_id, slot_y(slot), 0.0);
+                            slot_y(slot)
+                        }
+                    };
                     let sec = section_of(label);
                     let active = match sec {
                         Some(Section::Home) => {
@@ -730,15 +853,37 @@ impl App {
                     let ibox = Rect::from_center_size(pos2(cx, y + 22.0), vec2(32.0, 32.0));
                     let hit =
                         Rect::from_min_max(pos2(rect.left(), y), pos2(rect.right(), y + 60.0));
-                    let id = match temp {
-                        Some(_) => ui.id().with("rail_temp"),
-                        None => ui.id().with(("rail", label)),
+                    let resp = match temp {
+                        Some(_) => ui.interact(hit, ui.id().with("rail_temp"), Sense::click()),
+                        None => ui.interact(hit, item_id(label), Sense::click_and_drag()),
                     };
-                    let resp = ui.interact(hit, id, Sense::click());
                     name_it(&resp, &format!("Rail {}", label));
+                    // the dragged item is drawn above the bar, on a raised
+                    // tile of the bar's color
+                    let p = if lifted.is_some() {
+                        let p = ctx.layer_painter(egui::LayerId::new(
+                            egui::Order::Tooltip,
+                            resp.id.with("lift"),
+                        ));
+                        let tile = Rect::from_min_size(
+                            pos2(rect.left() + 3.0, y),
+                            vec2(rect.width() - 6.0, 60.0),
+                        );
+                        let shadow = egui::epaint::Shadow {
+                            offset: [0, 4],
+                            blur: 14,
+                            spread: 0,
+                            color: Color32::from_black_alpha(110),
+                        };
+                        p.add(shadow.as_shape(tile, 10.0));
+                        p.rect_filled(tile, 10.0, t.rail_top.lerp_to_gamma(white, 0.16));
+                        p
+                    } else {
+                        p.clone()
+                    };
                     if active {
                         p.circle_filled(ibox.center(), 17.0, Color32::from_white_alpha(46));
-                    } else if resp.hovered() {
+                    } else if resp.hovered() && lift.is_none() {
                         p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                     }
                     line_icon(&p, rail_icon(label), ibox.center(), white);
@@ -764,7 +909,9 @@ impl App {
                     if unread > 0 {
                         paint_rail_badge(&p, t.danger, t.rail_top, ibox.center(), unread);
                     }
-                    rail_tip(&resp, rect, ibox, &shown);
+                    if lift.is_none() {
+                        rail_tip(&resp, rect, ibox, &shown);
+                    }
                     if resp.clicked() || pressed {
                         match temp {
                             Some(ts) => self.section = *ts,
@@ -776,8 +923,8 @@ impl App {
                             }
                         }
                     }
-                    y += 62.0;
                 }
+                let y = slot_y(rows.len());
                 // More
                 let ibox = Rect::from_center_size(pos2(cx, y + 22.0), vec2(32.0, 32.0));
                 let hit = Rect::from_min_max(pos2(rect.left(), y), pos2(rect.right(), y + 60.0));

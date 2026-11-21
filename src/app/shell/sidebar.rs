@@ -599,14 +599,25 @@ impl App {
         }
     }
 
-    /// Spaces: the heading with its menu, All Tasks, each Space's tree and
-    /// New Space.
+    /// Spaces: the heading with its menu and "+", All Tasks and each
+    /// Space's tree.
     fn sidebar_spaces(&mut self, ui: &mut Ui, tc: Color32, filter: &str, ws: &str) {
         if filter.is_empty() || filter == "space" {
-            let (folded, hs) =
-                self.side_header(ui, "Spaces", &[("\u{22EF}", "Spaces settings")], 0);
-            // "New Space" at the end is the one add button here
+            // the "+" beside the heading is the one way to add a Space (no
+            // "New Space" row under the list too)
+            let (folded, hs) = self.side_header(
+                ui,
+                "Spaces",
+                &[("\u{22EF}", "Spaces settings"), ("+", "Create Space")],
+                0,
+            );
             name_it(&hs[0], "Spaces settings");
+            if hs[1].clicked() {
+                self.modal = Some(Modal::NewSpace {
+                    name: String::new(),
+                    color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
+                });
+            }
             click_menu(&hs[0], |ui| {
                 if ui.button(tr("Expand all")).clicked() {
                     for s in &mut self.data.spaces {
@@ -669,12 +680,6 @@ impl App {
                     continue;
                 }
                 self.space_rows(ui, s);
-            }
-            if self.add_row(ui, "New Space").clicked() {
-                self.modal = Some(Modal::NewSpace {
-                    name: String::new(),
-                    color: STATUS_PALETTE[1 + (self.data.spaces.len() * 3) % 13],
-                });
             }
         }
     }

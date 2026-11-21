@@ -363,11 +363,15 @@ fn sidebar_channels_have_one_add_button() {
 
 #[test]
 fn sidebar_shows_each_button_once() {
-    // every section adds from its own row only, and a row's "..." leaves
+    // each section adds from one place only, and a row's "..." leaves
     // creating to the "+" beside it
     let mut h = Ui1::new();
-    assert!(!h.has("Sidebar Create Space"));
-    assert_eq!(h.count_named("New Space"), 1);
+    assert!(!h.has("New Space"), "Spaces add from the heading's \"+\"");
+    let n = h.app.data.spaces.len();
+    h.click("Sidebar Create Space");
+    h.type_text("Heading plus");
+    h.key(egui::Key::Enter);
+    assert_eq!(h.app.data.spaces.len(), n + 1);
     assert!(!h.has("Assigned to me"), "that is My Tasks itself");
     h.click("My Tasks");
     assert_eq!(h.app.loc, Location::MyTasks);

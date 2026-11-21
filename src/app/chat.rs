@@ -1354,7 +1354,7 @@ impl App {
             let matching: Vec<&Message> = at
                 .iter()
                 .filter_map(|&(c, m)| self.data.channels.get(c)?.messages.get(m))
-                .filter(|m| q.is_empty() || m.text.to_lowercase().contains(&q) || m.post_title.as_ref().map(|t| t.to_lowercase().contains(&q)).unwrap_or(false))
+                .filter(|m| q.is_empty() || m.text.to_lowercase().contains(&q) || typed_post_title(m).is_some_and(|t| t.to_lowercase().contains(&q)))
                 .filter(|m| match panel {
                     1 => m.pinned,
                     2 => !m.replies.is_empty(),

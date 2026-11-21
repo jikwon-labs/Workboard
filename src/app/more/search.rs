@@ -281,15 +281,14 @@ impl App {
                     .iter()
                     .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
                 {
-                    // a post is found by its title too (its text may be empty)
-                    let title = super::chat::shown_post_title(m);
+                    // a post is found by its title too (its text may be
+                    // empty), a title someone wrote, not the default
+                    let title = super::chat::typed_post_title(m);
                     let in_text = m.text.to_lowercase().contains(&ql);
-                    let in_title = title
-                        .as_ref()
-                        .is_some_and(|t| t.to_lowercase().contains(&ql));
+                    let in_title = title.is_some_and(|t| t.to_lowercase().contains(&ql));
                     if in_text || in_title {
                         let shown = match title {
-                            Some(t) if !in_text => t,
+                            Some(t) if !in_text => t.to_string(),
                             _ => super::chat::shown_text(m),
                         };
                         rows.push((

@@ -914,3 +914,55 @@ fn the_default_post_title_starts_no_workflow() {
         format!("{} posted: Update on the move", h.app.who(h.app.data.me))
     );
 }
+
+/// Search doesn't list every post sent without a title for a word that is
+/// part of the default title ("date", "Update"): nobody wrote it.
+#[test]
+fn search_leaves_out_the_default_post_title() {
+    let mut h = posts_page();
+    let gen = channel_id(&h, "general");
+    add_post(
+        &mut h,
+        gen,
+        2,
+        "Update",
+        "Lunch is here",
+        "Announcement",
+        60,
+    );
+    h.app.section = Section::Home;
+    h.settle();
+    h.click("Search");
+    h.type_text("date");
+    h.settle();
+    assert!(!h.has("Lunch is here"), "not found by the default title");
+    assert!(!h.has("Update"));
+    h.key(egui::Key::Escape);
+    h.click("Search");
+    h.type_text("lunch");
+    h.settle();
+    assert!(h.has("Lunch is here"), "found by what was written");
+    h.key(egui::Key::Escape);
+
+    // nor finding in the channel
+    h.click("general");
+    h.app.channel_find = Some(String::new());
+    h.settle();
+    // the find box beside the bookmarks chip (a menu row has the same words)
+    let row = h.rect("Add bookmarks, notes, and more").center().y;
+    let find = h
+        .painted_text("Find in channel")
+        .into_iter()
+        .map(|(r, _)| r.center())
+        .find(|p| (p.y - row).abs() < 12.0)
+        .unwrap();
+    h.click_at(find);
+    h.type_text("date");
+    h.settle();
+    assert_eq!(h.app.channel_find.as_deref(), Some("date"));
+    assert!(
+        h.painted_text("Lunch is here").is_empty(),
+        "not in the channel's finds: {:?}",
+        h.painted_text("Lunch is here")
+    );
+}

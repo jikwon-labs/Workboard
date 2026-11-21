@@ -174,9 +174,10 @@ extension WorkspaceView {
         return out.sorted { $0.message.ts > $1.message.ts }
     }
 
-    /// Every post in the channels I can see, newest first.
+    /// Every post in the channels and direct messages I can see (as on the
+    /// Mac's Posts page), newest first.
     public func posts(me: UInt64) -> [(channel: ChannelView, message: MessageView)] {
-        visibleChannels(me: me).filter { $0.kind == .channel }.flatMap { c in c.messages.filter { $0.postTitle != nil }.map { (c, $0) } }
+        visibleChannels(me: me).flatMap { c in c.messages.filter { $0.postTitle != nil }.map { (c, $0) } }
             .sorted { $0.1.ts > $1.1.ts }
     }
 }

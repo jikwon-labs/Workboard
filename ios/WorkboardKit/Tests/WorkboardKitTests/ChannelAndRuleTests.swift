@@ -88,6 +88,10 @@ final class MessageExtrasTests: XCTestCase {
         // only text written: the post gets that default title too, as on the Mac
         XCTAssertTrue(Edits.sendPost(&d, channel: 302, title: "  ", text: "Coffee is on", me: 1, id: 9004, ts: 8))
         XCTAssertTrue(WorkspaceView(d).posts(me: 1).contains { $0.message.id == 9004 && $0.message.hasDefaultPostTitle })
+        // a post in a direct message I'm in is listed, as on the Mac's Posts page; not for others
+        XCTAssertTrue(Edits.sendPost(&d, channel: 303, title: "Lunch", text: "Pizza", me: 1, id: 9005, ts: 9))
+        XCTAssertEqual(WorkspaceView(d).posts(me: 1).first?.message.id, 9005)
+        XCTAssertFalse(WorkspaceView(d).posts(me: 3).contains { $0.message.id == 9005 })
         XCTAssertTrue(Edits.remindAboutMessage(&d, channel: 301, message: 313, at: 100, me: 1, id: 9002))
         XCTAssertEqual(d.at("extra.reminders")![0]!["message"], [301, 313])
     }

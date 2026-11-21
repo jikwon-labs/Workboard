@@ -696,3 +696,33 @@ fn a_goal_just_short_of_100_is_not_achieved() {
     assert!(h.has("Goal Signups"), "still in progress");
     assert!(!h.has("Achieved Signups"));
 }
+
+#[test]
+fn ticking_the_last_task_on_a_goals_page_opens_goal_achieved() {
+    let (mut h, _, _) = two_goals();
+    let task = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.parent.is_none() && !h.app.data.is_closed(t) && !t.archived)
+        .expect("an open task")
+        .clone();
+    let id = add_goal_with(
+        &mut h,
+        "Ship it",
+        vec![GoalTarget {
+            name: "Launch tasks".into(),
+            kind: TargetKind::Tasks { ids: vec![task.id] },
+        }],
+    );
+    h.click("Goal Ship it");
+    h.click(&format!("Tick {}", task.name));
+    assert!(h.app.data.is_closed(h.app.task(task.id).unwrap()));
+    assert!(
+        matches!(h.app.modal, Some(Modal::GoalAchieved { id: g }) if g == id),
+        "Goal achieved opens as it does for a number or a tick: {:?}",
+        h.app.modal.as_ref().map(|_| "another dialog")
+    );
+    assert_eq!(goal(&h, id).done_on, Some(today()));
+}

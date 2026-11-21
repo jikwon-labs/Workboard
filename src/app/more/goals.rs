@@ -439,6 +439,19 @@ impl App {
             return;
         };
         let before = pct_of(self.goal_progress(&self.data.extra.goals[gi]));
+        self.goal_edit_from(gi, before, what, f);
+    }
+
+    /// `goal_edit` for goal `gi` with its progress `before` the change, for
+    /// a change made outside it first (a task closed).
+    fn goal_edit_from(
+        &mut self,
+        gi: usize,
+        before: u8,
+        what: Option<GoalChange>,
+        f: impl FnOnce(&mut Goal),
+    ) {
+        let gid = self.data.extra.goals[gi].id;
         f(&mut self.data.extra.goals[gi]);
         let now = now_ts();
         let pct = pct_of(self.goal_progress(&self.data.extra.goals[gi]));
@@ -1518,6 +1531,9 @@ impl App {
                 };
                 let target = tg.name.clone();
                 let done = !self.data.is_closed(&tk);
+                // where it stood before the task changes it, so closing the
+                // last one opens Goal achieved as ticking a target does
+                let before = pct_of(self.goal_progress(goal));
                 self.toggle_done(task);
                 // the task changes through the actions queue: apply it now so
                 // the goal's progress counts it
@@ -1525,8 +1541,12 @@ impl App {
                 for a in acts {
                     self.apply(a);
                 }
-                self.goal_edit(
-                    g,
+                let Some(gi) = self.data.extra.goals.iter().position(|x| x.id == g) else {
+                    return;
+                };
+                self.goal_edit_from(
+                    gi,
+                    before,
                     Some(GoalChange::Task {
                         target,
                         task: tk.name,

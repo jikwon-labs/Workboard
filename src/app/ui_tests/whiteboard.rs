@@ -957,3 +957,225 @@ fn clear_board_question_has_even_room_around_it() {
     assert_eq!(h.app.sweep.confirm, None);
     assert!(h.has("Clear board"), "back to the menu");
 }
+
+/// A board open on screen at the starting view with notes "A", "B"... at
+/// these places, and no "how to start" card.
+fn board_with_notes(h: &mut Ui1, at: &[[f32; 2]]) -> u64 {
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    h.app.sweep.wb_new = None;
+    let wid = h.app.wb_open.unwrap();
+    let ids: Vec<u64> = at.iter().map(|_| h.app.data.new_id()).collect();
+    let wb = h
+        .app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap();
+    for (k, (pos, id)) in at.iter().zip(ids).enumerate() {
+        wb.notes.push(Sticky {
+            id,
+            pos: *pos,
+            text: char::from(b'A' + k as u8).to_string(),
+            color: [0xf8, 0xae, 0x00],
+        });
+    }
+    h.settle();
+    wid
+}
+
+/// Where a point of the board is on screen, at the starting view.
+fn on_screen(h: &Ui1, b: [f32; 2]) -> Pos2 {
+    h.rect("Whiteboard canvas").min + WB_ORIGIN + vec2(b[0], b[1])
+}
+
+fn note_pos(h: &Ui1, wid: u64, id: u64) -> [f32; 2] {
+    board_of(h, wid)
+        .notes
+        .iter()
+        .find(|n| n.id == id)
+        .unwrap()
+        .pos
+}
+
+fn button(pos: Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    }
+}
+
+/// Whether the dashed lines of a note lining up with others are drawn.
+fn guides_shown(h: &Ui1) -> bool {
+    h.shapes.iter().any(|c| {
+        matches!(&c.shape, egui::Shape::LineSegment { stroke, .. }
+            if stroke.color == crate::app::more::WB_GUIDE)
+    })
+}
+
+/// A note is taken by its top strip with any tool (here the pen, which
+/// drew a line instead before), and while dragged it snaps into line with
+/// another note near it, a dashed line showing it; moved on, it lets go
+/// again. Cmd+Z puts it back.
+#[test]
+fn a_note_moves_by_its_top_strip_and_lines_up_with_the_others() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[[100.0, 100.0], [400.0, 113.0]]);
+    let b = board_of(&h, wid).notes[1].id;
+    h.app.wb_tool = 0;
+    h.settle();
+    let grab = on_screen(&h, [480.0, 113.0 + 9.0]);
+    h.hover(grab);
+    assert_eq!(h.cursor, egui::CursorIcon::Grab, "the strip shows the hand");
+    h.frame(vec![button(grab, true)]);
+    // up 10: 3 below A, so it takes A's line
+    for k in 1..=10 {
+        h.frame(vec![egui::Event::PointerMoved(grab - vec2(0.0, k as f32))]);
+    }
+    assert_eq!(note_pos(&h, wid, b), [400.0, 100.0], "in line with A");
+    assert!(guides_shown(&h), "a dashed line shows it");
+    assert_eq!(h.cursor, egui::CursorIcon::Grabbing);
+    // on up, it lets go of the line and follows the pointer again
+    for k in 1..=10 {
+        h.frame(vec![egui::Event::PointerMoved(
+            grab - vec2(0.0, 10.0 + 3.0 * k as f32),
+        )]);
+    }
+    assert_eq!(note_pos(&h, wid, b), [400.0, 73.0]);
+    assert!(!guides_shown(&h));
+    // back near the line and let go there
+    let end = grab - vec2(0.0, 12.0);
+    h.frame(vec![egui::Event::PointerMoved(end)]);
+    h.frame(vec![button(end, false)]);
+    h.settle();
+    assert_eq!(note_pos(&h, wid, b), [400.0, 100.0]);
+    assert!(!guides_shown(&h), "the line goes when it is let go");
+    assert!(board_of(&h, wid).strokes.is_empty(), "the pen drew nothing");
+    assert!(h.app.sweep.wb_note_drag.is_none());
+    cmd_key(&mut h, egui::Key::Z);
+    assert_eq!(note_pos(&h, wid, b), [400.0, 113.0], "Cmd+Z put it back");
+}
+
+/// With the pen the pointer is a pencil, its tip where the line starts and
+/// in the pen's colour; on a note's text it is the I-beam, on the tool bar
+/// the hand, and the other tools keep the arrow.
+#[test]
+fn the_pen_shows_a_pencil_for_the_pointer() {
+    let mut h = Ui1::new();
+    board_with_notes(&mut h, &[[100.0, 100.0]]);
+    h.app.wb_tool = 0;
+    h.app.wb_color = crate::app::more::WB_COLORS[2];
+    h.settle();
+    let at = h.rect("Whiteboard canvas").center() + vec2(100.0, 100.0);
+    h.hover(at);
+    assert_eq!(h.cursor, egui::CursorIcon::None, "the arrow is hidden");
+    let ink = rgb(crate::app::more::WB_COLORS[2]);
+    let tip = h.shapes.iter().any(|c| match &c.shape {
+        egui::Shape::Path(p) => p.fill == ink && (p.points[0] - at).length() < 0.5,
+        _ => false,
+    });
+    assert!(tip, "a pencil tip in the pen colour at the pointer");
+    h.hover(on_screen(&h, [140.0, 150.0]));
+    assert_eq!(h.cursor, egui::CursorIcon::Text, "on a note's text");
+    h.hover(h.rect("Eraser").center());
+    assert_eq!(h.cursor, egui::CursorIcon::PointingHand, "on the tool bar");
+    h.app.wb_tool = 1;
+    h.hover(at);
+    assert_eq!(
+        h.cursor,
+        egui::CursorIcon::Default,
+        "other tools: the arrow"
+    );
+}
+
+/// A click anywhere on a note is for typing in it, whatever the tool: the
+/// sticky note tool made another note on top of it, and the move tool
+/// could not type at all. With the move tool a drag still moves it, and
+/// once typing, its text can be dragged over to select while the strip
+/// still moves it.
+#[test]
+fn a_click_on_a_note_types_in_it_with_any_tool() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
+    let nid = board_of(&h, wid).notes[0].id;
+    let text = egui::Id::new(("wb_note_text", wid, nid));
+    let typing = |h: &Ui1| h.ctx.memory(|m| m.has_focus(text));
+    let note = |h: &Ui1| board_of(h, wid).notes;
+    h.app.wb_tool = 1;
+    h.settle();
+    // low on the note, below its text
+    h.click_at(on_screen(&h, [180.0, 212.0]));
+    assert_eq!(note(&h).len(), 1, "no new note on top of it");
+    assert!(typing(&h), "it is ready to type in");
+    h.type_text("!");
+    assert_eq!(note(&h)[0].text, "A!", "typed after its text");
+    // on its strip
+    h.click_at(on_screen(&h, [180.0, 109.0]));
+    assert_eq!(note(&h).len(), 1);
+
+    h.app.wb_tool = 2;
+    h.settle();
+    h.click_at(h.rect("Whiteboard canvas").center());
+    assert!(!typing(&h));
+    h.click_at(on_screen(&h, [140.0, 150.0]));
+    assert!(typing(&h), "the move tool types too");
+    h.type_text("?");
+    assert_eq!(note(&h)[0].text, "A!?");
+    h.drag_by(on_screen(&h, [112.0, 126.0]), on_screen(&h, [200.0, 126.0]));
+    assert_eq!(
+        note(&h)[0].pos,
+        [100.0, 100.0],
+        "dragging over its text selects"
+    );
+    h.drag_by(on_screen(&h, [180.0, 109.0]), on_screen(&h, [480.0, 309.0]));
+    assert_eq!(note(&h)[0].pos, [400.0, 300.0], "its strip still moves it");
+    // not typing, the move tool takes it anywhere
+    h.click_at(on_screen(&h, [50.0, 500.0]));
+    assert!(!typing(&h));
+    h.drag_by(on_screen(&h, [480.0, 380.0]), on_screen(&h, [380.0, 380.0]));
+    assert_eq!(note(&h)[0].pos, [300.0, 300.0]);
+}
+
+/// Cmd+Z takes back my last change on the board, as the Undo button does
+/// (its tip says so); typing in a note it is the note's own undo, and
+/// Cmd+Shift+Z is not an undo.
+#[test]
+fn cmd_z_takes_back_on_the_board_but_not_while_typing() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
+    h.app.wb_tool = 0;
+    h.settle();
+    let c = h.rect("Whiteboard canvas").center();
+    h.drag_by(c, c + vec2(80.0, 30.0));
+    assert_eq!(board_of(&h, wid).strokes.len(), 1);
+    cmd_key(&mut h, egui::Key::Z);
+    assert!(board_of(&h, wid).strokes.is_empty(), "Cmd+Z took it back");
+    h.drag_by(c, c + vec2(80.0, 30.0));
+    let shift_cmd = egui::Modifiers {
+        command: true,
+        mac_cmd: true,
+        shift: true,
+        ..Default::default()
+    };
+    h.key_with(egui::Key::Z, shift_cmd);
+    assert_eq!(board_of(&h, wid).strokes.len(), 1, "Cmd+Shift+Z is no undo");
+    h.click_at(on_screen(&h, [140.0, 150.0]));
+    h.type_text("xyz");
+    cmd_key(&mut h, egui::Key::Z);
+    assert_eq!(board_of(&h, wid).strokes.len(), 1, "the stroke stays");
+    assert_eq!(board_of(&h, wid).notes.len(), 1);
+    h.hover(h.rect("Undo").center());
+    for _ in 0..12 {
+        h.frame(vec![]);
+    }
+    assert!(
+        drawn_texts(&h.shapes)
+            .iter()
+            .any(|t| t.contains("\u{2318}Z")),
+        "the tip shows the keys"
+    );
+}

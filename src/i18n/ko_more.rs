@@ -300,7 +300,7 @@ pub const T: &[(&str, &str)] = &[
     ("Zoom to 100%", "100%로 보기"),
     ("Width", "굵기"),
     ("Click the board to add a note", "보드를 누르면 메모가 붙습니다"),
-    ("Drag a note to move it", "메모를 끌어 옮깁니다"),
+    ("Drag a note to move it, click it to type", "메모를 끌어 옮기고, 눌러서 글을 씁니다"),
     ("Click or drag over a stroke to erase it", "획을 누르거나 문질러서 지웁니다"),
     ("New whiteboard created", "새 화이트보드를 만들었습니다"),
     ("Type its name at the top left. How would you like to start?", "왼쪽 위에서 바로 이름을 적을 수 있습니다. 어떻게 시작할까요?"),

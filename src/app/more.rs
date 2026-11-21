@@ -29,6 +29,8 @@ pub use search::Hit;
 pub use whiteboard::{WbNew, WbUndo, WbView};
 // for tests that place the pointer on the board
 #[cfg(test)]
+pub(crate) use whiteboard::GUIDE as WB_GUIDE;
+#[cfg(test)]
 pub use whiteboard::{WB_COLORS, WB_ORIGIN};
 
 /// Screen state of the app pages (not saved).
@@ -53,6 +55,10 @@ pub struct SweepUi {
     pub wb_undo: Vec<(u64, WbUndo)>,
     /// The pen stroke being drawn: (whiteboard, stroke id).
     pub wb_drawing: Option<(u64, u64)>,
+    /// The note being dragged: (whiteboard, note id, where it was when the
+    /// drag began). Its place follows the pointer from there, so lining up
+    /// with another note can let go again as the pointer moves on.
+    pub wb_note_drag: Option<(u64, u64, [f32; 2])>,
     /// Each whiteboard's pan and zoom on screen (not saved).
     pub wb_view: HashMap<u64, WbView>,
     /// The whiteboard just made here, shown as new for a moment.

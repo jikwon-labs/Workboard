@@ -535,13 +535,14 @@ impl App {
         y += 9.0;
         let can_undo = self.sweep.wb_undo.iter().any(|u| u.0 == wid);
         let r = Rect::from_min_size(pos2(bar.left() + 6.0, y), vec2(TOOL, TOOL));
+        let tip = format!("{}  {}", tr("Undo"), crate::os::keys("\u{2318}Z"));
         if bar_button(
             ui,
             t,
             r,
             ui.id().with(("wb_undo", wid)),
             "Undo",
-            tr("Undo"),
+            &tip,
             false,
             can_undo,
             |p, c, fg| {
@@ -578,7 +579,7 @@ impl App {
         };
         let hint = match tool {
             1 => Some(tr("Click the board to add a note")),
-            2 => Some(tr("Drag a note to move it")),
+            2 => Some(tr("Drag a note to move it, click it to type")),
             3 => Some(tr("Click or drag over a stroke to erase it")),
             _ => None,
         }

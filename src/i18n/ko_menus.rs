@@ -165,6 +165,7 @@ pub const T: &[(&str, &str)] = &[
     ("Select several tasks", "여러 작업 선택"),
     ("Commands in a Doc", "문서에서 명령어"),
     ("Back / forward", "뒤로 / 앞으로"),
+    ("Undo on a whiteboard", "화이트보드에서 실행 취소"),
     ("Send a message or save a new task", "메시지 보내기 또는 새 작업 저장"),
     ("New line in a message", "메시지에서 줄 바꾸기"),
     ("Close a window or menu", "창이나 메뉴 닫기"),

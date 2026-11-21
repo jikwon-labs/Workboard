@@ -98,6 +98,115 @@ impl WbView {
     }
 }
 
+/// A sticky note's size on the board.
+pub const NOTE_SIZE: egui::Vec2 = egui::Vec2::new(160.0, 120.0);
+/// Height of a note's top strip (its colour dot and x sit on it): taken
+/// there, a note moves whatever the tool.
+const NOTE_GRIP: f32 = 18.0;
+/// How near, on screen, a dragged note has to come to lining up with
+/// another before it snaps there.
+const SNAP_REACH: f32 = 6.0;
+/// The dashed lines a dragged note shows when it lines up with others.
+pub(crate) const GUIDE: Color32 = Color32::from_rgb(0xe8, 0x3e, 0x8c);
+
+/// A dashed line shown while a dragged note lines up with others.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct NoteGuide {
+    /// 0: an upright line at x = `at`; 1: a level line at y = `at`.
+    pub axis: usize,
+    pub at: f32,
+    /// Where it starts and ends along the other axis.
+    pub from: f32,
+    pub to: f32,
+}
+
+/// Where a note dragged to `at` settles among `others` (their top-left
+/// corners, in board units), and the lines it lines up on. On each axis,
+/// within `reach` of another note's middle it takes that middle, and within
+/// reach of an edge it takes that edge (flush with it, or just touching
+/// it); the nearest wins.
+pub(crate) fn snap_note(
+    at: [f32; 2],
+    others: &[[f32; 2]],
+    reach: f32,
+) -> ([f32; 2], Vec<NoteGuide>) {
+    let size = [NOTE_SIZE.x, NOTE_SIZE.y];
+    let mut pos = at;
+    for axis in 0..2 {
+        let s = size[axis];
+        // a note's lines on this axis: (offset from its corner, the middle?)
+        let lines = [(0.0, false), (s / 2.0, true), (s, false)];
+        let mut best: Option<f32> = None;
+        for o in others {
+            for (a, am) in lines {
+                for (b, bm) in lines {
+                    let d = o[axis] + b - (at[axis] + a);
+                    if am == bm && d.abs() <= reach && best.is_none_or(|x| d.abs() < x.abs()) {
+                        best = Some(d);
+                    }
+                }
+            }
+        }
+        pos[axis] += best.unwrap_or(0.0);
+    }
+    let on = |x: f32, y: f32| (x - y).abs() < 0.01;
+    let mut guides = vec![];
+    for axis in 0..2 {
+        let (s, os, k) = (size[axis], size[1 - axis], 1 - axis);
+        let mut add = |at: f32, with: Vec<&[f32; 2]>| {
+            if with.is_empty() {
+                return;
+            }
+            let from = with.iter().map(|o| o[k]).fold(pos[k], f32::min);
+            let to = with.iter().map(|o| o[k] + os).fold(pos[k] + os, f32::max);
+            guides.push(NoteGuide { axis, at, from, to });
+        };
+        // middles in line: one line through them (their edges are in line
+        // too, every note being the same size)
+        let mid = pos[axis] + s / 2.0;
+        let in_line = |o: &&[f32; 2]| on(o[axis] + s / 2.0, mid);
+        add(mid, others.iter().filter(in_line).collect());
+        // a note touching it edge to edge
+        for edge in [pos[axis], pos[axis] + s] {
+            add(
+                edge,
+                others
+                    .iter()
+                    .filter(|o| !in_line(o) && (on(o[axis], edge) || on(o[axis] + s, edge)))
+                    .collect(),
+            );
+        }
+    }
+    (pos, guides)
+}
+
+/// The pointer while drawing with the pen: a pencil, its tip (in the pen's
+/// colour) where the line starts. egui has no pencil among its cursors, so
+/// the real one is hidden and this is painted at its place.
+fn paint_pencil(p: &egui::Painter, tip: egui::Pos2, ink: Color32) {
+    let u = vec2(1.0, -1.0).normalized();
+    let v = vec2(1.0, 1.0).normalized();
+    let at = |along: f32, side: f32| tip + u * along + v * side;
+    let line = Stroke::new(1.2_f32, Color32::from_gray(40));
+    let (cone, end) = (6.5, 20.0);
+    p.add(egui::Shape::convex_polygon(
+        vec![at(cone, -3.5), at(cone, 3.5), at(end, 3.5), at(end, -3.5)],
+        Color32::WHITE,
+        line,
+    ));
+    p.add(egui::Shape::convex_polygon(
+        vec![tip, at(cone, 3.5), at(cone, -3.5)],
+        Color32::from_rgb(0xf3, 0xdc, 0xb8),
+        line,
+    ));
+    p.add(egui::Shape::convex_polygon(
+        vec![tip, at(2.6, 1.4), at(2.6, -1.4)],
+        ink,
+        Stroke::new(0.8_f32, ink),
+    ));
+    p.line_segment([at(end - 4.0, -3.5), at(end - 4.0, 3.5)], line);
+}
+
 /// Pen and note colours on a whiteboard.
 pub const WB_COLORS: [[u8; 3]; 6] = [
     [32, 32, 32],
@@ -129,6 +238,19 @@ impl App {
                     return;
                 };
                 let wid = self.data.extra.whiteboards[wi].id;
+                // Cmd+Z takes back my last change on the board, as the Undo
+                // button does; typing in a note or the board's name, it
+                // undoes the typing instead (Cmd+Shift+Z is not an undo)
+                if self.modal.is_none()
+                    && !ui.ctx().wants_keyboard_input()
+                    && ui.input_mut(|i| {
+                        let redo = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+                        !i.consume_key(redo, egui::Key::Z)
+                            && i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)
+                    })
+                {
+                    self.wb_undo(wid);
+                }
                 if self.sweep.wb_width <= 0.0 {
                     self.sweep.wb_width = 2.5;
                 }
@@ -212,10 +334,63 @@ impl App {
                         Stroke::new(s.width * z, rgb(s.color)),
                     ));
                 }
-                let mut drag_note = None;
+                // a note being dragged follows the pointer from where it was
+                // taken, lining up with the notes in view as it nears them
+                let mut guides = vec![];
+                if let Some((_, nid, start)) = self.sweep.wb_note_drag.filter(|d| d.0 == wid) {
+                    let ni = wb.notes.iter().position(|n| n.id == nid);
+                    let moved = ui.input(|i| {
+                        i.pointer
+                            .press_origin()
+                            .zip(i.pointer.interact_pos())
+                            .filter(|_| i.pointer.primary_down())
+                            .map(|(o, q)| (q - o) / z)
+                    });
+                    match (ni, moved) {
+                        (Some(ni), Some(d)) => {
+                            let in_view: Vec<[f32; 2]> = wb
+                                .notes
+                                .iter()
+                                .filter(|n| n.id != nid)
+                                .filter(|n| {
+                                    Rect::from_min_size(
+                                        view.to_screen(origin, n.pos),
+                                        NOTE_SIZE * z,
+                                    )
+                                    .intersects(rect)
+                                })
+                                .map(|n| n.pos)
+                                .collect();
+                            let (at, lines) = snap_note(
+                                [start[0] + d.x, start[1] + d.y],
+                                &in_view,
+                                SNAP_REACH / z,
+                            );
+                            if wb.notes[ni].pos != at {
+                                wb.notes[ni].pos = at;
+                                self.dirty = true;
+                            }
+                            guides = lines;
+                        }
+                        _ => {
+                            // let go; a drag that left it where it was is
+                            // nothing to undo
+                            self.sweep.wb_note_drag = None;
+                            let back = ni.is_some_and(|ni| wb.notes[ni].pos == start);
+                            if back
+                                && matches!(self.sweep.wb_undo.last(),
+                                    Some((w, WbUndo::NoteMoved(id, _))) if *w == wid && *id == nid)
+                            {
+                                self.sweep.wb_undo.pop();
+                            }
+                        }
+                    }
+                }
                 let mut move_from = None;
                 let mut drop_note = None;
                 let mut recolor = None;
+                let mut type_in = None;
+                let hover = ui.input(|i| i.pointer.hover_pos());
                 for (i, n) in wb.notes.iter_mut().enumerate() {
                     // every widget of a note takes its id from the note, so
                     // notes skipped off screen don't hand their ids (and the
@@ -225,8 +400,7 @@ impl App {
                     } else {
                         (1 << 63) | i as u64
                     };
-                    let r =
-                        Rect::from_min_size(view.to_screen(origin, n.pos), vec2(160.0, 120.0) * z);
+                    let r = Rect::from_min_size(view.to_screen(origin, n.pos), NOTE_SIZE * z);
                     // notes off the visible part of the board are not drawn
                     if !r.intersects(rect) {
                         continue;
@@ -237,19 +411,35 @@ impl App {
                         Color32::from_black_alpha(25),
                     );
                     p.rect_filled(r, 4.0 * z, note_fill(&t, n.color));
-                    let inner =
-                        Rect::from_min_max(r.min + vec2(8.0, 18.0) * z, r.max - vec2(8.0, 8.0) * z);
+                    let inner = Rect::from_min_max(
+                        r.min + vec2(8.0, NOTE_GRIP) * z,
+                        r.max - vec2(8.0, 8.0) * z,
+                    );
+                    let text_id = egui::Id::new(("wb_note_text", wid, key));
+                    let typable = z >= 0.45;
+                    // a click anywhere on the note is for typing in it (with
+                    // the sticky note tool it made another note on top); a
+                    // drag from its margins still draws or erases
+                    let body = ui.interact(
+                        r.intersect(rect),
+                        ui.id().with(("note_body", wid, key)),
+                        Sense::click(),
+                    );
+                    crate::widgets::no_pointer(&body);
+                    if body.clicked() && typable {
+                        type_in = Some((text_id, n.text.chars().count()));
+                    }
                     let mut child = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt(("wb_note", wid, key))
                             .max_rect(inner),
                     );
                     child.set_clip_rect(inner.intersect(rect));
-                    if z >= 0.45
+                    if typable
                         && child
                             .add(
                                 egui::TextEdit::multiline(&mut n.text)
-                                    .id(egui::Id::new(("wb_note_text", wid, key)))
+                                    .id(text_id)
                                     .frame(false)
                                     .font(FontId::proportional(13.0 * z))
                                     .desired_width(144.0 * z)
@@ -259,7 +449,7 @@ impl App {
                     {
                         self.dirty = true;
                     }
-                    if z < 0.45 {
+                    if !typable {
                         // too small to type in: the text is only drawn
                         p.with_clip_rect(inner.intersect(rect)).text(
                             inner.left_top(),
@@ -269,17 +459,54 @@ impl App {
                             t.text,
                         );
                     }
-                    if self.wb_tool == 2 && !space {
+                    // a note moves taken by its top strip, whatever the
+                    // tool, or with the move tool anywhere on it. A click
+                    // there is for typing; once typing, the move tool too
+                    // moves it by the strip only, so the text can be
+                    // clicked into and selected
+                    let editing = typable && ui.memory(|m| m.has_focus(text_id));
+                    let grip = Rect::from_min_size(r.min, vec2(r.width(), NOTE_GRIP * z));
+                    if !space {
+                        let area = if self.wb_tool == 2 && !editing {
+                            r
+                        } else {
+                            grip
+                        };
                         let h = ui.interact(
-                            r.intersect(rect),
+                            area.intersect(rect),
                             ui.id().with(("note", wid, key)),
-                            Sense::drag(),
+                            Sense::click_and_drag(),
                         );
+                        crate::widgets::no_pointer(&h);
                         if h.drag_started() {
                             move_from = Some((n.id, n.pos));
                         }
-                        if h.dragged() {
-                            drag_note = Some((i, h.drag_delta() / z));
+                        if h.clicked() && typable {
+                            type_in = Some((text_id, n.text.chars().count()));
+                        }
+                        let moving = self
+                            .sweep
+                            .wb_note_drag
+                            .is_some_and(|d| d.0 == wid && d.1 == n.id);
+                        if h.dragged() || moving {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                        } else if h.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                        }
+                    }
+                    // dots on the strip show where to take it, while the
+                    // pointer is on the note or it is being typed in
+                    let pointed = hover.is_some_and(|q| r.contains(q) && rect.contains(q));
+                    if typable && (pointed || editing) {
+                        let k = z.min(1.5);
+                        for dx in [-5.0, 0.0, 5.0] {
+                            for dy in [-2.0, 2.0] {
+                                p.circle_filled(
+                                    grip.center() + vec2(dx, dy) * k,
+                                    1.2 * k,
+                                    Color32::from_black_alpha(80),
+                                );
+                            }
                         }
                     }
                     // a colour dot along the note's top edge recolours it
@@ -294,6 +521,9 @@ impl App {
                             Sense::click(),
                         );
                         name_it(&dr, &format!("Note colour {}", i + 1));
+                        if dr.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
                         p.circle_filled(dot.center(), 5.0, rgb(n.color));
                         hover_ring(ui, &dr, dot.shrink(1.0), 6.0);
                         p.circle_stroke(
@@ -370,11 +600,34 @@ impl App {
                 }
                 if let Some((id, at)) = move_from {
                     self.sweep.wb_undo.push((wid, WbUndo::NoteMoved(id, at)));
+                    self.sweep.wb_note_drag = Some((wid, id, at));
+                    ui.ctx().request_repaint();
                 }
-                if let Some((i, d)) = drag_note {
-                    wb.notes[i].pos[0] += d.x;
-                    wb.notes[i].pos[1] += d.y;
-                    self.dirty = true;
+                if let Some((id, len)) = type_in {
+                    // the caret goes after the text, ready to add to it
+                    ui.memory_mut(|m| m.request_focus(id));
+                    let mut st = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+                    st.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(len),
+                    )));
+                    st.store(ui.ctx(), id);
+                }
+                // the lines the dragged note lines up on, over the notes
+                for g in &guides {
+                    let (a, b, ext) = if g.axis == 0 {
+                        ([g.at, g.from], [g.at, g.to], vec2(0.0, 12.0))
+                    } else {
+                        ([g.from, g.at], [g.to, g.at], vec2(12.0, 0.0))
+                    };
+                    p.extend(egui::Shape::dashed_line(
+                        &[
+                            view.to_screen(origin, a) - ext,
+                            view.to_screen(origin, b) + ext,
+                        ],
+                        Stroke::new(1.0_f32, GUIDE),
+                        4.0,
+                        3.0,
+                    ));
                 }
                 // the tools draw with the left button, in board coordinates;
                 // a pan (Space or the middle button) never draws
@@ -459,6 +712,17 @@ impl App {
                         _ => {}
                     }
                 }
+                // the pen's pointer is a pencil on the board (on a note's text
+                // it stays the I-beam, on its top strip the hand)
+                let drawing = resp.dragged_by(egui::PointerButton::Primary);
+                if self.wb_tool == 0 && !space && !panning && (resp.hovered() || drawing) {
+                    if let Some(at) = hover.filter(|q| rect.contains(*q)) {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+                        let top =
+                            egui::LayerId::new(egui::Order::Tooltip, ui.id().with("wb_pencil"));
+                        paint_pencil(&ui.ctx().layer_painter(top), at, rgb(self.wb_color));
+                    }
+                }
                 // drawn last, so they sit on top of the board and take the
                 // clicks over them
                 self.wb_panels(ui, rect, origin, wi);
@@ -525,5 +789,44 @@ impl App {
         if done {
             self.dirty = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dragged_note_lines_up_with_a_note_near_it() {
+        let a = [0.0, 0.0];
+        // 4 under the other's middle line: it takes the line, on both axes
+        let (at, lines) = snap_note([300.0, 4.0], &[a], 6.0);
+        assert_eq!(at, [300.0, 0.0]);
+        assert_eq!(
+            lines,
+            vec![NoteGuide {
+                axis: 1,
+                at: 60.0,
+                from: 0.0,
+                to: 460.0
+            }],
+            "one level line through both middles, from one note's far side to the other's"
+        );
+        // under it, 5 off its middle: an upright line
+        let (at, lines) = snap_note([5.0, 300.0], &[a], 6.0);
+        assert_eq!(at, [0.0, 300.0]);
+        assert_eq!(lines.len(), 1);
+        assert_eq!((lines[0].axis, lines[0].at), (0, 80.0));
+        // just right of it, 3 apart: the edges meet
+        let (at, lines) = snap_note([163.0, 200.0], &[a], 6.0);
+        assert_eq!(at, [160.0, 200.0]);
+        assert_eq!((lines[0].axis, lines[0].at), (0, 160.0));
+        // too far off: it stays where it is put, with no lines
+        let (at, lines) = snap_note([310.0, 9.0], &[a], 6.0);
+        assert_eq!(at, [310.0, 9.0]);
+        assert!(lines.is_empty());
+        // the nearer of two wins
+        let (at, _) = snap_note([300.0, 4.0], &[a, [600.0, 2.0]], 6.0);
+        assert_eq!(at, [300.0, 2.0]);
     }
 }

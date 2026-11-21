@@ -1243,3 +1243,39 @@ fn calendar_today_lines_up_with_the_other_days() {
         sun.left()
     );
 }
+
+/// The "To schedule" box ends on the same line as the days beside it.
+#[test]
+fn planner_columns_end_on_one_line() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Planner;
+    h.settle();
+    // the tall box drawn around a point (the drop zones paint their own
+    // frames, so they are found by where they are)
+    let box_at = |h: &Ui1, p: Pos2| {
+        h.shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Rect(r) if r.rect.contains(p) && r.rect.height() > 200.0 => {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .min_by(|a, b| a.area().total_cmp(&b.area()))
+    };
+    let label = h.painted_text(tr("To schedule"))[0].0;
+    let left = box_at(&h, label.center()).expect("the To schedule box");
+    let week = h.app.planner_week;
+    for i in 0..7 {
+        let d = week + Duration::days(i);
+        let add = h.rect(&format!("Add task on {}", d.format("%a %-d")));
+        let day = box_at(&h, add.center()).expect("the day's box");
+        assert!(
+            (day.bottom() - left.bottom()).abs() < 0.5,
+            "{} ends at {}, To schedule at {}",
+            d,
+            day.bottom(),
+            left.bottom()
+        );
+    }
+}

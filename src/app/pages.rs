@@ -221,18 +221,24 @@ impl App {
                     .auto_shrink([false, false])
                     .drag_to_scroll(false)
                     .show(ui, |ui| {
+                // the "To schedule" box and the days (their names included)
+                // end on one line
+                let col_h = avail.height() - 12.0;
                 ui.horizontal_top(|ui| {
                     // unscheduled list
                     ui.vertical(|ui| {
                         ui.set_width(left_w);
-                        ui.set_min_height(avail.height() - 10.0);
+                        // the line the drop zone draws around it anyway, so
+                        // its size is reckoned with it like the days'
                         let frame = egui::Frame::new()
                             .fill(t.column_bg)
+                            .stroke(Stroke::new(1.0_f32, t.border))
                             .corner_radius(10)
                             .inner_margin(egui::Margin::same(10));
+                        let inner_h = col_h - frame.total_margin().sum().y;
                         let (_, payload) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
                             ui.set_width(left_w - 20.0);
-                            ui.set_min_height(avail.height() - 40.0);
+                            ui.set_min_height(inner_h);
                             ui.label(RichText::new(tr("To schedule")).strong());
                             ui.label(
                                 RichText::new(tr(
@@ -276,12 +282,14 @@ impl App {
                         let d = week + Duration::days(i);
                         ui.vertical(|ui| {
                             ui.set_width(col_w);
+                            let top = ui.cursor().top();
                             let is_today = d == today();
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(d.text("%a")).color(t.text3));
                                 let n = RichText::new(d.day().to_string()).strong();
                                 ui.label(if is_today { n.color(t.danger) } else { n });
                             });
+                            let head_h = ui.cursor().top() - top;
                             let frame = egui::Frame::new()
                                 .fill(if is_today {
                                     t.selected_bg.gamma_multiply(0.5)
@@ -291,9 +299,10 @@ impl App {
                                 .stroke(Stroke::new(1.0_f32, t.border))
                                 .corner_radius(8)
                                 .inner_margin(egui::Margin::same(6));
+                            let inner_h = col_h - head_h - frame.total_margin().sum().y;
                             let (_, payload) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
                                 ui.set_width(col_w - 12.0);
-                                ui.set_min_height(avail.height() - 60.0);
+                                ui.set_min_height(inner_h);
                                 // overdue tasks from before this week are shown on today's column
                                 let carried = |x: &&Task| {
                                     is_today && x.due.map(|dd| dd < week).unwrap_or(false)

@@ -1490,3 +1490,34 @@ fn a_note_is_resized_by_its_corner() {
     h.click("Undo");
     assert_eq!(board_of(&h, wid).notes[0].wh(), Sticky::SIZE);
 }
+
+// ------------------------------------------------------------ QA round 1
+
+/// While the board menu or a dialog is open, Delete and Backspace are
+/// theirs: the shape picked on the board behind them stays. It was deleted
+/// out of sight, with its lines.
+#[test]
+fn delete_keys_leave_the_board_alone_while_a_menu_or_dialog_is_open() {
+    let mut h = Ui1::new();
+    let wid = template_board(&mut h, "Flow Chart");
+    h.hover(h.rect("Whiteboard canvas").center());
+    h.click("Shape Step");
+    h.click("Board menu");
+    assert!(h.has("Clear board"), "the menu is open");
+    h.key(egui::Key::Backspace);
+    assert_eq!(board_of(&h, wid).shapes.len(), 3, "kept with the menu open");
+    h.click("Delete whiteboard");
+    assert!(h.app.modal.is_some(), "the dialog is open");
+    h.key(egui::Key::Backspace);
+    h.key(egui::Key::Delete);
+    let b = board_of(&h, wid);
+    assert_eq!(
+        (b.shapes.len(), b.lines.len()),
+        (3, 2),
+        "kept with the dialog open"
+    );
+    h.click("Cancel");
+    assert!(h.app.modal.is_none());
+    h.key(egui::Key::Delete);
+    assert_eq!(board_of(&h, wid).shapes.len(), 2, "then Delete takes it");
+}

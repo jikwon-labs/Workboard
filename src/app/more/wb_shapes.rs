@@ -677,7 +677,10 @@ impl App {
             self.sweep.wb_sel = None;
             return;
         }
-        if !ui.ctx().wants_keyboard_input() {
+        // the keys are for a dialog or menu open over the board (a Delete
+        // there took the pick away out of sight)
+        let over = self.modal.is_some() || ui.memory(|m| m.any_popup_open());
+        if !over && !ui.ctx().wants_keyboard_input() {
             let (del, esc, enter) = ui.input(|i| {
                 (
                     i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),

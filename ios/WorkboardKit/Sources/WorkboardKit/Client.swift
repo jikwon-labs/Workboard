@@ -362,7 +362,8 @@ public final class SyncClient {
         // and take today's fingerprints as the baseline (every edit made
         // here was stamped when it was made), so nothing reads as edited
         let filledActivity = Sync.fillActivityIds(&snap)
-        let filled = Sync.fillBoardIds(&snap) || filledActivity
+        let filledGoals = Sync.fillGoalIds(&snap)
+        let filled = Sync.fillBoardIds(&snap) || filledActivity || filledGoals
         let old = SyncMeta(of: snap)
         var meta = old
         if old.v == 1 {
@@ -774,6 +775,7 @@ public final class SyncClient {
         } else {
             var fresh = snapshot
             Sync.fillActivityIds(&fresh)
+            Sync.fillGoalIds(&fresh)
             var meta = SyncMeta(of: fresh)
             meta.hashes = Sync.fingerprints(fresh)
             meta.fieldHashes = Sync.partHashes(fresh)
@@ -1035,6 +1037,7 @@ public final class SyncClient {
         // stamping, as the Mac app does before it saves
         Sync.fillActivityIds(&d)
         Sync.fillBoardIds(&d)
+        Sync.fillGoalIds(&d)
         let old = SyncMeta(of: d)
         var meta = old
         Sync.stamp(d, &meta, now: nowMs())

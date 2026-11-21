@@ -508,6 +508,7 @@ final class FieldMergeTests: XCTestCase {
     func save(_ v: inout JSON, _ m: inout SyncMeta, _ now: Int64) {
         Sync.fillActivityIds(&v)
         Sync.fillBoardIds(&v)
+        Sync.fillGoalIds(&v)
         Sync.stamp(v, &m, now: now)
         v.set("extra.sync", m.json)
     }
@@ -693,6 +694,44 @@ final class FieldMergeTests: XCTestCase {
         for v in [a, b] {
             let xs = (v.at("extra.whiteboards")?[0]?["strokes"]?.array ?? []).compactMap { $0["points"]?[0]?[0]?.double }.sorted()
             XCTAssertEqual(xs, [5, 9])
+        }
+    }
+
+    /// wb-sync's two_people_changing_different_targets_of_a_goal_both_keep_theirs.
+    func testTwoPeopleChangingDifferentTargetsOfAGoalBothKeepTheirs() {
+        func num(_ c: Double) -> JSON { ["Number": ["start": 0.0, "target": 10.0, "current": .double(c), "unit": ""]] }
+        var ma = SyncMeta()
+        var a = ws([], [], ma)
+        a.set("extra.goals", [["id": 70, "name": "G", "color": [0, 0, 0], "due": nil, "owner": 1,
+                               "targets": [["name": "Signups", "kind": num(0)], ["name": "Review", "kind": ["TrueFalse": ["done": false]]]],
+                               "log": [["ts": 100, "who": 1, "what": "Created", "pct": 0]]]])
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        func edit(_ v: inout JSON, _ f: (inout JSON) -> Void) {
+            var gs = v.at("extra.goals")!.array!
+            f(&gs[0])
+            v.set("extra.goals", .array(gs))
+        }
+        edit(&a) { g in
+            var t = g["targets"]!.array!
+            t[0]["kind"] = num(6)
+            g["targets"] = .array(t)
+            g["log"] = .array(g["log"]!.array! + [["ts": 200, "who": 1, "what": ["Number": ["target": "Signups", "from": 0.0, "to": 6.0, "unit": ""]], "pct": 30]])
+        }
+        save(&a, &ma, 20)
+        edit(&b) { g in
+            var t = g["targets"]!.array!
+            t[1]["kind"] = ["TrueFalse": ["done": true]]
+            g["targets"] = .array(t)
+            g["log"] = .array(g["log"]!.array! + [["ts": 201, "who": 2, "what": ["Done": ["target": "Review", "done": true]], "pct": 50]])
+        }
+        save(&b, &mb, 30)
+        swap(&a, &b)
+        for v in [a, b] {
+            let g = v.at("extra.goals")![0]!
+            XCTAssertEqual(g["targets"]?[0]?["kind"], num(6), "A's number")
+            XCTAssertEqual(g["targets"]?[1]?["kind"]?["TrueFalse"]?["done"], true, "B's tick")
+            XCTAssertEqual((g["log"]?.array ?? []).compactMap { $0["who"]?.uint }, [1, 1, 2], "both lines")
         }
     }
 

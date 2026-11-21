@@ -2131,6 +2131,7 @@ impl App {
             "Goal" => {
                 if let Ok(g) = serde_json::from_str::<Goal>(&item.payload) {
                     self.data.extra.goals.push(g);
+                    self.data.fix_goal_ids();
                 }
             }
             "Team" => {

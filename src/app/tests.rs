@@ -554,6 +554,7 @@ fn everything_survives_save_and_load() {
         due: None,
         owner: 1,
         targets: vec![GoalTarget {
+            id: 0,
             name: "Users".into(),
             kind: TargetKind::Number {
                 start: 0.0,
@@ -601,6 +602,7 @@ fn goal_progress_mixes_target_kinds() {
         owner: 1,
         targets: vec![
             GoalTarget {
+                id: 0,
                 name: "n".into(),
                 kind: TargetKind::Number {
                     start: 0.0,
@@ -610,10 +612,12 @@ fn goal_progress_mixes_target_kinds() {
                 },
             },
             GoalTarget {
+                id: 0,
                 name: "b".into(),
                 kind: TargetKind::TrueFalse { done: true },
             },
             GoalTarget {
+                id: 0,
                 name: "t".into(),
                 kind: TargetKind::Tasks {
                     ids: vec![done_task, open_task],
@@ -2061,6 +2065,7 @@ fn goal_tasks_ignore_deleted_ones() {
         due: None,
         owner: 1,
         targets: vec![GoalTarget {
+            id: 0,
             name: "x".into(),
             kind: TargetKind::Tasks {
                 ids: vec![id, 123456789],
@@ -2807,6 +2812,7 @@ fn goal_milestones_follow_progress_and_old_goals_start_quietly() {
         name: "Old".into(),
         owner: me,
         targets: vec![GoalTarget {
+            id: 0,
             name: "n".into(),
             kind: TargetKind::Number {
                 start: 0.0,
@@ -2865,6 +2871,7 @@ fn goal_history_survives_save_and_load_and_old_files_load() {
         start: Some(today()),
         reached: 50,
         log: vec![GoalEvent {
+            id: 0,
             ts: 1,
             who: 1,
             what: GoalChange::Number {

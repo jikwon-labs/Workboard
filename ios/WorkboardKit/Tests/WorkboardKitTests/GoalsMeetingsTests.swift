@@ -76,6 +76,23 @@ final class GoalsMeetingsTests: XCTestCase {
         XCTAssertEqual(WorkspaceView(d).goals(d).first { $0.id == 805 }!.targets.map(\.name), ["Five"])
     }
 
+    /// Targets get ids as they are made, and changing one here keeps its
+    /// id, so a change merges as that target's and not as a new one.
+    func testATargetKeepsItsIdWhenChanged() {
+        var d = SampleWorkspace.make()
+        Edits.addGoal(&d, name: "G", me: 1, id: 806)
+        Edits.addTarget(&d, goal: 806, GoalTargetView(name: "Press", kind: .trueFalse(done: false)))
+        Edits.addTarget(&d, goal: 806, GoalTargetView(name: "Signups", kind: .number(start: 0, target: 10, current: 0, unit: "")))
+        XCTAssertTrue(Sync.fillGoalIds(&d))
+        let ids = { WorkspaceView(d).goals(d).first { $0.id == 806 }!.targets.map(\.id) }
+        let before = ids()
+        XCTAssertTrue(before.allSatisfy { $0 >= 1 << 62 })
+        XCTAssertEqual(Set(before).count, 2)
+        Edits.setTarget(&d, goal: 806, index: 1, to: GoalTargetView(name: "Signups", kind: .number(start: 0, target: 10, current: 4, unit: "")))
+        XCTAssertEqual(ids(), before, "kept")
+        XCTAssertFalse(Sync.fillGoalIds(&d))
+    }
+
     func testMeetingActionItemsBecomeTasksForTheAttendees() {
         var d = SampleWorkspace.make()
         XCTAssertTrue(Edits.addMeeting(&d, title: "Sync", date: "2026-11-18", me: 1, id: 810))

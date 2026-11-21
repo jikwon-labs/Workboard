@@ -18,7 +18,9 @@
 // setting a custom field at the same moment as someone else keeps both;
 // entries without an id in a list of items stay as they are beside the
 // items; whiteboard strokes and notes have ids
-// (`fill_board_ids`) and merge like any other item. Deleted items leave a tombstone so they don't come back; restoring
+// (`fill_board_ids`) and merge like any other item, and so do a goal's
+// targets and history lines (`fill_goal_ids`): two people changing
+// different targets of a goal at once both keep theirs. Deleted items leave a tombstone so they don't come back; restoring
 // one from the trash revives it. Task comments and activity lines have ids
 // too, so edits, deletes and reactions carry over; lines saved before they
 // had ids get one worked out from their contents (`activity_id`). A few

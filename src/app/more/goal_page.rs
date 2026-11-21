@@ -1187,6 +1187,7 @@ pub(crate) const GOAL_COLORS: [[u8; 3]; 8] = [
 pub(crate) fn new_target(kind: u8) -> GoalTarget {
     match kind {
         0 => GoalTarget {
+            id: 0,
             name: tr("Target").into(),
             kind: TargetKind::Number {
                 start: 0.0,
@@ -1196,10 +1197,12 @@ pub(crate) fn new_target(kind: u8) -> GoalTarget {
             },
         },
         1 => GoalTarget {
+            id: 0,
             name: tr("Target").into(),
             kind: TargetKind::TrueFalse { done: false },
         },
         _ => GoalTarget {
+            id: 0,
             name: tr("Finish tasks").into(),
             kind: TargetKind::Tasks { ids: vec![] },
         },

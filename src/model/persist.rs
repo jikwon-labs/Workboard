@@ -13,6 +13,29 @@ impl Data {
             fix_task_activity_ids(t);
         }
         self.fix_board_ids();
+        self.fix_goal_ids();
+    }
+
+    /// Gives goal targets and history lines without an id one, the same
+    /// one every computer works out (`wb_sync::fill_goal_ids`), passing
+    /// over ids deleted before. Nothing to do (the usual case) costs a look.
+    pub fn fix_goal_ids(&mut self) {
+        let goals = &self.extra.goals;
+        if goals
+            .iter()
+            .all(|g| g.targets.iter().all(|t| t.id != 0) && g.log.iter().all(|e| e.id != 0))
+        {
+            return;
+        }
+        let mut v = serde_json::json!({"extra": {
+            "goals": serde_json::to_value(goals).unwrap_or_default(),
+            "sync": {"tombs": serde_json::to_value(&self.extra.sync.tombs).unwrap_or_default()},
+        }});
+        if wb_sync::fill_goal_ids(&mut v) {
+            if let Ok(g) = serde_json::from_value(v["extra"]["goals"].take()) {
+                self.extra.goals = g;
+            }
+        }
     }
 
     /// Gives whiteboard strokes and notes without an id one, the same one

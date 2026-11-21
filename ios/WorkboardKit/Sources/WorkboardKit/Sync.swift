@@ -7,7 +7,8 @@
 // field the newest change wins, so two people changing different fields of
 // one task both keep theirs. Reactions merge per (emoji, person), running
 // timers per person, time entries per (person, start), custom field values
-// per field; whiteboard strokes and notes have ids (`fillBoardIds`), and
+// per field; whiteboard strokes and notes have ids (`fillBoardIds`), as
+// do a goal's targets and history lines (`fillGoalIds`), and
 // entries without an id in a list of items stay as they are beside them.
 // The items inside an item (messages in a channel, lists in a space) are merged one by one,
 // and an item that moved (a list to another space) sits only where its newest

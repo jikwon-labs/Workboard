@@ -50,8 +50,17 @@ pub enum TargetKind {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GoalTarget {
+    /// So two people changing different targets at once both keep theirs
+    /// (`wb_sync::fill_goal_ids`, `Data::fix_goal_ids`); 0 until given one,
+    /// and then left out of the file.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub id: u64,
     pub name: String,
     pub kind: TargetKind,
+}
+
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -96,6 +105,9 @@ fn is_zero_u8(n: &u8) -> bool {
 /// One line of a goal's history.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GoalEvent {
+    /// So lines two people add at once are both kept, as a target's id.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub id: u64,
     pub ts: i64,
     /// Who did it; 0 when the app noticed it (a milestone reached through
     /// tasks closed elsewhere).

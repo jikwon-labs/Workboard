@@ -24,6 +24,7 @@ fn two_goals() -> (Ui1, u64, u64) {
             start: Some(day - Duration::days(40)),
             targets: vec![
                 GoalTarget {
+                    id: 0,
                     name: "Beta testers".into(),
                     kind: TargetKind::Number {
                         start: 0.0,
@@ -33,6 +34,7 @@ fn two_goals() -> (Ui1, u64, u64) {
                     },
                 },
                 GoalTarget {
+                    id: 0,
                     name: "Store review".into(),
                     kind: TargetKind::TrueFalse { done: false },
                 },
@@ -47,6 +49,7 @@ fn two_goals() -> (Ui1, u64, u64) {
             owner: me,
             start: Some(day - Duration::days(10)),
             targets: vec![GoalTarget {
+                id: 0,
                 name: "Lease signed".into(),
                 kind: TargetKind::TrueFalse { done: false },
             }],
@@ -305,6 +308,7 @@ fn ticking_a_task_on_a_goal_page_closes_it() {
         .expect("an open task")
         .clone();
     h.app.data.extra.goals[0].targets.push(GoalTarget {
+        id: 0,
         name: "Launch tasks".into(),
         kind: TargetKind::Tasks { ids: vec![task.id] },
     });
@@ -417,6 +421,7 @@ fn an_achieved_goal_is_shared_to_chat_as_a_card_that_opens_it() {
         .expect("a teammate")
         .clone();
     h.app.data.extra.goals[1].record(GoalEvent {
+        id: 0,
         ts: now_ts(),
         who: other.id,
         what: GoalChange::Created,
@@ -648,6 +653,7 @@ fn add_goal_with(h: &mut Ui1, name: &str, targets: Vec<GoalTarget>) -> u64 {
 
 fn number(name: &str, start: f64, target: f64, current: f64) -> GoalTarget {
     GoalTarget {
+        id: 0,
         name: name.into(),
         kind: TargetKind::Number {
             start,
@@ -712,6 +718,7 @@ fn ticking_the_last_task_on_a_goals_page_opens_goal_achieved() {
         &mut h,
         "Ship it",
         vec![GoalTarget {
+            id: 0,
             name: "Launch tasks".into(),
             kind: TargetKind::Tasks { ids: vec![task.id] },
         }],
@@ -861,6 +868,7 @@ fn history_by_someone_who_left_names_someone() {
     assert!(h.app.data.member(gone).is_none());
     for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == id) {
         g.record(GoalEvent {
+            id: 0,
             ts: now_ts(),
             who: gone,
             what: GoalChange::Created,
@@ -880,6 +888,7 @@ fn sharing_leaves_out_people_who_left_the_team() {
     let (mut h, _, b) = two_goals();
     for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == b) {
         g.record(GoalEvent {
+            id: 0,
             ts: now_ts(),
             who: 987_654_321,
             what: GoalChange::Created,
@@ -1114,6 +1123,7 @@ fn a_goals_page_fits_the_narrowest_window_with_big_numbers() {
         "Revenue",
         vec![
             GoalTarget {
+                id: 0,
                 name: "New contracts".into(),
                 kind: TargetKind::Number {
                     start: 0.0,
@@ -1271,6 +1281,7 @@ fn picking_tasks_that_finish_a_goal_opens_goal_achieved() {
         &mut h,
         "Ship it",
         vec![GoalTarget {
+            id: 0,
             name: "Launch tasks".into(),
             kind: TargetKind::Tasks { ids: vec![] },
         }],
@@ -1658,6 +1669,7 @@ fn a_milestone_i_reach_by_closing_a_task_anywhere_is_mine() {
         &mut h,
         "Ship it",
         vec![GoalTarget {
+            id: 0,
             name: "Launch tasks".into(),
             kind: TargetKind::Tasks {
                 ids: open.iter().map(|t| t.id).collect(),
@@ -1707,4 +1719,51 @@ fn a_milestone_i_reach_by_closing_a_task_anywhere_is_mine() {
         "{:?}",
         h.app.notify_rt.sent
     );
+}
+
+#[test]
+fn targets_and_history_lines_get_ids_as_they_are_made() {
+    let (mut h, a, _) = two_goals();
+    let all_have = |h: &Ui1| {
+        h.app
+            .data
+            .extra
+            .goals
+            .iter()
+            .all(|g| g.targets.iter().all(|t| t.id != 0) && g.log.iter().all(|e| e.id != 0))
+    };
+    // goals from a file before ids: given theirs on the first look
+    h.app.goal_watch(now_ts());
+    assert!(all_have(&h));
+    let before: Vec<u64> = goal(&h, a).targets.iter().map(|t| t.id).collect();
+    // a target added and a number recorded on the page
+    h.click("Goal Beta launch");
+    h.click("Add target");
+    h.click("Add Done or not target");
+    h.click("Plus 1 Beta testers");
+    assert!(all_have(&h), "{:?}", goal(&h, a));
+    let g = goal(&h, a).clone();
+    assert_eq!(g.targets.len(), 3);
+    assert_eq!(
+        &g.targets.iter().map(|t| t.id).collect::<Vec<_>>()[..2],
+        &before[..],
+        "kept"
+    );
+    let mut ids: Vec<u64> = g.targets.iter().map(|t| t.id).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 3, "each its own");
+    // and they are kept through saving and reading back
+    let back: Data = serde_json::from_value(serde_json::to_value(&h.app.data).unwrap()).unwrap();
+    let gb = back.extra.goals.iter().find(|x| x.id == a).unwrap();
+    assert_eq!(
+        gb.targets.iter().map(|t| t.id).collect::<Vec<_>>(),
+        g.targets.iter().map(|t| t.id).collect::<Vec<_>>()
+    );
+    // a new goal from the dialog has them at once too
+    h.click("Back to goals");
+    h.click("New goal");
+    h.type_text("Fresh");
+    h.click("Create goal");
+    assert!(all_have(&h));
 }

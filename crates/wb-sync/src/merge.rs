@@ -559,12 +559,14 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
     // here as everywhere else, or their comments would not be matched up
     fill_activity_ids(local);
     fill_board_ids(local);
+    fill_goal_ids(local);
     let filled: Vec<Value> = others
         .iter()
         .map(|o| {
             let mut o = o.clone();
             fill_activity_ids(&mut o);
             fill_board_ids(&mut o);
+            fill_goal_ids(&mut o);
             o
         })
         .collect();

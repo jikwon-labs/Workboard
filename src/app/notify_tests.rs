@@ -411,6 +411,7 @@ fn a_goal_due_tomorrow_is_announced() {
         due: Some(day + Duration::days(1)),
         owner: 1,
         targets: vec![GoalTarget {
+            id: 0,
             name: "Done".into(),
             kind: TargetKind::TrueFalse { done: false },
         }],
@@ -823,6 +824,7 @@ fn my_goals_passing_a_milestone_are_announced_once() {
         name: "Launch".into(),
         owner: me,
         targets: vec![GoalTarget {
+            id: 0,
             name: "Users".into(),
             kind: TargetKind::Number {
                 start: 0.0,
@@ -868,6 +870,7 @@ fn a_milestone_i_recorded_myself_is_not_announced() {
         name: "Launch".into(),
         owner: me,
         targets: vec![GoalTarget {
+            id: 0,
             name: "Ship".into(),
             kind: TargetKind::TrueFalse { done: false },
         }],
@@ -896,6 +899,7 @@ fn a_goal_far_behind_is_announced_once_after_the_morning_time() {
         start: Some(day - Duration::days(30)),
         due: Some(day + Duration::days(7)),
         targets: vec![GoalTarget {
+            id: 0,
             name: "Write".into(),
             kind: TargetKind::TrueFalse { done: false },
         }],
@@ -926,6 +930,7 @@ fn a_goal_due_today_is_announced_once_unless_turned_off_and_opens_the_goal() {
         owner: me,
         start: Some(day - Duration::days(10)),
         targets: vec![GoalTarget {
+            id: 0,
             name: "Ship".into(),
             kind: TargetKind::TrueFalse { done: false },
         }],
@@ -1110,6 +1115,7 @@ fn a_goal_far_behind_isnt_announced_again_after_many_other_notices() {
         start: Some(day - Duration::days(30)),
         due: Some(day + Duration::days(due)),
         targets: vec![GoalTarget {
+            id: 0,
             name: "Write".into(),
             kind: TargetKind::TrueFalse { done: false },
         }],

@@ -108,6 +108,7 @@ fn due_preset(which: u8, day: NaiveDate) -> NaiveDate {
 /// Samples on the empty Goals page: a name and its targets.
 fn samples() -> Vec<(&'static str, Vec<GoalTarget>, [u8; 3])> {
     let num = |name: &str, to: f64, unit: &str| GoalTarget {
+        id: 0,
         name: tr(name).into(),
         kind: TargetKind::Number {
             start: 0.0,
@@ -117,10 +118,12 @@ fn samples() -> Vec<(&'static str, Vec<GoalTarget>, [u8; 3])> {
         },
     };
     let done = |name: &str| GoalTarget {
+        id: 0,
         name: tr(name).into(),
         kind: TargetKind::TrueFalse { done: false },
     };
     let tasks = |name: &str| GoalTarget {
+        id: 0,
         name: tr(name).into(),
         kind: TargetKind::Tasks { ids: vec![] },
     };

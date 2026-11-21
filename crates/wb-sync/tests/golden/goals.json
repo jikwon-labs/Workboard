@@ -1,0 +1,83 @@
+{
+  "extra": {
+    "sync": {
+      "tombs": {
+        "5095967436815532327": 5
+      }
+    },
+    "goals": [
+      {
+        "id": 70,
+        "name": "G",
+        "targets": [
+          {
+            "name": "Signups",
+            "kind": {
+              "Number": {
+                "start": 0.0,
+                "target": 10.0,
+                "current": 3.0,
+                "unit": ""
+              }
+            }
+          },
+          {
+            "name": "Signups",
+            "kind": {
+              "Number": {
+                "start": 0.0,
+                "target": 5.0,
+                "current": 1.0,
+                "unit": ""
+              }
+            }
+          },
+          {
+            "id": 123,
+            "name": "Kept",
+            "kind": {
+              "TrueFalse": {
+                "done": true
+              }
+            }
+          },
+          {
+            "name": "팀 출시 ✓",
+            "kind": {
+              "Tasks": {
+                "ids": [
+                  1,
+                  2
+                ]
+              }
+            }
+          }
+        ],
+        "log": [
+          {
+            "ts": 1763000000,
+            "who": 2,
+            "what": "Created",
+            "pct": 0
+          },
+          {
+            "ts": 1763000100,
+            "who": 2,
+            "what": {
+              "Milestone": 50
+            },
+            "pct": 50
+          },
+          {
+            "ts": 1763000100,
+            "who": 2,
+            "what": {
+              "Milestone": 50
+            },
+            "pct": 50
+          }
+        ]
+      }
+    ]
+  }
+}

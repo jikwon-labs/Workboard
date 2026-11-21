@@ -403,6 +403,7 @@ impl App {
             // a goal from before history was kept: what it has reached
             // already is taken as it is, without announcing it
             g.record(GoalEvent {
+                id: 0,
                 ts: now,
                 who: 0,
                 what: GoalChange::Tracked,
@@ -415,6 +416,7 @@ impl App {
             if m > g.reached {
                 g.reached = m;
                 g.record(GoalEvent {
+                    id: 0,
                     ts: now,
                     who,
                     what: GoalChange::Milestone(m),
@@ -462,6 +464,8 @@ impl App {
         if changed {
             self.dirty = true;
         }
+        // targets added and lines written here get their ids at once
+        self.data.fix_goal_ids();
         reached
     }
 
@@ -514,6 +518,7 @@ impl App {
         if let Some(what) = what {
             let me = self.data.me;
             self.data.extra.goals[gi].record(GoalEvent {
+                id: 0,
                 ts: now,
                 who: me,
                 what,
@@ -545,6 +550,7 @@ impl App {
         g.done_on = None;
         let me = self.data.me;
         g.record(GoalEvent {
+            id: 0,
             ts: now,
             who: me,
             what: GoalChange::Created,

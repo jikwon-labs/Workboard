@@ -41,7 +41,26 @@ fn computed() -> Value {
         ]),
         "activity_id": wb_sync::activity_id(1001, 1763000000, 2, true, "made it ✓", 1).to_string(),
         "board_item_id": wb_sync::board_item_id(6001, "strokes", "0,0,0|1.5,2.25", 2).to_string(),
+        "goal_item_id": wb_sync::goal_item_id(70, "log", "1763000100|2|50|Milestone:50", 1).to_string(),
+        "goal_ids": goal_ids(),
     })
+}
+
+/// The ids `fill_goal_ids` gives the targets and history lines of
+/// goals.json: two targets alike, one id kept, one deleted id passed over.
+fn goal_ids() -> Value {
+    let mut data: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir().join("goals.json")).unwrap()).unwrap();
+    wb_sync::fill_goal_ids(&mut data);
+    let g = &data["extra"]["goals"][0];
+    let ids = |k: &str| -> Vec<Value> {
+        g[k].as_array()
+            .unwrap()
+            .iter()
+            .map(|x| Value::String(x["id"].as_u64().unwrap().to_string()))
+            .collect()
+    };
+    json!({"targets": ids("targets"), "log": ids("log")})
 }
 
 #[test]

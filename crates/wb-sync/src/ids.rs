@@ -1,5 +1,6 @@
 // Ids worked out from contents, for activity lines and whiteboard items
-// saved before they had ids, so every copy gives them the same one.
+// saved before they had ids and for goal targets and history lines, so
+// every copy gives them the same one.
 
 use super::*;
 
@@ -140,6 +141,101 @@ pub fn fill_board_ids(data: &mut Value) -> bool {
                 let n = counts.entry(sig.clone()).or_insert(0);
                 it["id"] = Value::from(board_item_id(bid, kind, &sig, *n));
                 *n += 1;
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// The id a goal's target or history line gets when it has none (saved
+/// before they had ids, made by an app that doesn't keep them, or just
+/// added): worked out from what it is, so every computer gives it the same
+/// one and they merge one by one, like whiteboard strokes. `kind` is
+/// "targets" or "log"; `nth` counts on past ids already taken (see
+/// `fill_goal_ids`). Bit 62 set, as in `activity_id`.
+pub fn goal_item_id(goal: u64, kind: &str, sig: &str, nth: usize) -> u64 {
+    let h = fnv(format!("goal|{}|{}|{}|{}", goal, kind, nth, sig).as_bytes());
+    (h & ((1u64 << 62) - 1)) | (1u64 << 62)
+}
+
+/// What a goal's target or history line is, for `goal_item_id`: a target by
+/// its name and kind ("Signups|Number"), which stay put while its numbers
+/// move; a history line by when, who, the progress after and what happened
+/// ("1763000000|2|50|Milestone:50"), which never change.
+pub fn goal_sig(kind: &str, item: &Value) -> String {
+    let variant = |v: Option<&Value>| -> String {
+        match v {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Object(o)) => match o.iter().next() {
+                Some((k, Value::Number(n))) => format!("{}:{}", k, n),
+                Some((k, _)) => k.clone(),
+                None => String::new(),
+            },
+            _ => String::new(),
+        }
+    };
+    if kind == "targets" {
+        format!(
+            "{}|{}",
+            item.get("name").and_then(|n| n.as_str()).unwrap_or(""),
+            variant(item.get("kind"))
+        )
+    } else {
+        let n = |k: &str| item.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
+        format!(
+            "{}|{}|{}|{}",
+            n("ts"),
+            n("who"),
+            n("pct"),
+            variant(item.get("what"))
+        )
+    }
+}
+
+/// Gives every goal target and history line without an id one (see
+/// `goal_item_id`), so two people changing different targets of a goal at
+/// once both keep their change and both history lines stay. An id already
+/// in the list, or deleted (a tombstone), is passed over for the next one,
+/// so a target added again after one like it was removed isn't taken for
+/// the removed one. True when anything changed.
+pub fn fill_goal_ids(data: &mut Value) -> bool {
+    let tombs: std::collections::HashSet<u64> = get_path(data, "extra.sync.tombs")
+        .and_then(|t| t.as_object())
+        .map(|o| o.keys().filter_map(|k| k.parse().ok()).collect())
+        .unwrap_or_default();
+    let Some(goals) = get_path_mut(data, "extra.goals").and_then(|g| g.as_array_mut()) else {
+        return false;
+    };
+    let mut changed = false;
+    for g in goals {
+        let gid = id_of(g).unwrap_or(0);
+        for kind in ["targets", "log"] {
+            let Some(items) = g.get_mut(kind).and_then(|a| a.as_array_mut()) else {
+                continue;
+            };
+            let missing = |it: &Value| it.is_object() && !id_of(it).is_some_and(|i| i != 0);
+            if !items.iter().any(missing) {
+                continue;
+            }
+            let mut used: std::collections::HashSet<u64> =
+                items.iter().filter_map(id_of).filter(|i| *i != 0).collect();
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            for it in items.iter_mut() {
+                if !missing(it) {
+                    continue;
+                }
+                let sig = goal_sig(kind, it);
+                let n = counts.entry(sig.clone()).or_insert(0);
+                let id = loop {
+                    let id = goal_item_id(gid, kind, &sig, *n);
+                    *n += 1;
+                    if !used.contains(&id) && !tombs.contains(&id) {
+                        break id;
+                    }
+                };
+                used.insert(id);
+                it["id"] = Value::from(id);
                 changed = true;
             }
         }

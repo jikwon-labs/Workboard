@@ -339,10 +339,12 @@ extension Sync {
         // here as everywhere else, or their comments would not be matched up
         fillActivityIds(&local)
         fillBoardIds(&local)
+        fillGoalIds(&local)
         let others = others.map { o -> JSON in
             var o = o
             fillActivityIds(&o)
             fillBoardIds(&o)
+            fillGoalIds(&o)
             return o
         }
         let before = local

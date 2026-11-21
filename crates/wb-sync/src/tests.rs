@@ -588,6 +588,7 @@ fn a_field_set_back_to_its_default_stays_there() {
 fn save(v: &mut Value, m: &mut SyncMeta, now: i64) {
     fill_activity_ids(v);
     fill_board_ids(v);
+    fill_goal_ids(v);
     stamp(&v.clone(), m, now);
     v["extra"]["sync"] = serde_json::to_value(&*m).unwrap();
 }
@@ -1705,3 +1706,133 @@ fn map_entries_an_older_copy_kept_are_not_edits_after_opening() {
     save(&mut a, &mut ma, 2000);
     assert_eq!(ma.values.get("extra.slack_map/UB"), Some(&2000));
 }
+
+#[test]
+fn two_people_changing_different_targets_of_a_goal_both_keep_theirs() {
+    let num = |current: f64| json!({"Number": {"start": 0.0, "target": 10.0, "current": current, "unit": ""}});
+    let line =
+        |ts: i64, who: u64, pct: u64| json!({"ts": ts, "who": who, "what": "Created", "pct": pct});
+    let mut ma = SyncMeta::default();
+    let mut a = ws(json!([]), json!([]), &ma);
+    a["extra"]["goals"] = json!([{"id": 70, "name": "G", "color": [0, 0, 0], "due": null, "owner": 1,
+        "targets": [
+            {"name": "Signups", "kind": num(0.0)},
+            {"name": "Review", "kind": {"TrueFalse": {"done": false}}}
+        ],
+        "log": [line(100, 1, 0)]}]);
+    // a copy saved before targets had ids works out the same ids
+    let mut old = a.clone();
+    save(&mut a, &mut ma, 10);
+    fill_goal_ids(&mut old);
+    let ids = |v: &Value, k: &str| -> Vec<u64> {
+        v["extra"]["goals"][0][k]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_u64().unwrap())
+            .collect()
+    };
+    assert_eq!(ids(&a, "targets"), ids(&old, "targets"));
+    assert_eq!(ids(&a, "log"), ids(&old, "log"));
+    assert!(ids(&a, "targets").iter().all(|i| *i >= 1 << 62));
+    let (mut b, mut mb) = (a.clone(), ma.clone());
+
+    // at once: A records 6 signups, B ticks the review; each adds a line
+    a["extra"]["goals"][0]["targets"][0]["kind"] = num(6.0);
+    a["extra"]["goals"][0]["log"].as_array_mut().unwrap().push(json!({"ts": 200, "who": 1, "what": {"Number": {"target": "Signups", "from": 0.0, "to": 6.0, "unit": ""}}, "pct": 30}));
+    save(&mut a, &mut ma, 20);
+    b["extra"]["goals"][0]["targets"][1]["kind"] = json!({"TrueFalse": {"done": true}});
+    b["extra"]["goals"][0]["log"].as_array_mut().unwrap().push(json!({"ts": 201, "who": 2, "what": {"Done": {"target": "Review", "done": true}}, "pct": 50}));
+    save(&mut b, &mut mb, 30);
+    swap(&mut a, &mut b);
+    for v in [&a, &b] {
+        let g = &v["extra"]["goals"][0];
+        assert_eq!(g["targets"][0]["kind"], num(6.0), "A's number: {}", g);
+        assert_eq!(
+            g["targets"][1]["kind"]["TrueFalse"]["done"], true,
+            "B's tick"
+        );
+        let whos: Vec<u64> = g["log"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["who"].as_u64().unwrap())
+            .collect();
+        assert_eq!(
+            whos,
+            vec![1, 1, 2],
+            "both lines, in time order: {}",
+            g["log"]
+        );
+    }
+
+    // A removes the review; B, not having seen it, records another number
+    let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+    a["extra"]["goals"][0]["targets"]
+        .as_array_mut()
+        .unwrap()
+        .remove(1);
+    save(&mut a, &mut ma, 40);
+    b["extra"]["goals"][0]["targets"][0]["kind"] = num(7.0);
+    save(&mut b, &mut mb, 50);
+    swap(&mut a, &mut b);
+    for v in [&a, &b] {
+        let t = v["extra"]["goals"][0]["targets"].as_array().unwrap();
+        assert_eq!(t.len(), 1, "the removal sticks: {:?}", t);
+        assert_eq!(t[0]["kind"], num(7.0));
+    }
+
+    // a target like the removed one added again isn't taken for it
+    let mut ma = meta_of(&a);
+    a["extra"]["goals"][0]["targets"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"name": "Review", "kind": {"TrueFalse": {"done": false}}}));
+    save(&mut a, &mut ma, 60);
+    let mut b = b.clone();
+    merge(&mut b, &[a.clone()]);
+    let names: Vec<&str> = b["extra"]["goals"][0]["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["Signups", "Review"],
+        "it arrives: {}",
+        b["extra"]["goals"][0]
+    );
+}
+
+#[test]
+fn goal_ids_are_the_same_on_the_phone() {
+    // the iPhone test (testGoalIdsMatchTheRustOnes) checks the same values
+    assert_eq!(
+        goal_sig(
+            "targets",
+            &json!({"name": "Signups", "kind": {"Number": {"start": 0.0}}})
+        ),
+        "Signups|Number"
+    );
+    assert_eq!(
+        goal_sig(
+            "log",
+            &json!({"ts": 1763000000, "who": 2, "pct": 50, "what": {"Milestone": 50}})
+        ),
+        "1763000000|2|50|Milestone:50"
+    );
+    assert_eq!(
+        goal_sig(
+            "log",
+            &json!({"ts": 5, "who": 0, "pct": 0, "what": "Tracked"})
+        ),
+        "5|0|0|Tracked"
+    );
+    assert_eq!(
+        goal_item_id(70, "targets", "Signups|Number", 0),
+        GOAL_ID_SAMPLE
+    );
+}
+
+const GOAL_ID_SAMPLE: u64 = 5095967436815532327;

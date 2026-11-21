@@ -787,6 +787,7 @@ fn goal_screens_have_no_english_left() {
     let day = today();
     let task = h.app.data.tasks[0].id;
     let target = |name: &str, kind: TargetKind| GoalTarget {
+        id: 0,
         name: name.into(),
         kind,
     };

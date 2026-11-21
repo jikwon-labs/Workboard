@@ -1527,10 +1527,9 @@ fn my_reading_state_goes_between_my_mac_and_my_phone() {
 
 /// Two computers on one goal through a server: what one records reaches
 /// the other with its history and milestone, edits to different parts of
-/// it both stay, and a goal one of them deletes stays deleted even if the
-/// other was changing it. Two changes to its targets at once keep one of
-/// them (the targets go between copies as one field), but both copies
-/// always end up the same.
+/// it both stay (a rename and a tick, or two different targets, with both
+/// history lines), and a goal one of them deletes stays deleted even if
+/// the other was changing it.
 #[test]
 fn a_goal_is_worked_on_from_two_computers() {
     use crate::app::more::GoalAct;
@@ -1562,6 +1561,7 @@ fn a_goal_is_worked_on_from_two_computers() {
         due: Some(today() + chrono::Duration::days(30)),
         targets: vec![
             GoalTarget {
+                id: 0,
                 name: "Signups".into(),
                 kind: TargetKind::Number {
                     start: 0.0,
@@ -1571,6 +1571,7 @@ fn a_goal_is_worked_on_from_two_computers() {
                 },
             },
             GoalTarget {
+                id: 0,
                 name: "Review".into(),
                 kind: TargetKind::TrueFalse { done: false },
             },
@@ -1633,7 +1634,7 @@ fn a_goal_is_worked_on_from_two_computers() {
             .any(|e| e.who == sam && e.what == GoalChange::Milestone(75)));
     }
 
-    // at once, both on its targets: the copies end up the same
+    // at once, each on another target: both changes and both lines stay
     a.goal_apply(GoalAct::SetNumber {
         g: gid,
         i: 0,
@@ -1643,12 +1644,33 @@ fn a_goal_is_worked_on_from_two_computers() {
     push(&mut a);
     push(&mut b);
     settle(&mut a, &mut b);
-    let (ga, gb) = (g_of(&a).unwrap(), g_of(&b).unwrap());
-    assert_eq!(
-        serde_json::to_value(&ga).unwrap(),
-        serde_json::to_value(&gb).unwrap(),
-        "one goal on both"
-    );
+    for x in [&a, &b] {
+        let g = g_of(x).unwrap();
+        assert!(
+            matches!(g.targets[0].kind, TargetKind::Number { current, .. } if current == 8.0),
+            "Ann's number"
+        );
+        assert!(
+            matches!(g.targets[1].kind, TargetKind::TrueFalse { done: false }),
+            "Sam's untick"
+        );
+        assert!(g
+            .log
+            .iter()
+            .any(|e| e.who == ann && matches!(e.what, GoalChange::Number { to, .. } if to == 8.0)));
+        assert!(g
+            .log
+            .iter()
+            .any(|e| e.who == sam && matches!(e.what, GoalChange::Done { done: false, .. })));
+    }
+    // one goal on both (lines written in the same second may sit in
+    // either order)
+    let same = |x: &App| {
+        let mut g = g_of(x).unwrap();
+        g.log.sort_by_key(|e| (e.ts, e.id));
+        serde_json::to_value(&g).unwrap()
+    };
+    assert_eq!(same(&a), same(&b), "one goal on both");
 
     // Ann deletes it while Sam records: it stays deleted on both
     a.remove_item("goal", gid);

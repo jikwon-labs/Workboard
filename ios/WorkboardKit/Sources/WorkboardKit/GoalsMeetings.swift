@@ -11,12 +11,16 @@ public struct GoalTargetView: Hashable, Sendable {
         case tasks(ids: [UInt64])
     }
 
+    /// So two people changing different targets at once both keep theirs
+    /// (Sync.fillGoalIds); 0 until given one.
+    public let id: UInt64
     public let name: String
     public let kind: Kind
 
     /// TargetKind is written by serde as {"Number": {...}}, {"TrueFalse":
     /// {...}} or {"Tasks": {...}}.
     init(_ j: JSON) {
+        id = j["id"]?.uint ?? 0
         name = j["name"]?.string ?? ""
         let k = j["kind"]
         if let n = k?["Number"] {
@@ -35,10 +39,13 @@ public struct GoalTargetView: Hashable, Sendable {
         case .trueFalse(let d): k = ["TrueFalse": ["done": .bool(d)]]
         case .tasks(let ids): k = ["Tasks": ["ids": .array(ids.map(JSON.id))]]
         }
-        return ["name": .string(name), "kind": k]
+        var j: JSON = ["name": .string(name), "kind": k]
+        if id != 0 { j["id"] = .id(id) }
+        return j
     }
 
     public init(name: String, kind: Kind) {
+        self.id = 0
         self.name = name
         self.kind = kind
     }
@@ -181,13 +188,16 @@ extension Edits {
         }
     }
 
-    /// Replaces target `index` (its current number, done, or tasks).
+    /// Replaces target `index` (its current number, done, or tasks). It
+    /// keeps the target's id, so the change merges as that target's.
     @discardableResult
     public static func setTarget(_ data: inout JSON, goal: UInt64, index: Int, to target: GoalTargetView) -> Bool {
         changeGoal(&data, goal) { g in
             var t = g["targets"]?.array ?? []
             guard t.indices.contains(index) else { return false }
-            t[index] = target.json
+            var j = target.json
+            if j["id"] == nil, let old = t[index]["id"] { j["id"] = old }
+            t[index] = j
             g["targets"] = .array(t)
             return true
         }

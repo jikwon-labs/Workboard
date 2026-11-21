@@ -53,5 +53,25 @@ final class GoldenTests: XCTestCase {
         XCTAssertEqual(
             "\(Sync.boardItemId(board: 6001, kind: "strokes", sig: "0,0,0|1.5,2.25", nth: 2))",
             want["board_item_id"]?.string)
+        XCTAssertEqual(
+            "\(Sync.goalItemId(goal: 70, kind: "log", sig: "1763000100|2|50|Milestone:50", nth: 1))",
+            want["goal_item_id"]?.string)
+    }
+
+    /// The ids a goal's targets and history lines get on the Mac, the
+    /// server and here (golden/goals.json: two targets alike, one id kept,
+    /// one deleted id passed over).
+    func testGoalIdsMatchTheMacApp() throws {
+        var data = try read("goals.json")
+        let want = try read("expected.json")["goal_ids"]
+        XCTAssertTrue(Sync.fillGoalIds(&data))
+        let g = data.at("extra.goals")![0]!
+        for kind in ["targets", "log"] {
+            let got = (g[kind]?.array ?? []).map { "\($0["id"]?.uint ?? 0)" }
+            let exp = (want?[kind]?.array ?? []).compactMap(\.string)
+            XCTAssertFalse(exp.isEmpty)
+            XCTAssertEqual(got, exp, kind)
+        }
+        XCTAssertFalse(Sync.fillGoalIds(&data), "nothing more to give")
     }
 }

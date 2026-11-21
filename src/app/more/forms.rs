@@ -185,7 +185,9 @@ fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (u
                 if k == "email" && !email_ok(&v) {
                     return Err((i, trf!("\"{}\" needs an email address.", fld.label)));
                 }
-                a.description.push_str(&format!("\n{}: {}", fld.label, v));
+                // a ticked box ("Yes" here) as it read on the screen
+                let shown = if k == "checkbox" { tr("Yes") } else { &v };
+                a.description.push_str(&format!("\n{}: {}", fld.label, shown));
             }
         }
     }

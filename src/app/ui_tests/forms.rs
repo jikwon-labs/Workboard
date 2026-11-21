@@ -458,3 +458,22 @@ fn an_unnamed_answer_is_named_in_the_interface_language() {
         Some("새 양식 submission")
     );
 }
+
+/// A ticked Checkbox question goes into the task description as the box
+/// read on the screen it was ticked on: 예 in Korean, not Yes.
+#[test]
+fn a_ticked_checkbox_is_written_in_the_interface_language() {
+    let mut h = Ui1::new();
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    blank_form(&mut h);
+    h.click("Question 2 kind");
+    h.click("Kind Checkbox");
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("Agreed");
+    h.click("Answer 2");
+    h.click("Submit");
+    let d = task_named(&h, "Agreed").description.clone();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert_eq!(d, "자세한 내용: 예");
+}

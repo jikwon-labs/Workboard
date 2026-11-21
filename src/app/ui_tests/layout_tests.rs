@@ -7,7 +7,7 @@ use super::*;
 impl Ui1 {
     /// Painted texts inside `area` that their clip rect cuts on the left or
     /// right (cut mid-glyph instead of shortened with an ellipsis).
-    fn cut_texts(&self, area: Rect) -> Vec<String> {
+    pub(super) fn cut_texts(&self, area: Rect) -> Vec<String> {
         let mut out = vec![];
         each_text(&self.shapes, |ts, clip| {
             let r = ts.visual_bounding_rect();
@@ -33,7 +33,7 @@ impl Ui1 {
 
     /// Controls on screen (vertically) that reach past the window's right
     /// edge.
-    fn past_right_edge(&self) -> Vec<String> {
+    pub(super) fn past_right_edge(&self) -> Vec<String> {
         let w = self.size.x;
         let h = self.size.y;
         let mut out: Vec<String> = self
@@ -48,7 +48,7 @@ impl Ui1 {
     }
 
     /// Every painted text shape with its rect (inside its clip rect).
-    fn texts_in(&self, area: Rect) -> Vec<(String, Rect)> {
+    pub(super) fn texts_in(&self, area: Rect) -> Vec<(String, Rect)> {
         let mut out = vec![];
         each_text(&self.shapes, |ts, clip| {
             let r = ts.visual_bounding_rect().intersect(clip);
@@ -62,7 +62,7 @@ impl Ui1 {
 }
 
 /// Pairs of painted texts in `area` whose visible rects overlap.
-fn overlapping(texts: &[(String, Rect)]) -> Vec<(String, String)> {
+pub(super) fn overlapping(texts: &[(String, Rect)]) -> Vec<(String, String)> {
     let mut out = vec![];
     for (i, (a, ra)) in texts.iter().enumerate() {
         for (b, rb) in &texts[i + 1..] {
@@ -175,7 +175,7 @@ const LONG_TASK: &str =
 
 /// The seed plus what the audit's heavy state had: a list with a long name,
 /// 35 overdue tasks of mine and one long-named task on that list due today.
-fn heavy(h: &mut Ui1) -> u64 {
+pub(super) fn heavy(h: &mut Ui1) -> u64 {
     let me = h.app.data.me;
     let long = h.app.data.new_id();
     h.app.data.spaces[0].lists.push(ListItem {

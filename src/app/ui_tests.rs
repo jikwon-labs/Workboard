@@ -9,6 +9,7 @@ use workboard_server::testing::temp_home;
 
 mod ai;
 mod archived;
+mod audit_sweep;
 mod chat;
 mod comments;
 mod docs;

@@ -89,7 +89,7 @@ fn english_left(shown: &str, data: &[String]) -> bool {
         .any(|d| d.contains(&low) || (low.len() > 3 && low.contains(d.as_str()) && d.len() > 3))
 }
 
-fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
+pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
     let d = &h.app.data;
     let space = d.spaces.first().map(|s| s.id).unwrap_or(0);
     let folder = d

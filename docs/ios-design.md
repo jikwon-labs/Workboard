@@ -161,7 +161,7 @@ ASC_ISSUER_ID=<발급자 ID, 같은 화면 위쪽>
 
 ## 로그인 (실제 서버 프로토콜)
 
-처음에는 서버가 없어서 `redeem`/`token` 메시지와 `auth_required` 같은 오류 코드를 제안해 두고 그대로 만들었다. 실제 서버(`server/src/lib.rs`, `crates/wb-net/src/lib.rs` 의 `Msg`)는 그것을 구현하지 않았다. 지금 iOS 는 실제 서버의 방식만 쓴다. 해당 코드는 `Protocol.swift`, `Account.swift`, `Client.swift` 에 있다.
+처음에는 서버가 없어서 `redeem`/`token` 메시지와 `auth_required` 같은 오류 코드를 제안해 두고 그대로 만들었다. 실제 서버(`server/src/lib.rs`, `crates/wb-net/src/protocol.rs` 의 `Msg`)는 그것을 구현하지 않았다. 지금 iOS 는 실제 서버의 방식만 쓴다. 해당 코드는 `Protocol.swift`, `Account.swift`, `Client.swift` 에 있다.
 
 ### 연결과 hello
 

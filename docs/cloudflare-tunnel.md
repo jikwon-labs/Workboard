@@ -120,7 +120,7 @@
 ## 코드에서 바뀐 곳
 
 - `crates/wb-net/src/conn.rs`: wss/https 주소면 TLS(rustls, macOS 가 신뢰하는 인증서)로 붙는다. `server_url` 은 https 주소의 기본 포트를 443 으로 본다.
-- `crates/wb-net/src/files.rs`: 파일 전송도 TLS. 프록시가 보내는 chunked 응답을 읽는다.
+- `crates/wb-net/src/http.rs`: 파일 전송도 TLS. 프록시가 보내는 chunked 응답을 읽는다.
 - `server/src/lib.rs`: `X-Forwarded-Proto: https` 로 온 요청이면 초대 메일과 `/join` 링크를 https 주소로 만든다. 터널을 거친 `/health` 는 `ok` 만 답한다. `serve_on` 으로 여러 주소를 동시에 듣는다.
 - `server/src/main.rs`: `--bind a,b`. 기본값은 `127.0.0.1`(2026-11-17 전에는 Tailscale 주소도).
 - `crates/wb-voice`: livekit 에 TLS 기능을 켜서 `wss://` LiveKit 에 붙는다.

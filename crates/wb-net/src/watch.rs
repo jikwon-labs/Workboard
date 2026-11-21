@@ -14,6 +14,11 @@
 // says so once and stops.
 
 use super::*;
+use crate::client::{connect, send, End};
+use std::io::ErrorKind;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::time::{Duration, Instant};
+use tungstenite::{Message, WebSocket};
 
 /// How long to wait before asking a server from before `watch` again.
 const OLD_SERVER_SECS: u64 = 10 * 60;

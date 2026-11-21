@@ -950,10 +950,14 @@ fn server_refusals_are_shown_in_the_interface_language() {
         out
     };
     let mut all = sentences(include_str!("../../../server/src/lib.rs"));
-    all.extend(sentences(include_str!("../../../crates/wb-net/src/lib.rs")));
-    all.extend(sentences(include_str!(
-        "../../../crates/wb-net/src/files.rs"
-    )));
+    for src in [
+        include_str!("../../../crates/wb-net/src/protocol.rs"),
+        include_str!("../../../crates/wb-net/src/addr.rs"),
+        include_str!("../../../crates/wb-net/src/client.rs"),
+        include_str!("../../../crates/wb-net/src/http.rs"),
+    ] {
+        all.extend(sentences(src));
+    }
     assert!(all.len() > 30, "found the texts: {}", all.len());
     crate::i18n::set_lang(crate::i18n::Lang::Ko);
     let shown: Vec<(String, String)> = all

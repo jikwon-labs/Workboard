@@ -841,3 +841,47 @@ fn whiteboard_list_shows_a_card_for_each_board() {
     h.click("Action Plan");
     assert_eq!(h.app.wb_open, Some(wid));
 }
+
+/// The "Clear the whole board?" question in the board menu has room inside
+/// the menu's edge, the words on one line and the buttons just under them.
+/// The buttons were centred in the height the menu had before, far below
+/// the words, and the words sat against the edge.
+#[test]
+fn clear_board_question_has_even_room_around_it() {
+    let mut h = Ui1::new();
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    h.app.sweep.wb_new = None;
+    h.settle();
+    h.click("Board menu");
+    h.click("Clear board");
+    h.settle();
+    let title = h.painted_text("Clear the whole board?")[0].0;
+    let body = h.painted_text("Every stroke and note on it is removed.")[0].0;
+    let clear = h.rect("Clear");
+    let cancel = h.rect("Cancel");
+    let menu = h
+        .ctx
+        .memory(|m| {
+            m.layer_ids()
+                .filter(|l| l.order == egui::Order::Foreground)
+                .filter_map(|l| m.area_rect(l.id))
+                .find(|r| r.contains_rect(clear))
+        })
+        .expect("the menu is open");
+    assert!(title.left() - menu.left() >= 12.0, "{title:?} in {menu:?}");
+    assert!(title.top() - menu.top() >= 12.0, "{title:?} in {menu:?}");
+    assert!(
+        menu.right() - clear.right() >= 12.0,
+        "{clear:?} in {menu:?}"
+    );
+    let below = menu.bottom() - clear.bottom();
+    assert!((10.0..=16.0).contains(&below), "{clear:?} in {menu:?}");
+    assert!(body.height() < 20.0, "the words fit on one line: {body:?}");
+    let gap = clear.top() - body.bottom();
+    assert!((8.0..=24.0).contains(&gap), "buttons {gap} below the words");
+    assert_eq!(cancel.height(), clear.height(), "the two buttons match");
+    h.click("Cancel");
+    assert_eq!(h.app.sweep.confirm, None);
+    assert!(h.has("Clear board"), "back to the menu");
+}

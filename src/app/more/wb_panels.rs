@@ -297,38 +297,64 @@ impl App {
     /// kept here instead of beside the zoom buttons. Clearing asks first.
     fn wb_menu(&mut self, ui: &mut Ui, t: &Theme, wid: u64, clear_key: &str) {
         if self.sweep.confirm.as_deref() == Some(clear_key) {
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new(tr("Clear the whole board?"))
-                    .font(crate::app::bold_font(ui.ctx(), 14.0))
-                    .color(t.text),
-            );
-            ui.label(
-                RichText::new(tr("Every stroke and note on it is removed."))
-                    .size(12.5)
-                    .color(t.text2),
-            );
-            ui.add_space(8.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let clear = ui.add(
-                    egui::Button::new(RichText::new(tr("Clear")).color(Color32::WHITE))
-                        .fill(t.danger),
-                );
-                name_it(&clear, "Clear");
-                if clear.clicked() {
-                    if let Some(wb) = self.data.extra.whiteboards.iter_mut().find(|w| w.id == wid) {
-                        wb.strokes.clear();
-                        wb.notes.clear();
-                    }
-                    self.sweep.wb_undo.retain(|u| u.0 != wid);
-                    self.sweep.confirm = None;
-                    self.dirty = true;
-                    close_popup(ui);
-                }
-                if ui.button(tr("Cancel")).clicked() {
-                    self.sweep.confirm = None;
-                }
-            });
+            // wide enough for the words on one line in English too
+            ui.set_min_width(250.0);
+            // room inside the menu's thin edge, like a dialog's
+            egui::Frame::new()
+                .inner_margin(egui::Margin {
+                    left: 8,
+                    right: 8,
+                    top: 6,
+                    bottom: 6,
+                })
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    ui.label(
+                        RichText::new(tr("Clear the whole board?"))
+                            .font(crate::app::bold_font(ui.ctx(), 14.0))
+                            .color(t.text),
+                    );
+                    ui.label(
+                        RichText::new(tr("Every stroke and note on it is removed."))
+                            .size(12.5)
+                            .color(t.text2),
+                    );
+                    ui.add_space(12.0);
+                    // a row only as tall as the buttons: a layout given the
+                    // rest of the popup kept the menu's height and centred
+                    // the buttons in it, far below the words
+                    ui.allocate_ui_with_layout(
+                        vec2(ui.available_width(), crate::widgets::CONTROL_H),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().button_padding.x = 12.0;
+                            let clear = ui.add(Tint(
+                                egui::Button::new(RichText::new(tr("Clear")).color(Color32::WHITE))
+                                    .fill(t.danger)
+                                    .corner_radius(6)
+                                    .min_size(vec2(0.0, crate::widgets::CONTROL_H)),
+                            ));
+                            name_it(&clear, "Clear");
+                            if clear.clicked() {
+                                if let Some(wb) =
+                                    self.data.extra.whiteboards.iter_mut().find(|w| w.id == wid)
+                                {
+                                    wb.strokes.clear();
+                                    wb.notes.clear();
+                                }
+                                self.sweep.wb_undo.retain(|u| u.0 != wid);
+                                self.sweep.confirm = None;
+                                self.dirty = true;
+                                close_popup(ui);
+                            }
+                            let cancel = crate::widgets::secondary_button(ui, tr("Cancel"));
+                            name_it(&cancel, "Cancel");
+                            if cancel.clicked() {
+                                self.sweep.confirm = None;
+                            }
+                        },
+                    );
+                });
             return;
         }
         if menu_row_named(ui, t, "Reset view", tr("Reset view"), false, |p, c| {

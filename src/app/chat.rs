@@ -2648,10 +2648,12 @@ impl App {
                     });
                 }
                 if let Some(pt) = shown_post_title(m) {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_top(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
                         line_icon(ui.painter(), "megaphone", r.center(), t.text2);
-                        ui.label(RichText::new(pt).size(16.0).color(t.text));
+                        // wrapped: a long one (a web address) widened the
+                        // whole conversation past the window
+                        ui.add(egui::Label::new(RichText::new(pt).size(16.0).color(t.text)).wrap());
                     });
                 }
                 if editing {
@@ -2965,9 +2967,11 @@ impl App {
             // it floats over the row's top edge so it hides little of the
             // row; on a one-line row it used to sit right on the text
             let bar_top = (rect.top() - 20.0).max(ui.clip_rect().top() + 2.0);
-            // at the row's right end, but not past the conversation's left
-            // edge (a narrow one cut off the first reactions)
-            let bar_left = (rect.right() - bw * n as f32 - 8.0).max(ui.clip_rect().left() + 2.0);
+            // at the row's right end, but inside the conversation that
+            // shows: not past its left edge (a narrow one cut off the first
+            // reactions) nor its right one
+            let right = rect.right().min(ui.clip_rect().right() - 4.0);
+            let bar_left = (right - bw * n as f32 - 8.0).max(ui.clip_rect().left() + 2.0);
             let bar = Rect::from_min_size(pos2(bar_left, bar_top), vec2(bw * n as f32 + 4.0, 28.0));
             ui.data_mut(|d| d.insert_temp(bar_mem, (bar_key, bar, pass)));
             ui.painter().rect_filled(bar, 7.0, t.card);

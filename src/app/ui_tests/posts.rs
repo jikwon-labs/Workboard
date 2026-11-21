@@ -1190,3 +1190,34 @@ fn a_posts_author_opens_their_profile_and_mine_can_be_edited() {
     h.click("Edit profile");
     assert!(matches!(h.app.modal, Some(Modal::Profile { .. })));
 }
+
+/// A post title with no spaces (a web address, say) wraps in the
+/// conversation. It used to widen the whole conversation past the window,
+/// so the message box and a message's hover toolbar were cut off at the
+/// right.
+#[test]
+fn a_long_post_title_keeps_the_conversation_inside_the_window() {
+    let mut h = Ui1::new();
+    let gen = channel_id(&h, "general");
+    let long = format!("https://example.com/{}", "a".repeat(140));
+    add_post(&mut h, gen, 2, &long, "See the plan", "Idea", 60);
+    h.click("general");
+    h.settle();
+    let composer = h.rect("Message composer");
+    assert!(
+        composer.right() < 1440.0,
+        "the message box fits: {composer:?}"
+    );
+    let (title, _) = h.painted_text(&long)[0];
+    assert!(
+        title.height() > 30.0 && title.right() <= composer.right() + 20.0,
+        "the title wraps inside: {title:?}"
+    );
+    let at = h.painted_text("See the plan")[0].0.center();
+    h.hover(at);
+    let more = h.rect("More actions");
+    assert!(
+        more.right() <= composer.right() + 20.0,
+        "the toolbar fits: {more:?}"
+    );
+}

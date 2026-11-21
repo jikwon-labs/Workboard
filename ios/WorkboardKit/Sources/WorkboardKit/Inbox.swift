@@ -56,6 +56,11 @@ public enum Inbox {
         }
         // imported history starts out cleared for everyone, unless saved for later
         func importedTab(_ key: String) -> InboxItem.Tab { later.contains(key) ? .later : .cleared }
+        // my notification settings (kept in step with the Mac) decide what is
+        // Primary; one the Mac hasn't sent is on, as its defaults are
+        let notify = data.at("extra.notify")
+        func on(_ k: String) -> Bool { notify?[k]?.bool ?? true }
+        let (commentsOn, mentionsOn, assignedOn) = (on("comments"), on("mentions"), on("assigned"))
         func mentions(_ text: String, _ ids: [UInt64]) -> Bool {
             ids.isEmpty ? Mentions.ids(in: text, members: members).contains(me) : ids.contains(me)
         }
@@ -71,7 +76,7 @@ public enum Inbox {
                 let mention = comment && mentions(text, (a["mentions"]?.array ?? []).compactMap(\.uint))
                 let assigned: Bool
                 if comment { assigned = false } else if let who = a["target"]?.uint { assigned = who == me && text.hasPrefix("assigned to ") } else { assigned = !myName.isEmpty && text == "assigned to \(myName)" }
-                let primary = (comment && mine) || mention || assigned
+                let primary = (comment && mine && commentsOn) || (mention && mentionsOn) || (assigned && assignedOn)
                 let ts = a["ts"]?.int ?? 0
                 let key = "\(tid):\(ts):\(author)"
                 out.append(InboxItem(key: key, ts: ts, author: author, title: t["name"]?.string ?? "", text: text, source: .task(tid),
@@ -93,7 +98,7 @@ public enum Inbox {
                     let key = "chat:\(cid):\(mid)"
                     out.append(InboxItem(key: key, ts: m["ts"]?.int ?? 0, author: author, title: title, text: m["text"]?.string ?? "",
                                          source: .chat(channel: cid, message: mid, thread: nil), comment: true, mention: true, assigned: false, reply: false,
-                                         tab: imported ? importedTab(key) : tab(key, primary: true)))
+                                         tab: imported ? importedTab(key) : tab(key, primary: mentionsOn)))
                 }
                 let replies = m["replies"]?.array ?? []
                 for (i, r) in replies.enumerated() {
@@ -105,7 +110,7 @@ public enum Inbox {
                     let key = "chat:\(cid):\(rid)"
                     out.append(InboxItem(key: key, ts: r["ts"]?.int ?? 0, author: ra, title: title, text: r["text"]?.string ?? "",
                                          source: .chat(channel: cid, message: rid, thread: mid), comment: true, mention: mention, assigned: false, reply: reply,
-                                         tab: MessageView.isImported(r) ? importedTab(key) : tab(key, primary: true)))
+                                         tab: MessageView.isImported(r) ? importedTab(key) : tab(key, primary: (mention && mentionsOn) || reply)))
                 }
             }
         }

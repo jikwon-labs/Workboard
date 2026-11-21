@@ -26,6 +26,32 @@ final class InboxTests: XCTestCase {
         XCTAssertEqual(Inbox.line(byKey["205:101:2"]!, author: "Alex Kim"), "Alex Kim assigned to Jamie Park")
     }
 
+    /// What goes to Primary follows my notification settings (kept in step
+    /// with the Mac), as inbox_items on the Mac does: comments, mentions and
+    /// assignments each go to Other when turned off; thread replies are
+    /// "notified only" and stay in Primary.
+    func testPrimaryFollowsMyNotificationSettingsLikeTheMac() {
+        var d = SampleWorkspace.make()
+        Edits.addComment(&d, task: 201, text: "Looks good", me: 2, ts: 100)
+        Edits.toggleAssignee(&d, task: 205, member: 1, me: 2, ts: 101)
+        Edits.sendMessage(&d, channel: 302, text: "@Jamie Park see this", me: 2, id: 900, ts: 102)
+        Edits.sendReply(&d, channel: 302, to: 321, text: "agreed", me: 2, id: 901, ts: 103)
+        func tabs() -> [String: InboxItem.Tab] {
+            Dictionary(Inbox.items(d, me: 1).map { ($0.key, $0.tab) }, uniquingKeysWith: { a, _ in a })
+        }
+        XCTAssertEqual(tabs()["201:100:2"], .primary)
+        XCTAssertEqual(tabs()["chat:302:900"], .primary)
+        d.set("extra.notify", .object(["comments": .bool(false), "mentions": .bool(false), "assigned": .bool(false)]))
+        let t = tabs()
+        XCTAssertEqual(t["201:100:2"], .other, "comments on my tasks off")
+        XCTAssertEqual(t["205:101:2"], .other, "assignments off")
+        XCTAssertEqual(t["chat:302:900"], .other, "mentions off")
+        XCTAssertEqual(t["chat:302:901"], .primary, "replies stay in Primary")
+        // a setting the Mac hasn't sent counts as on, like its defaults
+        d.set("extra.notify", .object(["direct": .bool(false)]))
+        XCTAssertEqual(tabs()["201:100:2"], .primary)
+    }
+
     func testLaterAndClearedAreKeptAndUndone() {
         var d = SampleWorkspace.make()
         Edits.addComment(&d, task: 201, text: "a", me: 2, ts: 100)

@@ -75,6 +75,9 @@ pub(super) fn emoji_grid(ui: &mut Ui) -> Option<&'static str> {
     picked
 }
 
+/// How long a message gone to stays lit up, in seconds.
+const FLASH_SECS: f64 = 2.0;
+
 /// The thread panel's width until it is dragged wider or narrower.
 const THREAD_W: f32 = 360.0;
 
@@ -1393,13 +1396,31 @@ impl App {
                 })
                 .collect();
             // the newest messages; earlier ones a page at a time on asking
-            let limit = match self.chat.window {
+            let mut limit = match self.chat.window {
                 Some((c, n)) if c == cid => n,
                 _ => CHAT_PAGE,
             };
+            // a message to go to is shown, however far back it is
+            if let Some(id) = self.chat.jump_to {
+                match matching.iter().position(|m| m.id == id) {
+                    Some(i) if matching.len() - i > limit => {
+                        limit = matching.len() - i;
+                        self.chat.window = Some((cid, limit));
+                    }
+                    Some(_) => {}
+                    None => self.chat.jump_to = None,
+                }
+            }
+            // (going to a message, the list isn't held at its bottom; the
+            // light goes out on time even when its message isn't drawn)
+            let now = ui.input(|i| i.time);
+            if self.chat.flash.is_some_and(|(_, _, at)| now - at >= FLASH_SECS) {
+                self.chat.flash = None;
+            }
+            let going = self.chat.jump_to.is_some() || self.chat.flash.is_some_and(|(c, _, _)| c == cid);
             let earlier = matching.len().saturating_sub(limit);
             let shown: Vec<Message> = matching[earlier..].iter().map(|m| (*m).clone()).collect();
-            let list = egui::ScrollArea::vertical().id_salt(("chat_scroll", cid)).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
+            let list = egui::ScrollArea::vertical().id_salt(("chat_scroll", cid)).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(!going).show(ui, |ui| {
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 10)).show(ui, |ui| {
                     if earlier > 0 {
                         ui.vertical_centered(|ui| {
@@ -1487,7 +1508,10 @@ impl App {
                             prev = None;
                         }
                         let compact = prev.map_or(false, |(a, ts)| a == m.author && m.ts - ts < 300) && m.post_title.is_none() && m.call.is_none();
+                        let top = ui.cursor().top();
+                        let light = ui.painter().add(egui::Shape::Noop);
                         self.message_row_c(ui, cid, m, true, compact, &mut acts);
+                        self.went_to(ui, cid, m.id, top, light);
                         prev = Some((m.author, m.ts));
                     }
                     // just sent: down to it, even from higher up the list
@@ -1569,6 +1593,44 @@ impl App {
 
     /// Leaving a conversation closes its thread panel; a thread in its own
     /// window stays open.
+    /// After drawing message `id` (from `top` down to the cursor): the one
+    /// to go to comes into the middle of the list at once and is lit up
+    /// (in the `light` shape under it), the light fading out over a moment.
+    fn went_to(&mut self, ui: &mut Ui, cid: u64, id: u64, top: f32, light: egui::layers::ShapeIdx) {
+        let lit = self.chat.flash.is_some_and(|(c, f, _)| c == cid && f == id);
+        if self.chat.jump_to != Some(id) && !lit {
+            return;
+        }
+        let row = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
+        let now = ui.input(|i| i.time);
+        if self.chat.jump_to == Some(id) {
+            self.chat.jump_to = None;
+            self.chat.flash = Some((cid, id, now));
+            ui.scroll_to_rect_animation(
+                row,
+                Some(Align::Center),
+                egui::style::ScrollAnimation::none(),
+            );
+        }
+        let Some((_, _, at)) = self.chat.flash else {
+            return;
+        };
+        let left = 1.0 - ((now - at) / FLASH_SECS) as f32;
+        if left <= 0.0 {
+            self.chat.flash = None;
+            return;
+        }
+        ui.painter().set(
+            light,
+            egui::Shape::rect_filled(
+                row.expand2(vec2(6.0, 2.0)),
+                6.0,
+                WARN_ORANGE.gamma_multiply(0.25 * left),
+            ),
+        );
+        ui.ctx().request_repaint();
+    }
+
     pub(super) fn leave_thread(&mut self) {
         if self.chat.thread_window.is_none() {
             self.chat.thread_open = None;

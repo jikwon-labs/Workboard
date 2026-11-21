@@ -650,6 +650,12 @@ struct ChatUi {
     also_channel: bool,
     /// The message being written in the open channel (`open`).
     text: String,
+    /// A message to bring into sight in the open conversation on its next
+    /// draw ("Open in channel" on a post), however far back it is.
+    jump_to: Option<u64>,
+    /// The message just gone to (conversation, message) and when (egui
+    /// time): lit up for a moment.
+    flash: Option<(u64, u64, f64)>,
     /// The title in the Post tab of the channel's box (the Posts page keeps
     /// its own, `PostsUi::title`).
     post_title: String,

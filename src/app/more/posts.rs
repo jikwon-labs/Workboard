@@ -548,8 +548,12 @@ impl App {
                                             |ui| {
                                                 if ui.link(tr("Open in channel")).clicked() {
                                                     // as the Inbox opens one (an old
-                                                    // thread closes)
+                                                    // thread closes), at the post:
+                                                    // nothing filtered out of the list
                                                     self.open_chat_at(cid, None);
+                                                    self.chat.jump_to = Some(m.id);
+                                                    self.channel_find = None;
+                                                    self.channel_panel = 0;
                                                 }
                                             },
                                         );

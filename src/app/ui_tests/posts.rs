@@ -997,3 +997,86 @@ fn logging_out_starts_the_posts_page_channel_and_filters_over() {
     assert_eq!(h.app.post.f_channel, None);
     assert!(h.app.post.picked.is_empty());
 }
+
+/// "Open in channel" goes to the post in the channel, not the channel's
+/// newest messages: the post is scrolled into sight, earlier messages
+/// shown as far back as it is, and lit up for a moment. It used to open
+/// the channel at the bottom, leaving the post to be searched for.
+#[test]
+fn open_in_channel_goes_to_the_post_and_lights_it_up() {
+    let mut h = posts_page();
+    let gen = channel_id(&h, "general");
+    add_post(
+        &mut h,
+        gen,
+        2,
+        "Office move",
+        "Boxes go Monday",
+        "Announcement",
+        90_000,
+    );
+    // many messages after it: further back than the channel shows at first
+    let me = h.app.data.me;
+    let c = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == gen)
+        .unwrap();
+    for i in 0..(crate::app::chat::CHAT_PAGE + 40) {
+        let mut m = crate::app::slack::new_message(
+            500_000 + i as u64,
+            me,
+            format!("later message {i}"),
+            now_ts() - 80_000 + i as i64,
+        );
+        m.imported = None;
+        c.messages.push(m);
+    }
+    h.settle();
+    let open = h.rect("Open in channel");
+    h.click_at(open.center());
+    for _ in 0..6 {
+        h.frame(vec![]);
+    }
+    assert_eq!(h.app.section, Section::Chat);
+    assert_eq!(h.app.chat.open, Some(gen));
+    let title = h.painted_text("Office move");
+    let composer = h.rect("Message composer");
+    assert!(
+        title
+            .iter()
+            .any(|(r, _)| r.top() > 120.0 && r.bottom() < composer.top()),
+        "the post is in sight: {title:?}, composer at {composer:?}"
+    );
+    let lit = |h: &Ui1| {
+        let at = h.painted_text("Office move")[0].0;
+        h.shapes.iter().any(|c| match &c.shape {
+            egui::Shape::Rect(r) => {
+                r.rect.contains(at.center())
+                    && r.fill.a() > 0
+                    && r.fill.r() as i32 > r.fill.b() as i32 + 20
+            }
+            _ => false,
+        })
+    };
+    assert!(lit(&h), "lit up");
+    // a few seconds later the light is gone
+    for _ in 0..80 {
+        h.frame(vec![]);
+    }
+    assert!(!lit(&h), "only for a moment");
+    assert!(h.app.chat.flash.is_none());
+
+    // going elsewhere before the light is out: it doesn't stay behind (the
+    // other conversation keeps to its newest messages)
+    h.app.section = Section::Posts;
+    h.settle();
+    h.click_at(h.rect("Open in channel").center());
+    h.click("website-redesign");
+    for _ in 0..80 {
+        h.frame(vec![]);
+    }
+    assert!(h.app.chat.flash.is_none(), "the light is gone there too");
+}

@@ -1,6 +1,6 @@
 // The shape of a task filter as it is kept: condition rows, groups of rows
-// with their own And / Or, and filters saved under a name. Matching and the
-// Filter panel are in src/app/parity.rs.
+// with their own And / Or, and filters saved under a name. Matching is in
+// src/app/parity/filter_model.rs, the Filter panel in filter_panel.rs there.
 
 use serde::{Deserialize, Serialize};
 

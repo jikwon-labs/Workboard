@@ -1,5 +1,5 @@
-// Korean text for src/app/small (see src/i18n.rs): files.rs, huddle.rs,
-// together.rs, updater.rs, media.rs and nav.rs.
+// Korean text for src/app/files.rs, huddle.rs, together.rs and nav.rs, and
+// for src/updater.rs and src/media.rs (see src/i18n.rs).
 
 pub const T: &[(&str, &str)] = &[
     // nav: workboard:// links, Inbox rows, reminders coming due

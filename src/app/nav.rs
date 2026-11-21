@@ -270,12 +270,25 @@ impl App {
             .member(me)
             .map(|m| m.name.clone())
             .unwrap_or_default();
-        let cleared = &self.data.extra.inbox_cleared;
-        let later = &self.data.extra.inbox_later;
+        // looked up for every row: sets, as these lists only ever grow
+        let cleared: std::collections::HashSet<&str> = self
+            .data
+            .extra
+            .inbox_cleared
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let later: std::collections::HashSet<&str> = self
+            .data
+            .extra
+            .inbox_later
+            .iter()
+            .map(String::as_str)
+            .collect();
         let tab_of = |key: &str, primary: bool| {
-            if cleared.iter().any(|k| k == key) {
+            if cleared.contains(key) {
                 3
-            } else if later.iter().any(|k| k == key) {
+            } else if later.contains(key) {
                 2
             } else if primary {
                 0
@@ -286,7 +299,7 @@ impl App {
         // imported history is already cleared for everyone, unless saved
         // for later
         let imported_tab = |key: &str| {
-            if later.iter().any(|k| k == key) {
+            if later.contains(key) {
                 2
             } else {
                 3

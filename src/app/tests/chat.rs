@@ -1008,6 +1008,45 @@ fn inbox_rows_moved_on_my_other_device_show_at_once() {
     );
 }
 
+/// Cleared and Later only ever grow, and every Inbox row is looked up in
+/// them: with tens of thousands of each, building the rows (which happens
+/// on every frame with a change) stays quick.
+#[test]
+fn inbox_rows_build_quickly_with_many_rows_cleared() {
+    let mut a = app();
+    let list = a.data.tasks[0].list_id;
+    let base = a.data.tasks[0].clone();
+    let now = now_ts();
+    let mut keys = vec![];
+    for i in 0..300u64 {
+        let mut t = base.clone();
+        t.id = 500_000 + i;
+        t.list_id = list;
+        t.activity = (0..100)
+            .map(|j| {
+                let ts = now - (i as i64 * 100 + j) * 60;
+                keys.push(format!("{}:{}:2", t.id, ts));
+                Activity {
+                    ts,
+                    author: 2,
+                    text: "a comment".into(),
+                    comment: true,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        a.data.tasks.push(t);
+    }
+    a.data.extra.inbox_cleared = keys;
+    a.data_changed();
+    let t0 = std::time::Instant::now();
+    let rows = a.inbox_items();
+    let took = t0.elapsed();
+    assert_eq!(rows.iter().filter(|r| r.tab == 3).count(), 30_000);
+    // looking each row up in a list of 30 000 took seconds
+    assert!(took.as_secs_f64() < 3.0, "built in {took:?}");
+}
+
 #[test]
 fn mentions_in_private_channels_i_am_not_in_stay_out() {
     let mut a = app();

@@ -1008,7 +1008,7 @@ fn inbox_rows_moved_on_my_other_device_show_at_once() {
     );
 }
 
-/// Cleared and Later only ever grow, and every Inbox row is looked up in
+/// Cleared and Later can be long, and every Inbox row is looked up in
 /// them: with tens of thousands of each, building the rows (which happens
 /// on every frame with a change) stays quick.
 #[test]

@@ -270,7 +270,7 @@ impl App {
             .member(me)
             .map(|m| m.name.clone())
             .unwrap_or_default();
-        // looked up for every row: sets, as these lists only ever grow
+        // looked up for every row: sets, as these lists can be long
         let cleared: std::collections::HashSet<&str> = self
             .data
             .extra

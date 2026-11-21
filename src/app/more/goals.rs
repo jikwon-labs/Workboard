@@ -26,6 +26,31 @@ pub(crate) fn pct_of(p: f32) -> u8 {
     }
 }
 
+/// The largest a goal's number gets either way: far past any count or
+/// amount people track, yet exact and printed in full.
+pub(crate) const NUM_MAX: f64 = 1e15;
+
+/// A box for one of a goal's numbers (start, target, now). It keeps them
+/// finite: "inf", "NaN" or "1e999" typed in leave it as it was, and anything
+/// past `NUM_MAX` stops there. The workspace file writes infinity as null,
+/// which can't be read back.
+pub(crate) fn number_box(v: &mut f64) -> egui::DragValue<'_> {
+    egui::DragValue::new(v)
+        .speed(1.0)
+        .range(-NUM_MAX..=NUM_MAX)
+        .custom_parser(parse_number)
+}
+
+/// A typed number, None unless it is a finite one.
+pub(crate) fn parse_number(s: &str) -> Option<f64> {
+    let s: String = s
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| if c == '\u{2212}' { '-' } else { c })
+        .collect();
+    s.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
 /// Milestones announced on the way to 100%.
 pub(crate) const MILESTONES: [u8; 4] = [25, 50, 75, 100];
 
@@ -1502,7 +1527,7 @@ impl App {
                 let TargetKind::Number { current, unit, .. } = &tg.kind else {
                     return;
                 };
-                if (current - to).abs() < f64::EPSILON {
+                if !to.is_finite() || (current - to).abs() < f64::EPSILON {
                     return;
                 }
                 let what = GoalChange::Number {
@@ -1664,7 +1689,7 @@ fn record_popup(
         let mut v: f64 = ui.data(|d| d.get_temp(value_id)).unwrap_or(current);
         ui.horizontal(|ui| {
             ui.label(tr("Now"));
-            let r = ui.add(egui::DragValue::new(&mut v).speed(1.0));
+            let r = ui.add(number_box(&mut v));
             name_it(&r, "Value now");
         });
         ui.data_mut(|d| d.insert_temp(value_id, v));
@@ -2064,6 +2089,28 @@ mod tests {
         assert_eq!(fmt_num(1234567.5), "1,234,567.5");
         assert_eq!(fmt_num(-3.0), "-3");
         assert_eq!(fmt_num(2.999), "3");
+    }
+
+    #[test]
+    fn goal_numbers_stay_finite_and_read_back() {
+        assert_eq!(parse_number("12.5"), Some(12.5));
+        assert_eq!(parse_number(" \u{2212}3 "), Some(-3.0));
+        for s in ["inf", "-inf", "NaN", "1e999", "", "abc"] {
+            assert_eq!(parse_number(s), None, "{s:?}");
+        }
+        // a goal saved with infinity in it (written as null) still reads
+        let g: Goal = serde_json::from_value(serde_json::json!({
+            "id": 1, "name": "G", "color": [0, 0, 0], "due": null, "owner": 1,
+            "targets": [{"name": "N", "kind": {"Number": {
+                "start": 0.0, "target": null, "current": null, "unit": ""}}}],
+            "log": [{"ts": 0, "who": 1, "pct": 0, "what": {"Number": {
+                "target": "N", "from": 1.0, "to": null, "unit": ""}}}]
+        }))
+        .expect("a goal with nulls for numbers reads");
+        assert!(matches!(
+            g.targets[0].kind,
+            TargetKind::Number { target, current, .. } if target == 0.0 && current == 0.0
+        ));
     }
 
     #[test]

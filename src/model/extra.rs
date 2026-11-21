@@ -21,11 +21,22 @@ pub struct Reminder {
     pub alerted: bool,
 }
 
+/// A goal's number as it was saved, 0 when it was saved as null: infinity
+/// (typed as "inf" or "1e999" before goal numbers were kept finite) is
+/// written as null, and a file or a teammate's copy with one in it couldn't
+/// be read at all.
+fn goal_num<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    Ok(Option::<f64>::deserialize(d)?.unwrap_or(0.0))
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum TargetKind {
     Number {
+        #[serde(deserialize_with = "goal_num")]
         start: f64,
+        #[serde(deserialize_with = "goal_num")]
         target: f64,
+        #[serde(deserialize_with = "goal_num")]
         current: f64,
         unit: String,
     },
@@ -102,7 +113,9 @@ pub enum GoalChange {
     Tracked,
     Number {
         target: String,
+        #[serde(deserialize_with = "goal_num")]
         from: f64,
+        #[serde(deserialize_with = "goal_num")]
         to: f64,
         unit: String,
     },

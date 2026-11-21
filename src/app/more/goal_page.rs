@@ -628,16 +628,16 @@ impl App {
                             .show(ui, |ui| {
                                 ui.label(tr("Now"));
                                 let before = *current;
-                                if ui.add(egui::DragValue::new(current).speed(1.0)).changed() {
+                                if ui.add(number_box(current)).changed() {
                                     ch = true;
                                 }
                                 let _ = before;
                                 ui.end_row();
                                 ui.label(tr("Start value"));
-                                ch |= ui.add(egui::DragValue::new(start).speed(1.0)).changed();
+                                ch |= ui.add(number_box(start)).changed();
                                 ui.end_row();
                                 ui.label(tr("Target value"));
-                                ch |= ui.add(egui::DragValue::new(target).speed(1.0)).changed();
+                                ch |= ui.add(number_box(target)).changed();
                                 ui.end_row();
                                 ui.label(tr("Unit"));
                                 ch |= ui.add(field(unit).desired_width(80.0)).changed();

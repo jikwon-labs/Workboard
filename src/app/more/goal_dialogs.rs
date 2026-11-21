@@ -384,7 +384,7 @@ impl App {
                                 small(ui, "Start value");
                                 let r = ui.add_sized(
                                     vec2(64.0, 26.0),
-                                    egui::DragValue::new(&mut d.from).speed(1.0),
+                                    number_box(&mut d.from),
                                 );
                                 name_it(&r, "Start value");
                             });
@@ -392,7 +392,7 @@ impl App {
                                 small(ui, "Target value");
                                 let r = ui.add_sized(
                                     vec2(64.0, 26.0),
-                                    egui::DragValue::new(&mut d.to).speed(1.0),
+                                    number_box(&mut d.to),
                                 );
                                 name_it(&r, "Target value");
                             });

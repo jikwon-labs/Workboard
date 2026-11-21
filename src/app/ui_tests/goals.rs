@@ -726,3 +726,47 @@ fn ticking_the_last_task_on_a_goals_page_opens_goal_achieved() {
     );
     assert_eq!(goal(&h, id).done_on, Some(today()));
 }
+
+/// The workspace as it is saved and read back, the way a restart or a
+/// teammate's copy sees it.
+fn reads_back(h: &Ui1) -> Result<Data, String> {
+    let v = serde_json::to_value(&h.app.data).map_err(|e| e.to_string())?;
+    serde_json::from_value::<Data>(v).map_err(|e| e.to_string())
+}
+
+#[test]
+fn recording_inf_or_nan_keeps_the_workspace_readable() {
+    let (mut h, a, _) = two_goals();
+    for typed in ["inf", "NaN", "-inf", "1e999"] {
+        h.click("Record Beta testers");
+        h.click("Value now");
+        h.type_text(typed);
+        h.click("Save value");
+        h.settle();
+        let v = current_of(&h, a, 0);
+        assert!(v.is_finite(), "{typed:?} gave {v}");
+        assert!(
+            reads_back(&h).is_ok(),
+            "{typed:?}: {:?}",
+            reads_back(&h).err()
+        );
+    }
+}
+
+#[test]
+fn the_new_goal_dialog_keeps_its_numbers_finite() {
+    let (mut h, _, _) = two_goals();
+    h.click("New goal");
+    h.type_text("Infinite");
+    h.click("Target value");
+    h.type_text("inf");
+    h.click("Start value");
+    h.type_text("-1e999");
+    h.click("Create goal");
+    let g = h.app.data.extra.goals.last().unwrap().clone();
+    let TargetKind::Number { start, target, .. } = g.targets[0].kind else {
+        panic!("a number target")
+    };
+    assert!(start.is_finite() && target.is_finite(), "{start} {target}");
+    assert!(reads_back(&h).is_ok(), "{:?}", reads_back(&h).err());
+}

@@ -3,6 +3,13 @@ import XCTest
 import WorkboardFakeServer
 
 final class AccountTests: XCTestCase {
+    func testANewPasswordIsLongEnoughAndTypedTheSameTwice() {
+        XCTAssertNil(newPasswordProblem("12345678", confirm: "12345678"))
+        XCTAssertEqual(newPasswordProblem("12345678", confirm: "12345679"), "The two passwords don't match.")
+        XCTAssertEqual(newPasswordProblem("1234567", confirm: "1234567"), passwordProblem("1234567"))
+        XCTAssertEqual(newPasswordProblem("short", confirm: "other"), passwordProblem("short"), "too short is said first")
+    }
+
     func testInviteLinkIsRead() {
         let l = InviteLink.parse("workboard://join?server=mac-mini.tail1.ts.net:8787&code=ABCD-EFGH-JKMN&email=sam%2Bwork%40example.com")
         XCTAssertEqual(l, InviteLink(server: "ws://mac-mini.tail1.ts.net:8787", code: "ABCD-EFGH-JKMN", email: "sam+work@example.com"))

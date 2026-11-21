@@ -446,7 +446,7 @@ struct PasswordView: View {
     func save() {
         client.resetAccountRequest()
         localError = nil
-        guard password == confirm else { localError = "The two passwords don't match."; return }
+        if let why = newPasswordProblem(password, confirm: confirm) { localError = why; return }
         localError = client.setPassword(email: email, password: password, oldPassword: hasAccount ? old : nil)
     }
 }

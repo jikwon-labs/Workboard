@@ -12,34 +12,11 @@ struct SignInView: View {
 
     @Environment(SyncClient.self) private var client
     @Environment(Nav.self) private var nav
-    @State private var mode: Mode = .password
-    // sign in
-    @State private var email = ""
-    @State private var password = ""
-    // code from the computer
-    @State private var linkCode = ""
+    /// What the forms hold, kept while switching between them.
+    @State private var form = SignInForm()
     @State private var scanning = false
-    // invite
-    @State private var code = ""
-    @State private var inviteEmail = ""
-    @State private var newPassword = ""
-    @State private var confirm = ""
-    // forgot
-    @State private var resetEmail = ""
-    @State private var codeSent = false
-    @State private var resetCode = ""
-    @State private var resetPassword = ""
-    @State private var resetConfirm = ""
-    @State private var forgotInfo: String?
-    @State private var asking = false
-    // shared
-    @State private var localError: String?
-    /// The form the last attempt came from, so its error shows only there.
-    @State private var attemptMode: Mode?
     @State private var editServer = false
     @State private var address = ""
-    /// GET /health says the server has no workspace yet.
-    @State private var emptyServer = false
 
     var body: some View {
         NavigationStack {
@@ -53,11 +30,11 @@ struct SignInView: View {
                     .listRowBackground(Color.clear)
                     .padding(.vertical, 8)
                 }
-                switch mode {
-                case .password: passwordForm
-                case .code: codeForm
-                case .invite: inviteForm
-                case .forgot: forgotForm
+                switch form.mode {
+                case .password: PasswordSignInForm(form: form)
+                case .code: CodeSignInForm(form: form, scanning: $scanning)
+                case .invite: InviteSignInForm(form: form)
+                case .forgot: ForgotPasswordForm(form: form)
                 }
                 serverSection
             }
@@ -75,7 +52,7 @@ struct SignInView: View {
     }
 
     var title: String {
-        switch mode {
+        switch form.mode {
         case .forgot: return "Reset password"
         case .invite: return "Join"
         case .code: return "Sign in"
@@ -90,175 +67,12 @@ struct SignInView: View {
 
     /// Why the server asked (its own words), above the forms.
     var note: String? {
-        if emptyServer { return AuthAPI.emptyServerNote }
+        if form.emptyServer { return AuthAPI.emptyServerNote }
         switch client.signInReason {
         case .signedOut: return client.signInMessage ?? "This iPhone isn't signed in on the server any more."
         case .gone: return (client.signInMessage ?? WorkspaceAPI.goneMessage) + " Sign in to another workspace, or type another server's address."
-        case .needed, nil: return mode == .password ? String(localized: "Sign in with your email and password, with the code your computer shows, or with the invite code you were given.") : nil
+        case .needed, nil: return form.mode == .password ? String(localized: "Sign in with your email and password, with the code your computer shows, or with the invite code you were given.") : nil
         case .failed: return nil
-        }
-    }
-
-    /// The error under the form that was sent (local check or the server's answer).
-    var shownError: String? {
-        if let localError { return localError }
-        if emptyServer { return nil } // the note above says what to do instead
-        if client.signInReason == .failed, attemptMode == mode, !client.signingIn { return client.signInMessage }
-        return nil
-    }
-
-    @ViewBuilder var errorFooter: some View {
-        if let e = shownError {
-            // the server's own words, in Korean when the table has them
-            Label(L(e), systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.red)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("signInError")
-        }
-    }
-
-    // MARK: forms
-
-    @ViewBuilder var passwordForm: some View {
-        Section {
-            TextField("Email", text: $email)
-                .keyboardType(.emailAddress)
-                .usernameField()
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("emailField")
-            PasswordField("Password", text: $password, kind: .current, id: "passwordField")
-                .onSubmit(signIn)
-            Button(action: signIn) { busyLabel("Sign in") }
-                .disabled(client.signingIn || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
-                .accessibilityIdentifier("signInButton")
-        } header: {
-            Text("Account")
-        } footer: {
-            errorFooter
-        }
-        Section {
-            Button("Sign in with a code from your computer") { switchTo(.code) }
-                .accessibilityIdentifier("codeModeButton")
-            Button("I have an invite code") { switchTo(.invite) }
-                .accessibilityIdentifier("inviteModeButton")
-            Button("Forgot password?") { resetEmail = email; switchTo(.forgot) }
-                .accessibilityIdentifier("forgotButton")
-        }
-    }
-
-    @ViewBuilder var codeForm: some View {
-        Section {
-            TextField("ABC123", text: $linkCode)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .keyboardType(.asciiCapable)
-                .font(.title2.monospaced())
-                .accessibilityIdentifier("linkCodeField")
-                .onChange(of: linkCode) { _, new in
-                    let t = LinkCode.typed(new)
-                    if t != new { linkCode = t }
-                }
-                .onSubmit(signInWithCode)
-            Button(action: signInWithCode) { busyLabel("Sign in") }
-                .disabled(client.signingIn || linkCode.count < LinkCode.length)
-                .accessibilityIdentifier("linkSignInButton")
-        } header: {
-            Text("Code from your computer")
-        } footer: {
-            if shownError != nil { errorFooter } else { Text("On your computer, open Work together > Sign in on your phone. The code works once, for 5 minutes.") }
-        }
-        Section {
-            Button { scanning = true } label: { Label("Scan QR code", systemImage: "qrcode.viewfinder") }
-                .accessibilityIdentifier("scanButton")
-        }
-        Section {
-            Button("I already have a password") { switchTo(.password) }
-                .accessibilityIdentifier("signInModeButton")
-        }
-    }
-
-    @ViewBuilder var inviteForm: some View {
-        Section {
-            TextField("XXXX-XXXX-XXXX", text: $code)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .font(.title3.monospaced())
-                .accessibilityIdentifier("inviteField")
-                .onChange(of: code) { old, new in readPastedLink(old: old, new: new) }
-            TextField("Email (optional)", text: $inviteEmail)
-                .keyboardType(.emailAddress)
-                .usernameField()
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("inviteEmailField")
-        } header: {
-            Text("Invite code")
-        } footer: {
-            Text("The email you were invited with. Leave it empty if the invite came to your email. You can also paste the whole invite link or email here.")
-        }
-        Section {
-            PasswordField("Password (at least \(minPasswordLength) characters)", text: $newPassword, kind: .new, id: "newPasswordField")
-            PasswordField("Password again", text: $confirm, kind: .new, id: "confirmPasswordField")
-                .onSubmit(join)
-            Button(action: join) { busyLabel("Join") }
-                .disabled(client.signingIn || code.trimmingCharacters(in: .whitespaces).isEmpty || newPassword.isEmpty)
-                .accessibilityIdentifier("joinButton")
-        } header: {
-            Text("Choose a password")
-        } footer: {
-            if shownError != nil { errorFooter } else { Text("You sign in with your email and this password on your other devices.") }
-        }
-        Section {
-            Button("I already have a password") { switchTo(.password) }
-                .accessibilityIdentifier("signInModeButton")
-        }
-    }
-
-    @ViewBuilder var forgotForm: some View {
-        Section {
-            TextField("Email", text: $resetEmail)
-                .keyboardType(.emailAddress)
-                .usernameField()
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("forgotEmailField")
-            Button(action: askForCode) { busyLabel(codeSent ? "Send another code" : "Send code", busy: asking) }
-                .disabled(asking || resetEmail.trimmingCharacters(in: .whitespaces).isEmpty)
-                .accessibilityIdentifier("sendCodeButton")
-        } header: {
-            Text("Your account email")
-        } footer: {
-            if let forgotInfo {
-                Text(forgotInfo).accessibilityIdentifier("forgotInfo")
-            } else if !codeSent, shownError != nil {
-                errorFooter
-            } else {
-                Text("The server emails you a code to set a new password.")
-            }
-        }
-        if codeSent {
-            Section {
-                TextField("XXXX-XXXX-XXXX", text: $resetCode)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .font(.title3.monospaced())
-                    .accessibilityIdentifier("resetCodeField")
-                PasswordField("New password (at least \(minPasswordLength) characters)", text: $resetPassword, kind: .new, id: "resetPasswordField")
-                PasswordField("New password again", text: $resetConfirm, kind: .new, id: "resetConfirmField")
-                    .onSubmit(reset)
-                Button(action: reset) { busyLabel("Set password and sign in") }
-                    .disabled(client.signingIn || resetCode.trimmingCharacters(in: .whitespaces).isEmpty || resetPassword.isEmpty)
-                    .accessibilityIdentifier("resetButton")
-            } header: {
-                Text("Code from the email")
-            } footer: {
-                errorFooter
-            }
-        }
-        Section {
-            Button("Back to sign in") { switchTo(.password) }
-                .accessibilityIdentifier("signInModeButton")
         }
     }
 
@@ -289,14 +103,6 @@ struct SignInView: View {
         }
     }
 
-    @ViewBuilder func busyLabel(_ text: String, busy: Bool? = nil) -> some View {
-        if busy ?? client.signingIn {
-            ProgressView().accessibilityLabel("Signing in")
-        } else {
-            Text(L(text))
-        }
-    }
-
     // MARK: actions
 
     /// A different server starts from its own workspace; the one here is
@@ -309,67 +115,9 @@ struct SignInView: View {
     /// The server turned us away: is it because it's still empty?
     func checkEmpty() async {
         let server = client.settings.server
-        guard !server.isEmpty else { emptyServer = false; return }
+        guard !server.isEmpty else { form.emptyServer = false; return }
         let has = await AuthAPI.hasWorkspace(server: server)
-        if server == client.settings.server { emptyServer = has == false }
-    }
-
-    func switchTo(_ m: Mode) {
-        localError = nil
-        forgotInfo = nil
-        mode = m
-    }
-
-    func send(_ r: SignInRequest) {
-        attemptMode = mode
-        localError = client.signIn(r)
-        if localError == nil { nav.openingWorkspace = true }
-    }
-
-    func signIn() {
-        send(.password(email: email, password: password))
-    }
-
-    func signInWithCode() {
-        send(.link(code: linkCode))
-    }
-
-    func join() {
-        if let why = passwordProblem(newPassword) { localError = why; return }
-        guard newPassword == confirm else { localError = "The two passwords don't match."; return }
-        let e = inviteEmail.trimmingCharacters(in: .whitespaces)
-        send(.invite(code: code, email: e.isEmpty ? nil : e, newPassword: newPassword))
-        // the account email to fill in next time
-        if !e.isEmpty { email = e }
-    }
-
-    func reset() {
-        if let why = passwordProblem(resetPassword) { localError = why; return }
-        guard resetPassword == resetConfirm else { localError = "The two passwords don't match."; return }
-        send(.reset(email: resetEmail, code: resetCode, newPassword: resetPassword))
-    }
-
-    func askForCode() {
-        localError = nil
-        forgotInfo = nil
-        asking = true
-        let (server, mail) = (client.settings.server, resetEmail)
-        Task {
-            defer { asking = false }
-            do {
-                if try await AuthAPI.forgot(server: server, email: mail) {
-                    codeSent = true
-                    forgotInfo = "If \(mail.trimmingCharacters(in: .whitespaces)) has an account here, a code is on its way. It works for 30 minutes."
-                } else {
-                    codeSent = false
-                    forgotInfo = "This server can't send email. Ask the owner or an admin for a new invite code, then use \"I have an invite code\"."
-                }
-            } catch AuthError.failed(let why) {
-                localError = why
-            } catch {
-                localError = "That server address doesn't look right."
-            }
-        }
+        if server == client.settings.server { form.emptyServer = has == false }
     }
 
     /// An invite link opened from outside the app: fill in the invite form.
@@ -379,23 +127,323 @@ struct SignInView: View {
         guard let link = nav.invite else { return }
         nav.invite = nil
         if link.fromComputer {
-            linkCode = link.code
-            switchTo(.code)
-            attemptMode = .code
+            form.linkCode = link.code
+            form.switchTo(.code)
+            form.attemptMode = .code
             return
         }
-        code = link.code
-        if let e = link.email { inviteEmail = e }
-        switchTo(.invite)
+        form.code = link.code
+        if let e = link.email { form.inviteEmail = e }
+        form.switchTo(.invite)
+    }
+}
+
+/// What is typed in the sign-in forms, and how the last attempt went.
+@MainActor
+@Observable
+final class SignInForm {
+    var mode: SignInView.Mode = .password
+    // sign in
+    var email = ""
+    var password = ""
+    // code from the computer
+    var linkCode = ""
+    // invite
+    var code = ""
+    var inviteEmail = ""
+    var newPassword = ""
+    var confirm = ""
+    // forgot
+    var resetEmail = ""
+    var codeSent = false
+    var resetCode = ""
+    var resetPassword = ""
+    var resetConfirm = ""
+    var forgotInfo: String?
+    var asking = false
+    // shared
+    var localError: String?
+    /// The form the last attempt came from, so its error shows only there.
+    var attemptMode: SignInView.Mode?
+    /// GET /health says the server has no workspace yet.
+    var emptyServer = false
+
+    func switchTo(_ m: SignInView.Mode) {
+        localError = nil
+        forgotInfo = nil
+        mode = m
+    }
+
+    func send(_ r: SignInRequest, client: SyncClient, nav: Nav) {
+        attemptMode = mode
+        localError = client.signIn(r)
+        if localError == nil { nav.openingWorkspace = true }
+    }
+
+    /// The error under the form that was sent (local check or the server's answer).
+    func shownError(_ client: SyncClient) -> String? {
+        if let localError { return localError }
+        if emptyServer { return nil } // the note above says what to do instead
+        if client.signInReason == .failed, attemptMode == mode, !client.signingIn { return client.signInMessage }
+        return nil
+    }
+}
+
+/// The error under a sign-in form.
+private struct SignInError: View {
+    let error: String?
+
+    var body: some View {
+        if let e = error {
+            // the server's own words, in Korean when the table has them
+            Label(L(e), systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.red)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("signInError")
+        }
+    }
+}
+
+/// A form's button: its title, or a spinner while signing in.
+private struct BusyLabel: View {
+    @Environment(SyncClient.self) private var client
+    let text: String
+    var busy: Bool?
+
+    var body: some View {
+        if busy ?? client.signingIn {
+            ProgressView().accessibilityLabel("Signing in")
+        } else {
+            Text(L(text))
+        }
+    }
+}
+
+/// Email and password.
+private struct PasswordSignInForm: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
+    @Bindable var form: SignInForm
+
+    var body: some View {
+        Section {
+            TextField("Email", text: $form.email)
+                .keyboardType(.emailAddress)
+                .usernameField()
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("emailField")
+            PasswordField("Password", text: $form.password, kind: .current, id: "passwordField")
+                .onSubmit(signIn)
+            Button(action: signIn) { BusyLabel(text: "Sign in") }
+                .disabled(client.signingIn || form.email.trimmingCharacters(in: .whitespaces).isEmpty || form.password.isEmpty)
+                .accessibilityIdentifier("signInButton")
+        } header: {
+            Text("Account")
+        } footer: {
+            SignInError(error: form.shownError(client))
+        }
+        Section {
+            Button("Sign in with a code from your computer") { form.switchTo(.code) }
+                .accessibilityIdentifier("codeModeButton")
+            Button("I have an invite code") { form.switchTo(.invite) }
+                .accessibilityIdentifier("inviteModeButton")
+            Button("Forgot password?") { form.resetEmail = form.email; form.switchTo(.forgot) }
+                .accessibilityIdentifier("forgotButton")
+        }
+    }
+
+    func signIn() {
+        form.send(.password(email: form.email, password: form.password), client: client, nav: nav)
+    }
+}
+
+/// The code the person's computer shows, typed or scanned.
+private struct CodeSignInForm: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
+    @Bindable var form: SignInForm
+    @Binding var scanning: Bool
+
+    var body: some View {
+        let error = form.shownError(client)
+        Section {
+            TextField("ABC123", text: $form.linkCode)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .keyboardType(.asciiCapable)
+                .font(.title2.monospaced())
+                .accessibilityIdentifier("linkCodeField")
+                .onChange(of: form.linkCode) { _, new in
+                    let t = LinkCode.typed(new)
+                    if t != new { form.linkCode = t }
+                }
+                .onSubmit(signInWithCode)
+            Button(action: signInWithCode) { BusyLabel(text: "Sign in") }
+                .disabled(client.signingIn || form.linkCode.count < LinkCode.length)
+                .accessibilityIdentifier("linkSignInButton")
+        } header: {
+            Text("Code from your computer")
+        } footer: {
+            if error != nil { SignInError(error: error) } else { Text("On your computer, open Work together > Sign in on your phone. The code works once, for 5 minutes.") }
+        }
+        Section {
+            Button { scanning = true } label: { Label("Scan QR code", systemImage: "qrcode.viewfinder") }
+                .accessibilityIdentifier("scanButton")
+        }
+        Section {
+            Button("I already have a password") { form.switchTo(.password) }
+                .accessibilityIdentifier("signInModeButton")
+        }
+    }
+
+    func signInWithCode() {
+        form.send(.link(code: form.linkCode), client: client, nav: nav)
+    }
+}
+
+/// An invite code and a new password.
+private struct InviteSignInForm: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
+    @Bindable var form: SignInForm
+
+    var body: some View {
+        let error = form.shownError(client)
+        Section {
+            TextField("XXXX-XXXX-XXXX", text: $form.code)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .font(.title3.monospaced())
+                .accessibilityIdentifier("inviteField")
+                .onChange(of: form.code) { old, new in readPastedLink(old: old, new: new) }
+            TextField("Email (optional)", text: $form.inviteEmail)
+                .keyboardType(.emailAddress)
+                .usernameField()
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("inviteEmailField")
+        } header: {
+            Text("Invite code")
+        } footer: {
+            Text("The email you were invited with. Leave it empty if the invite came to your email. You can also paste the whole invite link or email here.")
+        }
+        Section {
+            PasswordField("Password (at least \(minPasswordLength) characters)", text: $form.newPassword, kind: .new, id: "newPasswordField")
+            PasswordField("Password again", text: $form.confirm, kind: .new, id: "confirmPasswordField")
+                .onSubmit(join)
+            Button(action: join) { BusyLabel(text: "Join") }
+                .disabled(client.signingIn || form.code.trimmingCharacters(in: .whitespaces).isEmpty || form.newPassword.isEmpty)
+                .accessibilityIdentifier("joinButton")
+        } header: {
+            Text("Choose a password")
+        } footer: {
+            if error != nil { SignInError(error: error) } else { Text("You sign in with your email and this password on your other devices.") }
+        }
+        Section {
+            Button("I already have a password") { form.switchTo(.password) }
+                .accessibilityIdentifier("signInModeButton")
+        }
+    }
+
+    func join() {
+        if let why = newPasswordProblem(form.newPassword, confirm: form.confirm) { form.localError = why; return }
+        let e = form.inviteEmail.trimmingCharacters(in: .whitespaces)
+        form.send(.invite(code: form.code, email: e.isEmpty ? nil : e, newPassword: form.newPassword), client: client, nav: nav)
+        // the account email to fill in next time
+        if !e.isEmpty { form.email = e }
     }
 
     /// Pasting the whole link (or an email with it) into the code field.
     func readPastedLink(old: String, new: String) {
         guard new.count - old.count > 1, let link = InviteLink.find(in: new) else { return }
-        code = link.code
-        if let e = link.email { inviteEmail = e }
+        form.code = link.code
+        if let e = link.email { form.inviteEmail = e }
         if let s = link.server, !ServerAddress.same(s, client.settings.server) {
             client.setServer(s, freshCopy: true)
+        }
+    }
+}
+
+/// "Forgot password?": a code by email, then a new password.
+private struct ForgotPasswordForm: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(Nav.self) private var nav
+    @Bindable var form: SignInForm
+
+    var body: some View {
+        let error = form.shownError(client)
+        Section {
+            TextField("Email", text: $form.resetEmail)
+                .keyboardType(.emailAddress)
+                .usernameField()
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("forgotEmailField")
+            Button(action: askForCode) { BusyLabel(text: form.codeSent ? "Send another code" : "Send code", busy: form.asking) }
+                .disabled(form.asking || form.resetEmail.trimmingCharacters(in: .whitespaces).isEmpty)
+                .accessibilityIdentifier("sendCodeButton")
+        } header: {
+            Text("Your account email")
+        } footer: {
+            if let info = form.forgotInfo {
+                Text(info).accessibilityIdentifier("forgotInfo")
+            } else if !form.codeSent, error != nil {
+                SignInError(error: error)
+            } else {
+                Text("The server emails you a code to set a new password.")
+            }
+        }
+        if form.codeSent {
+            Section {
+                TextField("XXXX-XXXX-XXXX", text: $form.resetCode)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .font(.title3.monospaced())
+                    .accessibilityIdentifier("resetCodeField")
+                PasswordField("New password (at least \(minPasswordLength) characters)", text: $form.resetPassword, kind: .new, id: "resetPasswordField")
+                PasswordField("New password again", text: $form.resetConfirm, kind: .new, id: "resetConfirmField")
+                    .onSubmit(reset)
+                Button(action: reset) { BusyLabel(text: "Set password and sign in") }
+                    .disabled(client.signingIn || form.resetCode.trimmingCharacters(in: .whitespaces).isEmpty || form.resetPassword.isEmpty)
+                    .accessibilityIdentifier("resetButton")
+            } header: {
+                Text("Code from the email")
+            } footer: {
+                SignInError(error: error)
+            }
+        }
+        Section {
+            Button("Back to sign in") { form.switchTo(.password) }
+                .accessibilityIdentifier("signInModeButton")
+        }
+    }
+
+    func reset() {
+        if let why = newPasswordProblem(form.resetPassword, confirm: form.resetConfirm) { form.localError = why; return }
+        form.send(.reset(email: form.resetEmail, code: form.resetCode, newPassword: form.resetPassword), client: client, nav: nav)
+    }
+
+    func askForCode() {
+        form.localError = nil
+        form.forgotInfo = nil
+        form.asking = true
+        let (server, mail) = (client.settings.server, form.resetEmail)
+        Task {
+            defer { form.asking = false }
+            do {
+                if try await AuthAPI.forgot(server: server, email: mail) {
+                    form.codeSent = true
+                    form.forgotInfo = "If \(mail.trimmingCharacters(in: .whitespaces)) has an account here, a code is on its way. It works for 30 minutes."
+                } else {
+                    form.codeSent = false
+                    form.forgotInfo = "This server can't send email. Ask the owner or an admin for a new invite code, then use \"I have an invite code\"."
+                }
+            } catch AuthError.failed(let why) {
+                form.localError = why
+            } catch {
+                form.localError = "That server address doesn't look right."
+            }
         }
     }
 }

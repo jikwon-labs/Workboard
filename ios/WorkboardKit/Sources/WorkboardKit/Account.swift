@@ -91,6 +91,12 @@ public func passwordProblem(_ p: String) -> String? {
     p.count < minPasswordLength ? "Use at least \(minPasswordLength) characters for the password." : nil
 }
 
+/// Why a new password typed twice won't do (too short, or the two differ),
+/// or nil.
+public func newPasswordProblem(_ p: String, confirm: String) -> String? {
+    passwordProblem(p) ?? (p == confirm ? nil : "The two passwords don't match.")
+}
+
 /// The code a computer shows to sign a phone in (wb-server new_link_code):
 /// six capital letters and digits without look-alikes.
 public enum LinkCode {

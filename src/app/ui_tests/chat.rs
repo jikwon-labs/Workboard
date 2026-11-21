@@ -1210,6 +1210,52 @@ fn mentions_of_names_with_spaces_are_marked_whole() {
     assert_eq!(marked, vec!["@Alex Kim", "@Sam Lee", "@someone"]);
 }
 
+/// The parts of the painted text `whole` drawn in the mention tint.
+fn tinted_parts(h: &Ui1, whole: &str) -> Vec<String> {
+    let (fg, bg) = h.app.t().mention();
+    let mut out = vec![];
+    each_text(&h.shapes, |ts, _| {
+        let g = &ts.galley;
+        if g.text() != whole {
+            return;
+        }
+        for s in &g.job.sections {
+            if s.format.color == fg && s.format.background == bg {
+                out.push(g.job.text[s.byte_range.clone()].to_string());
+            }
+        }
+    });
+    out
+}
+
+#[test]
+fn a_mention_is_tinted_while_it_is_typed() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Message composer");
+    h.type_text("hi @Alex Kim and @Sam Lee");
+    assert_eq!(
+        tinted_parts(&h, "hi @Alex Kim and @Sam Lee"),
+        vec!["@Alex Kim", "@Sam Lee"],
+        "the channel's box tints the names, not the words around them"
+    );
+    // once sent it keeps the same tint
+    h.key(egui::Key::Enter);
+    assert_eq!(
+        tinted_parts(&h, "hi @Alex Kim and @Sam Lee"),
+        vec!["@Alex Kim", "@Sam Lee"]
+    );
+    // a task's comment box too
+    let mut h = Ui1::new();
+    open_design_task(&mut h);
+    h.click("Comment box");
+    h.type_text("@Alex Kim please check");
+    assert_eq!(
+        tinted_parts(&h, "@Alex Kim please check"),
+        vec!["@Alex Kim"]
+    );
+}
+
 #[test]
 fn a_deleted_channel_goes_to_trash_and_comes_back_with_its_messages() {
     let mut h = Ui1::new();

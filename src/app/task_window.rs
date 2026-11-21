@@ -1190,6 +1190,10 @@ impl App {
         // Cmd+Enter sends (taken before the box sees it as a new line)
         let send_key = right_ui.memory(|m| m.has_focus(comment_id))
             && right_ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+        let names = self.mention_names();
+        let tc = t.clone();
+        let mut lay =
+            |ui: &Ui, s: &str, w: f32| super::chat::mention_layout(ui, s, w, &names, &tc);
         let cr = right_ui.add(
             field_multi(&mut self.comment.text)
                 .id(comment_id)
@@ -1201,7 +1205,8 @@ impl App {
                     tr("Write a comment, @mention someone")
                 })
                 .desired_rows(3)
-                .desired_width(f32::INFINITY),
+                .desired_width(f32::INFINITY)
+                .layouter(&mut lay),
         );
         name_field(&cr, "Comment box");
         let mention_id = win_id.with("mention_open");

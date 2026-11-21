@@ -876,32 +876,19 @@ impl App {
     /// Where `text` @mentions someone (byte ranges): "@" and a member's or
     /// team's name, else "@" and the word after it (as `mention_text` marks).
     pub(super) fn mention_ranges(&self, text: &str) -> Vec<(usize, usize)> {
-        let names: Vec<&str> = self
-            .data
+        mention_spans(text, &self.mention_names())
+    }
+
+    /// The names an @ can stand for: everyone's names and the teams'.
+    pub(super) fn mention_names(&self) -> Vec<String> {
+        self.data
             .members
             .iter()
             .flat_map(|m| m.names())
-            .chain(self.data.extra.teams.iter().map(|t| t.name.trim()))
+            .map(str::to_string)
+            .chain(self.team_names())
             .filter(|n| !n.is_empty())
-            .collect();
-        let mut out = vec![];
-        let mut i = 0;
-        while i < text.len() {
-            let rest = &text[i..];
-            if rest.starts_with('@') && (i == 0 || text[..i].ends_with(char::is_whitespace)) {
-                let after = &rest[1..];
-                let len = wb_sync::mentions::name_at(after, names.iter().copied()).or_else(|| {
-                    Some(after.find(char::is_whitespace).unwrap_or(after.len())).filter(|w| *w > 0)
-                });
-                if let Some(len) = len {
-                    out.push((i, i + 1 + len));
-                    i += 1 + len;
-                    continue;
-                }
-            }
-            i += rest.chars().next().map_or(1, char::len_utf8);
-        }
-        out
+            .collect()
     }
 
     /// A message's text as it is shown (chatfmt): its formatting, mentions
@@ -964,8 +951,7 @@ impl App {
                 f.background = code_bg;
             }
             if mention && !look.code && !look.block {
-                f.color = t.selected_text;
-                f.background = t.selected_bg;
+                (f.color, f.background) = t.mention();
             }
             job.append(&r.text[a..b], 0.0, f);
         }
@@ -2073,6 +2059,8 @@ impl App {
                 };
                 let enter = take_enter(ui, text_id);
                 format_keys(ui, text_id, &mut self.chat.text);
+                let names = self.mention_names();
+                let mut lay = |ui: &Ui, s: &str, w: f32| mention_layout(ui, s, w, &names, &t);
                 let r = capped(ui, text_id, |ui| {
                     ui.add(
                         egui::TextEdit::multiline(&mut self.chat.text)
@@ -2080,7 +2068,8 @@ impl App {
                             .hint_text(hint)
                             .frame(false)
                             .desired_rows(1)
-                            .desired_width(f32::INFINITY),
+                            .desired_width(f32::INFINITY)
+                            .layouter(&mut lay),
                     )
                 });
                 r.widget_info(|| {
@@ -2380,6 +2369,8 @@ impl App {
                 let people = mention_matches(people, trailing_mention(so_far).map_or("", |m| m.1));
                 let teams = self.team_names();
                 let slash_names = self.slash_choices("/");
+                let names = self.mention_names();
+                let mut lay = |ui: &Ui, s: &str, w: f32| mention_layout(ui, s, w, &names, &t);
                 let mut picked: Option<u64> = None;
                 let mut insert: Option<String> = None;
                 let text = if thread {
@@ -2396,7 +2387,8 @@ impl App {
                             .hint_text(hint)
                             .frame(false)
                             .desired_rows(2)
-                            .desired_width(f32::INFINITY),
+                            .desired_width(f32::INFINITY)
+                            .layouter(&mut lay),
                     )
                 });
                 r.widget_info(move || {
@@ -3132,6 +3124,8 @@ impl App {
                     .find(|m| m.id == mid)
             })
             .is_some_and(stands_without_text);
+        let names = self.mention_names();
+        let mut lay = |ui: &Ui, s: &str, w: f32| mention_layout(ui, s, w, &names, &t);
         let Some((_, _, text)) = self.chat.edit.as_mut() else {
             return;
         };
@@ -3148,7 +3142,8 @@ impl App {
                         .id(id)
                         .frame(false)
                         .desired_rows(1)
-                        .desired_width(f32::INFINITY),
+                        .desired_width(f32::INFINITY)
+                        .layouter(&mut lay),
                 )
             })
             .inner;
@@ -4298,4 +4293,66 @@ fn mention_matches(people: Vec<Member>, query: &str) -> Vec<Member> {
         .into_iter()
         .filter(|m| m.any_name(|n| n.to_lowercase().starts_with(&q)))
         .collect()
+}
+
+/// Where the @mentions are in `text` (byte ranges, the @ included): a
+/// known name, even one with spaces, else the word after the @.
+pub(super) fn mention_spans(text: &str, names: &[String]) -> Vec<(usize, usize)> {
+    let mut out = vec![];
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        if rest.starts_with('@') && (i == 0 || text[..i].ends_with(char::is_whitespace)) {
+            let after = &rest[1..];
+            let len = wb_sync::mentions::name_at(after, names.iter().map(String::as_str))
+                .or_else(|| {
+                    Some(after.find(char::is_whitespace).unwrap_or(after.len())).filter(|w| *w > 0)
+                });
+            if let Some(len) = len {
+                out.push((i, i + 1 + len));
+                i += 1 + len;
+                continue;
+            }
+        }
+        i += rest.chars().next().map_or(1, char::len_utf8);
+    }
+    out
+}
+
+/// A text box's layouter: the text as typed, with each @mention in the
+/// tint it gets once sent, so the writer sees who it reaches. Font and
+/// colour are the box's own defaults.
+pub(super) fn mention_layout(
+    ui: &Ui,
+    text: &str,
+    wrap: f32,
+    names: &[String],
+    t: &Theme,
+) -> std::sync::Arc<egui::Galley> {
+    let font = egui::FontSelection::default().resolve(ui.style());
+    let color = ui
+        .visuals()
+        .override_text_color
+        .unwrap_or_else(|| ui.visuals().widgets.inactive.text_color());
+    let plain = egui::TextFormat::simple(font, color);
+    let (fg, bg) = t.mention();
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = wrap;
+    let mut at = 0;
+    for (a, b) in mention_spans(text, names) {
+        if at < a {
+            job.append(&text[at..a], 0.0, plain.clone());
+        }
+        let tint = egui::TextFormat {
+            color: fg,
+            background: bg,
+            ..plain.clone()
+        };
+        job.append(&text[a..b], 0.0, tint);
+        at = b;
+    }
+    if at < text.len() || job.sections.is_empty() {
+        job.append(&text[at..], 0.0, plain);
+    }
+    ui.fonts(|f| f.layout_job(job))
 }

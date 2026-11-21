@@ -639,12 +639,8 @@ impl App {
                             ui.add(egui::Label::new(rt).wrap());
                         }
                         Seg::Mention(s) => {
-                            ui.label(
-                                RichText::new(s)
-                                    .color(if t.dark { t.accent_text } else { t.primary })
-                                    .background_color(t.selected_bg)
-                                    .strong(),
-                            );
+                            let (fg, bg) = t.mention();
+                            ui.label(RichText::new(s).color(fg).background_color(bg).strong());
                         }
                         Seg::Link(s, to) => {
                             let r = ui.add(

@@ -63,6 +63,12 @@ pub fn theme_accent(dark: bool, accent: &str) -> Theme {
 }
 
 impl Theme {
+    /// An @mention's text colour and the tint behind it, the same in
+    /// messages, comments and the boxes they are written in.
+    pub fn mention(&self) -> (Color32, Color32) {
+        (self.accent_text, self.accent_bg)
+    }
+
     /// The accent as a fill that white text reads on: `primary`, or a
     /// mid-grey where the dark black theme's `primary` is light.
     pub fn solid(&self) -> Color32 {

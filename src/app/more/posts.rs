@@ -166,13 +166,18 @@ impl App {
                                     })
                                     .inner;
                                 ui.separator();
+                                let names = self.mention_names();
+                                let mut lay = |ui: &Ui, s: &str, w: f32| {
+                                    crate::app::chat::mention_layout(ui, s, w, &names, &t)
+                                };
                                 let r = ui.add(
                                     egui::TextEdit::multiline(&mut self.post.body)
                                         .id(egui::Id::new(POST_TEXT))
                                         .hint_text(tr("Share an announcement..."))
                                         .frame(false)
                                         .desired_rows(3)
-                                        .desired_width(f32::INFINITY),
+                                        .desired_width(f32::INFINITY)
+                                        .layouter(&mut lay),
                                 );
                                 name_field(&r, "Post text");
                                 // "@" typed at the start of a word lists the people

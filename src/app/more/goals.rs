@@ -132,7 +132,8 @@ pub(crate) fn fmt_num(v: f64) -> String {
         out.push('.');
         out.push_str(f.trim_end_matches('0'));
     }
-    if neg {
+    // -0.001 rounds to nothing: "0", not "-0"
+    if neg && (whole > 0 || frac > 0) {
         format!("-{}", out)
     } else {
         out
@@ -2094,6 +2095,10 @@ mod tests {
         assert_eq!(fmt_num(1234567.5), "1,234,567.5");
         assert_eq!(fmt_num(-3.0), "-3");
         assert_eq!(fmt_num(2.999), "3");
+        assert_eq!(fmt_num(-0.001), "0", "no minus on what shows as nothing");
+        assert_eq!(fmt_num(-0.5), "-0.5");
+        assert_eq!(fmt_num(-1234.567), "-1,234.57");
+        assert_eq!(fmt_num(NUM_MAX), "1,000,000,000,000,000");
     }
 
     #[test]

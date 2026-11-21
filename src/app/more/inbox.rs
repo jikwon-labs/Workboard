@@ -447,7 +447,10 @@ impl App {
                                     )
                                 {
                                     if self.inbox_tab == 3 {
+                                        // back where it belongs, as on the iPhone: also out
+                                        // of Later, where an older version could leave it
                                         self.data.extra.inbox_cleared.retain(|x| x != &key);
+                                        self.data.extra.inbox_later.retain(|x| x != &key);
                                     } else {
                                         self.data.extra.inbox_later.retain(|x| x != &key);
                                         self.data.extra.inbox_cleared.push(key.clone());

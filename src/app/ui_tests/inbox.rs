@@ -637,3 +637,21 @@ fn a_quick_click_on_clear_after_another_control_still_clears() {
     h.settle();
     assert_eq!(h.app.data.extra.inbox_cleared, vec![key]);
 }
+
+#[test]
+fn restore_brings_a_row_back_even_when_it_was_also_saved_for_later() {
+    // a key in both lists, as an older version left it after Later on a
+    // cleared row
+    let mut key = String::new();
+    let mut h = inbox(|d| {
+        key = comment_on(d, CASE, "Over to you", 60);
+        d.extra.inbox_cleared.push(key.clone());
+        d.extra.inbox_later.push(key.clone());
+    });
+    h.click("Inbox Cleared");
+    hover_row(&mut h, CASE);
+    h.click("Restore");
+    assert!(!h.app.data.extra.inbox_later.contains(&key));
+    h.click("Inbox Primary");
+    assert!(h.has(CASE), "back in Primary, not in Later");
+}

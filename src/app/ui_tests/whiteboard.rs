@@ -1200,10 +1200,10 @@ fn cmd_z_takes_back_on_the_board_but_not_while_typing() {
     for _ in 0..12 {
         h.frame(vec![]);
     }
+    // in this computer's own words: Ctrl+Z on Windows
+    let keys = crate::os::keys("\u{2318}Z");
     assert!(
-        drawn_texts(&h.shapes)
-            .iter()
-            .any(|t| t.contains("\u{2318}Z")),
+        drawn_texts(&h.shapes).iter().any(|t| t.contains(&keys)),
         "the tip shows the keys"
     );
 }

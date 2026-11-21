@@ -80,8 +80,11 @@ final class AccountUITests: WorkboardUITestCase {
         a = launchApp(["-wbServer", signInServer])
         XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "signed in with the saved token")
         a.buttons["settingsButton"].tap()
+        // the account rows are below "Show on Home", off a small screen
+        XCTAssertTrue(reveal(a.staticTexts["accountEmail"], in: a))
         waitLabel(a.staticTexts["accountEmail"], contains: "No password yet")
         let link = a.buttons["passwordLink"]
+        XCTAssertTrue(reveal(link, in: a))
         waitLabel(link, contains: "Set a password")
         link.tap()
         type(a.textFields["accountEmailField"], "alex@example.test")

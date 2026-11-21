@@ -355,6 +355,15 @@ fn an_achieved_goal_is_shared_to_chat_as_a_card_that_opens_it() {
         .expect("the general channel")
         .id;
     assert_eq!(channel, general, "it starts on the general channel");
+    // the message's box reaches its 4 px margin past the text area named here
+    let (to, msg) = (
+        h.rect("Share to channel"),
+        h.rect("Share message").expand(4.0),
+    );
+    assert!(
+        (to.left() - msg.left()).abs() < 1.0 && (to.right() - msg.right()).abs() < 1.0,
+        "Send to as wide as the message: {to:?} {msg:?}"
+    );
     h.click("Send goal to chat");
     assert!(h.app.modal.is_none());
     let c = h
@@ -379,6 +388,13 @@ fn an_achieved_goal_is_shared_to_chat_as_a_card_that_opens_it() {
     h.app.section = Section::Chat;
     h.app.chat.open = Some(general);
     h.settle();
+    let link = h.find("Open goal Office move").expect("the card's link");
+    assert!(!h.hover_fill_at(link));
+    h.hover(link);
+    assert!(
+        h.hover_fill_at(link),
+        "the link shows it is under the pointer"
+    );
     h.click("Open goal Office move");
     assert_eq!(h.app.section, Section::Goals);
     assert_eq!(h.app.goal_open, Some(b));

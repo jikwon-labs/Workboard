@@ -139,16 +139,17 @@ impl App {
             .find(|p| p.0 == *channel)
             .map(|p| p.1.clone())
             .unwrap_or_default();
-        let w = ui.available_width();
-        egui::ComboBox::from_id_salt("share goal channel")
+        // as wide as the message field below it
+        let pick = egui::ComboBox::from_id_salt("share goal channel")
             .selected_text(cur)
-            .width(w - 20.0)
+            .width(ui.available_width())
             .show_ui(ui, |ui| {
                 for (id, name) in &places {
                     let r = ui.selectable_value(channel, *id, name);
                     name_it(&r, &format!("Share in {}", name));
                 }
             });
+        name_it(&pick.response, "Share to channel");
         ui.add_space(10.0);
         ui.label(
             RichText::new(tr("Message"))
@@ -341,15 +342,13 @@ fn paint_goal_card(ui: &mut Ui, t: &Theme, card: &GoalCard, data: &Data, link: b
                 }
                 if link {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let b = ui.add(
-                            egui::Label::new(
-                                RichText::new(tr("Open goal"))
-                                    .size(13.0)
-                                    .strong()
-                                    .color(pace_colors(Pace::Done, t).1),
-                            )
-                            .sense(Sense::click()),
-                        );
+                        // a frameless button: the soft fill shows it under the pointer
+                        let b = ui.add(crate::widgets::ghost(egui::Button::new(
+                            RichText::new(tr("Open goal"))
+                                .size(13.0)
+                                .strong()
+                                .color(pace_colors(Pace::Done, t).1),
+                        )));
                         name_it(&b, &format!("Open goal {}", card.name));
                         open = b.clicked();
                     });

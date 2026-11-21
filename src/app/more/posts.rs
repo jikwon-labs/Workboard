@@ -80,17 +80,20 @@ impl App {
                                     name_it(&pick.response, "Post type");
                                 });
                                 ui.separator();
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(tr("Title:")).color(t.text2));
-                                    // frameless like the body below, so a hint shows where to type
-                                    let r = ui.add(
-                                        egui::TextEdit::singleline(&mut self.post.title)
-                                            .hint_text(tr("Add a title"))
-                                            .frame(false)
-                                            .desired_width(f32::INFINITY),
-                                    );
-                                    name_field(&r, "Post title");
-                                });
+                                let title_focus = ui
+                                    .horizontal(|ui| {
+                                        ui.label(RichText::new(tr("Title:")).color(t.text2));
+                                        // frameless like the body below, so a hint shows where to type
+                                        let r = ui.add(
+                                            egui::TextEdit::singleline(&mut self.post.title)
+                                                .hint_text(tr("Add a title"))
+                                                .frame(false)
+                                                .desired_width(f32::INFINITY),
+                                        );
+                                        name_field(&r, "Post title");
+                                        r.has_focus()
+                                    })
+                                    .inner;
                                 ui.separator();
                                 let r = ui.add(
                                     egui::TextEdit::multiline(&mut self.post.body)
@@ -100,6 +103,12 @@ impl App {
                                         .desired_width(f32::INFINITY),
                                 );
                                 name_field(&r, "Post text");
+                                // Cmd+Enter in the title or the text posts, as
+                                // it sends a comment (Enter is a new line)
+                                let cmd_enter = (title_focus || r.has_focus())
+                                    && ui.input_mut(|i| {
+                                        i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter)
+                                    });
                                 ui.horizontal(|ui| {
                                     // "@" is a character, "+" two lines; the others line icons
                                     for (g, tip) in [
@@ -155,7 +164,7 @@ impl App {
                                         if !picked {
                                             sent = sent.on_hover_text(tr("Select a channel first"));
                                         }
-                                        if sent.clicked() && ready {
+                                        if (sent.clicked() || cmd_enter) && ready {
                                             let title = self.post.title.trim().to_string();
                                             let kind = self.post.kind.clone();
                                             let text = self.post.body.trim().to_string();

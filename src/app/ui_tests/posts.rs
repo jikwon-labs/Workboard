@@ -574,3 +574,34 @@ fn the_filters_narrow_the_posts_together_and_sort_turns_them_around() {
     h.settle();
     assert_eq!(listed(&h, &all), ["Old one", "Web news", "Lunch"]);
 }
+
+/// Cmd+Enter in the title or the text posts, as it sends a comment; Enter
+/// alone still starts a new line in the text.
+#[test]
+fn cmd_enter_posts_from_the_title_or_the_text() {
+    let mut h = posts_page();
+    write_post(&mut h, "general", "Office move", "Monday");
+    h.key(egui::Key::Enter);
+    h.type_text("9am");
+    assert!(all_posts(&h).is_empty(), "Enter is a new line");
+    h.cmd_enter();
+    let p = all_posts(&h).pop().expect("Cmd+Enter in the text posts");
+    assert_eq!(p.text, "Monday\n9am");
+    assert!(h.app.post.title.is_empty() && h.app.post.body.is_empty());
+
+    h.click("Post title");
+    h.type_text("Lunch");
+    h.cmd_enter();
+    assert_eq!(all_posts(&h).len(), 2, "Cmd+Enter in the title posts");
+    assert_eq!(
+        all_posts(&h).pop().unwrap().post_title.as_deref(),
+        Some("Lunch")
+    );
+
+    // not ready (no title): nothing goes and the text stays
+    h.click("Post text");
+    h.type_text("No title yet");
+    h.cmd_enter();
+    assert_eq!(all_posts(&h).len(), 2);
+    assert_eq!(h.app.post.body, "No title yet");
+}

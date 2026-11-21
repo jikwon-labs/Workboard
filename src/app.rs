@@ -1843,6 +1843,254 @@ impl App {
         }
     }
 
+    /// Puts an edited task in place of the one it was: its history, the
+    /// confetti and the automations its new status sets off, a repeating
+    /// task's next one.
+    fn replace_task(&mut self, mut new: Task) {
+        let me = self.data.me;
+        if let Some(idx) = self.data.tasks.iter().position(|t| t.id == new.id) {
+            let old = self.data.tasks[idx].clone();
+            new.tidy_times(&old);
+            self.data.log_task_changes(&old, &mut new, me);
+            if new.name.trim().is_empty() {
+                new.name = old.name.clone();
+            }
+            if old.status != new.status && self.data.lab(Lab::Confetti) {
+                let closes = self.data.statuses_for_list(new.list_id).iter().any(|s| {
+                    s.name == new.status && matches!(s.kind, StatusKind::Closed | StatusKind::Done)
+                });
+                if closes {
+                    self.toast(trf!("\u{1F389} Nice! \"{}\" is complete", new.name));
+                }
+            }
+            let mut move_to = None;
+            if old.status != new.status {
+                let space = self.data.space_of_list(new.list_id).map(|s| s.id);
+                let rules: Vec<Automation> = self
+                    .data
+                    .extra
+                    .automations
+                    .iter()
+                    .filter(|a| {
+                        a.enabled
+                            && a.trigger_status == new.status
+                            && a.list.is_none_or(|l| l == new.list_id || Some(l) == space)
+                    })
+                    .cloned()
+                    .collect();
+                for a in rules {
+                    match a.action.as_str() {
+                        "assign" => {
+                            if let Ok(uid) = a.value.parse::<u64>() {
+                                if !self.data.extra.apps.multiple_assignees {
+                                    new.assignees = vec![uid];
+                                } else if !new.assignees.contains(&uid) {
+                                    new.assignees.push(uid);
+                                    new.activity
+                                        .push(self.data.about_line(me, "assigned to", uid));
+                                }
+                            }
+                        }
+                        "priority" => {
+                            if let Ok(p) = a.value.parse::<u8>() {
+                                new.priority = p.min(4);
+                            }
+                        }
+                        "move" => {
+                            if let Ok(l) = a.value.parse::<u64>() {
+                                if self.data.space_of_list(l).is_some() {
+                                    // moved below, with subtasks and statuses, as Move does
+                                    move_to = Some(l);
+                                }
+                            }
+                        }
+                        _ => new.activity.push(Activity {
+                            ts: now_ts(),
+                            author: me,
+                            text: a.value.clone(),
+                            comment: true,
+                            mentions: self.data.mentions_in(&a.value),
+                            ..Default::default()
+                        }),
+                    }
+                    new.log(me, format!("Automation ran: {}", self.describe_action(&a)));
+                }
+            }
+            self.roll_recurring(&old, &mut new);
+            new.updated = now_ts();
+            let nid = new.id;
+            self.data.tasks[idx] = new;
+            self.dirty = true;
+            if let Some(l) = move_to {
+                self.move_tasks(&[nid], l);
+            }
+        }
+    }
+
+    /// Deletes a task with its subtasks into one Trash entry.
+    fn delete_task(&mut self, id: u64) {
+        let mut kill = vec![id];
+        let mut i = 0;
+        while i < kill.len() {
+            let k = kill[i];
+            kill.extend(
+                self.data
+                    .tasks
+                    .iter()
+                    .filter(|t| t.parent == Some(k))
+                    .map(|t| t.id),
+            );
+            i += 1;
+        }
+        let removed: Vec<Task> = self
+            .data
+            .tasks
+            .iter()
+            .filter(|t| kill.contains(&t.id))
+            .cloned()
+            .collect();
+        if let Some(first) = removed.iter().find(|t| t.id == id) {
+            let tid = self.data.new_id();
+            let title = first.name.clone();
+            self.data.extra.trash.push(TrashItem {
+                id: tid,
+                kind: "Task".into(),
+                title,
+                deleted: now_ts(),
+                payload: serde_json::to_string(&removed).unwrap_or_default(),
+            });
+            if let Some((v, _)) = self.undo_trash.as_mut() {
+                v.push(tid);
+            }
+        }
+        self.data.tasks.retain(|t| !kill.contains(&t.id));
+        if self.open_task.map(|o| kill.contains(&o)).unwrap_or(false) {
+            self.open_task = None;
+        }
+        self.dirty = true;
+    }
+
+    /// Makes a task (`Action::Add`), with the template, description, tags
+    /// and the like waiting in `pending`.
+    fn add_task(&mut self, add: Action) {
+        let Action::Add {
+            list,
+            name,
+            status,
+            priority,
+            assignees,
+            due,
+            parent,
+            open,
+        } = add
+        else {
+            return;
+        };
+        let me = self.data.me;
+        let id = self.data.new_id();
+        let statuses = self.data.statuses_for_list(list);
+        let status = status.unwrap_or_else(|| statuses[0].name.clone());
+        let order = self.data.tasks.iter().map(|t| t.order).max().unwrap_or(0) + 1;
+        let now = now_ts();
+        // people put on the task as it is made hear about it like a later assignment
+        let mut activity = vec![Activity {
+            ts: now,
+            author: me,
+            text: "created this task".into(),
+            comment: false,
+            ..Default::default()
+        }];
+        activity.extend(
+            assignees
+                .iter()
+                .filter(|a| **a != me)
+                .map(|a| self.data.about_line(me, "assigned to", *a)),
+        );
+        self.data.tasks.push(Task {
+            id,
+            list_id: list,
+            parent,
+            name: if name.trim().is_empty() {
+                tr("Untitled task").into()
+            } else {
+                name.trim().to_string()
+            },
+            description: String::new(),
+            status,
+            priority,
+            assignees,
+            start: None,
+            due,
+            start_time: None,
+            due_time: None,
+            tags: vec![],
+            checklist: vec![],
+            activity,
+            time_entries: vec![],
+            timer_started: None,
+            timer_by: None,
+            timers: vec![],
+            estimate_min: None,
+            created: now,
+            updated: now,
+            order,
+            custom: Default::default(),
+            recur: None,
+            archived: false,
+            done_at: None,
+            closed_at: None,
+            milestone: false,
+            watchers: vec![],
+            unwatched: None,
+            waiting_on: vec![],
+            linked: vec![],
+            attachments: vec![],
+            form: self.pending.form.take(),
+        });
+        if let Some(ws) = self.pending.sheet_week.take() {
+            self.add_sheet_rows(ws, vec![id]);
+        }
+        if let Some(tp) = self.pending.template.take() {
+            if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
+                t.description = tp.description.clone();
+                t.tags = tp.tags.clone();
+                t.checklist = tp
+                    .checklist
+                    .iter()
+                    .map(|c| CheckItem {
+                        text: c.clone(),
+                        done: false,
+                        assignee: None,
+                    })
+                    .collect();
+            }
+        }
+        if let Some(desc) = self.pending.description.take() {
+            if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
+                t.description = desc;
+            }
+        }
+        if let Some(line) = self.pending.log.take() {
+            if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
+                t.log(me, line);
+            }
+        }
+        let tags = std::mem::take(&mut self.pending.tags);
+        if !tags.is_empty() {
+            if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
+                for tag in tags {
+                    if !t.tags.contains(&tag) {
+                        t.tags.push(tag);
+                    }
+                }
+            }
+        }
+        self.dirty = true;
+        if open {
+            self.open_task = Some(id);
+        }
+    }
+
     fn apply(&mut self, a: Action) {
         let me = self.data.me;
         // a space shared with me to view or comment only (the server would put it back)
@@ -1858,243 +2106,9 @@ impl App {
                 self.recent.truncate(6);
                 self.swap_comment_draft(id);
             }
-            Action::Replace(mut new) => {
-                if let Some(idx) = self.data.tasks.iter().position(|t| t.id == new.id) {
-                    let old = self.data.tasks[idx].clone();
-                    new.tidy_times(&old);
-                    self.data.log_task_changes(&old, &mut new, me);
-                    if new.name.trim().is_empty() {
-                        new.name = old.name.clone();
-                    }
-                    if old.status != new.status && self.data.lab(Lab::Confetti) {
-                        let closes = self.data.statuses_for_list(new.list_id).iter().any(|s| {
-                            s.name == new.status
-                                && matches!(s.kind, StatusKind::Closed | StatusKind::Done)
-                        });
-                        if closes {
-                            self.toast(trf!("\u{1F389} Nice! \"{}\" is complete", new.name));
-                        }
-                    }
-                    let mut move_to = None;
-                    if old.status != new.status {
-                        let space = self.data.space_of_list(new.list_id).map(|s| s.id);
-                        let rules: Vec<Automation> = self
-                            .data
-                            .extra
-                            .automations
-                            .iter()
-                            .filter(|a| {
-                                a.enabled
-                                    && a.trigger_status == new.status
-                                    && a.list.is_none_or(|l| l == new.list_id || Some(l) == space)
-                            })
-                            .cloned()
-                            .collect();
-                        for a in rules {
-                            match a.action.as_str() {
-                                "assign" => {
-                                    if let Ok(uid) = a.value.parse::<u64>() {
-                                        if !self.data.extra.apps.multiple_assignees {
-                                            new.assignees = vec![uid];
-                                        } else if !new.assignees.contains(&uid) {
-                                            new.assignees.push(uid);
-                                            new.activity.push(self.data.about_line(
-                                                me,
-                                                "assigned to",
-                                                uid,
-                                            ));
-                                        }
-                                    }
-                                }
-                                "priority" => {
-                                    if let Ok(p) = a.value.parse::<u8>() {
-                                        new.priority = p.min(4);
-                                    }
-                                }
-                                "move" => {
-                                    if let Ok(l) = a.value.parse::<u64>() {
-                                        if self.data.space_of_list(l).is_some() {
-                                            // moved below, with subtasks and statuses, as Move does
-                                            move_to = Some(l);
-                                        }
-                                    }
-                                }
-                                _ => new.activity.push(Activity {
-                                    ts: now_ts(),
-                                    author: me,
-                                    text: a.value.clone(),
-                                    comment: true,
-                                    mentions: self.data.mentions_in(&a.value),
-                                    ..Default::default()
-                                }),
-                            }
-                            new.log(me, format!("Automation ran: {}", self.describe_action(&a)));
-                        }
-                    }
-                    self.roll_recurring(&old, &mut new);
-                    new.updated = now_ts();
-                    let nid = new.id;
-                    self.data.tasks[idx] = new;
-                    self.dirty = true;
-                    if let Some(l) = move_to {
-                        self.move_tasks(&[nid], l);
-                    }
-                }
-            }
-            Action::Add {
-                list,
-                name,
-                status,
-                priority,
-                assignees,
-                due,
-                parent,
-                open,
-            } => {
-                let id = self.data.new_id();
-                let statuses = self.data.statuses_for_list(list);
-                let status = status.unwrap_or_else(|| statuses[0].name.clone());
-                let order = self.data.tasks.iter().map(|t| t.order).max().unwrap_or(0) + 1;
-                let now = now_ts();
-                // people put on the task as it is made hear about it like a later assignment
-                let mut activity = vec![Activity {
-                    ts: now,
-                    author: me,
-                    text: "created this task".into(),
-                    comment: false,
-                    ..Default::default()
-                }];
-                activity.extend(
-                    assignees
-                        .iter()
-                        .filter(|a| **a != me)
-                        .map(|a| self.data.about_line(me, "assigned to", *a)),
-                );
-                self.data.tasks.push(Task {
-                    id,
-                    list_id: list,
-                    parent,
-                    name: if name.trim().is_empty() {
-                        tr("Untitled task").into()
-                    } else {
-                        name.trim().to_string()
-                    },
-                    description: String::new(),
-                    status,
-                    priority,
-                    assignees,
-                    start: None,
-                    due,
-                    start_time: None,
-                    due_time: None,
-                    tags: vec![],
-                    checklist: vec![],
-                    activity,
-                    time_entries: vec![],
-                    timer_started: None,
-                    timer_by: None,
-                    timers: vec![],
-                    estimate_min: None,
-                    created: now,
-                    updated: now,
-                    order,
-                    custom: Default::default(),
-                    recur: None,
-                    archived: false,
-                    done_at: None,
-                    closed_at: None,
-                    milestone: false,
-                    watchers: vec![],
-                    unwatched: None,
-                    waiting_on: vec![],
-                    linked: vec![],
-                    attachments: vec![],
-                    form: self.pending.form.take(),
-                });
-                if let Some(ws) = self.pending.sheet_week.take() {
-                    self.add_sheet_rows(ws, vec![id]);
-                }
-                if let Some(tp) = self.pending.template.take() {
-                    if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
-                        t.description = tp.description.clone();
-                        t.tags = tp.tags.clone();
-                        t.checklist = tp
-                            .checklist
-                            .iter()
-                            .map(|c| CheckItem {
-                                text: c.clone(),
-                                done: false,
-                                assignee: None,
-                            })
-                            .collect();
-                    }
-                }
-                if let Some(desc) = self.pending.description.take() {
-                    if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
-                        t.description = desc;
-                    }
-                }
-                if let Some(line) = self.pending.log.take() {
-                    if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
-                        t.log(me, line);
-                    }
-                }
-                let tags = std::mem::take(&mut self.pending.tags);
-                if !tags.is_empty() {
-                    if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
-                        for tag in tags {
-                            if !t.tags.contains(&tag) {
-                                t.tags.push(tag);
-                            }
-                        }
-                    }
-                }
-                self.dirty = true;
-                if open {
-                    self.open_task = Some(id);
-                }
-            }
-            Action::DeleteTask(id) => {
-                let mut kill = vec![id];
-                let mut i = 0;
-                while i < kill.len() {
-                    let k = kill[i];
-                    kill.extend(
-                        self.data
-                            .tasks
-                            .iter()
-                            .filter(|t| t.parent == Some(k))
-                            .map(|t| t.id),
-                    );
-                    i += 1;
-                }
-                let removed: Vec<Task> = self
-                    .data
-                    .tasks
-                    .iter()
-                    .filter(|t| kill.contains(&t.id))
-                    .cloned()
-                    .collect();
-                if let Some(first) = removed.iter().find(|t| t.id == id) {
-                    let tid = self.data.new_id();
-                    let title = first.name.clone();
-                    self.data.extra.trash.push(TrashItem {
-                        id: tid,
-                        kind: "Task".into(),
-                        title,
-                        deleted: now_ts(),
-                        payload: serde_json::to_string(&removed).unwrap_or_default(),
-                    });
-                    if let Some((v, _)) = self.undo_trash.as_mut() {
-                        v.push(tid);
-                    }
-                }
-                self.data.tasks.retain(|t| !kill.contains(&t.id));
-                if self.open_task.map(|o| kill.contains(&o)).unwrap_or(false) {
-                    self.open_task = None;
-                }
-                self.dirty = true;
-            }
+            Action::Replace(mut new) => self.replace_task(new),
+            add @ Action::Add { .. } => self.add_task(add),
+            Action::DeleteTask(id) => self.delete_task(id),
             Action::Go(l) => {
                 if !matches!(
                     l,

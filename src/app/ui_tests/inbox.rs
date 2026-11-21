@@ -507,3 +507,30 @@ fn alone_the_due_count_leaves_out_tasks_i_cannot_see_like_the_sidebar() {
     );
     assert!(h.has("Looking to collaborate?"));
 }
+
+#[test]
+fn only_the_rows_on_screen_are_drawn() {
+    let mut h = inbox(|d| {
+        for i in 0..300 {
+            comment_on(d, CASE, &format!("Comment {i}"), 60 + i * 60);
+        }
+    });
+    let drawn = h.painted_text(CASE).len();
+    // a 900 point window has room for about a dozen 58 point rows
+    assert!(
+        (5..40).contains(&drawn),
+        "{drawn} of 300 rows drawn on every frame"
+    );
+    // the rows further down are drawn once scrolled to
+    assert_eq!(h.painted_text("Alex Kim commented: Comment 299").len(), 0);
+    h.hover(pos2(900.0, 500.0));
+    for _ in 0..200 {
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -400.0),
+            modifiers: Default::default(),
+        }]);
+    }
+    h.settle();
+    assert_eq!(h.painted_text("Alex Kim commented: Comment 299").len(), 1);
+}

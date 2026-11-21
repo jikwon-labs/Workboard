@@ -315,6 +315,11 @@ impl App {
                             let w = ui.available_width();
                             let (r, resp) = ui.allocate_exact_size(vec2(w, 58.0), Sense::click());
                             name_it(&resp, &tname);
+                            // a row scrolled out of sight keeps its place but isn't
+                            // drawn: thousands of rows would be on every frame
+                            if !ui.is_rect_visible(r) {
+                                continue;
+                            }
                             if resp.hovered() {
                                 ui.painter().rect_filled(r, 8.0, t.hover);
                             }

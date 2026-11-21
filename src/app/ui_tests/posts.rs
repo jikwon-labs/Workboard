@@ -437,3 +437,36 @@ fn the_sort_drop_down_stays_on_the_page_in_a_narrow_window() {
         "at the right like the cards: {sort:?} {open:?}"
     );
 }
+
+/// Tooltips the pointer has brought up over the window.
+fn tooltips(h: &Ui1) -> usize {
+    h.ctx.memory(|m| {
+        m.areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|l| l.order == egui::Order::Tooltip)
+            .count()
+    })
+}
+
+/// Resting the pointer on Post without a channel says to pick one; with a
+/// channel picked no tooltip comes up (it used to be an empty bubble).
+#[test]
+fn the_post_button_tooltip_only_asks_for_a_channel() {
+    let mut h = posts_page();
+    let at = h.find("Post").unwrap();
+    h.hover(at);
+    for _ in 0..30 {
+        h.frame(vec![]);
+    }
+    assert_eq!(tooltips(&h), 1);
+    assert!(!h.painted_text("Select a channel first").is_empty());
+
+    pick_channel(&mut h, "general");
+    h.hover(pos2(900.0, 600.0));
+    h.hover(at);
+    for _ in 0..30 {
+        h.frame(vec![]);
+    }
+    assert_eq!(tooltips(&h), 0, "no empty tooltip");
+}

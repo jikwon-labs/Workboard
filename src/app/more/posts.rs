@@ -150,16 +150,12 @@ impl App {
                                                 .corner_radius(6)
                                                 .min_size(vec2(56.0, 30.0)),
                                             );
-                                        if ui
-                                            .add(b)
-                                            .on_hover_text(if !picked {
-                                                tr("Select a channel first")
-                                            } else {
-                                                ""
-                                            })
-                                            .clicked()
-                                            && ready
-                                        {
+                                        let mut sent = ui.add(b);
+                                        // (no tooltip at all once a channel is picked)
+                                        if !picked {
+                                            sent = sent.on_hover_text(tr("Select a channel first"));
+                                        }
+                                        if sent.clicked() && ready {
                                             let title = self.post.title.trim().to_string();
                                             let kind = self.post.kind.clone();
                                             let text = self.post.body.trim().to_string();

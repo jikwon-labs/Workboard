@@ -14,6 +14,7 @@ mod fill;
 mod home;
 mod look;
 
+use crate::app::icons::{seg, seg_width, SegItem};
 use look::*;
 
 /// The open form's tab.

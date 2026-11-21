@@ -11,6 +11,7 @@
 // (`goal_edit`).
 
 use super::*;
+use crate::app::icons::{seg, SegItem};
 use egui::{Pos2, Response};
 
 /// A kind of goal target without its values: what New goal and "+ Target"
@@ -2028,82 +2029,27 @@ fn section_title(ui: &mut Ui, t: &Theme, text: &str, n: usize) {
 
 /// All / Mine / Achieved, each with how many.
 fn filter_tabs(ui: &mut Ui, t: &Theme, on: GoalFilter, counts: [usize; 3]) -> Option<GoalFilter> {
-    let mut picked = None;
-    let labels = ["All", "Mine", "Achieved"];
-    egui::Frame::new()
-        .fill(t.hover)
-        .corner_radius(10)
-        .inner_margin(egui::Margin::same(3))
-        .show(ui, |ui| {
-            // sized to its buttons: in the header's right-to-left row they
-            // go in from the right, so the last first
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                let rtl = ui.layout().prefer_right_to_left();
-                let order: Vec<usize> = if rtl { vec![2, 1, 0] } else { vec![0, 1, 2] };
-                for i in order {
-                    let l = &labels[i];
-                    let f = [GoalFilter::All, GoalFilter::Mine, GoalFilter::Achieved][i];
-                    let sel = on == f;
-                    let text = format!("{} {}", tr(l), counts[i]);
-                    let b = egui::Button::new(RichText::new(text).size(13.0).color(if sel {
-                        t.text
-                    } else {
-                        t.text2
-                    }))
-                    .fill(if sel { t.card } else { Color32::TRANSPARENT })
-                    .stroke(Stroke::NONE)
-                    .corner_radius(8)
-                    .min_size(vec2(0.0, 30.0));
-                    let r = ui.add(b);
-                    name_it(&r, &format!("Show {}", l));
-                    if r.clicked() {
-                        picked = Some(f);
-                    }
-                }
-            });
-        });
-    picked
+    const FILTERS: [(GoalFilter, &str, &str); 3] = [
+        (GoalFilter::All, "All", "Show All"),
+        (GoalFilter::Mine, "Mine", "Show Mine"),
+        (GoalFilter::Achieved, "Achieved", "Show Achieved"),
+    ];
+    let items: Vec<SegItem> = FILTERS
+        .iter()
+        .zip(counts)
+        .map(|(f, n)| (None, tr(f.1).to_string(), Some(n), f.2))
+        .collect();
+    let sel = FILTERS.iter().position(|f| f.0 == on).unwrap_or(0);
+    seg(ui, t, &items, sel).map(|i| FILTERS[i].0)
 }
 
 /// Cards / rows.
 fn view_switch(ui: &mut Ui, t: &Theme, list: bool) -> Option<GoalsView> {
-    let mut picked = None;
-    egui::Frame::new()
-        .fill(t.hover)
-        .corner_radius(10)
-        .inner_margin(egui::Margin::same(3))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                let mut both = vec![
-                    (GoalsView::Cards, Icon::Apps, "Show as cards", !list),
-                    (GoalsView::List, Icon::List, "Show as list", list),
-                ];
-                if ui.layout().prefer_right_to_left() {
-                    both.reverse();
-                }
-                for (kind, icon, name, sel) in both {
-                    let (r, resp) = ui.allocate_exact_size(vec2(34.0, 30.0), Sense::click());
-                    if sel {
-                        ui.painter().rect_filled(r, 8.0, t.card);
-                    } else if resp.hovered() {
-                        ui.painter().rect_filled(r, 8.0, t.card.gamma_multiply(0.5));
-                    }
-                    icons::line_icon(
-                        ui.painter(),
-                        icon,
-                        r.center(),
-                        if sel { t.text } else { t.text2 },
-                    );
-                    name_it(&resp, name);
-                    if resp.clicked() {
-                        picked = Some(kind);
-                    }
-                }
-            });
-        });
-    picked
+    let items: [SegItem; 2] = [
+        (Some(Icon::Apps), String::new(), None, "Show as cards"),
+        (Some(Icon::List), String::new(), None, "Show as list"),
+    ];
+    seg(ui, t, &items, list as usize).map(|i| [GoalsView::Cards, GoalsView::List][i])
 }
 
 /// Achieved goals: a tinted card each, and a dashed one for the goal in

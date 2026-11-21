@@ -1,7 +1,7 @@
 // The look the form pages share: a form's tile (its colour and icon) and the
 // icon picker, and the few kinds of control every button on these pages is
-// one of: the primary button with an icon, segmented tabs, a drop-down's
-// button, the dashed "add" button and small pills.
+// one of: the primary button with an icon, a drop-down's button, the dashed
+// "add" button and small pills. Segmented tabs (`seg`) are in icons.rs.
 
 use super::*;
 
@@ -192,87 +192,6 @@ pub(super) fn primary_icon(
         t.on_primary,
     );
     resp
-}
-
-/// One item of `seg`: (line icon or "", text, count shown after it, name for
-/// screen readers and tests).
-pub(super) type SegItem<'a> = (Option<Icon>, String, Option<usize>, &'a str);
-
-/// Segmented tabs: a grey track with the picked item raised in the page
-/// colour (the form's Edit / Fill out / Answers, the Answers filter).
-/// Returns the item clicked.
-pub(super) fn seg(ui: &mut Ui, t: &Theme, items: &[SegItem], sel: usize) -> Option<usize> {
-    let font = FontId::proportional(13.0);
-    let p = ui.painter().clone();
-    let widths = seg_widths(&p, t, items);
-    let total = seg_width(&p, t, items);
-    let (track, _) = ui.allocate_exact_size(vec2(total, CONTROL_H + 4.0), Sense::hover());
-    p.rect_filled(track, 8.0, t.hover);
-    let mut x = track.left() + 3.0;
-    let mut out = None;
-    for (i, ((kind, label, count, name), w)) in items.iter().zip(widths).enumerate() {
-        let r = Rect::from_min_size(pos2(x, track.top() + 3.0), vec2(w, CONTROL_H - 2.0));
-        let resp = ui.interact(r, ui.id().with(("seg", *name)), Sense::click());
-        name_it(&resp, name);
-        let on = i == sel;
-        if on {
-            p.rect_filled(
-                r.translate(vec2(0.0, 1.0)),
-                6.0,
-                Color32::from_black_alpha(18),
-            );
-            p.rect_filled(r, 6.0, t.bg);
-        } else if resp.hovered() {
-            p.rect_filled(r, 6.0, t.row_selected);
-        }
-        let color = if on || resp.hovered() {
-            t.text
-        } else {
-            t.text2
-        };
-        let mut cx = r.left() + 12.0;
-        if let Some(kind) = kind {
-            line_icon_scaled(&p, *kind, pos2(cx + 7.0, r.center().y), color, 0.85);
-            cx += 20.0;
-        }
-        let g = p.layout_no_wrap(label.clone(), font.clone(), color);
-        let gw = g.size().x;
-        p.galley(pos2(cx, r.center().y - g.size().y / 2.0), g, color);
-        if let Some(n) = count {
-            p.text(
-                pos2(cx + gw + 5.0, r.center().y),
-                Align2::LEFT_CENTER,
-                n.to_string(),
-                FontId::proportional(11.0),
-                t.text3,
-            );
-        }
-        if resp.clicked() {
-            out = Some(i);
-        }
-        x += w + 2.0;
-    }
-    out
-}
-
-/// Each item's width in `seg`.
-fn seg_widths(p: &egui::Painter, t: &Theme, items: &[SegItem]) -> Vec<f32> {
-    let font = FontId::proportional(13.0);
-    items
-        .iter()
-        .map(|(kind, label, count, _)| {
-            let g = p.layout_no_wrap(label.clone(), font.clone(), t.text);
-            let c =
-                count.map(|n| p.layout_no_wrap(n.to_string(), FontId::proportional(11.0), t.text3));
-            let text = g.size().x + c.as_ref().map_or(0.0, |c| c.size().x + 5.0);
-            24.0 + if kind.is_none() { 0.0 } else { 20.0 } + text
-        })
-        .collect()
-}
-
-/// How wide `seg` draws these items, its track included.
-pub(super) fn seg_width(p: &egui::Painter, t: &Theme, items: &[SegItem]) -> f32 {
-    seg_widths(p, t, items).iter().sum::<f32>() + 6.0 + 2.0 * items.len().saturating_sub(1) as f32
 }
 
 /// A drop-down's button: framed like a secondary button, an icon and the

@@ -697,3 +697,23 @@ fn the_comments_filter_shows_task_comments_only() {
     h.click("Mentions");
     assert!(h.has("#general") && !h.has(CASE));
 }
+
+#[test]
+fn clicking_the_time_in_create_reminder_types_there_not_in_the_name() {
+    let mut h = inbox(|_| {});
+    h.app.modal = Some(Modal::Reminder {
+        text: String::new(),
+        date: Some(today()),
+        time: "09:00".into(),
+    });
+    h.settle();
+    // the name box has the focus on opening
+    h.type_text("Pay rent");
+    h.click("Reminder time");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("14:30");
+    h.click_side("Create Reminder", true); // the button, right of the heading
+    let r = h.app.data.extra.reminders.last().unwrap();
+    assert_eq!(r.text, "Pay rent", "the time went into the name");
+    assert_eq!(r.due_ts, crate::timefmt::reminder_ts(today(), "14:30"));
+}

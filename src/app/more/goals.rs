@@ -140,6 +140,26 @@ pub(crate) fn fmt_num(v: f64) -> String {
     }
 }
 
+/// What to write or draw on a goal's colour: white, or near-black on a
+/// colour too light for white to read (white below 3:1 against it, the
+/// yellow among the goal colours).
+pub(crate) fn ink_on(c: Color32) -> Color32 {
+    let lin = |v: u8| {
+        let v = v as f32 / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let l = 0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b());
+    if 1.05 / (l + 0.05) < 3.0 {
+        Color32::from_rgb(26, 26, 26)
+    } else {
+        Color32::WHITE
+    }
+}
+
 /// A progress ring: the track all round, the share `frac` from the top,
 /// clockwise, with round ends.
 pub(crate) fn paint_ring(
@@ -242,7 +262,7 @@ pub(crate) fn achieved_buttons(ui: &mut Ui, color: Color32) -> (Response, Respon
         let share = ui.add(
             egui::Button::new(
                 RichText::new(tr("Share to team chat"))
-                    .color(Color32::WHITE)
+                    .color(ink_on(color))
                     .strong(),
             )
             .fill(color)
@@ -1736,7 +1756,7 @@ pub(crate) fn paint_check(
         let a = r.left_center() + vec2(r.width() * 0.22, 0.0);
         let b = r.center_bottom() + vec2(-r.width() * 0.08, -r.height() * 0.28);
         let c = r.right_top() + vec2(-r.width() * 0.22, r.height() * 0.3);
-        p.line(vec![a, b, c], Stroke::new(2.0, Color32::WHITE));
+        p.line(vec![a, b, c], Stroke::new(2.0, ink_on(color)));
     } else {
         p.rect_filled(r, 5.0, if hovered { t.hover } else { t.card });
         p.rect_stroke(r, 5.0, Stroke::new(1.5, t.text3), egui::StrokeKind::Inside);
@@ -2031,7 +2051,7 @@ fn achieved_shelf(
                     let c = pos2(r.left() + 38.0, r.center().y);
                     p.circle_filled(c, 24.0, t.card);
                     p.circle_filled(c, 20.0, color);
-                    icons::line_icon(p, "check", c, Color32::WHITE);
+                    icons::line_icon(p, "check", c, ink_on(color));
                     let nf = FontId::proportional(15.0);
                     p.text(
                         pos2(r.left() + 72.0, r.center().y - 9.0),
@@ -2229,6 +2249,16 @@ mod tests {
         assert_eq!(g.time_used(d(11, 6)), Some(0.5));
         assert_eq!(g.time_used(d(11, 30)), Some(1.0));
         assert_eq!(Goal::default().time_used(d(11, 6)), None);
+    }
+
+    #[test]
+    fn only_the_light_goal_colours_take_dark_ink() {
+        let dark = Color32::from_rgb(26, 26, 26);
+        for c in super::super::goal_page::GOAL_COLORS {
+            let ink = ink_on(rgb(c));
+            let yellow = c == [0xf8, 0xae, 0x00];
+            assert_eq!(ink == dark, yellow, "{c:?}");
+        }
     }
 
     #[test]

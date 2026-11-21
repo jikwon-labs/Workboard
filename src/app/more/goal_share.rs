@@ -253,7 +253,7 @@ fn paint_goal_card(ui: &mut Ui, t: &Theme, card: &GoalCard, data: &Data, link: b
                 let p = ui.painter();
                 if done {
                     p.circle_filled(r.center(), 20.0, color);
-                    paint_tick(p, r.center(), 8.0, Color32::WHITE, 2.8);
+                    paint_tick(p, r.center(), 8.0, ink_on(color), 2.8);
                 } else {
                     paint_ring(
                         p,

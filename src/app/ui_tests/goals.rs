@@ -1593,3 +1593,27 @@ fn a_number_target_cant_start_where_it_ends() {
         .painted_text("The start and target values are the same")
         .is_empty());
 }
+
+#[test]
+fn words_on_a_light_goal_colour_are_dark_enough_to_read() {
+    let (mut h, _, b) = two_goals();
+    // yellow, where white words hardly show
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == b) {
+        g.color = [0xf8, 0xae, 0x00];
+    }
+    h.click("Done Lease signed");
+    h.key(egui::Key::Escape);
+    h.settle();
+    h.click("Achieved Office move");
+    let (_, c) = h.painted_text("Share to team chat")[0];
+    assert_ne!(c, Color32::WHITE, "not white on yellow");
+    let (_, c) = h.painted_text("Done")[0];
+    assert_ne!(c, Color32::WHITE, "the Done button either");
+    // a dark colour keeps white words
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == b) {
+        g.color = [0x5f, 0x55, 0xee];
+    }
+    h.settle();
+    let (_, c) = h.painted_text("Share to team chat")[0];
+    assert_eq!(c, Color32::WHITE);
+}

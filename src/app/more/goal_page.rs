@@ -222,7 +222,7 @@ impl App {
                     );
                     if done {
                         ui.painter().circle_filled(rr.center(), 34.0, color);
-                        paint_tick(ui.painter(), rr.center(), 15.0, Color32::WHITE, 3.5);
+                        paint_tick(ui.painter(), rr.center(), 15.0, ink_on(color), 3.5);
                     } else {
                         ui.painter().text(
                             rr.center() - vec2(0.0, 6.0),
@@ -470,7 +470,7 @@ impl App {
                                     let p = ui.painter();
                                     if reached {
                                         p.circle_filled(c, 13.0, color);
-                                        paint_tick(p, c, 6.0, Color32::WHITE, 2.4);
+                                        paint_tick(p, c, 6.0, ink_on(color), 2.4);
                                     } else if next {
                                         p.circle_stroke(c, 12.0, Stroke::new(2.0, color));
                                     } else {
@@ -1374,7 +1374,7 @@ fn done_toggle(ui: &mut Ui, t: &Theme, done: bool, color: Color32) -> egui::Resp
         if hovered {
             p.rect_filled(r, 10.0, crate::widgets::hover_fill(ui));
         }
-        (tr("Done"), Color32::WHITE)
+        (tr("Done"), ink_on(color))
     } else {
         p.rect_filled(r, 10.0, if hovered { t.hover } else { t.card });
         p.rect_stroke(

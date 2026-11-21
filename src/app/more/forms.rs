@@ -6,6 +6,7 @@
 // and the Answers tab (answers.rs).
 
 use super::*;
+use wb_net::email_ok;
 
 mod answers;
 mod editor;
@@ -135,17 +136,6 @@ pub struct FormAnswers {
     pub assignees: Vec<u64>,
 }
 
-/// An email address as the team server takes one: something before the @,
-/// a dot inside what follows, no spaces.
-fn email_ok(e: &str) -> bool {
-    e.split_once('@').is_some_and(|(name, domain)| {
-        !name.is_empty()
-            && domain.contains('.')
-            && !domain.starts_with('.')
-            && !domain.ends_with('.')
-            && !e.contains(char::is_whitespace)
-    })
-}
 
 /// The form name in a task's history line "submitted the form <name>": how
 /// apps that don't record `Task::form` (0.1.21 and older) mark an answer.

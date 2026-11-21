@@ -430,6 +430,28 @@ pub const AI_WRITE: [&str; 9] = [
 /// change, a question, a task's name and description together.
 pub const AI_MAX_TEXT: usize = 60_000;
 
+/// Earlier questions and answers an AI question takes along; the server
+/// reads no more than this.
+pub const AI_MAX_HISTORY: usize = 10;
+
+/// The largest file the server takes. Under the 100 MB a request may carry
+/// through Cloudflare (Tunnel) on its free plan, so a server behind it takes
+/// the same files as one reached directly.
+pub const MAX_FILE: u64 = 90 << 20;
+
+/// An email address as the server takes one: something before the @, a dot
+/// inside what follows, no spaces (surrounding spaces don't count).
+pub fn email_ok(e: &str) -> bool {
+    let e = e.trim();
+    e.split_once('@').is_some_and(|(name, domain)| {
+        !name.is_empty()
+            && domain.contains('.')
+            && !domain.starts_with('.')
+            && !domain.ends_with('.')
+            && !e.contains(char::is_whitespace)
+    })
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Msg {
@@ -2121,6 +2143,17 @@ mod tests {
     fn roles_order_from_member_to_owner() {
         assert!(Role::Owner.manages() && Role::Admin.manages() && !Role::Member.manages());
         assert!(Role::Owner > Role::Admin && Role::Admin > Role::Member);
+    }
+
+    #[test]
+    fn email_ok_ignores_surrounding_spaces_only() {
+        assert!(email_ok("sam@example.com"));
+        assert!(email_ok("  sam@example.com "));
+        assert!(!email_ok("sam @example.com"));
+        assert!(!email_ok("@example.com"));
+        assert!(!email_ok("sam@example"));
+        assert!(!email_ok("sam@.example.com"));
+        assert!(!email_ok("sam@example.com."));
     }
 
     #[test]

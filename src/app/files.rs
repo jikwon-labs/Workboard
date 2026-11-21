@@ -43,9 +43,8 @@ pub(super) const THUMB: u32 = 720;
 pub(super) const FULL: u32 = 2560;
 /// The size `Files::fetch` asks for: the file only, nothing decoded.
 const FETCH_ONLY: u32 = 0;
-/// The server takes files up to this size (MAX_FILE in server/src/files.rs:
-/// under the 100 MB Cloudflare passes on its free plan).
-pub(super) const MAX_FILE: u64 = 90 << 20;
+/// The server takes files up to this size.
+pub(super) use wb_net::MAX_FILE;
 /// Pictures and videos in one message.
 pub(super) const MAX_PER_MESSAGE: usize = 10;
 /// Waits before fetching a missing file again: after the first failure, the

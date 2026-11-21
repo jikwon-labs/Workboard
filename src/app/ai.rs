@@ -15,9 +15,9 @@ use super::*;
 use std::collections::BTreeMap;
 use wb_net::{AiAsk, AiTurn, Msg};
 
-/// Earlier questions and answers a question takes along (the server reads
-/// as many: server/src/ai.rs MAX_HISTORY).
-const MAX_HISTORY: usize = 10;
+/// Earlier questions and answers a question takes along (as many as the
+/// server reads).
+use wb_net::AI_MAX_HISTORY as MAX_HISTORY;
 /// Said when a request can't go: no connection, or the server has no AI.
 pub(super) const NOT_READY: &str =
     "Not connected to a team server with AI. Try again once it's back.";

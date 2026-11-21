@@ -87,19 +87,7 @@ pub(crate) fn norm_email(e: &str) -> String {
     e.trim().to_lowercase()
 }
 
-pub(crate) fn email_ok(e: &str) -> bool {
-    let e = e.trim();
-    match e.split_once('@') {
-        Some((a, b)) => {
-            !a.is_empty()
-                && b.contains('.')
-                && !b.starts_with('.')
-                && !b.ends_with('.')
-                && !e.contains(char::is_whitespace)
-        }
-        None => false,
-    }
-}
+pub(crate) use wb_net::email_ok;
 
 /// Conservative ASCII mailbox syntax for the local teammate-invite command.
 /// This intentionally does not accept display names or quoted local parts.

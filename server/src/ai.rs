@@ -63,8 +63,8 @@ pub const CONTEXT_CHARS: usize = 120_000;
 pub const SUMMARY_MESSAGES: usize = 400;
 /// About how much text a summary reads at most (bytes of text).
 pub const SUMMARY_CHARS: usize = 80_000;
-/// Earlier questions and answers a question takes along.
-pub const MAX_HISTORY: usize = 10;
+/// Earlier questions and answers a question takes along (shared with the apps).
+pub use wb_net::AI_MAX_HISTORY as MAX_HISTORY;
 /// Pieces of an answer are sent at most this often.
 pub const PIECE_GAP: Duration = Duration::from_millis(80);
 const API_URL: &str = "https://api.anthropic.com/v1/messages";

@@ -1400,3 +1400,36 @@ fn an_assignee_question_leaves_out_people_not_joined_yet() {
     assert!(h.has("Pick Alex Kim"));
     assert!(!h.has("Pick Invited Ivy"));
 }
+
+/// A question whose text was cleared reads "Untitled question" on Fill
+/// out, in the problem Submit finds and in the task it makes, not "".
+#[test]
+fn a_question_without_text_shows_as_untitled() {
+    let mut h = Ui1::new();
+    blank_form(&mut h);
+    h.click("Question 2 kind");
+    h.click("Kind Short text");
+    h.click("Question 2");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.key(egui::Key::Backspace);
+    h.click("Required 2");
+    assert!(!h
+        .painted_text("Added to the task description as \"Untitled question: answer\"")
+        .is_empty());
+    assert!(h.has("2 · Untitled question"), "the panel's list");
+    h.click("Fill out");
+    assert!(!h.painted_text("Untitled question").is_empty());
+    h.click("Answer 1");
+    h.type_text("Untitled test");
+    h.click("Submit");
+    assert!(!h
+        .painted_text("Please answer \"Untitled question\".")
+        .is_empty());
+    h.click("Answer 2");
+    h.type_text("an answer");
+    h.click("Submit");
+    assert_eq!(
+        task_named(&h, "Untitled test").description,
+        "Untitled question: an answer"
+    );
+}

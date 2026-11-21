@@ -100,6 +100,16 @@ fn one_per_form(k: &str) -> bool {
     matches!(k, "name" | "priority" | "due")
 }
 
+/// A question's text as the form shows it: "Untitled question" when it
+/// has none, as an unnamed form shows "Untitled form".
+fn question_title(fld: &FormField) -> String {
+    if fld.label.trim().is_empty() {
+        tr("Untitled question").into()
+    } else {
+        fld.label.trim().to_string()
+    }
+}
+
 /// Where a question's answer goes, as the editor says under it.
 fn kind_hint(fld: &FormField) -> String {
     match fld.map.as_str() {
@@ -110,7 +120,7 @@ fn kind_hint(fld: &FormField) -> String {
         "assignee" => tr("Saved as an assignee").into(),
         _ => trf!(
             "Added to the task description as \"{}: answer\"",
-            fld.label.trim()
+            question_title(fld)
         ),
     }
 }
@@ -162,6 +172,7 @@ pub(crate) fn old_answer_form(forms: &[Form], name: &str, list: u64) -> Option<u
 fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (usize, String)> {
     let mut a = FormAnswers::default();
     for (i, fld) in f.fields.iter().enumerate() {
+        let label = question_title(fld);
         let mut v = fill
             .get(&i)
             .map(|s| s.trim().to_string())
@@ -176,7 +187,7 @@ fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (u
             let answerable =
                 fld.map != "dropdown" || fld.options.iter().any(|o| !o.trim().is_empty());
             if fld.required && answerable {
-                return Err((i, trf!("Please answer \"{}\".", fld.label)));
+                return Err((i, trf!("Please answer \"{}\".", label)));
             }
             continue;
         }
@@ -197,22 +208,21 @@ fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (u
                 Err(_) => {
                     return Err((
                         i,
-                        trf!("\"{}\" isn't a date. Write it as YYYY-MM-DD.", fld.label),
+                        trf!("\"{}\" isn't a date. Write it as YYYY-MM-DD.", label),
                     ))
                 }
             },
             "assignee" => a.assignees.extend(v.parse::<u64>().ok()),
             k => {
                 if k == "number" && !v.parse::<f64>().is_ok_and(f64::is_finite) {
-                    return Err((i, trf!("\"{}\" needs a number.", fld.label)));
+                    return Err((i, trf!("\"{}\" needs a number.", label)));
                 }
                 if k == "email" && !email_ok(&v) {
-                    return Err((i, trf!("\"{}\" needs an email address.", fld.label)));
+                    return Err((i, trf!("\"{}\" needs an email address.", label)));
                 }
                 // a ticked box ("Yes" here) as it read on the screen
                 let shown = if k == "checkbox" { tr("Yes") } else { &v };
-                a.description
-                    .push_str(&format!("\n{}: {}", fld.label, shown));
+                a.description.push_str(&format!("\n{}: {}", label, shown));
             }
         }
     }

@@ -808,7 +808,7 @@ impl App {
                                     let label = format!(
                                         "{} \u{00B7} {}",
                                         qi + 1,
-                                        crate::widgets::one_line(&q.label)
+                                        crate::widgets::one_line(&question_title(q))
                                     );
                                     egui::Frame::new()
                                         .fill(if own { t.accent_bg } else { t.hover })

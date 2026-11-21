@@ -300,6 +300,7 @@ pub const T: &[(&str, &str)] = &[
     ("Undo", "실행 취소"),
     ("Untitled whiteboard", "제목 없는 화이트보드"),
     ("Untitled form", "제목 없는 양식"),
+    ("Untitled question", "제목 없는 질문"),
     ("Board menu", "보드 메뉴"),
     ("Clear board", "보드 전체 지우기"),
     ("Everything on it is removed.", "보드의 모든 내용이 지워집니다."),

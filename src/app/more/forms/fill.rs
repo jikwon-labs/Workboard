@@ -149,7 +149,12 @@ impl App {
         let bad = self.sweep.forms.error_at == Some(i);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(RichText::new(&fld.label).size(14.0).strong().color(t.text));
+            ui.label(
+                RichText::new(question_title(fld))
+                    .size(14.0)
+                    .strong()
+                    .color(t.text),
+            );
             if fld.required {
                 ui.label(RichText::new("*").size(14.0).color(t.danger));
             }

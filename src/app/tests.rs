@@ -1076,6 +1076,14 @@ fn recent_items_remember_tasks_lists_and_docs() {
 
 /// A real workboard-server on a free local port, data in a temporary folder.
 /// Keep taking in what the server sends until `cond` holds.
+/// Ticks `a` until the server has saved the workspace file in `folder`
+/// (the server's home, or a workspace's folder in it); fails the test after
+/// the same wait as `net_until`.
+pub(super) fn net_until_saved(a: &mut App, folder: &std::path::Path) {
+    let file = folder.join(workboard_server::WORKSPACE_FILE);
+    net_until(a, "the server saving the workspace", |_| file.is_file());
+}
+
 pub(super) fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
     let held = wait_until(
         std::time::Duration::from_secs(15),

@@ -151,13 +151,7 @@ fn two_computers_work_in_one_shared_folder() {
 
 /// The owner on `addr` makes an invite code for member 3 (Sam).
 fn invite_code_for_sam(a: &mut App, server: &TestServer) -> String {
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file()
-        && std::time::Instant::now() < until
-    {
-        a.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    net_until_saved(a, &server.home);
     net_until(a, "the people list", |a| {
         a.sync_rt.people.iter().any(|p| p.member == 3)
     });
@@ -289,13 +283,7 @@ fn two_computers_work_through_a_server() {
     assert_eq!(cfg.server.as_deref(), Some(addr.as_str()));
     assert!(cfg.folder.is_empty());
     // wait until the server has saved A's copy, so B finds it there
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file()
-        && std::time::Instant::now() < until
-    {
-        a.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    net_until_saved(&mut a, &server.home);
 
     // A is the owner and makes an invite code for Sam (already a member)
     assert_eq!(a.sync_rt.role, Some(wb_net::Role::Owner));

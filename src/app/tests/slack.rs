@@ -1285,13 +1285,7 @@ fn concurrent_slack_matches_go_through_a_server() {
     net_until(&mut a, "A shared on the server", |a| {
         a.data.extra.shared.is_some()
     });
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file()
-        && std::time::Instant::now() < until
-    {
-        a.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    net_until_saved(&mut a, &server.home);
     net_until(&mut a, "A sees the people list", |a| {
         a.sync_rt.people.iter().any(|p| p.member == sam)
     });

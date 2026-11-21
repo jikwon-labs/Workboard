@@ -2,7 +2,7 @@
 // when setting up the server, signs in on a second computer with it, invites
 // someone (the code goes out by mail) who joins with the code and a password.
 
-use super::tests::{blank_as, net_until};
+use super::tests::{blank_as, net_until, net_until_saved};
 use super::together::How;
 use super::*;
 use workboard_server::testing::{temp_home, TestServer};
@@ -39,10 +39,7 @@ fn accounts_sign_in_anywhere_and_invites_go_out_by_mail() {
         "owner@team.io",
         "the owner's email goes up with the workspace"
     );
-    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file() {
-        a.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    net_until_saved(&mut a, &server.home);
 
     // the owner's second computer: email and password, no code
     let mut a2 = computer("Laptop");
@@ -237,10 +234,7 @@ fn logging_out_sends_what_is_left_deletes_the_copy_and_signing_in_brings_it_back
     net_until(&mut a, "A on the server", |a| {
         a.data.extra.shared.is_some() && connected(a)
     });
-    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file() {
-        a.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    net_until_saved(&mut a, &server.home);
 
     // the owner's laptop signs in, writes something and logs out at once
     let mut b = computer("Laptop");
@@ -379,10 +373,7 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
         .expect("invite mail");
     assert!(mail.contains(&format!("/w/{}/join?code=", id)), "{}", mail);
     let folder = server.home.join("workspaces").join(&id);
-    while !folder.join(workboard_server::WORKSPACE_FILE).is_file() {
-        a.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    net_until_saved(&mut a, &folder);
 
     // another computer signs in with the account: it chooses which one
     let mut b = keeping_computer("Laptop");
@@ -484,10 +475,7 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
         .unwrap();
     let id = addr2.rsplit('/').next().unwrap().to_string();
     let folder = server.home.join("workspaces").join(&id);
-    while !folder.join(workboard_server::WORKSPACE_FILE).is_file() {
-        a.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    net_until_saved(&mut a, &folder);
 
     // another computer has it open
     let mut b = computer("Laptop");

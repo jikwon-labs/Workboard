@@ -625,13 +625,7 @@ fn forms_go_between_teammates_through_a_server() {
     let mut a = Ui1::new();
     a.app.connect_server(&addr, "").unwrap();
     receive(&mut a, "A on the server", |x| x.data.extra.shared.is_some());
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !server.home.join(workboard_server::WORKSPACE_FILE).is_file()
-        && std::time::Instant::now() < until
-    {
-        a.app.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    crate::app::tests::net_until_saved(&mut a.app, &server.home);
     receive(&mut a, "the people list", |x| {
         x.sync_rt.people.iter().any(|p| p.member == 3)
     });

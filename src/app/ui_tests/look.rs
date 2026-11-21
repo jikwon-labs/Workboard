@@ -671,3 +671,73 @@ fn one_glyph_buttons_are_square() {
     h.click_at(dots.center());
     assert!(h.has("Color & Icon"), "the Space menu opens");
 }
+
+/// The small "make one thing" dialogs label their fields and end with Cancel
+/// and the main button at the right edge; the main button waits for what it
+/// needs, and Enter in the field does the same.
+#[test]
+fn small_dialogs_label_fields_and_put_cancel_and_the_button_at_the_right() {
+    let mut h = Ui1::new();
+    let n = h.app.data.extra.bookmarks.len();
+    h.app.modal = Some(Modal::Bookmark {
+        title: String::new(),
+        url: String::new(),
+    });
+    h.settle();
+    assert!(h.has("Link") && h.has("Name (optional)"));
+    let win = h.modal_rect();
+    // the dialog's title says "Add bookmark" too: the button is the lower one
+    let add = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Add bookmark")
+        .map(|(_, r)| *r)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    let cancel = h.rect("Cancel");
+    assert!(
+        win.right() - add.right() < 40.0 && cancel.right() < add.left(),
+        "Cancel then Add bookmark at the right: {:?} {:?} in {:?}",
+        cancel,
+        add,
+        win
+    );
+    assert!((add.center().y - cancel.center().y).abs() < 1.0);
+    // nothing to add without a link
+    h.click_at(add.center());
+    assert_eq!(h.app.data.extra.bookmarks.len(), n);
+    h.click("Bookmark link");
+    h.type_text("https://example.com");
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert_eq!(h.app.data.extra.bookmarks.len(), n + 1);
+    assert_eq!(
+        h.app.data.extra.bookmarks.last().unwrap().title,
+        "https://example.com"
+    );
+    assert!(h.app.modal.is_none());
+
+    // Cancel closes without making anything
+    for modal in [
+        Modal::NewDashboard {
+            name: String::new(),
+        },
+        Modal::Reminder {
+            text: String::new(),
+            date: Some(today()),
+            time: "09:00".into(),
+        },
+        Modal::SetStatus {
+            text: String::new(),
+        },
+    ] {
+        h.app.modal = Some(modal);
+        h.settle();
+        let win = h.modal_rect();
+        let cancel = h.rect("Cancel");
+        assert!(cancel.center().x > win.center().x, "Cancel sits right");
+        h.click("Cancel");
+        h.settle();
+        assert!(h.app.modal.is_none());
+    }
+}

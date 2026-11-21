@@ -283,12 +283,18 @@ impl App {
         time: &mut String,
     ) -> bool {
         let mut close = false;
+        field_label(ui, t, tr("Reminder"));
         let r = ui.add(
             field(text)
                 .hint_text(tr("Remind me to..."))
                 .desired_width(f32::INFINITY),
         );
-        r.request_focus();
+        name_field(&r, "Reminder text");
+        // once, so the time field can take the keyboard too
+        focus_once(ui, &r);
+        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.add_space(8.0);
+        field_label(ui, t, tr("When"));
         ui.horizontal(|ui| {
             let d_txt = date.map(fmt_date).unwrap_or_else(|| tr("Date").into());
             let r = icon_button(ui, t, "calendar", &d_txt, "Reminder date", true);
@@ -298,7 +304,10 @@ impl App {
             let r = ui.add(field(time).hint_text("09:00").desired_width(60.0));
             name_field(&r, "Reminder time");
         });
-        if primary_button(ui, t, tr("Create Reminder")).clicked() && !text.trim().is_empty() {
+        let ok = !text.trim().is_empty();
+        let (create, cancel) = dialog_footer(ui, t, tr("Create Reminder"), ok);
+        close |= cancel;
+        if (create || enter) && ok {
             let ts = reminder_ts(date.unwrap_or_else(today), time);
             let id = self.data.new_id();
             let (task, message) = std::mem::take(&mut self.reminder_about);
@@ -401,17 +410,36 @@ impl App {
         url: &mut String,
     ) -> bool {
         let mut close = false;
-        ui.add(
-            field(title)
-                .hint_text(tr("Name"))
-                .desired_width(f32::INFINITY),
+        ui.label(
+            RichText::new(tr(
+                "Bookmarks make it easy to save items or any URL from around the web.",
+            ))
+            .color(t.text2),
         );
-        ui.add(
+        ui.add_space(10.0);
+        // the link comes first: it's the one thing a bookmark needs
+        field_label(ui, t, tr("Link"));
+        let r = ui.add(
             field(url)
                 .hint_text(tr("https://..."))
                 .desired_width(f32::INFINITY),
         );
-        if primary_button(ui, t, tr("Add bookmark")).clicked() && !url.trim().is_empty() {
+        name_field(&r, "Bookmark link");
+        focus_once(ui, &r);
+        let mut enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.add_space(8.0);
+        field_label(ui, t, tr("Name (optional)"));
+        let r = ui.add(
+            field(title)
+                .hint_text(tr("Shows the link when left empty"))
+                .desired_width(f32::INFINITY),
+        );
+        name_field(&r, "Bookmark name");
+        enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let ok = !url.trim().is_empty();
+        let (add, cancel) = dialog_footer(ui, t, tr("Add bookmark"), ok);
+        close |= cancel;
+        if (add || enter) && ok {
             let id = self.data.new_id();
             let ttl = if title.trim().is_empty() {
                 url.trim().to_string()
@@ -433,19 +461,15 @@ impl App {
     /// The NewDashboard dialog. Returns true when it should close.
     pub(super) fn new_dashboard_body(&mut self, ui: &mut Ui, t: &Theme, name: &mut String) -> bool {
         let mut close = false;
-        ui.label(tr("Dashboard name"));
+        field_label(ui, t, tr("Dashboard name"));
         let r = ui.add(
             field(name)
                 .hint_text(tr("For example: Weekly overview"))
                 .desired_width(f32::INFINITY),
         );
         name_field(&r, "Dashboard name entry");
-        let spaces: Vec<(u64, String)> = self
-            .data
-            .spaces
-            .iter()
-            .map(|s| (s.id, s.name.clone()))
-            .collect();
+        focus_once(ui, &r);
+        ui.add_space(4.0);
         ui.label(
             RichText::new(tr(
                 "Shows the whole Workspace; pick a Space later from the Dashboards page.",
@@ -453,13 +477,12 @@ impl App {
             .small()
             .color(t.text2),
         );
-        let _ = spaces;
         // off until it has a name, rather than doing nothing
         let named = !name.trim().is_empty();
-        let create = ui
-            .add_enabled_ui(named, |ui| primary_button(ui, t, tr("Create Dashboard")))
-            .inner;
-        if create.clicked() && named {
+        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let (create, cancel) = dialog_footer(ui, t, tr("Create Dashboard"), named);
+        close |= cancel;
+        if (create || enter) && named {
             self.new_dashboard(name.trim());
             self.section = Section::Dashboards;
             close = true;

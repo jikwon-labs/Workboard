@@ -104,10 +104,10 @@ impl App {
         name: &mut String,
     ) -> bool {
         let mut close = false;
-        ui.label(tr("Workspace name"));
+        field_label(ui, t, tr("Workspace name"));
         ui.add(field(name).desired_width(f32::INFINITY));
-        ui.add_space(6.0);
-        ui.label(tr("Workspace color"));
+        ui.add_space(8.0);
+        field_label(ui, t, tr("Workspace color"));
         // the current colour first when it isn't one of these (the
         // default a new workspace starts with is not), so it shows chosen
         let current = self.data.extra.workspace_color;
@@ -153,8 +153,10 @@ impl App {
             counts += &crate::trf!(" \u{2022} {} archived", archived);
         }
         ui.label(RichText::new(counts).color(t.text2));
-        ui.add_space(8.0);
-        if primary_button(ui, t, tr("Save")).clicked() && !name.trim().is_empty() {
+        let ok = !name.trim().is_empty();
+        let (save, cancel) = dialog_footer(ui, t, tr("Save"), ok);
+        close |= cancel;
+        if save && ok {
             self.data.workspace = name.trim().to_string();
             let mut list = Data::workspaces();
             if let Some(w) = list.iter_mut().find(|w| w.file == self.ws_file) {
@@ -394,26 +396,34 @@ impl App {
                 }
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(14.0);
+        // Clear status on the left, away from Cancel and Save at the right
+        let (mut save, mut cancel, mut clear) = (false, false, false);
         ui.horizontal(|ui| {
-            if primary_button(ui, t, tr("Save")).clicked() {
-                let me = self.data.me;
-                if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
-                    m.status_text = text.trim().to_string();
-                }
-                self.dirty = true;
-                close = true;
-            }
-            if ui.button(tr("Clear status")).clicked() {
-                let me = self.data.me;
-                if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
-                    m.status_text.clear();
-                }
-                self.dirty = true;
-                close = true;
-            }
+            clear = secondary_button(ui, tr("Clear status")).clicked();
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                save = ui
+                    .add(Tint(
+                        primary_btn(t, tr("Save")).min_size(vec2(90.0, CONTROL_H)),
+                    ))
+                    .clicked();
+                cancel = secondary_button(ui, tr("Cancel")).clicked();
+            });
         });
-        close
+        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if save || enter || clear {
+            let me = self.data.me;
+            if let Some(m) = self.data.members.iter_mut().find(|m| m.id == me) {
+                m.status_text = if clear {
+                    String::new()
+                } else {
+                    text.trim().to_string()
+                };
+            }
+            self.dirty = true;
+            close = true;
+        }
+        close | cancel
     }
 
     /// The Share dialog. Returns true when it should close.

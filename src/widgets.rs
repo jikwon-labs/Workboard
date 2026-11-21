@@ -199,6 +199,31 @@ pub fn dialog_header(ui: &mut Ui, t: &Theme, title: &str) -> bool {
     close
 }
 
+/// The bottom row of a dialog that makes or saves something: Cancel and the
+/// main button at the right edge, with room above. The main button stays off
+/// until `ok`. Returns (main button clicked, Cancel clicked).
+pub fn dialog_footer(ui: &mut Ui, t: &Theme, label: &str, ok: bool) -> (bool, bool) {
+    ui.add_space(14.0);
+    let mut out = (false, false);
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            out.0 = ui
+                .add_enabled(
+                    ok,
+                    Tint(primary_btn(t, label).min_size(vec2(90.0, CONTROL_H))),
+                )
+                .clicked();
+            out.1 = secondary_button(ui, tr("Cancel")).clicked();
+        });
+    });
+    out
+}
+
+/// A small grey label over a dialog's field.
+pub fn field_label(ui: &mut Ui, t: &Theme, text: &str) {
+    ui.label(egui::RichText::new(text).color(t.text2));
+}
+
 /// A small switch (on/off) with a label, named for tests and screen readers.
 pub fn switch(ui: &mut Ui, t: &Theme, on: &mut bool, label: &str) -> Response {
     let (r, resp) = ui.allocate_exact_size(SWITCH_SIZE, Sense::click());

@@ -1102,6 +1102,20 @@ pub(super) fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
     );
 }
 
+/// A `w` x `h` picture file (a colour gradient) named `name` in a new
+/// temporary folder.
+pub(super) fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
+    let dir = temp_home("pic");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut img = image::RgbaImage::new(w, h);
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        *p = image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 160, 255]);
+    }
+    let p = dir.join(name);
+    img.save(&p).unwrap();
+    p
+}
+
 /// The id of the channel (not a direct message) named `name`.
 pub(super) fn channel_id(a: &App, name: &str) -> u64 {
     a.data

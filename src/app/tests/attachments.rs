@@ -4,18 +4,6 @@
 
 use super::*;
 
-fn picture_file(name: &str, w: u32, h: u32) -> std::path::PathBuf {
-    let dir = temp_home("pic");
-    std::fs::create_dir_all(&dir).unwrap();
-    let mut img = image::RgbaImage::new(w, h);
-    for (x, _, p) in img.enumerate_pixels_mut() {
-        *p = image::Rgba([if x < w / 2 { 200 } else { 30 }, 90, 40, 255]);
-    }
-    let p = dir.join(name);
-    img.save(&p).unwrap();
-    p
-}
-
 /// Tick until the message box's attachments are ready (or fail the test).
 fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -58,7 +46,7 @@ fn a_picture_goes_through_the_server_to_the_other_computer() {
 
     // A puts a picture in the message box: it's checked, then sent to the server
     let ch = channel_id(&a, "general");
-    let pic = picture_file("sunset.png", 320, 200);
+    let pic = test_picture("sunset.png", 320, 200);
     a.add_media(false, Some(pic.clone()), None);
     let files = until_ready(&mut a, false);
     assert_eq!(files.len(), 1);
@@ -203,7 +191,7 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     a.drafts.chat_files.swap(a.chat.open, &mut a.chat.files);
     // no server, no folder: the picture is ready once it's in the cache
     assert_eq!(a.media_remote(), crate::app::files::Remote::None);
-    a.add_media(false, Some(picture_file("one.png", 50, 40)), None);
+    a.add_media(false, Some(test_picture("one.png", 50, 40)), None);
     let files = until_ready(&mut a, false);
     assert!(a.files.local(&files[0].file).is_some());
     // another channel has its own (empty) box; coming back brings the picture back
@@ -218,7 +206,7 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
         Some(files[0].file.clone())
     );
     // a pasted screenshot arrives as PNG bytes
-    let png = std::fs::read(picture_file("shot.png", 30, 20)).unwrap();
+    let png = std::fs::read(test_picture("shot.png", 30, 20)).unwrap();
     a.add_media(false, None, Some(png));
     let files = until_ready(&mut a, false);
     assert_eq!(files.len(), 2);
@@ -310,7 +298,7 @@ fn in_a_shared_folder_pictures_go_into_its_files_folder() {
         a.media_remote(),
         crate::app::files::Remote::Folder(folder.clone())
     );
-    a.add_media(false, Some(picture_file("team.png", 40, 40)), None);
+    a.add_media(false, Some(test_picture("team.png", 40, 40)), None);
     let files = until_ready(&mut a, false);
     assert!(
         folder.join("files").join(&files[0].file).is_file(),
@@ -438,7 +426,7 @@ fn a_picture_goes_without_where_it_was_taken() {
 
 #[test]
 fn a_bmp_goes_as_a_jpeg_under_that_name() {
-    let pic = picture_file("Scan.bmp", 60, 40);
+    let pic = test_picture("Scan.bmp", 60, 40);
     let before = std::fs::read(&pic).unwrap();
     let mut a = app();
     a.add_media(false, Some(pic.clone()), None);
@@ -465,7 +453,7 @@ fn a_bmp_goes_as_a_jpeg_under_that_name() {
 
 #[test]
 fn a_png_or_jpeg_goes_as_it_is() {
-    let pic = picture_file("Chart.png", 60, 40);
+    let pic = test_picture("Chart.png", 60, 40);
     let mut a = app();
     a.add_media(false, Some(pic.clone()), None);
     let files = until_ready(&mut a, false);
@@ -526,7 +514,7 @@ fn a_video_goes_without_where_it_was_taken() {
 #[test]
 fn one_message_takes_at_most_ten_pictures() {
     let mut a = app();
-    let pic = picture_file("many.png", 20, 20);
+    let pic = test_picture("many.png", 20, 20);
     // twelve chosen at once: ten go in, the rest are left out with a note
     let added: Vec<bool> = (0..12)
         .map(|_| a.add_media(false, Some(pic.clone()), None))
@@ -549,7 +537,7 @@ fn one_message_takes_at_most_ten_pictures() {
 fn a_missing_file_is_fetched_again_later() {
     let folder = temp_home("retry-files");
     std::fs::create_dir_all(folder.join("files")).unwrap();
-    let pic = picture_file("later.png", 30, 20);
+    let pic = test_picture("later.png", 30, 20);
     let (sha, bytes) = wb_net::sha256_file(&pic).unwrap();
     let att = Attachment {
         file: sha.clone(),
@@ -594,7 +582,7 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
         a.media_remote(),
         crate::app::files::Remote::SignedOut("127.0.0.1:9".into())
     );
-    a.add_media(false, Some(picture_file("wait.png", 20, 20)), None);
+    a.add_media(false, Some(test_picture("wait.png", 20, 20)), None);
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while a.chat.files[0].att.is_none() && std::time::Instant::now() < end {
         a.files_tick(None);
@@ -626,7 +614,7 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
 #[test]
 fn sharing_a_folder_brings_earlier_pictures_along() {
     let mut a = app();
-    a.add_media(false, Some(picture_file("before.png", 24, 24)), None);
+    a.add_media(false, Some(test_picture("before.png", 24, 24)), None);
     let files = until_ready(&mut a, false);
     let ch = a.data.channels[0].id;
     a.apply_chat(vec![ChatAction::Send {
@@ -651,7 +639,7 @@ fn sharing_a_folder_brings_earlier_pictures_along() {
 #[test]
 fn a_failed_upload_for_a_sent_message_is_tried_again_and_not_cancelled() {
     let mut a = app();
-    a.add_media(false, Some(picture_file("again.png", 16, 16)), None);
+    a.add_media(false, Some(test_picture("again.png", 16, 16)), None);
     let att = until_ready(&mut a, false).remove(0);
     let sha = att.file.clone();
     let remote = crate::app::files::Remote::Server {
@@ -677,7 +665,7 @@ fn a_failed_upload_for_a_sent_message_is_tried_again_and_not_cancelled() {
 #[test]
 fn a_picture_added_before_sharing_goes_up_when_the_message_is_sent() {
     let mut a = app();
-    a.add_media(false, Some(picture_file("early.png", 16, 16)), None);
+    a.add_media(false, Some(test_picture("early.png", 16, 16)), None);
     let files = until_ready(&mut a, false);
     let sha = files[0].file.clone();
     // now the workspace is on a server this computer is signed in to
@@ -727,7 +715,7 @@ fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
     let mut a = app();
     let folder = temp_home("trash-reupload");
     a.share_here(&folder.to_string_lossy()).unwrap();
-    a.add_media(false, Some(picture_file("trash.png", 24, 24)), None);
+    a.add_media(false, Some(test_picture("trash.png", 24, 24)), None);
     let files = until_ready(&mut a, false);
     let ch = a.data.channels[0].id;
     a.apply_chat(vec![ChatAction::Send {
@@ -782,7 +770,7 @@ fn dead_server() -> crate::app::files::Remote {
 #[test]
 fn waiting_uploads_are_kept_on_disk_and_carry_on_after_a_restart() {
     let mut a = app();
-    a.add_media(false, Some(picture_file("later.png", 16, 16)), None);
+    a.add_media(false, Some(test_picture("later.png", 16, 16)), None);
     let att = until_ready(&mut a, false).remove(0);
     let sha = att.file.clone();
     let remote = dead_server();
@@ -818,13 +806,13 @@ fn waiting_uploads_are_kept_on_disk_and_carry_on_after_a_restart() {
 #[test]
 fn sharing_brings_task_attachments_along_too() {
     let mut a = app();
-    a.add_media(false, Some(picture_file("task.png", 16, 16)), None);
+    a.add_media(false, Some(test_picture("task.png", 16, 16)), None);
     let att = until_ready(&mut a, false).remove(0);
     a.chat.files.clear();
     let tid = a.data.tasks[0].id;
     a.data.tasks[0].attachments.push(att.clone());
     // and one in a deleted message in the Trash
-    a.add_media(false, Some(picture_file("trash.png", 18, 18)), None);
+    a.add_media(false, Some(test_picture("trash.png", 18, 18)), None);
     let gone = until_ready(&mut a, false).remove(0);
     a.chat.files.clear();
     a.data.extra.trash.push(TrashItem {
@@ -858,7 +846,7 @@ fn a_task_attachment_waiting_for_a_sign_in_goes_up_once_there_is_one() {
         server: Some("127.0.0.1:9".into()),
     });
     let tid = a.data.tasks[0].id;
-    a.add_task_file(tid, picture_file("plan.png", 20, 20));
+    a.add_task_file(tid, test_picture("plan.png", 20, 20));
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while a.task_files[0].1.att.is_none() && std::time::Instant::now() < end {
         a.files_tick(None);
@@ -1154,7 +1142,7 @@ fn a_task_attachment_still_going_up_at_quit_joins_its_task_after_a_restart() {
         server: Some("127.0.0.1:9".into()),
     });
     let tid = a.data.tasks[0].id;
-    a.add_task_file(tid, picture_file("restart.png", 20, 22));
+    a.add_task_file(tid, test_picture("restart.png", 20, 22));
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while a.task_files[0].1.att.is_none() && std::time::Instant::now() < end {
         a.files_tick(None);

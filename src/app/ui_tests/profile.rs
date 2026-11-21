@@ -2,19 +2,7 @@
 // photo, and others seeing the display name before the full name.
 
 use super::*;
-
-/// A picture file wider than it is tall.
-fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
-    let dir = temp_home("ui-profile-pic");
-    std::fs::create_dir_all(&dir).unwrap();
-    let mut img = image::RgbaImage::new(w, h);
-    for (x, y, p) in img.enumerate_pixels_mut() {
-        *p = image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 160, 255]);
-    }
-    let p = dir.join(name);
-    img.save(&p).unwrap();
-    p
-}
+use crate::app::tests::test_picture;
 
 /// Frames until `done` holds (or fail after 10 seconds).
 fn frames_until(h: &mut Ui1, what: &str, done: impl Fn(&Ui1) -> bool) {

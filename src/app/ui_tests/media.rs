@@ -1,19 +1,7 @@
 // Click-through tests for pictures and attachments in chat and on tasks.
 
 use super::*;
-
-/// A picture file for attachment tests.
-fn test_picture(name: &str, w: u32, h: u32) -> std::path::PathBuf {
-    let dir = temp_home("ui-pic");
-    std::fs::create_dir_all(&dir).unwrap();
-    let mut img = image::RgbaImage::new(w, h);
-    for (x, y, p) in img.enumerate_pixels_mut() {
-        *p = image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 160, 255]);
-    }
-    let p = dir.join(name);
-    img.save(&p).unwrap();
-    p
-}
+use crate::app::tests::test_picture;
 
 #[test]
 fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {

@@ -724,39 +724,32 @@ impl App {
                         .get_mut(i)
                         .map(|x| &mut x.kind)
                     {
+                        // the numbers are taken once let go (typed and left,
+                        // or dragged and dropped) and go through the goal's
+                        // own edit, as + Record does: the number now as a
+                        // line in the history, and for all three the
+                        // milestone banner and Goal achieved, in my name
                         egui::Grid::new("number target")
                             .num_columns(2)
                             .spacing([10.0, 8.0])
                             .show(ui, |ui| {
                                 ui.label(tr("Now"));
-                                // recorded like + Record once it is let go
-                                // (typed and left, or dragged and dropped):
-                                // a line in the history, the milestone
-                                // banner, Goal achieved. Escape drops it.
-                                let now_id = egui::Id::new(("goal number now", gid, i));
-                                let mut now: f64 =
-                                    ui.data(|d| d.get_temp(now_id)).unwrap_or(*current);
-                                let r = ui.add(number_box(&mut now));
-                                name_it(&r, "Number now");
-                                if r.dragged() || r.has_focus() {
-                                    ui.data_mut(|d| d.insert_temp(now_id, now));
-                                } else {
-                                    ui.data_mut(|d| d.remove_temp::<f64>(now_id));
-                                    let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                                    if now != *current && !esc {
-                                        act = Some(PageAct::Goal(GoalAct::SetNumber {
-                                            g: gid,
-                                            i,
-                                            to: now,
-                                        }));
-                                    }
+                                let id = egui::Id::new(("goal number now", gid, i));
+                                if let Some(to) = number_let_go(ui, id, *current, "Number now") {
+                                    act = Some(PageAct::Goal(GoalAct::SetNumber { g: gid, i, to }));
                                 }
                                 ui.end_row();
                                 ui.label(tr("Start value"));
-                                ch |= ui.add(number_box(start)).changed();
+                                let id = egui::Id::new(("goal number start", gid, i));
+                                if let Some(v) = number_let_go(ui, id, *start, "Number start") {
+                                    act = Some(PageAct::SetRange(i, Some(v), None));
+                                }
                                 ui.end_row();
                                 ui.label(tr("Target value"));
-                                ch |= ui.add(number_box(target)).changed();
+                                let id = egui::Id::new(("goal number target", gid, i));
+                                if let Some(v) = number_let_go(ui, id, *target, "Number target") {
+                                    act = Some(PageAct::SetRange(i, None, Some(v)));
+                                }
                                 ui.end_row();
                                 ui.label(tr("Unit"));
                                 ch |= ui.add(field(unit).desired_width(80.0)).changed();
@@ -883,20 +876,17 @@ impl App {
                     egui::ScrollArea::vertical()
                         .max_height(320.0)
                         .show(ui, |ui| {
+                            // through the goal's own edit, so picking tasks
+                            // already closed moves it like any change here
                             for (id, name) in &all {
                                 if let Some(TargetKind::Tasks { ids }) = self.data.extra.goals[gi]
                                     .targets
-                                    .get_mut(i)
-                                    .map(|x| &mut x.kind)
+                                    .get(i)
+                                    .map(|x| &x.kind)
                                 {
                                     let mut on = ids.contains(id);
                                     if check(ui, &mut on, name).changed() {
-                                        if on {
-                                            ids.push(*id);
-                                        } else {
-                                            ids.retain(|x| x != id);
-                                        }
-                                        self.dirty = true;
+                                        act = Some(PageAct::PickTask(i, *id, on));
                                     }
                                 }
                             }
@@ -1089,6 +1079,27 @@ impl App {
                     g.targets.remove(i);
                 }
             }),
+            PageAct::SetRange(i, from, to) => self.goal_edit(gid, None, |g| {
+                if let Some(TargetKind::Number { start, target, .. }) =
+                    g.targets.get_mut(i).map(|t| &mut t.kind)
+                {
+                    if let Some(v) = from {
+                        *start = v;
+                    }
+                    if let Some(v) = to {
+                        *target = v;
+                    }
+                }
+            }),
+            PageAct::PickTask(i, task, on) => self.goal_edit(gid, None, |g| {
+                if let Some(TargetKind::Tasks { ids }) = g.targets.get_mut(i).map(|t| &mut t.kind) {
+                    if on && !ids.contains(&task) {
+                        ids.push(task);
+                    } else if !on {
+                        ids.retain(|x| *x != task);
+                    }
+                }
+            }),
             PageAct::DismissBanner => self.goal_banner = None,
             PageAct::ShowDone(v) => self.goal_show_done = v,
             PageAct::NextGoal => self.goal_apply(GoalAct::NewGoal),
@@ -1102,6 +1113,10 @@ enum PageAct {
     Goal(GoalAct),
     AddTarget(u8),
     RemoveTarget(usize),
+    /// a number target's start and target values, each when it changed
+    SetRange(usize, Option<f64>, Option<f64>),
+    /// a task picked for (true) or taken off a tasks target
+    PickTask(usize, u64, bool),
     DismissBanner,
     ShowDone(Option<(u64, usize)>),
     NextGoal,
@@ -1260,6 +1275,22 @@ fn milestone_float(
             }
         });
     out
+}
+
+/// A box for one of a number target's values that hands it back once it is
+/// let go (typed and left, or dragged and dropped), not on every keystroke
+/// or step of a drag; Escape drops what was typed.
+fn number_let_go(ui: &mut Ui, id: egui::Id, kept: f64, name: &str) -> Option<f64> {
+    let mut v: f64 = ui.data(|d| d.get_temp(id)).unwrap_or(kept);
+    let r = ui.add(number_box(&mut v));
+    name_it(&r, name);
+    if r.dragged() || r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, v));
+        return None;
+    }
+    ui.data_mut(|d| d.remove_temp::<f64>(id));
+    let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    (v != kept && !esc).then_some(v)
 }
 
 /// What a name box shows: while it is being typed in, what is typed there

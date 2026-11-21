@@ -1199,3 +1199,79 @@ fn a_goal_without_targets_says_so_in_the_list_too() {
     );
     assert!(!h.painted_text("No targets yet").is_empty(), "in its row");
 }
+
+#[test]
+fn changing_a_targets_range_or_its_tasks_counts_as_mine() {
+    let (mut h, _, _) = two_goals();
+    let me = h.app.data.me;
+    let id = add_goal_with(&mut h, "Signups", vec![number("People", 0.0, 100.0, 40.0)]);
+    // its history has begun, as it has for any goal the app has seen
+    h.app.goal_watch(now_ts());
+    h.click("Goal Signups");
+    // 40 of 100 is 40%; aiming for 40 makes it done
+    h.click("Edit People");
+    h.click("Number target");
+    h.type_text("40");
+    h.key(egui::Key::Enter);
+    h.settle();
+    let g = goal(&h, id).clone();
+    assert!(matches!(g.targets[0].kind, TargetKind::Number { target, .. } if target == 40.0));
+    assert!(
+        matches!(h.app.modal, Some(Modal::GoalAchieved { id: x }) if x == id),
+        "Goal achieved opens, as for any change made on the page"
+    );
+    assert!(
+        g.log
+            .iter()
+            .any(|e| e.what == GoalChange::Milestone(100) && e.who == me),
+        "the milestone is mine, not the app's: {:?}",
+        g.log
+    );
+    h.app.notify_clock(now_ts());
+    assert!(
+        h.app.notify_rt.sent.iter().all(|n| !n.target.contains(&id.to_string())),
+        "nobody tells me what I just did: {:?}",
+        h.app.notify_rt.sent
+    );
+}
+
+#[test]
+fn picking_tasks_that_finish_a_goal_opens_goal_achieved() {
+    let (mut h, _, _) = two_goals();
+    let me = h.app.data.me;
+    let task = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.parent.is_none() && !t.archived)
+        .expect("a task")
+        .clone();
+    // closed already
+    h.app.toggle_done(task.id);
+    for a in std::mem::take(&mut h.app.actions) {
+        h.app.apply(a);
+    }
+    assert!(h.app.data.is_closed(h.app.task(task.id).unwrap()));
+    let id = add_goal_with(
+        &mut h,
+        "Ship it",
+        vec![GoalTarget {
+            name: "Launch tasks".into(),
+            kind: TargetKind::Tasks { ids: vec![] },
+        }],
+    );
+    h.app.goal_watch(now_ts());
+    h.click("Goal Ship it");
+    h.click("Pick tasks for Launch tasks");
+    h.click(&task.name);
+    h.settle();
+    assert!(
+        matches!(h.app.modal, Some(Modal::GoalAchieved { id: x }) if x == id),
+        "Goal achieved opens"
+    );
+    assert!(goal(&h, id)
+        .log
+        .iter()
+        .any(|e| e.what == GoalChange::Milestone(100) && e.who == me));
+}

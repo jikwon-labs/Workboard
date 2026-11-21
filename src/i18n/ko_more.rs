@@ -220,6 +220,7 @@ pub const T: &[(&str, &str)] = &[
     ("Choose", "선택"),
     ("Submit", "제출"),
     ("Submitted. A task was created in {}", "제출했습니다. {}에 작업이 만들어졌습니다"),
+    ("{} submission", "{} 답변"),
     // forms: the hub, its sidebar and table
     ("All forms", "모든 양식"),
     ("My forms", "내 양식"),

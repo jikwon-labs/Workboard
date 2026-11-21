@@ -356,8 +356,9 @@ impl App {
                 self.form_tab = FormTab::Edit;
             }
             Ok(a) => {
+                // in the language of the person submitting, like a new task's name
                 let name = if a.name.trim().is_empty() {
-                    format!("{} submission", f.name)
+                    trf!("{} submission", f.name)
                 } else {
                     a.name
                 };

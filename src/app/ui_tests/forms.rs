@@ -438,3 +438,23 @@ fn a_removed_choice_is_no_longer_the_answer() {
     h.click("Submit");
     assert_eq!(task_named(&h, "Paint the wall").description, "");
 }
+
+/// A submit with the name question left empty names the task after the
+/// form in the language of the person submitting, like any new task.
+#[test]
+fn an_unnamed_answer_is_named_in_the_interface_language() {
+    let mut h = Ui1::new();
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    blank_form(&mut h);
+    h.click("Fill out");
+    h.click("Submit");
+    let name = h.app.data.tasks.last().map(|t| t.name.clone());
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert_eq!(name.as_deref(), Some("새 양식 답변"));
+    // someone using it in English (the form keeps the name it was made with)
+    h.click("Submit");
+    assert_eq!(
+        h.app.data.tasks.last().map(|t| t.name.as_str()),
+        Some("새 양식 submission")
+    );
+}

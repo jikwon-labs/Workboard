@@ -83,7 +83,7 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 #   -destination 'platform=iOS Simulator,id=A59C0212-4DEC-4488-8E16-2EDEE67EBD7D'
 ```
 
-`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`, `&imported=KEY` 를 붙이면 맥의 Slack 가져오기가 쓴 것처럼 `imported` 가 붙는다), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`), 다음 관리 요청에 N초 늦게 답하기(`/admin/late-answer?secs=N`, 그동안 그 연결에는 아무것도 가지 않는다), 다른 사람이 입력 중이라고 알리기(`/admin/typing?channel=C&member=M`)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
+`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`, `&imported=KEY` 를 붙이면 맥의 Slack 가져오기가 쓴 것처럼 `imported` 가 붙는다. `&file=NAME` 은 파일을 붙여 보내고(`&kind=Image` 면 1x1 그림, 앱이 받아 갈 수 있게 서버에 둔다), `&reply=ID` 는 그 메시지의 스레드 답글로 보낸다), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`), 다음 관리 요청에 N초 늦게 답하기(`/admin/late-answer?secs=N`, 그동안 그 연결에는 아무것도 가지 않는다), 다른 사람이 입력 중이라고 알리기(`/admin/typing?channel=C&member=M`)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
 
 예제 작업공간에서는 Sam Lee(멤버 3)에게만 이메일(`sam@example.com`)이 있다. 초대 코드에 이메일을 비워도 되는 경우와 이메일을 꼭 넣어야 하는 경우(멤버 2)를 둘 다 시험하기 위해서다.
 
@@ -362,6 +362,15 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **전에는** 다른 서버로 옮기면 사본과 대기 중인 변경을 지워서, 변경이 남아 있으면 "Switch servers?" 로 먼저 물었다. 이제 지우지 않으니 그 질문은 없앴다.
 - **push (2026-11-19):** 보관한 워크스페이스도 push 등록을 유지한다. 떠날 때는 끊지 않고, 이 iPhone 에서 지우거나(`forget`) 로그아웃할 때만 끊는다. `push_token` 에 `pushKey`(주소 해시)를 같이 보내 서버가 알림에 `"ws"` 로 붙이고, 열린 워크스페이스가 아닌 알림을 누르면 그 워크스페이스로 바꾼 뒤 대화를 연다(`savedWorkspace(pushKey:)`). 자세한 것은 `docs/server-design.md` "열려 있지 않은 워크스페이스의 알림".
 - **검증:** `WorkspaceSwitchTests` 6개, UI 테스트 `WorkspacesUITests` 1개(18787 과 18789 가짜 서버 사이를 오가고 하나를 뺀다).
+
+## 대화 거르기와 검색 연산자 (2026-11-22)
+
+맥의 대화 옆 패널 필터를 iPhone 대화 화면에 옮겼다.
+
+- **대화 화면 위 거르기 버튼**(`filterMessagesButton`): 모든 메시지, 답장, 고정된 메시지, 저장됨, 파일, 링크, 작업으로 만든 메시지. 켜져 있으면 목록 위에 이름과 x 가 있는 띠가 나온다. 규칙은 WorkboardKit `ChatFilters.swift` 의 `MessageFilter` 다. 맥과 같고, 파일·링크는 스레드 답글에 있어도 부모 메시지를 보여 준다. 링크는 링크 미리보기가 쓰는 `ChatFormat.firstURL`(코드 안 주소는 빼고) 또는 `preview` 가 있는 것.
+- **파일:** 메시지 목록 대신 대화의 파일 모음(`ConversationFilesView`). 스레드 답글의 파일까지 새것부터. "사진과 동영상" 은 격자, "다른 파일" 은 이름·크기·보낸 사람·시각 목록이다. 누르면 메시지 안에서 누를 때와 같다. 길게 눌러 "대화에서 보기": 대화의 메시지면 거르기를 풀고 그 메시지로, 답글이면 그 스레드로 간다.
+- **빠른 찾기의 연산자**(`SearchQuery`): `has:file(s)`, `has:link(s)`, `from:이름`(`me`, 이름이나 표시 이름의 공백 뺀 앞부분, 이름의 아무 단어 앞부분, 봇 메시지는 봇 이름). 연산자가 있으면 메시지 결과만 보여 주고 글자가 없어도 된다.
+- **검증:** `ChatFilterTests` 5개, UI 테스트 `ChatFiltersUITests` 3개. 가짜 서버 `/admin/say` 에 `&file=`·`&kind=Image`·`&reply=` 를 더했다.
 
 ## 설계와 달라진 점
 

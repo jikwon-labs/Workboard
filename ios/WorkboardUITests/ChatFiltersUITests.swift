@@ -1,5 +1,5 @@
-// UI tests for a conversation's filters (Replies, Files, Links...) and its
-// files gallery. Needs the fake servers:
+// UI tests for a conversation's filters (Replies, Files, Links...), its
+// files gallery, and has:/from: in quick find. Needs the fake servers:
 //   swift run wb-fake-server --port 18787
 //   swift run wb-fake-server --port 18789 --admin-http
 
@@ -89,5 +89,44 @@ final class ChatFiltersUITests: WorkboardUITestCase {
         XCTAssertTrue(show.waitForExistence(timeout: 5))
         show.tap()
         XCTAssertTrue(a.navigationBars["Thread"].waitForExistence(timeout: 5), "a reply's file goes to its thread")
+    }
+
+    /// has:file, has:link and from:name narrow the messages found, and
+    /// only messages show while one is typed.
+    func testSearchOperators() {
+        let tag = "\(Int.random(in: 100000...999999))"
+        send("report \(tag)", channel: 303, file: "report-\(tag).pdf")
+        send("site \(tag) https://example.com/s\(tag)", channel: 303)
+        let a = launchFresh(["-wbOpen", "search"], server: adminServer)
+        let field = a.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        XCTAssertTrue(a.staticTexts["searchHint"].waitForExistence(timeout: 5), "the hint while the search is empty")
+        field.tap()
+        func find(_ s: String) {
+            field.tap()
+            if let old = field.value as? String, !old.isEmpty, old != field.placeholderValue {
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count))
+            }
+            field.typeText(s)
+        }
+        func result(_ text: String) -> XCUIElement {
+            a.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'result-message-' AND label CONTAINS %@", text)).firstMatch
+        }
+        find("has:file \(tag)")
+        XCTAssertTrue(result("report \(tag)").waitForExistence(timeout: 5))
+        XCTAssertFalse(result("site \(tag)").exists)
+        find("HAS:LINK \(tag)")
+        XCTAssertTrue(result("site \(tag)").waitForExistence(timeout: 5))
+        XCTAssertFalse(result("report \(tag)").exists)
+        find("from:alex \(tag)")
+        XCTAssertTrue(result("report \(tag)").waitForExistence(timeout: 5))
+        XCTAssertTrue(result("site \(tag)").exists)
+        // the launch task matches "launch", but with an operator only messages show
+        find("launch has:file")
+        XCTAssertTrue(a.staticTexts["noResults"].waitForExistence(timeout: 5))
+        XCTAssertFalse(a.buttons["result-task-201"].exists)
+        XCTAssertTrue(a.staticTexts["searchHint"].exists, "the hint with no results")
+        find("from:sam \(tag)")
+        XCTAssertTrue(a.staticTexts["noResults"].waitForExistence(timeout: 5))
     }
 }

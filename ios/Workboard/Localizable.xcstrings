@@ -3950,6 +3950,17 @@
         }
       }
     },
+    "Narrow messages with has:file, has:link or from:name": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "has:file, has:link, from:이름 으로 메시지를 좁힐 수 있습니다"
+          }
+        }
+      }
+    },
     "Needs sign-in": {
       "localizations": {
         "ko": {

@@ -175,6 +175,7 @@ struct SearchView: View {
                 Section {
                     Text("Search tasks, docs, messages, people").font(.subheadline).foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
+                    SearchHint()
                 }
             } else {
                 SearchResults(query: query, scope: scope)
@@ -188,6 +189,17 @@ struct SearchView: View {
         .searchScopes($scope, activation: .onSearchPresentation) {
             ForEach(SearchScope.allCases, id: \.self) { s in Text(L(s.title)).tag(s) }
         }
+    }
+}
+
+/// How to narrow the messages found (SearchQuery).
+struct SearchHint: View {
+    var body: some View {
+        Text("Narrow messages with has:file, has:link or from:name")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .listRowBackground(Color.clear)
+            .accessibilityIdentifier("searchHint")
     }
 }
 
@@ -214,17 +226,25 @@ struct SearchResults: View {
     var body: some View {
         let v = client.view
         let me = client.me ?? 0
-        let q = query.trimmingCharacters(in: .whitespaces)
+        let raw = query.trimmingCharacters(in: .whitespaces)
+        // has:file, has:link and from:name narrow the messages; with any
+        // of them only messages are searched (SearchQuery in WorkboardKit)
+        let parsed = SearchQuery(raw)
+        let q = parsed.text
+        let only = parsed.hasOperators
         let has = { (s: String) in s.localizedCaseInsensitiveContains(q) }
-        let on = { (s: SearchScope) in scope == .all || scope == s }
+        let on = { (s: SearchScope) in (scope == .all || scope == s) && (!only || s == .messages) }
         let tasks = on(.tasks) ? Array(v.tasks.filter { has($0.name) || has($0.description) || $0.tags.contains(where: has) }.prefix(30)) : []
         let docs = on(.docs) ? Array(v.visibleDocs(me: me).filter { has($0.title) || has($0.body) }.prefix(20)) : []
         let channels = v.visibleChannels(me: me)
-        let convs = on(.messages) ? channels.filter { has(v.title(of: $0, me: me)) } : []
-        let messages = on(.messages) ? Array(channels.flatMap { c in (c.messages + c.messages.flatMap(\.replies)).filter { has($0.text) }.map { (c, $0) } }.suffix(30).reversed()) : []
+        let convs = on(.messages) && !only ? channels.filter { has(v.title(of: $0, me: me)) } : []
+        let messages = on(.messages) ? Array(channels.flatMap { c in (c.messages + c.messages.flatMap(\.replies)).filter { parsed.matches($0, members: v.members, me: me) }.map { (c, $0) } }.suffix(30).reversed()) : []
         let people = on(.people) ? v.members.filter { has($0.name) || has($0.email) } : []
         if tasks.isEmpty && docs.isEmpty && convs.isEmpty && messages.isEmpty && people.isEmpty {
-            Text("No results for \"\(q)\"").foregroundStyle(.secondary).accessibilityIdentifier("noResults")
+            Section {
+                Text("No results for \"\(raw)\"").foregroundStyle(.secondary).accessibilityIdentifier("noResults")
+                SearchHint()
+            }
         }
         if !tasks.isEmpty {
             Section {

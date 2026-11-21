@@ -361,15 +361,20 @@ impl App {
                                     FontId::proportional(13.0),
                                     t.text2,
                                 );
-                            ui.painter().text(
-                                r.right_center() - vec2(12.0, 0.0),
-                                Align2::RIGHT_CENTER,
-                                fmt_ago(ts),
-                                FontId::proportional(12.0),
-                                t.text3,
-                            );
+                            // under the pointer the row's buttons take the time's place: a
+                            // long time ("Oct 17 at 4:19 PM") would show through them
+                            let buttons = resp.hovered() || ui.rect_contains_pointer(r);
+                            if !buttons {
+                                ui.painter().text(
+                                    r.right_center() - vec2(12.0, 0.0),
+                                    Align2::RIGHT_CENTER,
+                                    fmt_ago(ts),
+                                    FontId::proportional(12.0),
+                                    t.text3,
+                                );
+                            }
                             let mut handled = false;
-                            if resp.hovered() || ui.rect_contains_pointer(r) {
+                            if buttons {
                                 let lr = Rect::from_min_size(
                                     pos2(r.right() - 180.0, r.center().y - 13.0),
                                     vec2(56.0, 26.0),

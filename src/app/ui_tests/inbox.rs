@@ -287,3 +287,26 @@ fn a_long_title_stops_before_the_time_in_the_smallest_window() {
         time[0].0
     );
 }
+
+#[test]
+fn the_row_buttons_do_not_sit_on_top_of_a_long_time() {
+    let ago = 400 * 86400;
+    let mut h = inbox(|d| {
+        comment_on(d, CASE, "A comment from last year", ago);
+    });
+    let when = fmt_ago(now_ts() - ago);
+    assert_eq!(h.painted_text(&when).len(), 1, "{when} is shown");
+    hover_row(&mut h, CASE);
+    for b in ["Later", "Clear"] {
+        let br = h.rect(b);
+        for (tr, _) in h.painted_text(&when) {
+            assert!(
+                !tr.intersects(br),
+                "{b} {br:?} is drawn over the time {when:?} {tr:?}"
+            );
+        }
+    }
+    // away from the row the time shows again
+    h.hover(pos2(700.0, 80.0));
+    assert_eq!(h.painted_text(&when).len(), 1);
+}

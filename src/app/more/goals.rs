@@ -2066,6 +2066,12 @@ fn achieved_shelf(
                             d.text("%b %-d"),
                             (due - d).num_days()
                         ),
+                        // as Goal achieved says it
+                        (Some(d), Some(due)) if d > due => trf!(
+                            "Achieved {}, {} days late",
+                            d.text("%b %-d"),
+                            (d - due).num_days()
+                        ),
                         (Some(d), _) => trf!("Achieved {}", d.text("%b %-d")),
                         _ => tr("Achieved").into(),
                     };

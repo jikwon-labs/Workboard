@@ -250,6 +250,10 @@ impl App {
                                     "Goal achieved, {} days before the deadline",
                                     (due - d).num_days()
                                 ),
+                                (Some(d), Some(due)) if d > due => trf!(
+                                    "Goal achieved, {} days after the deadline",
+                                    (d - due).num_days()
+                                ),
                                 _ => tr("Goal achieved!").into(),
                             };
                             ui.label(

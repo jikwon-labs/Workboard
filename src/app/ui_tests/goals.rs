@@ -1617,3 +1617,26 @@ fn words_on_a_light_goal_colour_are_dark_enough_to_read() {
     let (_, c) = h.painted_text("Share to team chat")[0];
     assert_eq!(c, Color32::WHITE);
 }
+
+#[test]
+fn a_goal_achieved_after_its_deadline_says_how_late() {
+    let (mut h, _, b) = two_goals();
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == b) {
+        g.due = Some(today() - Duration::days(2));
+    }
+    h.click("Done Lease signed");
+    assert!(
+        !h.painted_text("Done 2 days after the deadline").is_empty(),
+        "Goal achieved says it"
+    );
+    h.key(egui::Key::Escape);
+    h.settle();
+    let late = format!("Achieved {}, 2 days late", today().text("%b %-d"));
+    assert!(!h.painted_text(&late).is_empty(), "so does its shelf card");
+    h.click("Achieved Office move");
+    assert!(
+        !h.painted_text("Goal achieved, 2 days after the deadline")
+            .is_empty(),
+        "and its page"
+    );
+}

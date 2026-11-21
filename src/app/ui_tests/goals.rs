@@ -874,3 +874,22 @@ fn history_by_someone_who_left_names_someone() {
     );
     assert!(h.painted_text(" created the goal").is_empty());
 }
+
+#[test]
+fn sharing_leaves_out_people_who_left_the_team() {
+    let (mut h, _, b) = two_goals();
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == b) {
+        g.record(GoalEvent {
+            ts: now_ts(),
+            who: 987_654_321,
+            what: GoalChange::Created,
+            pct: 0,
+        });
+    }
+    h.click("Done Lease signed");
+    h.click("Share from achieved");
+    assert!(
+        !h.has("Mention the people involved"),
+        "nobody to mention, not \"Mention the people involved ()\""
+    );
+}

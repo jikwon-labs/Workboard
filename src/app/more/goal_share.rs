@@ -58,11 +58,16 @@ impl App {
         })
     }
 
-    /// The people who moved goal `gid`, other than me.
+    /// The people on the team who moved goal `gid`, other than me.
     fn goal_people(&self, gid: u64) -> Vec<u64> {
         let me = self.data.me;
         self.goal_snapshot(gid)
-            .map(|c| c.people.into_iter().filter(|p| *p != me).collect())
+            .map(|c| {
+                c.people
+                    .into_iter()
+                    .filter(|p| *p != me && self.data.member(*p).is_some())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

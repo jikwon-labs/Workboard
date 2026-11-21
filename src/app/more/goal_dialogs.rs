@@ -626,8 +626,9 @@ impl App {
         ui.add_space(12.0);
         // targets, days taken, the people who moved it
         let mut people: Vec<u64> = vec![];
+        // (those still on the team: the others have no face to show)
         for e in &g.log {
-            if e.who != 0 && !people.contains(&e.who) {
+            if e.who != 0 && !people.contains(&e.who) && self.data.member(e.who).is_some() {
                 people.push(e.who);
             }
         }

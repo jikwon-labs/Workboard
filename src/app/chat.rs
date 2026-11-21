@@ -2063,6 +2063,10 @@ impl App {
                         .filter(|m| !m.invited && m.id != me)
                         .cloned()
                         .collect();
+                    let people = mention_matches(
+                        people,
+                        trailing_mention(&self.chat.text).map_or("", |m| m.1),
+                    );
                     let teams = self.team_names();
                     let mut picked = None;
                     popup(ui, &at, mention_popup, 210.0, |ui| {
@@ -2204,9 +2208,11 @@ impl App {
                     None => {}
                 }
                 if let Some(text) = insert {
-                    // a picked @name replaces an "@" already typed
-                    if text.starts_with('@') && self.chat.text.ends_with('@') {
-                        self.chat.text.pop();
+                    // a picked @name replaces the "@" (and what followed it) typed
+                    if text.starts_with('@') {
+                        if let Some((at, _)) = trailing_mention(&self.chat.text) {
+                            self.chat.text.truncate(at);
+                        }
                     }
                     self.chat.text.push_str(&text);
                     ui.memory_mut(|m| m.request_focus(text_id));
@@ -2262,6 +2268,12 @@ impl App {
                     .filter(|m| !m.invited && m.id != me)
                     .cloned()
                     .collect();
+                let so_far = if thread {
+                    &self.chat.thread_text
+                } else {
+                    &self.chat.text
+                };
+                let people = mention_matches(people, trailing_mention(so_far).map_or("", |m| m.1));
                 let teams = self.team_names();
                 let slash_names = self.slash_choices("/");
                 let mut picked: Option<u64> = None;
@@ -2375,9 +2387,11 @@ impl App {
                     });
                 });
                 if let Some(new) = insert {
-                    // a picked @name replaces an "@" already typed
-                    if text.ends_with('@') {
-                        text.pop();
+                    // a picked @name replaces the "@" (and what followed it) typed
+                    if new.starts_with('@') {
+                        if let Some((at, _)) = trailing_mention(text) {
+                            text.truncate(at);
+                        }
                     }
                     text.push_str(&new);
                     ui.memory_mut(|m| m.request_focus(id));
@@ -4124,4 +4138,39 @@ fn drop_hint(ctx: &egui::Context, t: &Theme, r: Rect, label: &str) {
         FontId::proportional(18.0),
         t.text,
     );
+}
+
+/// Where an "@name" being typed at the end of `text` starts: an "@" at the
+/// start of a word followed only by letters so far (none: the "@" alone).
+/// A name picked from the @ list replaces it, and the list offers only the
+/// people whose name has what was typed after the "@".
+pub(super) fn trailing_mention(text: &str) -> Option<(usize, &str)> {
+    let at = text.rfind('@')?;
+    let query = &text[at + 1..];
+    if query.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let before = text[..at].chars().last();
+    before
+        .map_or(true, char::is_whitespace)
+        .then_some((at, query))
+}
+
+/// `people` narrowed to the names holding `query` (all of them when it's
+/// empty or nobody's name has it).
+fn mention_matches(people: Vec<Member>, query: &str) -> Vec<Member> {
+    let q = query.to_lowercase();
+    if q.is_empty() {
+        return people;
+    }
+    let hits: Vec<Member> = people
+        .iter()
+        .filter(|m| m.shown().to_lowercase().contains(&q))
+        .cloned()
+        .collect();
+    if hits.is_empty() {
+        people
+    } else {
+        hits
+    }
 }

@@ -3532,3 +3532,36 @@ fn a_message_coming_into_the_open_chat_shows_no_count_and_no_jump() {
     h.settle();
     assert_eq!(counts(&h), before, "read on coming back");
 }
+
+/// Letters typed after "@" narrow the @ list, and the name picked replaces
+/// the "@" and those letters (it used to leave "@Al@Alex Kim").
+#[test]
+fn a_picked_mention_replaces_what_was_typed_after_the_at() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("Message composer");
+    h.type_text("Hi ");
+    // Jordan may be named elsewhere on screen (a direct message)
+    let jordan = h.count_named("Jordan Park");
+    let alex = h.count_named("Alex Kim");
+    h.type_text("@");
+    h.type_text("Al");
+    h.settle();
+    assert_eq!(h.count_named("Alex Kim"), alex + 1, "the list offers Alex");
+    assert_eq!(
+        h.count_named("Jordan Park"),
+        jordan,
+        "and only the names with Al"
+    );
+    h.click("Alex Kim");
+    assert_eq!(h.app.chat.text, "Hi @Alex Kim ");
+}
+
+#[test]
+fn trailing_mention_is_the_at_word_at_the_end() {
+    use crate::app::chat::trailing_mention;
+    assert_eq!(trailing_mention("Hi @Al"), Some((3, "Al")));
+    assert_eq!(trailing_mention("@"), Some((0, "")));
+    assert_eq!(trailing_mention("mail a@b"), None);
+    assert_eq!(trailing_mention("@Al done"), None);
+}

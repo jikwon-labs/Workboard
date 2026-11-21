@@ -124,6 +124,165 @@ fn due_preset(which: DueChoice, day: NaiveDate) -> NaiveDate {
     first_next.and_then(|d| d.pred_opt()).unwrap_or(day)
 }
 
+/// New goal's due date choices: the end of this month, this quarter or
+/// next quarter, or a day picked.
+fn due_choices(ui: &mut Ui, t: &Theme, d: &mut GoalDraft, day: NaiveDate) {
+    ui.horizontal_wrapped(|ui| {
+        for (i, choice) in DueChoice::ALL.into_iter().enumerate() {
+            let preset = || due_preset(choice, day).text("%b %-d");
+            let (title, sub) = match choice {
+                DueChoice::MonthEnd => (tr("End of this month"), preset()),
+                DueChoice::QuarterEnd => (tr("End of this quarter"), preset()),
+                DueChoice::NextQuarterEnd => (tr("End of next quarter"), preset()),
+                DueChoice::Picked => (
+                    tr("Pick a date"),
+                    if d.when == DueChoice::Picked {
+                        d.due.map(|x| x.text("%b %-d")).unwrap_or_default()
+                    } else {
+                        String::new()
+                    },
+                ),
+            };
+            let sel = d.when == choice;
+            let resp = choice_box(ui, t, title, &sub, sel, vec2(0.0, 46.0));
+            name_it(
+                &resp,
+                &format!(
+                    "Due {}",
+                    [
+                        "end of month",
+                        "end of quarter",
+                        "end of next quarter",
+                        "picked"
+                    ][i]
+                ),
+            );
+            if choice != DueChoice::Picked && resp.clicked() {
+                d.when = choice;
+                d.due = Some(due_preset(choice, day));
+            }
+            if choice == DueChoice::Picked {
+                let mut pick = d.due;
+                if let Some(true) =
+                    popup(ui, &resp, ui.id().with("new goal due"), DATE_MENU_W, |ui| {
+                        date_menu(ui, t, ui.id().with("new goal cal"), &mut pick)
+                    })
+                {
+                    d.when = DueChoice::Picked;
+                    d.due = pick;
+                }
+            }
+        }
+    });
+}
+
+/// New goal's "Measured by": a card for each kind of target.
+fn target_kinds(ui: &mut Ui, t: &Theme, d: &mut GoalDraft, w: f32) {
+    ui.horizontal(|ui| {
+        let bw = (w - 16.0) / 3.0;
+        for k in TargetType::ALL {
+            let (title, icon) = (k.label(), k.icon());
+            let ex = match k {
+                TargetType::Number => "For example: revenue, customers",
+                TargetType::Done => "For example: contract signed, review passed",
+                TargetType::Tasks => "For example: the launch tasks",
+            };
+            let (r, resp) = ui.allocate_exact_size(vec2(bw, 92.0), Sense::click());
+            let sel = d.kind == k;
+            let p = ui.painter();
+            p.rect_filled(
+                r,
+                12.0,
+                if resp.hovered() && !sel {
+                    t.hover
+                } else {
+                    t.card
+                },
+            );
+            p.rect_stroke(
+                r,
+                12.0,
+                Stroke::new(
+                    if sel { 1.8 } else { 1.0 },
+                    if sel { t.text } else { t.border },
+                ),
+                egui::StrokeKind::Inside,
+            );
+            let ib = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(30.0, 30.0));
+            let (bg, fg) = pace_colors(Pace::Done, t);
+            p.rect_filled(ib, 8.0, bg);
+            icons::line_icon(p, icon, ib.center(), fg);
+            if sel {
+                let c = pos2(r.right() - 18.0, r.top() + 18.0);
+                p.circle_filled(c, 9.0, t.text);
+                paint_tick(p, c, 4.0, t.card, 1.8);
+            }
+            p.text(
+                pos2(r.left() + 14.0, r.top() + 56.0),
+                Align2::LEFT_CENTER,
+                tr(title),
+                FontId::proportional(14.0),
+                t.text,
+            );
+            let ef = FontId::proportional(12.0);
+            p.text(
+                pos2(r.left() + 14.0, r.top() + 76.0),
+                Align2::LEFT_CENTER,
+                crate::widgets::fit_text(p, tr(ex), &ef, bw - 24.0),
+                ef,
+                t.text2,
+            );
+            name_it(&resp, &format!("Measure by {}", title));
+            if resp.clicked() {
+                d.kind = k;
+            }
+        }
+    });
+}
+
+/// The targets added already, as chips with an x to take one out.
+fn added_targets(ui: &mut Ui, t: &Theme, d: &mut GoalDraft) {
+    // targets added already
+    let mut drop = None;
+    if !d.more.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            for (i, tg) in d.more.iter().enumerate() {
+                // a long name starts a new row instead of running off the edge
+                let max_w = crate::widgets::chip_room(ui, &tg.name, 13.0, 41.0);
+                egui::Frame::new()
+                    .fill(t.hover)
+                    .corner_radius(14)
+                    .inner_margin(egui::Margin {
+                        left: 10,
+                        right: 3,
+                        top: 2,
+                        bottom: 2,
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.scope(|ui| {
+                                ui.set_max_width(max_w);
+                                ui.add(
+                                    egui::Label::new(RichText::new(&tg.name).size(13.0)).truncate(),
+                                );
+                            });
+                            let x = close_x(ui, 20.0, t.text2);
+                            name_it(&x, &format!("Remove {}", tg.name));
+                            if x.clicked() {
+                                drop = Some(i);
+                            }
+                        });
+                    });
+            }
+        });
+        ui.add_space(6.0);
+    }
+    if let Some(i) = drop {
+        d.more.remove(i);
+    }
+}
+
 /// Samples on the empty Goals page: a name and its targets.
 fn samples() -> Vec<(&'static str, Vec<GoalTarget>, [u8; 3])> {
     let num = |name: &str, to: f64, unit: &str| GoalTarget {
@@ -228,53 +387,7 @@ impl App {
         }
         ui.add_space(14.0);
         label(ui, "Due date");
-        ui.horizontal_wrapped(|ui| {
-            for (i, choice) in DueChoice::ALL.into_iter().enumerate() {
-                let preset = || due_preset(choice, day).text("%b %-d");
-                let (title, sub) = match choice {
-                    DueChoice::MonthEnd => (tr("End of this month"), preset()),
-                    DueChoice::QuarterEnd => (tr("End of this quarter"), preset()),
-                    DueChoice::NextQuarterEnd => (tr("End of next quarter"), preset()),
-                    DueChoice::Picked => (
-                        tr("Pick a date"),
-                        if d.when == DueChoice::Picked {
-                            d.due.map(|x| x.text("%b %-d")).unwrap_or_default()
-                        } else {
-                            String::new()
-                        },
-                    ),
-                };
-                let sel = d.when == choice;
-                let resp = choice_box(ui, t, title, &sub, sel, vec2(0.0, 46.0));
-                name_it(
-                    &resp,
-                    &format!(
-                        "Due {}",
-                        [
-                            "end of month",
-                            "end of quarter",
-                            "end of next quarter",
-                            "picked"
-                        ][i]
-                    ),
-                );
-                if choice != DueChoice::Picked && resp.clicked() {
-                    d.when = choice;
-                    d.due = Some(due_preset(choice, day));
-                }
-                if choice == DueChoice::Picked {
-                    let mut pick = d.due;
-                    if let Some(true) =
-                        popup(ui, &resp, ui.id().with("new goal due"), DATE_MENU_W, |ui| {
-                            date_menu(ui, t, ui.id().with("new goal cal"), &mut pick)
-                        })
-                    {
-                        d.when = DueChoice::Picked;
-                        d.due = pick;
-                    }
-                }
-            }
-        });
+        due_choices(ui, t, d, day);
         ui.label(
             RichText::new(trf!(
                 "It starts today, {}. Progress is compared with the time gone by.",
@@ -285,107 +398,61 @@ impl App {
         );
         ui.add_space(14.0);
         label(ui, "Measured by");
-        ui.horizontal(|ui| {
-            let bw = (w - 16.0) / 3.0;
-            for k in TargetType::ALL {
-                let (title, icon) = (k.label(), k.icon());
-                let ex = match k {
-                    TargetType::Number => "For example: revenue, customers",
-                    TargetType::Done => "For example: contract signed, review passed",
-                    TargetType::Tasks => "For example: the launch tasks",
-                };
-                let (r, resp) = ui.allocate_exact_size(vec2(bw, 92.0), Sense::click());
-                let sel = d.kind == k;
-                let p = ui.painter();
-                p.rect_filled(
-                    r,
-                    12.0,
-                    if resp.hovered() && !sel {
-                        t.hover
-                    } else {
-                        t.card
-                    },
-                );
-                p.rect_stroke(
-                    r,
-                    12.0,
-                    Stroke::new(
-                        if sel { 1.8 } else { 1.0 },
-                        if sel { t.text } else { t.border },
-                    ),
-                    egui::StrokeKind::Inside,
-                );
-                let ib = Rect::from_min_size(r.min + vec2(14.0, 14.0), vec2(30.0, 30.0));
-                let (bg, fg) = pace_colors(Pace::Done, t);
-                p.rect_filled(ib, 8.0, bg);
-                icons::line_icon(p, icon, ib.center(), fg);
-                if sel {
-                    let c = pos2(r.right() - 18.0, r.top() + 18.0);
-                    p.circle_filled(c, 9.0, t.text);
-                    paint_tick(p, c, 4.0, t.card, 1.8);
-                }
-                p.text(
-                    pos2(r.left() + 14.0, r.top() + 56.0),
-                    Align2::LEFT_CENTER,
-                    tr(title),
-                    FontId::proportional(14.0),
-                    t.text,
-                );
-                let ef = FontId::proportional(12.0);
-                p.text(
-                    pos2(r.left() + 14.0, r.top() + 76.0),
-                    Align2::LEFT_CENTER,
-                    crate::widgets::fit_text(p, tr(ex), &ef, bw - 24.0),
-                    ef,
-                    t.text2,
-                );
-                name_it(&resp, &format!("Measure by {}", title));
-                if resp.clicked() {
-                    d.kind = k;
-                }
-            }
-        });
+        target_kinds(ui, t, d, w);
         ui.add_space(8.0);
-        // targets added already
-        let mut drop = None;
-        if !d.more.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                for (i, tg) in d.more.iter().enumerate() {
-                    // a long name starts a new row instead of running off the edge
-                    let max_w = crate::widgets::chip_room(ui, &tg.name, 13.0, 41.0);
-                    egui::Frame::new()
-                        .fill(t.hover)
-                        .corner_radius(14)
-                        .inner_margin(egui::Margin {
-                            left: 10,
-                            right: 3,
-                            top: 2,
-                            bottom: 2,
-                        })
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.scope(|ui| {
-                                    ui.set_max_width(max_w);
-                                    ui.add(
-                                        egui::Label::new(RichText::new(&tg.name).size(13.0))
-                                            .truncate(),
-                                    );
-                                });
-                                let x = close_x(ui, 20.0, t.text2);
-                                name_it(&x, &format!("Remove {}", tg.name));
-                                if x.clicked() {
-                                    drop = Some(i);
-                                }
-                            });
-                        });
+        added_targets(ui, t, d);
+        self.target_setup(ui, t, d, w);
+        ui.add_space(6.0);
+        let add = icons::icon_button(ui, t, "plus", tr("Target"), "Another target", true);
+        if add.clicked() && !same_range(d) {
+            let tg = d.current_target();
+            d.more.push(tg);
+            d.reset_target();
+        }
+        ui.add_space(12.0);
+        self.goal_owner_and_color(ui, t, d);
+        ui.add_space(14.0);
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(tr("You can change all of this later"))
+                    .size(12.5)
+                    .color(t.text2),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let named = !d.name.trim().is_empty() && !same_range(d);
+                let create = ui
+                    .add_enabled_ui(named, |ui| primary_button(ui, t, tr("Create goal")))
+                    .inner;
+                name_it(&create, "Create goal");
+                if create.clicked() && named {
+                    let mut targets = d.more.clone();
+                    targets.push(d.current_target());
+                    let g = Goal {
+                        name: d.name.trim().to_string(),
+                        color: d.color,
+                        due: d.due,
+                        owner: d.owner,
+                        targets,
+                        ..Default::default()
+                    };
+                    self.add_goal(g);
+                    self.section = Section::Goals;
+                    close = true;
+                }
+                let cancel = secondary_button(ui, tr("Cancel"));
+                name_it(&cancel, "Cancel new goal");
+                if cancel.clicked() {
+                    close = true;
                 }
             });
-            ui.add_space(6.0);
-        }
-        if let Some(i) = drop {
-            d.more.remove(i);
-        }
+        });
+        close
+    }
+
+    /// Under the kinds: the target being set up, its name and what it
+    /// measures (a range, done or not, or tasks to pick).
+    fn target_setup(&mut self, ui: &mut Ui, t: &Theme, d: &mut GoalDraft, w: f32) {
         egui::Frame::new()
             .fill(if t.dark {
                 t.hover
@@ -518,14 +585,10 @@ impl App {
                     }
                 }
             });
-        ui.add_space(6.0);
-        let add = icons::icon_button(ui, t, "plus", tr("Target"), "Another target", true);
-        if add.clicked() && !same_range(d) {
-            let tg = d.current_target();
-            d.more.push(tg);
-            d.reset_target();
-        }
-        ui.add_space(12.0);
+    }
+
+    /// The goal's owner and colour.
+    fn goal_owner_and_color(&mut self, ui: &mut Ui, t: &Theme, d: &mut GoalDraft) {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(crate::i18n::tr_ctx("Owner (goal)", "Owner"))
@@ -572,43 +635,6 @@ impl App {
                 }
             }
         });
-        ui.add_space(14.0);
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(tr("You can change all of this later"))
-                    .size(12.5)
-                    .color(t.text2),
-            );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let named = !d.name.trim().is_empty() && !same_range(d);
-                let create = ui
-                    .add_enabled_ui(named, |ui| primary_button(ui, t, tr("Create goal")))
-                    .inner;
-                name_it(&create, "Create goal");
-                if create.clicked() && named {
-                    let mut targets = d.more.clone();
-                    targets.push(d.current_target());
-                    let g = Goal {
-                        name: d.name.trim().to_string(),
-                        color: d.color,
-                        due: d.due,
-                        owner: d.owner,
-                        targets,
-                        ..Default::default()
-                    };
-                    self.add_goal(g);
-                    self.section = Section::Goals;
-                    close = true;
-                }
-                let cancel = secondary_button(ui, tr("Cancel"));
-                name_it(&cancel, "Cancel new goal");
-                if cancel.clicked() {
-                    close = true;
-                }
-            });
-        });
-        close
     }
 
     /// Goal achieved: the moment a goal reaches 100%.

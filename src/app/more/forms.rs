@@ -125,6 +125,18 @@ pub struct FormAnswers {
     pub assignees: Vec<u64>,
 }
 
+/// An email address as the team server takes one: something before the @,
+/// a dot inside what follows, no spaces.
+fn email_ok(e: &str) -> bool {
+    e.split_once('@').is_some_and(|(name, domain)| {
+        !name.is_empty()
+            && domain.contains('.')
+            && !domain.starts_with('.')
+            && !domain.ends_with('.')
+            && !e.contains(char::is_whitespace)
+    })
+}
+
 /// Checks the answers (required, number, email) and turns them into task
 /// fields; a problem comes with the question it is about.
 fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (usize, String)> {
@@ -167,10 +179,10 @@ fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (u
             },
             "assignee" => a.assignees.extend(v.parse::<u64>().ok()),
             k => {
-                if k == "number" && v.parse::<f64>().is_err() {
+                if k == "number" && !v.parse::<f64>().is_ok_and(f64::is_finite) {
                     return Err((i, trf!("\"{}\" needs a number.", fld.label)));
                 }
-                if k == "email" && !(v.contains('@') && v.contains('.')) {
+                if k == "email" && !email_ok(&v) {
                     return Err((i, trf!("\"{}\" needs an email address.", fld.label)));
                 }
                 a.description.push_str(&format!("\n{}: {}", fld.label, v));

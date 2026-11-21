@@ -1370,6 +1370,48 @@ fn form_answers_check_required_number_and_email() {
     assert!(form_answers(&f, &fill).unwrap_err().contains("Size"));
 }
 
+/// An Email question takes an address (something before the @, a dot
+/// inside what follows, no spaces) and a Number question a number one can
+/// count with: "@." or "inf" are refused, as the server refuses such
+/// addresses.
+#[test]
+fn form_answers_check_email_and_number_strictly() {
+    use super::more::form_answers;
+    let f = Form {
+        id: 1,
+        name: "Intake".into(),
+        fields: vec![
+            FormField {
+                label: "Seats".into(),
+                map: "number".into(),
+                ..Default::default()
+            },
+            FormField {
+                label: "Mail".into(),
+                map: "email".into(),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    let check = |n: &str, e: &str| {
+        let fill: HashMap<usize, String> = [(0, n.to_string()), (1, e.to_string())].into();
+        form_answers(&f, &fill)
+    };
+    for good in ["a@b.co", " kim.lee@mail.example.kr ", "a+b@c.d"] {
+        assert!(check("3", good).is_ok(), "{good}");
+    }
+    for bad in ["@.", "a.b@", "@b.co", "a@b.", "a@.co", "a b@c.d", "ab.cd"] {
+        assert!(check("3", bad).unwrap_err().contains("email"), "{bad}");
+    }
+    for good in ["0", "-2.5", "1e3", " 12 "] {
+        assert!(check(good, "a@b.co").is_ok(), "{good}");
+    }
+    for bad in ["inf", "-infinity", "NaN", "1e400", "twelve"] {
+        assert!(check(bad, "a@b.co").unwrap_err().contains("number"), "{bad}");
+    }
+}
+
 /// Answers that all go into the task description stay apart: a second
 /// Description question's answer starts its own paragraph, also after a
 /// "question: answer" line.

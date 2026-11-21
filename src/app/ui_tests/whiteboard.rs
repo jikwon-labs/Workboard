@@ -1922,3 +1922,26 @@ fn cmd_z_waits_while_a_note_is_dragged() {
         "Undo puts it back"
     );
 }
+
+/// A note put down with the sticky note tool takes the typing, as a shape
+/// put down does: what was typed right after it went nowhere.
+#[test]
+fn a_new_note_takes_the_typing() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[]);
+    h.app.wb_tool = 1;
+    h.settle();
+    h.hover(on_screen(&h, [300.0, 300.0]));
+    h.click_at(on_screen(&h, [300.0, 300.0]));
+    h.type_text("Hello");
+    assert_eq!(board_of(&h, wid).notes[0].text, "Hello");
+    // the next click on the board makes the next note, and typing goes there
+    h.click_at(on_screen(&h, [600.0, 300.0]));
+    h.type_text("World");
+    let texts: Vec<String> = board_of(&h, wid)
+        .notes
+        .iter()
+        .map(|n| n.text.clone())
+        .collect();
+    assert_eq!(texts, ["Hello", "World"]);
+}

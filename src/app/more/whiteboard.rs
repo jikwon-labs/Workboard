@@ -114,6 +114,9 @@ impl WbView {
 /// Height of a note's top strip (its colour dot and x sit on it): taken
 /// there, a note moves whatever the tool.
 const NOTE_GRIP: f32 = 18.0;
+/// The smallest zoom a note can be typed in at (below it, its text is only
+/// drawn).
+const TYPABLE_ZOOM: f32 = 0.45;
 /// How near, on screen, a dragged note has to come to lining up with
 /// another before it snaps there.
 const SNAP_REACH: f32 = 6.0;
@@ -492,7 +495,7 @@ impl App {
                         r.max - vec2(8.0, 8.0) * z,
                     );
                     let text_id = egui::Id::new(("wb_note_text", wid, key));
-                    let typable = z >= 0.45;
+                    let typable = z >= TYPABLE_ZOOM;
                     // a click anywhere on the note is for typing in it (with
                     // the sticky note tool it made another note on top); a
                     // drag from its margins still draws or erases
@@ -830,6 +833,12 @@ impl App {
                                 });
                                 self.sweep.wb_undo.push((wid, WbUndo::Note(id)));
                                 self.dirty = true;
+                                // it takes the typing, as a shape put down
+                                // does (what was typed right after went nowhere)
+                                if z >= TYPABLE_ZOOM {
+                                    let text = egui::Id::new(("wb_note_text", wid, id));
+                                    ui.memory_mut(|m| m.request_focus(text));
+                                }
                             }
                         }
                         3 => {

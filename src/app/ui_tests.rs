@@ -24,6 +24,7 @@ mod inbox;
 mod layout_tests;
 mod look;
 mod media;
+mod meetings;
 mod navigation;
 mod notify_settings;
 mod people;

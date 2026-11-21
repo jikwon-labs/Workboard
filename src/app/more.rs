@@ -161,6 +161,13 @@ pub fn default_dash_cards(kind: &str) -> Vec<DashCard> {
         .collect()
 }
 
+/// Meetings soonest first by the clock ("9:00" before "10:00"); a time
+/// that can't be read goes after the day's other meetings.
+fn meeting_order(m: &Meeting) -> (NaiveDate, bool, chrono::NaiveTime) {
+    let at = parse_time_of_day(&m.time);
+    (m.date, at.is_none(), at.unwrap_or_default())
+}
+
 impl App {
     // ---------------------------------------------------------------- people
 
@@ -328,7 +335,7 @@ impl App {
                     .filter(|m| ql.is_empty() || m.title.to_lowercase().contains(&ql))
                     .cloned()
                     .collect();
-                ms.sort_by_key(|m| (m.date, m.time.clone()));
+                ms.sort_by_key(meeting_order);
                 if ms.is_empty() {
                     side_empty(
                         ui,
@@ -348,9 +355,14 @@ impl App {
                             let sel = self.meeting_open == Some(m.id);
                             let (r, resp) =
                                 side_row(ui, &t, &format!("Open meeting {}", m.title), sel, 44.0);
+                            let title = if m.title.trim().is_empty() {
+                                tr("Untitled")
+                            } else {
+                                m.title.as_str()
+                            };
                             let shown = fit_text(
                                 ui.painter(),
-                                &m.title,
+                                title,
                                 &FontId::proportional(14.0),
                                 r.width() - 20.0,
                             );
@@ -376,6 +388,8 @@ impl App {
                 self.sweep.side_find.insert("meetings", q);
             });
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::symmetric(32, 20))).show_inside(ui, |ui| {
+            // many attendees push the agenda and notes down: they scroll
+            egui::ScrollArea::vertical().id_salt("meet_body").auto_shrink([false, false]).show(ui, |ui| {
             let Some(idx) = self.meeting_open.and_then(|id| self.data.extra.meetings.iter().position(|m| m.id == id)) else {
                 ui.add_space(40.0);
                 ui.vertical_centered(|ui| ui.label(RichText::new(tr("Pick a meeting or create one to keep the agenda and notes together.")).color(t.text2)));
@@ -398,7 +412,24 @@ impl App {
                         }
                     }
                     ui.label(tr("at"));
-                    ch |= ui.add(field(&mut m.time).desired_width(60.0)).changed();
+                    let te = ui.add(field(&mut m.time).desired_width(60.0));
+                    name_it(&te, "Meeting time");
+                    ch |= te.changed();
+                    // typed as "9", "9:30" or "2pm": kept as 09:00, 09:30, 14:00
+                    // so the list orders by the clock and the notice can tell when
+                    let at = parse_time_of_day(&m.time);
+                    if te.lost_focus() {
+                        if let Some(at) = at {
+                            let tidy = at.format("%H:%M").to_string();
+                            if tidy != m.time {
+                                m.time = tidy;
+                                ch = true;
+                            }
+                        }
+                    }
+                    if at.is_none() && !te.has_focus() {
+                        ui.label(RichText::new(tr("Use a time like 14:30")).small().color(t.danger));
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.add(ghost(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)))).clicked() {
                             delete = true;
@@ -422,12 +453,17 @@ impl App {
                 });
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Agenda")).color(t.text2));
-                ch |= ui.add(field_multi(&mut m.agenda).hint_text(tr("What will you discuss?")).desired_rows(4).desired_width(f32::INFINITY)).changed();
+                let te = ui.add(field_multi(&mut m.agenda).hint_text(tr("What will you discuss?")).desired_rows(4).desired_width(f32::INFINITY));
+                name_it(&te, "Meeting agenda");
+                ch |= te.changed();
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Notes")).color(t.text2));
-                ch |= ui.add(field_multi(&mut m.notes).hint_text(tr("Write notes. Lines starting with [ ] become action items.")).desired_rows(10).desired_width(f32::INFINITY)).changed();
+                let te = ui.add(field_multi(&mut m.notes).hint_text(tr("Write notes. Lines starting with [ ] become action items.")).desired_rows(10).desired_width(f32::INFINITY));
+                name_it(&te, "Meeting notes");
+                ch |= te.changed();
                 let actions: Vec<String> = m.notes.lines().filter_map(|l| l.trim().strip_prefix("[ ]").map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect();
-                if !actions.is_empty() && ui.button(trf!("Create {} tasks from action items", actions.len())).clicked() {
+                let make = if actions.len() == 1 { tr("Create a task from the action item").to_string() } else { trf!("Create {} tasks from action items", actions.len()) };
+                if !actions.is_empty() && ui.button(make).clicked() {
                     make_tasks = actions;
                     m.notes = m.notes.replace("[ ]", "[x]");
                     ch = true;
@@ -456,6 +492,7 @@ impl App {
                 let m = &self.data.extra.meetings[idx];
                 self.modal = Some(Modal::ConfirmRemove { kind: "meeting", id: m.id, name: m.title.clone() });
             }
+            });
         });
     }
 
@@ -683,7 +720,7 @@ impl App {
             .filter(|m| m.attendees.contains(&me) && (0..=1).contains(&(m.date - td).num_days()))
             .cloned()
             .collect();
-        ms.sort_by(|a, b| (a.date, &a.time).cmp(&(b.date, &b.time)));
+        ms.sort_by_key(meeting_order);
         (rs, ms)
     }
 

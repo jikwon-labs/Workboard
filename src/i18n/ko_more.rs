@@ -62,6 +62,7 @@ pub const T: &[(&str, &str)] = &[
     // meetings
     ("No meetings yet", "아직 회의가 없어요"),
     ("Pick a meeting or create one to keep the agenda and notes together.", "회의를 선택하거나 새로 만들어 안건과 메모를 한곳에 모으세요."),
+    ("Use a time like 14:30", "14:30 처럼 시각을 입력하세요"),
     ("at", "시각"),
     ("Attendees", "참석자"),
     ("Agenda", "안건"),
@@ -69,6 +70,7 @@ pub const T: &[(&str, &str)] = &[
     ("Notes", "메모"),
     ("Write notes. Lines starting with [ ] become action items.", "메모를 쓰세요. [ ]로 시작하는 줄은 실행 항목이 됩니다."),
     ("Create {} tasks from action items", "실행 항목으로 작업 {}개 만들기"),
+    ("Create a task from the action item", "실행 항목으로 작업 만들기"),
     // goals: the Goals page, a goal's page, New goal and Goal achieved
     ("Share to team chat", "팀 채팅에 알리기"),
     ("{} is done. Thank you all!", "{} 목표를 달성했습니다. 모두 고생 많으셨어요!"),

@@ -20,6 +20,7 @@ mod task;
 mod types;
 
 pub use extra::*;
+pub use query::ListPlace;
 pub use task::*;
 pub use types::*;
 

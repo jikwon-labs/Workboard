@@ -292,22 +292,12 @@ impl App {
     /// Every list as (id, "Space / Folder / List"), personal space included;
     /// archived ones left out (tasks moved there would drop out of sight).
     pub(crate) fn all_list_paths(&self) -> Vec<(u64, String)> {
-        let mut out = vec![];
-        for s in &self.data.spaces {
-            if s.private_owner.map_or(false, |o| o != self.data.me) {
-                continue;
-            }
-            for l in &s.lists {
-                out.push((l.id, format!("{} / {}", s.name, l.name)));
-            }
-            for f in &s.folders {
-                for l in &f.lists {
-                    out.push((l.id, format!("{} / {} / {}", s.name, f.name, l.name)));
-                }
-            }
-        }
-        out.retain(|(l, _)| !self.data.list_archived(*l));
-        out
+        let me = self.data.me;
+        self.data
+            .list_places()
+            .filter(|p| !p.others_private(me) && !p.archived())
+            .map(|p| (p.list.id, p.path()))
+            .collect()
     }
 
     pub(crate) fn move_tasks_body(

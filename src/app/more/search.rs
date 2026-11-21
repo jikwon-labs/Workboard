@@ -202,7 +202,12 @@ impl App {
                         locs.push((
                             "Locations",
                             "list",
-                            format!("{} / {} / {}", s.name, f.name, l.name),
+                            ListPlace {
+                                space: s,
+                                folder: Some(f),
+                                list: l,
+                            }
+                            .path(),
                             tr("List").into(),
                             Hit::Go(Location::List(l.id)),
                         ));
@@ -212,7 +217,12 @@ impl App {
                     locs.push((
                         "Locations",
                         "list",
-                        format!("{} / {}", s.name, l.name),
+                        ListPlace {
+                            space: s,
+                            folder: None,
+                            list: l,
+                        }
+                        .path(),
                         tr("List").into(),
                         Hit::Go(Location::List(l.id)),
                     ));

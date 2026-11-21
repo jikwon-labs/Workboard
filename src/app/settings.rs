@@ -330,24 +330,13 @@ impl App {
             .filter(|s| s.archived && s.private_owner.is_none())
             .map(|s| (s.id, s.name.clone()))
             .collect();
-        let arch_lists: Vec<(u64, String)> =
-            self.data
-                .spaces
-                .iter()
-                .filter(|s| !s.archived)
-                .flat_map(|s| {
-                    // a List in a Folder shows its Folder too, as Move tasks does
-                    s.lists
-                        .iter()
-                        .filter(|l| l.archived)
-                        .map(move |l| (l.id, format!("{} / {}", s.name, l.name)))
-                        .chain(s.folders.iter().flat_map(move |f| {
-                            f.lists.iter().filter(|l| l.archived).map(move |l| {
-                                (l.id, format!("{} / {} / {}", s.name, f.name, l.name))
-                            })
-                        }))
-                })
-                .collect();
+        // a List in a Folder shows its Folder too, as Move tasks does
+        let arch_lists: Vec<(u64, String)> = self
+            .data
+            .list_places()
+            .filter(|p| !p.space.archived && p.list.archived)
+            .map(|p| (p.list.id, p.path()))
+            .collect();
         let arch_folders: Vec<(u64, String)> = self
             .data
             .spaces

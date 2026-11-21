@@ -254,6 +254,26 @@ impl Data {
         "List".into()
     }
 
+    /// Every List with where it sits: its Space and its Folder (None for a
+    /// List right in the Space), each Space's own Lists before its Folders'.
+    pub fn list_places(&self) -> impl Iterator<Item = ListPlace<'_>> {
+        self.spaces.iter().flat_map(|s| {
+            let own = s.lists.iter().map(move |l| ListPlace {
+                space: s,
+                folder: None,
+                list: l,
+            });
+            let in_folders = s.folders.iter().flat_map(move |f| {
+                f.lists.iter().map(move |l| ListPlace {
+                    space: s,
+                    folder: Some(f),
+                    list: l,
+                })
+            });
+            own.chain(in_folders)
+        })
+    }
+
     /// Breadcrumb names for a list: space / folder / list.
     pub fn list_path(&self, list_id: u64) -> Vec<String> {
         for s in &self.spaces {
@@ -388,5 +408,33 @@ impl Data {
             }
         }
         None
+    }
+}
+
+/// A List with the Space and Folder it sits in (`Data::list_places`).
+#[derive(Clone, Copy)]
+pub struct ListPlace<'a> {
+    pub space: &'a Space,
+    pub folder: Option<&'a Folder>,
+    pub list: &'a ListItem,
+}
+
+impl ListPlace<'_> {
+    /// "Space / Folder / List", or "Space / List" outside a Folder.
+    pub fn path(&self) -> String {
+        match self.folder {
+            Some(f) => format!("{} / {} / {}", self.space.name, f.name, self.list.name),
+            None => format!("{} / {}", self.space.name, self.list.name),
+        }
+    }
+
+    /// The List, its Folder or its Space is archived.
+    pub fn archived(&self) -> bool {
+        self.list.archived || self.folder.is_some_and(|f| f.archived) || self.space.archived
+    }
+
+    /// In someone else's Personal space (hidden from me).
+    pub fn others_private(&self, me: u64) -> bool {
+        self.space.private_owner.is_some_and(|o| o != me)
     }
 }

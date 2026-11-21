@@ -655,3 +655,22 @@ fn restore_brings_a_row_back_even_when_it_was_also_saved_for_later() {
     h.click("Inbox Primary");
     assert!(h.has(CASE), "back in Primary, not in Later");
 }
+
+#[test]
+fn an_imported_row_saved_for_later_offers_no_primary_it_cannot_go_to() {
+    let mut key = String::new();
+    let mut h = inbox(|d| {
+        key = mention_in_general(d, 2, "@Me an old Slack mention", 30 * 86400);
+        let c = d.channels.iter_mut().find(|c| c.name == "general").unwrap();
+        c.messages.last_mut().unwrap().imported = Some("slack".into());
+        d.extra.inbox_later.push(key.clone());
+    });
+    h.click("Inbox Later");
+    hover_row(&mut h, "#general");
+    assert!(
+        !h.has("Primary"),
+        "imported history goes back to Cleared, not to Primary"
+    );
+    h.click("Clear");
+    assert!(h.app.data.extra.inbox_later.is_empty());
+}

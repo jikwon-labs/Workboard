@@ -412,8 +412,10 @@ impl App {
                                     self.dirty = true;
                                     handled = true;
                                 }
-                                // Later items can go back to the inbox
+                                // Later items can go back to the inbox (imported history
+                                // would go back to Cleared: only Clear for it)
                                 if self.inbox_tab == 2
+                                    && !it.imported
                                     && pressed_once(
                                         &put_over(
                                             ui,

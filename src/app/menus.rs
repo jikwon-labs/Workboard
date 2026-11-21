@@ -1317,6 +1317,16 @@ impl App {
         let Some(mut modal) = self.modal.take() else {
             return;
         };
+        // a text box on the page behind keeps the keyboard unless it lets
+        // go: what's typed with a dialog up would land in it unseen
+        if let Some(id) = ctx.memory(|m| m.focused()) {
+            if ctx
+                .read_response(id)
+                .is_some_and(|r| r.layer_id.order == egui::Order::Background)
+            {
+                ctx.memory_mut(|m| m.surrender_focus(id));
+            }
+        }
         let t = self.t();
         let mut open = true;
         let mut close = false;

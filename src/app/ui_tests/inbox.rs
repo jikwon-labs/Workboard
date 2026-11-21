@@ -173,3 +173,39 @@ fn a_double_click_on_clear_clears_that_row_only() {
     h.click("Clear");
     assert!(h.app.data.extra.inbox_cleared.contains(&second));
 }
+
+#[test]
+fn a_filter_that_hides_every_row_says_so_and_offers_everything() {
+    let mut h = inbox(|d| {
+        comment_on(d, CASE, "Over to you", 60);
+    });
+    // the only row is a comment, not an assignment
+    h.click("Filter");
+    h.click("Assigned to me");
+    assert!(!h.has(CASE));
+    assert!(
+        !h.has("You're all caught up"),
+        "there is a row on this tab, only filtered out"
+    );
+    assert!(h.has("Nothing matches this filter"));
+    // with a reminder above the rows, too
+    let me = h.app.data.me;
+    let id = h.app.data.new_id();
+    h.app.data.extra.reminders.push(Reminder {
+        id,
+        text: "Call the bank".into(),
+        due_ts: now_ts() + 3600,
+        owner: me,
+        ..Default::default()
+    });
+    h.settle();
+    assert!(!h.has("No new comments, mentions or assignments."));
+    assert!(h.has("Nothing matches this filter"));
+    h.click("Show everything");
+    assert_eq!(h.app.inbox_filter, 0);
+    assert!(h.has(CASE));
+    // an empty tab with no filter still says it is empty
+    h.click("Inbox Other");
+    assert!(h.has("Nothing in Other"));
+    assert!(!h.has("Nothing matches this filter"));
+}

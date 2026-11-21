@@ -76,12 +76,15 @@ impl App {
             .cloned()
             .filter(|x| x.tab == self.inbox_tab)
             .collect();
+        let on_tab = items.len();
         match self.inbox_filter {
             1 => items.retain(|x| x.comment),
             2 => items.retain(|x| x.mention),
             3 => items.retain(|x| x.assigned),
             _ => {}
         }
+        // the tab has rows, only the filter hides them all
+        let filtered_out = items.is_empty() && on_tab > 0;
         items.sort_by_key(|x| std::cmp::Reverse(x.ts));
         let mut clear_all = false;
         egui::Frame::new()
@@ -162,7 +165,7 @@ impl App {
                                 .reminders
                                 .iter()
                                 .any(|r| r.owner == self.data.me && !r.done);
-                        if items.is_empty() && reminders_shown {
+                        if items.is_empty() && reminders_shown && !filtered_out {
                             ui.add_space(16.0);
                             ui.label(
                                 RichText::new(tr("No new comments, mentions or assignments."))
@@ -187,9 +190,15 @@ impl App {
                                             && self.data.task_live(x)
                                     })
                                     .count();
-                                let point_to_due = self.inbox_tab == 0 && alone && due_work > 0;
+                                let point_to_due =
+                                    self.inbox_tab == 0 && alone && due_work > 0 && !filtered_out;
                                 // the people icon only where it invites people
                                 let (title, sub, icon) = match self.inbox_tab {
+                                    _ if filtered_out => (
+                                        "Nothing matches this filter",
+                                        "This tab has items the filter hides.",
+                                        "filter",
+                                    ),
                                     0 if point_to_due => (
                                         "Nothing from other people",
                                         "The Inbox collects comments, mentions and assignments from others.",
@@ -239,7 +248,12 @@ impl App {
                                 ui.add_space(10.0);
                                 ui.label(RichText::new(tr(title)).size(18.0).color(t.text));
                                 ui.label(RichText::new(tr(sub)).size(14.0).color(t.text2));
-                                if point_to_due {
+                                if filtered_out {
+                                    ui.add_space(10.0);
+                                    if ui.button(tr("Show everything")).clicked() {
+                                        self.inbox_filter = 0;
+                                    }
+                                } else if point_to_due {
                                     ui.add_space(10.0);
                                     ui.label(
                                         RichText::new(trf!(
@@ -272,7 +286,7 @@ impl App {
                                             role: "Member".into(),
                                         });
                                     }
-                                } else if self.inbox_tab == 0 && invite {
+                                } else if self.inbox_tab == 0 && invite && !filtered_out {
                                     ui.add_space(10.0);
                                     if ui
                                         .add(Tint(

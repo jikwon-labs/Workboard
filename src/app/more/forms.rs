@@ -626,16 +626,7 @@ impl App {
                         .layout(Layout::right_to_left(Align::Center)),
                 );
                 self.star_toggle(&mut right, format!("form:{}", f.id));
-                let star_left = right.min_rect().left();
-                // the tabs, measured before the name so a long name is
-                // shortened to leave them room in a small window
-                let items: [SegItem; 3] = [
-                    ("edit", tr("Edit").into(), None, "Edit"),
-                    ("eye", tr("Fill out").into(), None, "Fill out"),
-                    ("inbox", tr("Answers").into(), Some(answers), "Answers"),
-                ];
-                let seg_w = seg_width(ui.painter(), &t, &items);
-                let tabs_end = star_left - 8.0;
+                let tabs_end = right.min_rect().left() - 8.0;
                 // left: back, "All forms", the form
                 let mut left = ui.new_child(
                     egui::UiBuilder::new()
@@ -667,16 +658,36 @@ impl App {
                 let (tile, _) = left.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
                 paint_tile(left.painter(), tile, form_look(&f, &t));
                 left.add_space(2.0);
+                // the tabs, measured before the name, which is shortened to
+                // leave them room before the star; where even that isn't
+                // enough (a small window, a wide sidebar) they drop their
+                // icons, and the name goes
                 let name_left = left.cursor().left() + 4.0;
+                let tab = |icon: &'static str, wide: bool| if wide { icon } else { "" };
+                let tabs = |wide: bool| -> [SegItem; 3] {
+                    [
+                        (tab("edit", wide), tr("Edit").into(), None, "Edit"),
+                        (tab("eye", wide), tr("Fill out").into(), None, "Fill out"),
+                        (
+                            tab("inbox", wide),
+                            tr("Answers").into(),
+                            Some(answers),
+                            "Answers",
+                        ),
+                    ]
+                };
+                let mut items = tabs(true);
+                let mut seg_w = seg_width(ui.painter(), &t, &items);
+                if tabs_end - seg_w - 16.0 - name_left < 40.0 {
+                    items = tabs(false);
+                    seg_w = seg_width(ui.painter(), &t, &items);
+                }
                 let room = (row.width() * 0.3).min(tabs_end - seg_w - 16.0 - name_left);
-                let title = form_title(&f);
-                let shown = fit_text(
-                    left.painter(),
-                    &title,
-                    &FontId::proportional(14.0),
-                    room.max(12.0),
-                );
-                left.label(RichText::new(shown).size(14.0).color(t.text));
+                if room >= 16.0 {
+                    let title = form_title(&f);
+                    let shown = fit_text(left.painter(), &title, &FontId::proportional(14.0), room);
+                    left.label(RichText::new(shown).size(14.0).color(t.text));
+                }
                 let left_end = left.min_rect().right();
                 // the tabs: in the middle when there is room, else after the
                 // name and before the star

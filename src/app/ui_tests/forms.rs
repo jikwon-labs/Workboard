@@ -902,7 +902,10 @@ fn a_form_made_from_a_spaces_plus_goes_to_that_space() {
     // the List being looked at, when it is in that space, rather than its first
     let marketing = list_id(&h, "Marketing");
     let team = h.app.data.space_of_list(marketing).unwrap().id;
-    assert_ne!(h.app.data.lists_in(Location::Space(team)).unwrap()[0], marketing);
+    assert_ne!(
+        h.app.data.lists_in(Location::Space(team)).unwrap()[0],
+        marketing
+    );
     h.app.actions.push(Action::Go(Location::List(marketing)));
     h.settle();
     h.click("Create in Team Space");
@@ -1350,4 +1353,30 @@ fn a_restored_form_gets_back_its_older_answers_beside_a_namesake() {
         assert!(h.has(&format!("Answer task {}", mine)));
         assert!(!h.has(&format!("Answer task {}", other)));
     }
+}
+
+/// With the sidebar dragged as wide as it goes in the smallest window, the
+/// header's tabs still stop before the star (they drop their icons, and
+/// the name if need be), and the star still works.
+#[test]
+fn the_header_fits_beside_the_widest_sidebar() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.new_form_from(Some(4));
+    let fid = h.app.form_open.unwrap();
+    h.app.data.extra.forms[0].name = "A long form name that goes on".into();
+    h.settle();
+    let edge = h.rect("Close sidebar").right() + 9.0;
+    h.drag_by(pos2(edge, 300.0), pos2(edge + 300.0, 300.0));
+    let star = h.rect(&format!("Star form:{}", fid));
+    let answers = h.rect("Answers");
+    assert!(
+        answers.right() + 4.0 <= star.left(),
+        "the tabs end at {}, the star starts at {}",
+        answers.right(),
+        star.left()
+    );
+    h.click(&format!("Star form:{}", fid));
+    assert!(h.app.data.extra.starred.contains(&format!("form:{}", fid)));
+    h.click("Fill out");
+    assert_eq!(h.app.form_tab, FormTab::Fill);
 }

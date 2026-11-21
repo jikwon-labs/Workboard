@@ -378,15 +378,22 @@ impl App {
         ));
     }
 
-    /// A blank form made from a space's + menu: its answers go to the first
-    /// List of that space that isn't archived, or to none yet (it asks for
-    /// one) when the space has no List, never to a List of another space.
+    /// A blank form made from a space's + menu: its answers go to the List
+    /// being looked at when it is in that space, else to the first List of
+    /// that space that isn't archived, or to none yet (it asks for one) when
+    /// the space has no List; never to a List of another space.
     pub(crate) fn new_form_in_space(&mut self, sid: u64) {
+        let here = self
+            .default_list()
+            .filter(|l| self.data.space_of_list(*l).is_some_and(|s| s.id == sid))
+            .filter(|l| !self.data.list_archived(*l));
         self.new_form_from(None);
-        let list = self
-            .data
-            .lists_in(Location::Space(sid))
-            .and_then(|v| v.into_iter().find(|l| !self.data.list_archived(*l)))
+        let list = here
+            .or_else(|| {
+                self.data
+                    .lists_in(Location::Space(sid))
+                    .and_then(|v| v.into_iter().find(|l| !self.data.list_archived(*l)))
+            })
             .unwrap_or(0);
         if let Some(f) = self
             .form_open

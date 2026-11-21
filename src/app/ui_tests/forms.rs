@@ -899,6 +899,16 @@ fn a_form_made_from_a_spaces_plus_goes_to_that_space() {
         Some(side)
     );
     assert_eq!(form(&h, fid).list_id, ideas);
+    // the List being looked at, when it is in that space, rather than its first
+    let marketing = list_id(&h, "Marketing");
+    let team = h.app.data.space_of_list(marketing).unwrap().id;
+    assert_ne!(h.app.data.lists_in(Location::Space(team)).unwrap()[0], marketing);
+    h.app.actions.push(Action::Go(Location::List(marketing)));
+    h.settle();
+    h.click("Create in Team Space");
+    h.click("Form");
+    let fid = h.app.form_open.unwrap();
+    assert_eq!(form(&h, fid).list_id, marketing);
     // a space with no List yet: the form asks for one
     h.app.data.spaces.push(Space {
         id: 9100,

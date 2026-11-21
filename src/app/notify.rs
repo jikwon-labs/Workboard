@@ -445,7 +445,8 @@ impl App {
                             )
                         }) {
                             Some(id) => mine.iter().any(|f| f.id == id),
-                            // two of that name in one List: any of them of mine
+                            // several of that name and the List doesn't tell
+                            // which (as before forms were told apart): any of mine
                             None => mine.iter().any(|f| f.name == name),
                         };
                         if to_me {

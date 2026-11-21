@@ -401,11 +401,13 @@ impl Conn {
             }
             Some(Msg::Push { data }) => {
                 let (hub2, device2) = (hub.clone(), self.device.clone());
-                // merging can take a moment on a big workspace
-                let refused =
-                    tokio::task::spawn_blocking(move || hub2.push(member, &device2, data))
-                        .await
-                        .unwrap_or(false);
+                // merging can take a moment on a big workspace; a merge that
+                // failed on the way is said, not taken as accepted
+                let refused = match off_thread(move || Ok(hub2.push(member, &device2, data))).await
+                {
+                    Ok(refused) => refused,
+                    Err(why) => return Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
+                };
                 // said once in a while, as an app may send again before the update reaches it
                 let quiet = self
                     .told_put_back

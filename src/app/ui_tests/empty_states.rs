@@ -27,8 +27,7 @@ fn no_space() -> Data {
 }
 
 fn with(data: Data, w: f32, h: f32) -> Ui1 {
-    let mut ui = Ui1::sized(w, h);
-    ui.app = App::build(None, Some(data));
+    let mut ui = Ui1::sized_with(w, h, data);
     ui.settle();
     ui
 }

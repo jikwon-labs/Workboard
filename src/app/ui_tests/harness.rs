@@ -40,11 +40,22 @@ impl Ui1 {
 
     // the smallest window the app allows is 900x560
     pub(super) fn sized(w: f32, h: f32) -> Self {
+        Self::sized_with(w, h, Data::seed())
+    }
+
+    /// A window of the usual size showing `data` instead of the seed.
+    pub(super) fn with_data(data: Data) -> Self {
+        Self::sized_with(1440.0, 900.0, data)
+    }
+
+    /// A window of this size showing `data`. Tests that need an app other
+    /// than the seed's start here, so it keeps the harness's clock pin.
+    pub(super) fn sized_with(w: f32, h: f32, data: Data) -> Self {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         let mut h = Ui1 {
             ctx,
-            app: App::build(None, Some(Data::seed())),
+            app: App::build(None, Some(data)),
             time: 0.0,
             tree: vec![],
             nodes: vec![],

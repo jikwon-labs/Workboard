@@ -107,8 +107,7 @@ fn a_new_workspace_leaves_out_online_only_tools_but_saved_ones_keep_theirs() {
     assert_eq!(d.extra.pinned_tools, ["create_task"]);
     assert!(d.extra.hidden_nav.iter().any(|x| x == "Skills"));
     assert!(d.extra.hidden_nav.iter().any(|x| x == "Artifacts"));
-    let mut h = Ui1::new();
-    h.app = App::build(None, Some(d.clone()));
+    let mut h = Ui1::with_data(d.clone());
     h.settle();
     assert!(
         !h.has("Skills") && !h.has("Artifacts"),

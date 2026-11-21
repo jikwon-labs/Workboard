@@ -647,9 +647,7 @@ fn forms_go_between_teammates_through_a_server() {
         .find(|p| p.member == 3)
         .and_then(|p| p.invite.clone())
         .unwrap();
-    let mut b = Ui1::new();
-    b.app = App::build(None, Some(crate::app::tests::blank_as("Theirs", 1, "B")));
-    b.app.notify_rt.last_clock = i64::MAX;
+    let mut b = Ui1::with_data(crate::app::tests::blank_as("Theirs", 1, "B"));
     b.app.connect_server(&addr, &code.to_lowercase()).unwrap();
     receive(&mut b, "B joined", |x| x.data.extra.shared.is_some());
     assert_eq!(b.app.data.me, 3);

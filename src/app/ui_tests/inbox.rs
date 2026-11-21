@@ -503,8 +503,7 @@ fn alone_the_due_count_leaves_out_tasks_i_cannot_see_like_the_sidebar() {
     space.private_owner = Some(7);
     space.lists[0].id = lid;
     d.spaces.push(space);
-    let mut h = Ui1::new();
-    h.app = App::build(None, Some(d));
+    let mut h = Ui1::with_data(d);
     h.app.apply(Action::Add {
         list: lid,
         name: "Hidden due task".into(),

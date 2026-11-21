@@ -1417,3 +1417,21 @@ fn korean_typed_in_a_goal_and_a_target_name_is_kept() {
     h.settle();
     assert_eq!(goal(&h, a).name, "목표");
 }
+
+#[test]
+fn search_finds_a_goal_and_opens_it() {
+    let (mut h, a, _) = two_goals();
+    let rows = h.app.search_rows("beta lau", 0);
+    assert!(rows
+        .iter()
+        .any(|r| matches!(r.4, crate::app::more::Hit::Goal(x) if x == a)));
+    h.app.section = Section::Chat;
+    h.settle();
+    h.click("Search");
+    h.type_text("Beta lau");
+    h.settle();
+    h.click("Beta launch");
+    assert_eq!(h.app.section, Section::Goals);
+    assert_eq!(h.app.goal_open, Some(a));
+    assert!(h.has("Goal overview"), "its own page");
+}

@@ -136,7 +136,6 @@ pub struct FormAnswers {
     pub assignees: Vec<u64>,
 }
 
-
 /// The form name in a task's history line "submitted the form <name>": how
 /// apps that don't record `Task::form` (0.1.21 and older) mark an answer.
 fn old_answer_name(t: &Task) -> Option<&str> {

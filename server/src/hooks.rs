@@ -467,7 +467,6 @@ fn channel_name(canon: &Value, ch: u64) -> String {
         .unwrap_or_default()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

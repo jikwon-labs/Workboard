@@ -1534,7 +1534,7 @@ impl App {
             let line = ui.available_rect_before_wrap();
             ui.painter().hline(line.left() + 14.0..=line.right() - 14.0, line.top(), Stroke::new(0.5_f32, t.border));
             ui.add_space(2.0);
-            let composer_h = (140.0_f32 + if self.chat.files.is_empty() { 0.0 } else { 76.0 }).max(composer_seen(ui, ("chat_composer_h", cid)));
+            let composer_h = (140.0_f32 + if self.chat.channel.files.is_empty() { 0.0 } else { 76.0 }).max(composer_seen(ui, ("chat_composer_h", cid)));
             // "has:file", "has:link" and "from:name" narrow it (msgquery.rs)
             let find = MsgQuery::parse(&self.channel_find.clone().unwrap_or_default());
             let q = find.text.clone();
@@ -1692,7 +1692,7 @@ impl App {
                         prev = Some((m.author, m.ts));
                     }
                     // just sent: down to it, even from higher up the list
-                    if std::mem::take(&mut self.chat.to_bottom) {
+                    if std::mem::take(&mut self.chat.channel.to_bottom) {
                         ui.scroll_to_cursor(Some(Align::BOTTOM));
                     }
                 });
@@ -1713,7 +1713,7 @@ impl App {
                     .filter(|m| m.author != me && m.imported.is_none() && m.ts > since)
                     .count();
                 if below > 0 && new_below(ui, &t, list.inner_rect, below) {
-                    self.chat.to_bottom = true;
+                    self.chat.channel.to_bottom = true;
                 }
             }
             // with a thread beside it, the cursor goes to the thread's box
@@ -1985,7 +1985,7 @@ impl App {
         // all inside the window; one row of tiles when pictures
         // wait in the box
         let composer_h = (140.0_f32
-            + if self.chat.thread_files.is_empty() {
+            + if self.chat.thread.files.is_empty() {
                 0.0
             } else {
                 76.0
@@ -2015,7 +2015,7 @@ impl App {
                 for r in &parent.replies {
                     self.message_row(ui, cid, r, false, acts);
                 }
-                if std::mem::take(&mut self.chat.thread_to_bottom) {
+                if std::mem::take(&mut self.chat.thread.to_bottom) {
                     ui.scroll_to_cursor(Some(Align::BOTTOM));
                 }
             });
@@ -2249,12 +2249,12 @@ impl App {
                     )
                 };
                 let enter = take_enter(ui, text_id);
-                format_keys(ui, text_id, &mut self.chat.text);
+                format_keys(ui, text_id, &mut self.chat.channel.text);
                 let names = self.mention_names();
                 let mut lay = |ui: &Ui, s: &str, w: f32| mention_layout(ui, s, w, &names, &t);
                 let r = capped(ui, text_id, |ui| {
                     ui.add(
-                        egui::TextEdit::multiline(&mut self.chat.text)
+                        egui::TextEdit::multiline(&mut self.chat.channel.text)
                             .id(text_id)
                             .hint_text(hint)
                             .frame(false)
@@ -2267,27 +2267,30 @@ impl App {
                     egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Message composer")
                 });
                 // the others in the conversation see that I'm typing
-                if r.changed() && !self.chat.text.trim().is_empty() {
+                if r.changed() && !self.chat.channel.text.trim().is_empty() {
                     if let Some(cid) = self.chat.open {
                         self.typing_now(cid, None);
                     }
                 }
                 // "/" at the start lists the commands (integrations.rs)
-                if let Some(pick) = slash_list(ui, &t, &self.slash_choices(&self.chat.text)) {
-                    self.chat.text = format!("/{} ", pick);
-                    move_cursor_to_end(ui.ctx(), text_id, &self.chat.text);
+                if let Some(pick) = slash_list(ui, &t, &self.slash_choices(&self.chat.channel.text))
+                {
+                    self.chat.channel.text = format!("/{} ", pick);
+                    move_cursor_to_end(ui.ctx(), text_id, &self.chat.channel.text);
                 }
                 // typing "@" at the start of a word offers the people to mention
                 let mention_popup = egui::Id::new("chat_mention_popup");
-                if r.changed() && self.chat.text.ends_with('@') {
-                    let before = self.chat.text[..self.chat.text.len() - 1].chars().last();
+                if r.changed() && self.chat.channel.text.ends_with('@') {
+                    let before = self.chat.channel.text[..self.chat.channel.text.len() - 1]
+                        .chars()
+                        .last();
                     if before.map_or(true, char::is_whitespace) {
                         ui.memory_mut(|m| m.open_popup(mention_popup));
                     }
                 }
                 // Up in an empty box changes my last message here
                 if r.has_focus()
-                    && self.chat.text.is_empty()
+                    && self.chat.channel.text.is_empty()
                     && self.composer_mode == 0
                     && ui.input(|i| i.key_pressed(egui::Key::ArrowUp))
                 {
@@ -2343,7 +2346,7 @@ impl App {
                     let nobody = people.is_empty();
                     let people = mention_matches(
                         people,
-                        trailing_mention(&self.chat.text).map_or("", |m| m.1),
+                        trailing_mention(&self.chat.channel.text).map_or("", |m| m.1),
                     );
                     let teams = self.team_names();
                     let mut picked = None;
@@ -2373,7 +2376,7 @@ impl App {
                         }
                     });
                     if let Some(id) = picked {
-                        self.chat.picked.push(id);
+                        self.chat.channel.picked.push(id);
                     }
                     let itool = |ui: &mut Ui, kind: &str, tip: &str| {
                         icon_button(ui, &t, kind, "", tip, false).on_hover_text(tr(tip))
@@ -2385,7 +2388,7 @@ impl App {
                             close_popup(ui);
                         }
                     });
-                    format_buttons(ui, &t, text_id, &mut self.chat.text, "");
+                    format_buttons(ui, &t, text_id, &mut self.chat.channel.text, "");
                     if itool(ui, "task", "Create task").clicked() {
                         self.open_quick_add(None);
                     }
@@ -2400,8 +2403,8 @@ impl App {
                         // don't hold the message: they follow it
                         let (files_ok, files) = self.pending_ready(false);
                         let ready = files_ok
-                            && (!self.chat.text.trim().is_empty()
-                                || !self.chat.files.is_empty()
+                            && (!self.chat.channel.text.trim().is_empty()
+                                || !self.chat.channel.files.is_empty()
                                 || (self.composer_mode == 1
                                     && !self.chat.post_title.trim().is_empty()));
                         let b = Tint(
@@ -2421,7 +2424,7 @@ impl App {
                         );
                         let sent = ui.add(b);
                         // the clock: send it later (schedule.rs), plain messages only
-                        if self.composer_mode == 0 && !self.chat.text.trim().is_empty() {
+                        if self.composer_mode == 0 && !self.chat.channel.text.trim().is_empty() {
                             let clock = icon_button(ui, &t, "clock", "", "Schedule message", false)
                                 .on_hover_text(tr("Schedule message"));
                             popup(ui, &clock, egui::Id::new("schedule_popup"), 220.0, |ui| {
@@ -2448,7 +2451,7 @@ impl App {
                             );
                         }
                         if (sent.clicked() || enter) && ready {
-                            let text = self.chat.text.trim().to_string();
+                            let text = self.chat.channel.text.trim().to_string();
                             let title = if self.composer_mode == 1 {
                                 Some(if self.chat.post_title.trim().is_empty() {
                                     DEFAULT_POST_TITLE.to_string()
@@ -2459,26 +2462,26 @@ impl App {
                                 None
                             };
                             out = Some((text, title, files));
-                            self.chat.coming = self.pending_coming(false);
+                            self.chat.channel.coming = self.pending_coming(false);
                             // after a post the box goes back to plain messages
                             self.composer_mode = 0;
-                            self.chat.text.clear();
+                            self.chat.channel.text.clear();
                             // the picks go with the message (see apply_chat)
                             self.chat.post_title.clear();
-                            self.chat.files.clear();
-                        } else if enter && files_ok && self.chat.files.is_empty() {
-                            self.chat.text.clear();
+                            self.chat.channel.files.clear();
+                        } else if enter && files_ok && self.chat.channel.files.is_empty() {
+                            self.chat.channel.text.clear();
                         }
                     });
                 });
                 match schedule {
                     Some(Some(at)) => {
                         if let Some(ch) = self.chat.open {
-                            let text = self.chat.text.clone();
-                            let picked = self.chat.picked.clone();
+                            let text = self.chat.channel.text.clone();
+                            let picked = self.chat.channel.picked.clone();
                             if self.schedule_message(ch, None, &text, &picked, at) {
-                                self.chat.text.clear();
-                                self.chat.picked.clear();
+                                self.chat.channel.text.clear();
+                                self.chat.channel.picked.clear();
                             }
                         }
                     }
@@ -2493,13 +2496,13 @@ impl App {
                 if let Some(text) = insert {
                     // a picked @name replaces the "@" (and what followed it) typed
                     if text.starts_with('@') {
-                        if let Some((at, _)) = trailing_mention(&self.chat.text) {
-                            self.chat.text.truncate(at);
+                        if let Some((at, _)) = trailing_mention(&self.chat.channel.text) {
+                            self.chat.channel.text.truncate(at);
                         }
                     }
-                    self.chat.text.push_str(&text);
+                    self.chat.channel.text.push_str(&text);
                     ui.memory_mut(|m| m.request_focus(text_id));
-                    let n = self.chat.text.chars().count();
+                    let n = self.chat.channel.text.chars().count();
                     let mut st = egui::TextEdit::load_state(ui.ctx(), text_id).unwrap_or_default();
                     st.cursor.set_char_range(Some(egui::text::CCursorRange::one(
                         egui::text::CCursor::new(n),
@@ -2531,12 +2534,7 @@ impl App {
             .show(ui, |ui| {
                 self.pending_strip(ui, thread);
                 let (files_ok, files) = self.pending_ready(thread);
-                let has_files = !(if thread {
-                    &self.chat.thread_files
-                } else {
-                    &self.chat.files
-                })
-                .is_empty();
+                let has_files = !self.chat.composer(thread).files.is_empty();
                 let id = egui::Id::new(if thread {
                     super::files::THREAD_BOX
                 } else {
@@ -2551,11 +2549,7 @@ impl App {
                     .filter(|m| !m.invited && m.id != me)
                     .cloned()
                     .collect();
-                let so_far = if thread {
-                    &self.chat.thread_text
-                } else {
-                    &self.chat.text
-                };
+                let so_far = &self.chat.composer(thread).text;
                 let nobody = people.is_empty();
                 let people = mention_matches(people, trailing_mention(so_far).map_or("", |m| m.1));
                 let teams = self.team_names();
@@ -2564,11 +2558,7 @@ impl App {
                 let mut lay = |ui: &Ui, s: &str, w: f32| mention_layout(ui, s, w, &names, &t);
                 let mut picked: Option<u64> = None;
                 let mut insert: Option<String> = None;
-                let text = if thread {
-                    &mut self.chat.thread_text
-                } else {
-                    &mut self.chat.text
-                };
+                let text = &mut self.chat.composer_mut(thread).text;
                 let enter = take_enter(ui, id);
                 format_keys(ui, id, text);
                 let r = capped(ui, id, |ui| {
@@ -2696,21 +2686,13 @@ impl App {
                 }
                 if let Some(m) = picked {
                     // the picks go with the reply (see apply_chat)
-                    if thread {
-                        self.chat.thread_picked.push(m);
-                    } else {
-                        self.chat.picked.push(m);
-                    }
+                    self.chat.composer_mut(thread).picked.push(m);
                 }
                 if out.is_some() {
                     let coming = self.pending_coming(thread);
-                    if thread {
-                        self.chat.thread_coming = coming;
-                        self.chat.thread_files.clear();
-                    } else {
-                        self.chat.coming = coming;
-                        self.chat.files.clear();
-                    }
+                    let c = self.chat.composer_mut(thread);
+                    c.coming = coming;
+                    c.files.clear();
                 }
                 if pick {
                     self.pick_media(thread);
@@ -3856,12 +3838,12 @@ impl App {
                     text,
                     files,
                 } => {
-                    self.chat.to_bottom = true;
+                    self.chat.channel.to_bottom = true;
                     self.send_files(&files);
                     // the channel's box: the people picked from its @ list
-                    let picked = std::mem::take(&mut self.chat.picked);
+                    let picked = std::mem::take(&mut self.chat.channel.picked);
                     let id = self.add_post(ch, title, "Announcement", text, files, &picked);
-                    for p in std::mem::take(&mut self.chat.coming) {
+                    for p in std::mem::take(&mut self.chat.channel.coming) {
                         self.chat.following.push((ch, vec![id], p));
                     }
                 }
@@ -4132,11 +4114,9 @@ impl App {
                     files,
                 } => {
                     // files the box was sent with before they were ready
-                    let coming = std::mem::take(if parent.is_none() {
-                        &mut self.chat.coming
-                    } else {
-                        &mut self.chat.thread_coming
-                    });
+                    // the box it was written in: the channel's, or the thread's
+                    let in_thread = parent.is_some();
+                    let coming = std::mem::take(&mut self.chat.composer_mut(in_thread).coming);
                     // "/name ...": a command (integrations.rs)
                     let mut text = text;
                     if text.starts_with('/') && files.is_empty() && coming.is_empty() {
@@ -4146,11 +4126,7 @@ impl App {
                             Slash::Done => continue,
                             Slash::Post(t) => text = t,
                             Slash::Unknown(t) => {
-                                if parent.is_none() {
-                                    self.chat.text = t;
-                                } else {
-                                    self.chat.thread_text = t;
-                                }
+                                self.chat.composer_mut(in_thread).text = t;
                                 continue;
                             }
                         }
@@ -4170,27 +4146,14 @@ impl App {
                             also_channel,
                             coming,
                         });
-                        if parent.is_none() {
-                            self.chat.picked.clear();
-                        } else {
-                            self.chat.thread_picked.clear();
-                        }
+                        self.chat.composer_mut(in_thread).picked.clear();
                         continue;
                     }
-                    if parent.is_none() {
-                        self.chat.to_bottom = true;
-                    } else {
-                        self.chat.thread_to_bottom = true;
-                    }
+                    self.chat.composer_mut(in_thread).to_bottom = true;
                     self.send_files(&files);
                     let id = self.data.new_id();
-                    // the people picked from the @ list of the box it was
-                    // written in: the channel's, or the thread's
-                    let picked = if parent.is_none() {
-                        std::mem::take(&mut self.chat.picked)
-                    } else {
-                        std::mem::take(&mut self.chat.thread_picked)
-                    };
+                    // the people picked from the @ list of the box it was written in
+                    let picked = std::mem::take(&mut self.chat.composer_mut(in_thread).picked);
                     let mentions = self.chat_mentions(&text, ch, &picked);
                     let m = Message {
                         goal: None,

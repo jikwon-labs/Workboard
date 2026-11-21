@@ -1450,7 +1450,10 @@ fn cmd_arrows_go_back_and_forward_outside_text_fields() {
     cmd_key(&mut h, egui::Key::ArrowLeft);
     assert_eq!(h.app.nav_spot(), spot, "Cmd+Left in a text field stays");
     h.type_text("X");
-    assert_eq!(h.app.chat.text, "Xhello", "and moves to the line start");
+    assert_eq!(
+        h.app.chat.channel.text, "Xhello",
+        "and moves to the line start"
+    );
 }
 
 #[test]

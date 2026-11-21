@@ -188,7 +188,7 @@ fn escape_closes_the_thread() {
     assert_eq!(h.app.chat.thread_open, None);
     h.click("1 reply");
     assert_eq!(h.app.chat.thread_open, Some(tid));
-    assert_eq!(h.app.chat.thread_text, "half a reply", "the draft is kept");
+    assert_eq!(h.app.chat.thread.text, "half a reply", "the draft is kept");
 
     // a menu over the thread closes first, the thread stays
     h.click("More actions");
@@ -481,7 +481,10 @@ fn chat_drafts_stay_with_their_channel() {
         .clone();
     h.click_side(&b.name, false);
     assert_eq!(h.app.chat.open, Some(b.id));
-    assert_eq!(h.app.chat.text, "", "the other channel starts empty");
+    assert_eq!(
+        h.app.chat.channel.text, "",
+        "the other channel starts empty"
+    );
     h.send_message("first message");
     let sent = h
         .app
@@ -498,7 +501,7 @@ fn chat_drafts_stay_with_their_channel() {
     assert_eq!(sent, "first message");
     // back to the first channel: the unsent text is still there
     h.click_side("general", false);
-    assert_eq!(h.app.chat.text, "hello");
+    assert_eq!(h.app.chat.channel.text, "hello");
 }
 
 #[test]
@@ -949,16 +952,16 @@ fn composer_mention_and_emoji_pickers() {
     h.click("Mention someone");
     // the picker's entry, right of a sidebar row of the same name
     h.click_side("Alex Kim", true);
-    assert_eq!(h.app.chat.text, "@Alex Kim ");
+    assert_eq!(h.app.chat.channel.text, "@Alex Kim ");
     h.click("Emoji");
     h.click("\u{1F525}");
-    assert_eq!(h.app.chat.text, "@Alex Kim \u{1F525}");
+    assert_eq!(h.app.chat.channel.text, "@Alex Kim \u{1F525}");
     // typing "@" opens the list by itself and the pick replaces the "@"
     h.type_text(" @");
     assert!(h.has("Jordan Park"), "typing @ offers people");
     // (the right-most "Jordan Park" is the list's row, not a name in the feed)
     h.click_side("Jordan Park", true);
-    assert_eq!(h.app.chat.text, "@Alex Kim \u{1F525} @Jordan Park ");
+    assert_eq!(h.app.chat.channel.text, "@Alex Kim \u{1F525} @Jordan Park ");
 }
 
 #[test]
@@ -981,7 +984,7 @@ fn composer_emoji_picker_opens_above_the_composer_not_over_it() {
         );
     }
     h.click("\u{1F355}");
-    assert_eq!(h.app.chat.text, "\u{1F355}");
+    assert_eq!(h.app.chat.channel.text, "\u{1F355}");
 }
 
 #[test]
@@ -1067,7 +1070,7 @@ fn enter_in_the_middle_sends_without_a_line_break_and_shift_enter_keeps_one() {
         modifiers: shift,
     }]);
     h.type_text("two");
-    assert_eq!(h.app.chat.text, "one\ntwo");
+    assert_eq!(h.app.chat.channel.text, "one\ntwo");
 }
 
 #[test]
@@ -1561,7 +1564,7 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
     rows.dedup();
     assert_eq!(rows.len(), 2, "both are offered");
     h.click_at(rows[1].center());
-    assert_eq!(h.app.chat.text, "@Sam Lee ");
+    assert_eq!(h.app.chat.channel.text, "@Sam Lee ");
     h.type_text("can you look?");
     h.key(egui::Key::Enter);
     let general = h
@@ -1575,7 +1578,10 @@ fn a_chat_mention_picked_from_the_list_means_that_person_when_two_share_a_name()
     assert_eq!(m.text, "@Sam Lee can you look?");
     assert_eq!(m.mentions, vec![sam2], "the one picked, not both");
     assert!(!m.mentions.contains(&sam));
-    assert!(h.app.chat.picked.is_empty(), "used up by the message");
+    assert!(
+        h.app.chat.channel.picked.is_empty(),
+        "used up by the message"
+    );
     // typed by hand, without the list: both (it can't tell which)
     h.type_text("@Sam Lee again");
     h.key(egui::Key::Enter);
@@ -1634,9 +1640,12 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
     rows.dedup();
     assert_eq!(rows.len(), 2, "both are offered in the thread's list");
     h.click_at(rows[1].center());
-    assert_eq!(h.app.chat.thread_text, "@Sam Lee ");
-    assert!(h.app.chat.text.is_empty(), "not into the channel's box");
-    assert_eq!(h.app.chat.thread_picked, vec![sam2]);
+    assert_eq!(h.app.chat.thread.text, "@Sam Lee ");
+    assert!(
+        h.app.chat.channel.text.is_empty(),
+        "not into the channel's box"
+    );
+    assert_eq!(h.app.chat.thread.picked, vec![sam2]);
     h.type_text("see this");
     h.key(egui::Key::Enter);
     let reply = |h: &Ui1| {
@@ -1658,7 +1667,7 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
     let r = reply(&h);
     assert_eq!(r.text, "@Sam Lee see this");
     assert_eq!(r.mentions, vec![sam2], "the one picked, not both");
-    assert!(h.app.chat.thread_picked.is_empty(), "used up by the reply");
+    assert!(h.app.chat.thread.picked.is_empty(), "used up by the reply");
     // typing "@" opens the same list
     h.click("Reply composer");
     h.type_text("@");
@@ -1675,7 +1684,7 @@ fn a_thread_reply_keeps_the_same_named_person_picked_from_its_mention_list() {
         .unwrap();
     h.click_at(first.center());
     assert_eq!(
-        h.app.chat.thread_text, "@Sam Lee ",
+        h.app.chat.thread.text, "@Sam Lee ",
         "the typed @ is replaced"
     );
     h.type_text("too");
@@ -1749,7 +1758,7 @@ fn korean_typing_keeps_backspace_cmd_backspace_and_fast_keys() {
     ev.extend([backspace(true, none), backspace(false, none)]);
     h.frame(ev);
     h.settle();
-    assert_eq!(h.app.chat.text, "");
+    assert_eq!(h.app.chat.channel.text, "");
 
     // Cmd+Backspace while a syllable is unfinished: macOS finishes it and
     // passes on only the release of the key; the line still goes
@@ -1764,7 +1773,7 @@ fn korean_typing_keeps_backspace_cmd_backspace_and_fast_keys() {
     };
     h.frame(vec![backspace(false, cmd)]);
     h.settle();
-    assert_eq!(h.app.chat.text, "");
+    assert_eq!(h.app.chat.channel.text, "");
 
     // fast typing: a space and the next syllable in the same frame as the
     // end of the last one stay in order
@@ -1776,7 +1785,7 @@ fn korean_typing_keeps_backspace_cmd_backspace_and_fast_keys() {
     h.frame(vec![egui::Event::Ime(egui::ImeEvent::Preedit("나".into()))]);
     h.frame(finished("나"));
     h.settle();
-    assert_eq!(h.app.chat.text, "가 나");
+    assert_eq!(h.app.chat.channel.text, "가 나");
 }
 
 #[test]
@@ -1803,59 +1812,59 @@ fn delete_keys_in_the_message_box_work_as_on_the_mac() {
     // Option+Backspace takes one Korean word, not the whole sentence
     h.type_text("안녕하세요, 반갑습니다");
     h.key_with(Key::Backspace, opt);
-    assert_eq!(h.app.chat.text, "안녕하세요, ");
+    assert_eq!(h.app.chat.channel.text, "안녕하세요, ");
     // spaces and punctuation go with the word before them
     h.key_with(Key::Backspace, opt);
-    assert_eq!(h.app.chat.text, "");
+    assert_eq!(h.app.chat.channel.text, "");
     h.type_text("hello world ");
     h.key_with(Key::Backspace, opt);
-    assert_eq!(h.app.chat.text, "hello ");
+    assert_eq!(h.app.chat.channel.text, "hello ");
 
     // Option+Delete takes the next word; Option+Left stops at a Korean word
     h.type_text("회의 메모");
     h.key_with(Key::ArrowLeft, opt);
     h.key_with(Key::ArrowLeft, opt);
     h.key_with(Key::Delete, opt);
-    assert_eq!(h.app.chat.text, "hello  메모");
+    assert_eq!(h.app.chat.channel.text, "hello  메모");
 
     // Cmd+Backspace takes the line up to the cursor; at the start of a line
     // it joins it to the line before
     h.key_with(Key::ArrowRight, cmd);
     h.key_with(Key::Backspace, cmd);
-    assert_eq!(h.app.chat.text, "");
+    assert_eq!(h.app.chat.channel.text, "");
     h.type_text("first line\nsecond line");
     h.key_with(Key::Backspace, cmd);
-    assert_eq!(h.app.chat.text, "first line\n");
+    assert_eq!(h.app.chat.channel.text, "first line\n");
     h.key_with(Key::Backspace, cmd);
-    assert_eq!(h.app.chat.text, "first line");
+    assert_eq!(h.app.chat.channel.text, "first line");
 
     // with a selection, Cmd+Backspace takes only the selection
     h.key_with(Key::ArrowLeft, opt | Modifiers::SHIFT);
     h.key_with(Key::Backspace, cmd);
-    assert_eq!(h.app.chat.text, "first ");
+    assert_eq!(h.app.chat.channel.text, "first ");
 
     // Cmd+Delete takes the rest of the line
     h.type_text("one two");
     h.key_with(Key::ArrowLeft, opt);
     h.key_with(Key::Delete, cmd);
-    assert_eq!(h.app.chat.text, "first one ");
+    assert_eq!(h.app.chat.channel.text, "first one ");
 
     // Ctrl+Backspace and Ctrl+D take one letter each
     h.type_text("xyz");
     h.key_with(Key::Backspace, ctrl);
-    assert_eq!(h.app.chat.text, "first one xy");
+    assert_eq!(h.app.chat.channel.text, "first one xy");
     h.key_with(Key::ArrowLeft, Modifiers::NONE);
     h.key_with(Key::D, ctrl);
-    assert_eq!(h.app.chat.text, "first one x");
+    assert_eq!(h.app.chat.channel.text, "first one x");
 
     // a long line wraps: Cmd+Backspace takes only the row the cursor is on
     h.key_with(Key::ArrowRight, cmd);
     h.key_with(Key::Backspace, cmd);
-    assert_eq!(h.app.chat.text, "");
+    assert_eq!(h.app.chat.channel.text, "");
     let long = "word ".repeat(80);
     h.type_text(&long);
     h.key_with(Key::Backspace, cmd);
-    let left = h.app.chat.text.clone();
+    let left = h.app.chat.channel.text.clone();
     assert!(
         !left.is_empty() && left.len() < long.len() && long.starts_with(&left),
         "only the last row went: {left:?}"
@@ -1879,7 +1888,7 @@ fn a_sign_typed_right_after_a_korean_syllable_is_kept() {
         modifiers: egui::Modifiers::SHIFT,
     }]);
     h.settle();
-    assert_eq!(h.app.chat.text, "안녕하세요!");
+    assert_eq!(h.app.chat.channel.text, "안녕하세요!");
 }
 
 /// Sending from higher up a long conversation goes down to the message just
@@ -2249,7 +2258,7 @@ fn group_mentions_from_the_list_keep_their_people() {
     };
     h.click("Mention someone");
     h.click("@Design Crew");
-    assert_eq!(h.app.chat.text, "@Design Crew ");
+    assert_eq!(h.app.chat.channel.text, "@Design Crew ");
     h.type_text("review please");
     h.key(egui::Key::Enter);
     let m = last(&h);
@@ -2365,18 +2374,18 @@ fn formatting_buttons_and_keys_wrap_the_selection_and_marks_are_hidden() {
     h.type_text("ship it");
     h.key_with(egui::Key::A, cmd);
     h.click("Bold");
-    assert_eq!(h.app.chat.text, "**ship it**");
+    assert_eq!(h.app.chat.channel.text, "**ship it**");
     // the same text stays selected: Italic goes inside the bold
     h.click("Italic");
-    assert_eq!(h.app.chat.text, "***ship it***");
+    assert_eq!(h.app.chat.channel.text, "***ship it***");
     h.click("Italic");
-    assert_eq!(h.app.chat.text, "**ship it**", "again takes it off");
+    assert_eq!(h.app.chat.channel.text, "**ship it**", "again takes it off");
     // at the end with nothing selected: two marks, typing goes between them
     h.key(egui::Key::End);
     h.type_text(" now ");
     h.key_with(egui::Key::C, cmd | egui::Modifiers::SHIFT);
     h.type_text("cargo test");
-    assert_eq!(h.app.chat.text, "**ship it** now `cargo test`");
+    assert_eq!(h.app.chat.channel.text, "**ship it** now `cargo test`");
     h.key(egui::Key::Enter);
     assert_eq!(last_in(&h, cid).text, "**ship it** now `cargo test`");
     assert!(
@@ -2520,14 +2529,14 @@ fn drafts_are_listed_and_saved_with_the_workspace() {
     h.click("Draft in #general");
     assert_eq!(h.app.chat.open, Some(cid));
     h.settle();
-    assert_eq!(h.app.chat.text, "half a thought");
+    assert_eq!(h.app.chat.channel.text, "half a thought");
     // a workspace saved with a draft brings it back
     let mut h2 = Ui1::new();
     h2.app.data.extra.chat_drafts = saved.extra.chat_drafts.clone();
     h2.app.drafts.loaded_for = None;
     h2.settle();
     h2.click("general");
-    assert_eq!(h2.app.chat.text, "half a thought");
+    assert_eq!(h2.app.chat.channel.text, "half a thought");
 }
 
 /// The clock next to Send keeps the message for later; Scheduled messages
@@ -2551,7 +2560,7 @@ fn schedule_a_message_and_send_edit_or_cancel_it() {
     h.type_text("standup notes");
     h.click("Schedule message");
     h.click("In 1 hour");
-    assert_eq!(h.app.chat.text, "", "the box is emptied");
+    assert_eq!(h.app.chat.channel.text, "", "the box is emptied");
     let s = h.app.scheduled();
     assert_eq!(s.len(), 1);
     assert_eq!(s[0].text, "standup notes");
@@ -2575,7 +2584,7 @@ fn schedule_a_message_and_send_edit_or_cancel_it() {
     h.click(&format!("Edit {}", id));
     assert!(h.app.scheduled().is_empty());
     h.settle();
-    assert_eq!(h.app.chat.text, "standup notes");
+    assert_eq!(h.app.chat.channel.text, "standup notes");
     // schedule again, then Send now
     h.click("Schedule message");
     h.click("Tomorrow at 9:00 AM");
@@ -2619,7 +2628,7 @@ fn slash_commands_work_in_the_message_box() {
     h.click("Message composer");
     h.type_text("/sh");
     h.click("Command /shrug");
-    assert_eq!(h.app.chat.text, "/shrug ");
+    assert_eq!(h.app.chat.channel.text, "/shrug ");
     h.type_text("oh well");
     h.key(egui::Key::Enter);
     assert_eq!(
@@ -2672,8 +2681,8 @@ fn slash_commands_work_in_the_message_box() {
     );
     // an unknown one goes back in the box; a path is just text
     send(&mut h, "/nope now");
-    assert_eq!(h.app.chat.text, "/nope now");
-    h.app.chat.text.clear();
+    assert_eq!(h.app.chat.channel.text, "/nope now");
+    h.app.chat.channel.text.clear();
     send(&mut h, "/usr/bin is full");
     assert_eq!(last_in(&h, cid).text, "/usr/bin is full");
 }
@@ -3515,7 +3524,7 @@ fn a_picked_mention_replaces_what_was_typed_after_the_at() {
     );
     // the picker's entry, right of a sidebar row of the same name
     h.click_side("Alex Kim", true);
-    assert_eq!(h.app.chat.text, "Hi @Alex Kim ");
+    assert_eq!(h.app.chat.channel.text, "Hi @Alex Kim ");
 }
 
 #[test]
@@ -3877,7 +3886,7 @@ fn cmd_f_finds_in_the_open_conversation() {
         Some("apple"),
         "typed into it"
     );
-    assert_eq!(h.app.chat.text, "", "not into the composer");
+    assert_eq!(h.app.chat.channel.text, "", "not into the composer");
     assert!(shown(&h, "apples for the team"));
     assert!(!shown(&h, "bananas tomorrow"), "only what matches");
 
@@ -3886,7 +3895,7 @@ fn cmd_f_finds_in_the_open_conversation() {
     h.key_with(egui::Key::F, egui::Modifiers::COMMAND);
     h.type_text("banana");
     assert_eq!(h.app.channel_find.as_deref(), Some("banana"));
-    assert_eq!(h.app.chat.text, "");
+    assert_eq!(h.app.chat.channel.text, "");
     assert!(shown(&h, "bananas tomorrow"));
     assert!(!shown(&h, "apples for the team"));
 
@@ -3937,7 +3946,7 @@ fn opening_a_conversation_puts_the_cursor_in_its_box() {
     h.click("general");
     assert_eq!(focused(&h), Some(chat_box), "the channel's box");
     h.type_text("typed right away");
-    assert_eq!(h.app.chat.text, "typed right away");
+    assert_eq!(h.app.chat.channel.text, "typed right away");
 
     h.click("random");
     assert_eq!(h.app.chat.open, Some(7_777));

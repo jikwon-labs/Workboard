@@ -12,9 +12,9 @@ fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
         a.net_tick(None);
         let (ok, files) = a.pending_ready(thread);
         let list = if thread {
-            &a.chat.thread_files
+            &a.chat.thread.files
         } else {
-            &a.chat.files
+            &a.chat.channel.files
         };
         if let Some(e) = list.iter().find_map(|p| p.error.clone()) {
             panic!("attachment refused: {}", e);
@@ -33,7 +33,7 @@ fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    panic!("attachments never got ready: {:?}", a.chat.files);
+    panic!("attachments never got ready: {:?}", a.chat.channel.files);
 }
 
 #[test]
@@ -188,7 +188,10 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     let chans: Vec<u64> = a.data.channels.iter().map(|c| c.id).take(2).collect();
     a.section = Section::Chat;
     a.chat.open = Some(chans[0]);
-    a.drafts.chat_files.swap(a.chat.open, &mut a.chat.files);
+    a.drafts
+        .chat
+        .files
+        .swap(a.chat.open, &mut a.chat.channel.files);
     // no server, no folder: the picture is ready once it's in the cache
     assert_eq!(a.media_remote(), crate::app::files::Remote::None);
     a.add_media(false, Some(test_picture("one.png", 50, 40)), None);
@@ -196,13 +199,19 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     assert!(a.files.local(&files[0].file).is_some());
     // another channel has its own (empty) box; coming back brings the picture back
     a.chat.open = Some(chans[1]);
-    a.drafts.chat_files.swap(a.chat.open, &mut a.chat.files);
-    assert!(a.chat.files.is_empty());
+    a.drafts
+        .chat
+        .files
+        .swap(a.chat.open, &mut a.chat.channel.files);
+    assert!(a.chat.channel.files.is_empty());
     a.chat.open = Some(chans[0]);
-    a.drafts.chat_files.swap(a.chat.open, &mut a.chat.files);
-    assert_eq!(a.chat.files.len(), 1);
+    a.drafts
+        .chat
+        .files
+        .swap(a.chat.open, &mut a.chat.channel.files);
+    assert_eq!(a.chat.channel.files.len(), 1);
     assert_eq!(
-        a.chat.files[0].att.as_ref().map(|x| x.file.clone()),
+        a.chat.channel.files[0].att.as_ref().map(|x| x.file.clone()),
         Some(files[0].file.clone())
     );
     // a pasted screenshot arrives as PNG bytes
@@ -262,7 +271,7 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     let doc = temp_home("doc").join("plan.pdf");
     std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
     std::fs::write(&doc, b"%PDF").unwrap();
-    a.chat.files.clear();
+    a.chat.channel.files.clear();
     a.add_media(false, Some(doc), None);
     let files = until_ready(&mut a, false);
     assert_eq!(
@@ -279,14 +288,17 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     // a folder is refused, saying why
     let folder = temp_home("doc").join("Notes");
     std::fs::create_dir_all(&folder).unwrap();
-    a.chat.files.clear();
+    a.chat.channel.files.clear();
     a.add_media(false, Some(folder), None);
     let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while a.chat.files[0].error.is_none() && std::time::Instant::now() < end {
+    while a.chat.channel.files[0].error.is_none() && std::time::Instant::now() < end {
         a.files_tick(None);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert_eq!(a.chat.files[0].error.as_deref(), Some("Notes is a folder."));
+    assert_eq!(
+        a.chat.channel.files[0].error.as_deref(),
+        Some("Notes is a folder.")
+    );
 }
 
 #[test]
@@ -520,7 +532,10 @@ fn one_message_takes_at_most_ten_pictures() {
         .map(|_| a.add_media(false, Some(pic.clone()), None))
         .collect();
     assert_eq!(added.iter().filter(|x| **x).count(), 10);
-    assert_eq!(a.chat.files.len(), crate::app::files::MAX_PER_MESSAGE);
+    assert_eq!(
+        a.chat.channel.files.len(),
+        crate::app::files::MAX_PER_MESSAGE
+    );
     assert!(a
         .toast
         .as_ref()
@@ -528,9 +543,9 @@ fn one_message_takes_at_most_ten_pictures() {
     // the thread's box counts on its own
     assert!(a.add_media(true, Some(pic.clone()), None));
     // removing one makes room again
-    a.chat.files.pop();
+    a.chat.channel.files.pop();
     assert!(a.add_media(false, Some(pic), None));
-    assert_eq!(a.chat.files.len(), 10);
+    assert_eq!(a.chat.channel.files.len(), 10);
 }
 
 #[test]
@@ -584,11 +599,11 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
     );
     a.add_media(false, Some(test_picture("wait.png", 20, 20)), None);
     let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while a.chat.files[0].att.is_none() && std::time::Instant::now() < end {
+    while a.chat.channel.files[0].att.is_none() && std::time::Instant::now() < end {
         a.files_tick(None);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    let att = a.chat.files[0].att.clone().unwrap();
+    let att = a.chat.channel.files[0].att.clone().unwrap();
     assert_eq!(
         a.files.state(&att.file),
         Some(crate::app::files::Transfer::Failed(
@@ -808,13 +823,13 @@ fn sharing_brings_task_attachments_along_too() {
     let mut a = app();
     a.add_media(false, Some(test_picture("task.png", 16, 16)), None);
     let att = until_ready(&mut a, false).remove(0);
-    a.chat.files.clear();
+    a.chat.channel.files.clear();
     let tid = a.data.tasks[0].id;
     a.data.tasks[0].attachments.push(att.clone());
     // and one in a deleted message in the Trash
     a.add_media(false, Some(test_picture("trash.png", 18, 18)), None);
     let gone = until_ready(&mut a, false).remove(0);
-    a.chat.files.clear();
+    a.chat.channel.files.clear();
     a.data.extra.trash.push(TrashItem {
         id: 1,
         kind: "message".into(),

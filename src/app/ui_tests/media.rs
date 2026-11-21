@@ -25,6 +25,7 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     while !matches!(
         h.app
             .chat
+            .channel
             .files
             .first()
             .and_then(|p| p.transfer(&h.app.files)),
@@ -34,7 +35,8 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
         h.frame(vec![]);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    let Some(crate::app::files::Transfer::Failed(why)) = h.app.chat.files[0].transfer(&h.app.files)
+    let Some(crate::app::files::Transfer::Failed(why)) =
+        h.app.chat.channel.files[0].transfer(&h.app.files)
     else {
         panic!("the upload failed");
     };
@@ -118,7 +120,10 @@ fn drop_a_picture_send_it_and_open_it_large() {
         ),
         (600, 400, MediaKind::Image)
     );
-    assert!(h.app.chat.files.is_empty(), "the box is empty again");
+    assert!(
+        h.app.chat.channel.files.is_empty(),
+        "the box is empty again"
+    );
     assert!(!h.has("Attachment beach.png"));
     // it shows in the conversation; clicking opens it large, Esc closes
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -164,7 +169,7 @@ fn drop_a_picture_send_it_and_open_it_large() {
         h.frame(vec![]);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert_eq!(h.app.chat.files[0].error, None);
+    assert_eq!(h.app.chat.channel.files[0].error, None);
     h.settle();
     assert!(h.has("Attachment ui-notes.md"), "a tile in the message box");
     h.send_message("the plan");
@@ -216,7 +221,10 @@ fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
         ..Default::default()
     }];
     h.frame(vec![]);
-    assert!(h.app.chat.files.is_empty(), "not taken by the chat box");
+    assert!(
+        h.app.chat.channel.files.is_empty(),
+        "not taken by the chat box"
+    );
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while h.app.task(id).unwrap().attachments.is_empty() && std::time::Instant::now() < until {
         h.frame(vec![]);
@@ -377,9 +385,9 @@ fn v_released(cmd: bool) -> egui::Event {
 
 fn wait_for_tiles(h: &mut Ui1, n: usize) {
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !(h.app.chat.files.len() >= n
+    while !(h.app.chat.channel.files.len() >= n
         && h.app.pending_ready(false).0
-        && h.app.chat.files.iter().all(|p| !p.getting_ready()))
+        && h.app.chat.channel.files.iter().all(|p| !p.getting_ready()))
         && std::time::Instant::now() < until
     {
         h.frame(vec![]);
@@ -417,7 +425,7 @@ fn a_screenshot_pastes_into_the_message_box_without_clicking_it_first() {
     h.frame_held(vec![], egui::Modifiers::COMMAND);
     h.frame(vec![v_released(false)]);
     wait_for_tiles(&mut h, 1);
-    assert_eq!(h.app.chat.files.len(), 1, "pasted again");
+    assert_eq!(h.app.chat.channel.files.len(), 1, "pasted again");
 
     // typing a v is not a paste, even right after a Cmd shortcut
     h.click("Message composer");
@@ -434,7 +442,7 @@ fn a_screenshot_pastes_into_the_message_box_without_clicking_it_first() {
     ]);
     h.frame(vec![v_released(false)]);
     h.settle();
-    assert_eq!(h.app.chat.files.len(), 1, "no second picture");
+    assert_eq!(h.app.chat.channel.files.len(), 1, "no second picture");
 
     // pasting while another text field has the keyboard leaves the message box alone
     h.click("Search");
@@ -444,7 +452,7 @@ fn a_screenshot_pastes_into_the_message_box_without_clicking_it_first() {
     h.frame(vec![v_released(true)]);
     h.settle();
     assert_eq!(
-        h.app.chat.files.len(),
+        h.app.chat.channel.files.len(),
         1,
         "nothing added from the search box"
     );
@@ -631,8 +639,11 @@ fn files_dragged_over_an_open_thread_light_up_only_the_thread() {
         ..Default::default()
     }];
     h.frame(vec![]);
-    assert_eq!(h.app.chat.thread_files.len(), 1);
-    assert!(h.app.chat.files.is_empty(), "not in the channel's box");
+    assert_eq!(h.app.chat.thread.files.len(), 1);
+    assert!(
+        h.app.chat.channel.files.is_empty(),
+        "not in the channel's box"
+    );
     assert!(
         hint_x(&h, "Drop files to reply").is_empty(),
         "gone once dropped"
@@ -665,13 +676,16 @@ fn a_picture_still_getting_ready_follows_the_message_it_was_sent_with() {
     }];
     h.frame(vec![]);
     h.settle();
-    assert!(h.app.chat.files[0].getting_ready());
+    assert!(h.app.chat.channel.files[0].getting_ready());
     h.send_message("on its way");
     // the message goes at once, the box is empty, the picture shows as coming
     let m = last_message(&h, cid);
     assert_eq!(m.text, "on its way");
     assert!(m.attachments.is_empty());
-    assert!(h.app.chat.files.is_empty(), "the box is empty again");
+    assert!(
+        h.app.chat.channel.files.is_empty(),
+        "the box is empty again"
+    );
     h.settle();
     assert!(
         h.has("Sending slow.png"),
@@ -725,11 +739,14 @@ fn a_picture_alone_still_getting_ready_goes_once_it_is() {
     ];
     h.frame(vec![]);
     h.settle();
-    assert_eq!(h.app.chat.files.len(), 2);
+    assert_eq!(h.app.chat.channel.files.len(), 2);
     h.click("Message composer");
     h.key(egui::Key::Enter);
     // the box empties at once; an empty message never goes to the others
-    assert!(h.app.chat.files.is_empty(), "the box is empty again");
+    assert!(
+        h.app.chat.channel.files.is_empty(),
+        "the box is empty again"
+    );
     assert_eq!(count(&h), n, "nothing to show yet");
     h.app.files.hold_prepared = false;
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -768,7 +785,7 @@ fn a_picture_still_going_up_can_be_sent() {
     }];
     h.frame(vec![]);
     wait_for_tiles(&mut h, 1);
-    let att = h.app.chat.files[0].att.clone().unwrap();
+    let att = h.app.chat.channel.files[0].att.clone().unwrap();
     // halfway to the server
     h.app
         .files
@@ -779,7 +796,10 @@ fn a_picture_still_going_up_can_be_sent() {
     let m = last_message(&h, cid);
     assert_eq!(m.text, "big one");
     assert_eq!(m.attachments, vec![att]);
-    assert!(h.app.chat.files.is_empty(), "the box is empty again");
+    assert!(
+        h.app.chat.channel.files.is_empty(),
+        "the box is empty again"
+    );
     h.settle();
     assert!(h.has("Picture big.png"));
 }

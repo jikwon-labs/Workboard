@@ -229,10 +229,11 @@ impl App {
                 self.leave_thread();
                 self.drafts
                     .chat
+                    .text
                     .saved
                     .insert(item.channel, item.text.clone());
-                if self.drafts.chat.on == Some(item.channel) {
-                    self.chat.text = item.text;
+                if self.drafts.chat.text.on == Some(item.channel) {
+                    self.chat.channel.text = item.text;
                 }
                 return true;
             }
@@ -278,10 +279,10 @@ impl App {
             let b = ui.add_enabled(later, egui::Button::new(tr("Schedule")));
             name_it(&b, "Schedule");
             if b.clicked() {
-                let text = self.chat.text.clone();
-                let picked = std::mem::take(&mut self.chat.picked);
+                let text = self.chat.channel.text.clone();
+                let picked = std::mem::take(&mut self.chat.channel.picked);
                 if self.schedule_message(ch, None, &text, &picked, at) {
-                    self.chat.text.clear();
+                    self.chat.channel.text.clear();
                 }
                 close = true;
             }

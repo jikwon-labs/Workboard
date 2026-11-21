@@ -365,12 +365,28 @@ impl<T: Blank> DraftBox<T> {
 struct Drafts {
     /// The workspace file whose saved drafts were brought back.
     loaded_for: Option<String>,
-    chat: DraftBox,
-    thread: DraftBox,
-    chat_files: DraftBox<Vec<files::Pending>>,
-    thread_files: DraftBox<Vec<files::Pending>>,
-    chat_picked: DraftBox<Vec<u64>>,
-    thread_picked: DraftBox<Vec<u64>>,
+    /// The channels' message boxes, by channel id.
+    chat: ComposerDrafts,
+    /// The threads' reply boxes, by thread (message) id.
+    thread: ComposerDrafts,
+}
+
+/// What a message box keeps of each place it was used for: its text, the
+/// pictures waiting in it and the people picked from its @ list.
+#[derive(Default)]
+struct ComposerDrafts {
+    text: DraftBox,
+    files: DraftBox<Vec<files::Pending>>,
+    picked: DraftBox<Vec<u64>>,
+}
+
+impl ComposerDrafts {
+    /// `DraftBox::swap` for each part of the box.
+    fn swap(&mut self, now: Option<u64>, c: &mut Composer) {
+        self.text.swap(now, &mut c.text);
+        self.files.swap(now, &mut c.files);
+        self.picked.swap(now, &mut c.picked);
+    }
 }
 
 /// What a task's list says about it: whose private space it's in, whether
@@ -657,10 +673,12 @@ struct HeldMessage {
 #[derive(Default)]
 struct ChatUi {
     open: Option<u64>,
+    /// The open channel's message box (`open`).
+    channel: Composer,
+    /// The open thread's reply box (`thread_open`).
+    thread: Composer,
     /// "Also send to the channel" is ticked under the thread's reply box.
     also_channel: bool,
-    /// The message being written in the open channel (`open`).
-    text: String,
     /// A message to bring into sight in the open conversation on its next
     /// draw ("Open in channel" on a post), however far back it is.
     jump_to: Option<u64>,
@@ -679,13 +697,6 @@ struct ChatUi {
     delete: Option<u64>,
     /// A channel marked unread while open: it stays unread until left.
     keep_unread: Option<u64>,
-    /// Pictures and videos waiting in the channel and thread message boxes.
-    files: Vec<files::Pending>,
-    /// Attachments still being checked and copied when the channel's /
-    /// thread's box was sent: the message that goes out next takes them
-    /// into `following`.
-    coming: Vec<files::Pending>,
-    thread_coming: Vec<files::Pending>,
     /// Attachments a sent message waits for (conversation, the message and
     /// its "also sent to the channel" copy, the file): put on it once
     /// they're ready, shown as tiles on their way until then.
@@ -693,10 +704,6 @@ struct ChatUi {
     /// Messages of nothing but files not ready yet: they go out with the
     /// first that is (never empty to the others).
     held: Vec<HeldMessage>,
-    /// People picked from the @mention list in the channel's message box
-    /// (kept with its draft), so a name two people share means the one
-    /// picked.
-    picked: Vec<u64>,
     /// How many messages the open conversation draws after "Show earlier
     /// messages" (by conversation; `CHAT_PAGE` for any other).
     window: Option<(u64, usize)>,
@@ -714,19 +721,9 @@ struct ChatUi {
     /// the next one (drawn in the app's own window, as in the click tests,
     /// both would be the same reply box).
     thread_panel_pass: u64,
-    /// The reply being written in the open thread (`thread_open`).
-    thread_text: String,
     /// The reply box was just typed in (this frame), with words in it: the
     /// others in the thread are told.
     thread_typed: bool,
-    thread_files: Vec<files::Pending>,
-    /// The same for the open thread's reply box (kept with its draft).
-    thread_picked: Vec<u64>,
-    /// A message was just sent in the channel / the thread: its list goes
-    /// down to the newest message on the next frame, even when it had been
-    /// scrolled up.
-    to_bottom: bool,
-    thread_to_bottom: bool,
     /// Where I'd read up to in the open conversation: the red "New" line
     /// sits above this message (conversation, message) until I leave it.
     /// Set on opening it with unread messages, and when messages come in
@@ -746,6 +743,43 @@ struct ChatUi {
     /// it comes in: the sidebar, rail and Dock, drawn before it marks new
     /// messages read, don't count them for a frame.
     shown: bool,
+}
+
+/// A message box: the open channel's or the open thread's.
+#[derive(Default)]
+struct Composer {
+    /// What is being written.
+    text: String,
+    /// Pictures and videos waiting in the box.
+    files: Vec<files::Pending>,
+    /// Attachments still being checked and copied when the box was sent:
+    /// the message that goes out next takes them into `ChatUi::following`.
+    coming: Vec<files::Pending>,
+    /// People picked from the @mention list (kept with its draft), so a
+    /// name two people share means the one picked.
+    picked: Vec<u64>,
+    /// A message was just sent from the box: its list goes down to the
+    /// newest message on the next frame, even when it had been scrolled up.
+    to_bottom: bool,
+}
+
+impl ChatUi {
+    /// The thread's reply box, or the channel's message box.
+    fn composer(&self, thread: bool) -> &Composer {
+        if thread {
+            &self.thread
+        } else {
+            &self.channel
+        }
+    }
+
+    fn composer_mut(&mut self, thread: bool) -> &mut Composer {
+        if thread {
+            &mut self.thread
+        } else {
+            &mut self.channel
+        }
+    }
 }
 
 /// The Posts page: the post being written and the filters.
@@ -5308,22 +5342,12 @@ impl App {
     fn ui_frame_inner(&mut self, ctx: &egui::Context) {
         self.menu_was_open = any_menu_was_open(ctx);
         self.bring_back_drafts();
-        self.drafts.chat.swap(self.chat.open, &mut self.chat.text);
+        self.drafts
+            .chat
+            .swap(self.chat.open, &mut self.chat.channel);
         self.drafts
             .thread
-            .swap(self.chat.thread_open, &mut self.chat.thread_text);
-        self.drafts
-            .chat_files
-            .swap(self.chat.open, &mut self.chat.files);
-        self.drafts
-            .thread_files
-            .swap(self.chat.thread_open, &mut self.chat.thread_files);
-        self.drafts
-            .chat_picked
-            .swap(self.chat.open, &mut self.chat.picked);
-        self.drafts
-            .thread_picked
-            .swap(self.chat.thread_open, &mut self.chat.thread_picked);
+            .swap(self.chat.thread_open, &mut self.chat.thread);
         self.files_tick(Some(ctx));
         self.personal_list_defaults();
         self.sync_view_prefs();
@@ -5702,10 +5726,11 @@ impl App {
                 .map(|c| c.id)
         };
         let mut out = vec![];
-        let open = self.chat.open.map(|c| (c, &self.chat.text));
+        let open = self.chat.open.map(|c| (c, &self.chat.channel.text));
         for (ch, text) in self
             .drafts
             .chat
+            .text
             .saved
             .iter()
             .map(|(c, t)| (*c, t))
@@ -5719,10 +5744,11 @@ impl App {
                 });
             }
         }
-        let open = self.chat.thread_open.map(|c| (c, &self.chat.thread_text));
+        let open = self.chat.thread_open.map(|c| (c, &self.chat.thread.text));
         for (tid, text) in self
             .drafts
             .thread
+            .text
             .saved
             .iter()
             .map(|(c, t)| (*c, t))
@@ -5750,13 +5776,15 @@ impl App {
             // a box already showing its place takes it now, the rest when
             // their place opens (`DraftBox::swap`)
             match d.thread {
-                None if self.drafts.chat.on == Some(d.channel) => self.chat.text = d.text,
-                None => {
-                    self.drafts.chat.saved.insert(d.channel, d.text);
+                None if self.drafts.chat.text.on == Some(d.channel) => {
+                    self.chat.channel.text = d.text
                 }
-                Some(t) if self.drafts.thread.on == Some(t) => self.chat.thread_text = d.text,
+                None => {
+                    self.drafts.chat.text.saved.insert(d.channel, d.text);
+                }
+                Some(t) if self.drafts.thread.text.on == Some(t) => self.chat.thread.text = d.text,
                 Some(t) => {
-                    self.drafts.thread.saved.insert(t, d.text);
+                    self.drafts.thread.text.saved.insert(t, d.text);
                 }
             }
         }

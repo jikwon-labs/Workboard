@@ -1529,10 +1529,10 @@ impl App {
         }
         for (local, result) in self.files.take_prepared() {
             self.profile_photo_prepared(local, &result, &remote);
-            let boxes = [&mut self.chat.files, &mut self.chat.thread_files]
+            let boxes = [&mut self.chat.channel.files, &mut self.chat.thread.files]
                 .into_iter()
-                .chain(self.drafts.chat_files.saved.values_mut())
-                .chain(self.drafts.thread_files.saved.values_mut());
+                .chain(self.drafts.chat.files.saved.values_mut())
+                .chain(self.drafts.thread.files.saved.values_mut());
             for list in boxes {
                 if let Some(p) = list.iter_mut().find(|p| p.local == local) {
                     match &result {
@@ -1591,10 +1591,10 @@ impl App {
     /// The attachments in every message box (this one and the ones kept
     /// with other channels).
     fn boxed_attachments(&self) -> Vec<Attachment> {
-        let boxes = [&self.chat.files, &self.chat.thread_files]
+        let boxes = [&self.chat.channel.files, &self.chat.thread.files]
             .into_iter()
-            .chain(self.drafts.chat_files.saved.values())
-            .chain(self.drafts.thread_files.saved.values());
+            .chain(self.drafts.chat.files.saved.values())
+            .chain(self.drafts.thread.files.saved.values());
         boxes
             .flat_map(|l| l.iter().filter_map(|p| p.att.clone()))
             .chain(self.task_files.iter().filter_map(|(_, p)| p.att.clone()))
@@ -1712,11 +1712,7 @@ impl App {
                     // the box's own state stays as it is for what's written next
                     let also = std::mem::replace(&mut self.chat.also_channel, h.also_channel);
                     let coming = std::mem::replace(
-                        if h.parent.is_none() {
-                            &mut self.chat.coming
-                        } else {
-                            &mut self.chat.thread_coming
-                        },
+                        &mut self.chat.composer_mut(h.parent.is_some()).coming,
                         h.coming,
                     );
                     self.apply_chat(vec![super::chat::ChatAction::Send {
@@ -1726,11 +1722,7 @@ impl App {
                         files: vec![a.clone()],
                     }]);
                     self.chat.also_channel = also;
-                    if h.parent.is_none() {
-                        self.chat.coming = coming;
-                    } else {
-                        self.chat.thread_coming = coming;
-                    }
+                    self.chat.composer_mut(h.parent.is_some()).coming = coming;
                 }
                 Err(e) => {
                     self.toast(format!("{}: {}", p.name, App::error_text(e)));
@@ -1829,11 +1821,7 @@ impl App {
         path: Option<PathBuf>,
         png: Option<Vec<u8>>,
     ) -> bool {
-        let count = if thread {
-            self.chat.thread_files.len()
-        } else {
-            self.chat.files.len()
-        };
+        let count = self.chat.composer(thread).files.len();
         if count >= MAX_PER_MESSAGE {
             self.toast(trf!(
                 "You can send up to {} files in one message.",
@@ -1843,11 +1831,7 @@ impl App {
         }
         let remote = self.media_remote();
         let p = self.files.add(path, png, &remote);
-        if thread {
-            self.chat.thread_files.push(p);
-        } else {
-            self.chat.files.push(p);
-        }
+        self.chat.composer_mut(thread).files.push(p);
         true
     }
 
@@ -2014,11 +1998,7 @@ impl App {
     /// Attachments waiting in a message box, as small tiles with a remove
     /// button and how far the upload is.
     pub(super) fn pending_strip(&mut self, ui: &mut Ui, thread: bool) {
-        let list = if thread {
-            &self.chat.thread_files
-        } else {
-            &self.chat.files
-        };
+        let list = &self.chat.composer(thread).files;
         if list.is_empty() {
             return;
         }
@@ -2154,11 +2134,7 @@ impl App {
             self.files.upload(&a, &remote);
         }
         if let Some(l) = remove {
-            let list = if thread {
-                &mut self.chat.thread_files
-            } else {
-                &mut self.chat.files
-            };
+            let list = &mut self.chat.composer_mut(thread).files;
             let gone = list
                 .iter()
                 .find(|p| p.local == l)
@@ -2178,11 +2154,7 @@ impl App {
     /// Ones still being checked and copied don't hold it up: they follow
     /// the message (`pending_coming`).
     pub(super) fn pending_ready(&self, thread: bool) -> (bool, Vec<Attachment>) {
-        let list = if thread {
-            &self.chat.thread_files
-        } else {
-            &self.chat.files
-        };
+        let list = &self.chat.composer(thread).files;
         let ok = list
             .iter()
             .all(|p| p.sendable(&self.files) || p.getting_ready());
@@ -2199,11 +2171,7 @@ impl App {
     /// The attachments in a message box still being checked and copied:
     /// they're put on the message once they're ready.
     pub(super) fn pending_coming(&self, thread: bool) -> Vec<Pending> {
-        let list = if thread {
-            &self.chat.thread_files
-        } else {
-            &self.chat.files
-        };
+        let list = &self.chat.composer(thread).files;
         list.iter().filter(|p| p.getting_ready()).cloned().collect()
     }
 

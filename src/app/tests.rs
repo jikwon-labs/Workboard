@@ -1370,6 +1370,38 @@ fn form_answers_check_required_number_and_email() {
     assert!(form_answers(&f, &fill).unwrap_err().contains("Size"));
 }
 
+/// Answers that all go into the task description stay apart: a second
+/// Description question's answer starts its own paragraph, also after a
+/// "question: answer" line.
+#[test]
+fn form_answers_keep_each_description_apart() {
+    use super::more::form_answers;
+    let q = |label: &str, map: &str| FormField {
+        label: label.into(),
+        map: map.into(),
+        ..Default::default()
+    };
+    let f = Form {
+        id: 1,
+        name: "Intake".into(),
+        fields: vec![
+            q("Goal", "description"),
+            q("Team", "text"),
+            q("Notes", "description"),
+            q("More", "description"),
+        ],
+        ..Default::default()
+    };
+    let fill: HashMap<usize, String> = [(0, "Ship it"), (1, "Web"), (2, "Soon"), (3, "Later")]
+        .into_iter()
+        .map(|(i, v)| (i, v.to_string()))
+        .collect();
+    assert_eq!(
+        form_answers(&f, &fill).unwrap().description,
+        "Ship it\nTeam: Web\n\nSoon\n\nLater"
+    );
+}
+
 #[test]
 fn notepad_lines() {
     use super::menus::notepad_line;

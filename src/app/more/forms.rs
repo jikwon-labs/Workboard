@@ -146,7 +146,13 @@ fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (u
         }
         match fld.map.as_str() {
             "name" => a.name = v,
-            "description" => a.description.push_str(&v),
+            "description" => {
+                // a second one starts its own paragraph
+                if !a.description.is_empty() {
+                    a.description.push_str("\n\n");
+                }
+                a.description.push_str(&v)
+            }
             "priority" => {
                 a.priority = PRIORITIES.iter().position(|p| p.label == v).unwrap_or(0) as u8
             }

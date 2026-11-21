@@ -24,6 +24,9 @@ public struct StickyView: Identifiable, Hashable, Sendable {
     public let pos: [Double]
     public let text: String
     public let color: [Int]
+    /// Width and height on the board: as resized on the Mac (Sticky::wh), or
+    /// `WhiteboardView.noteSize` for a note never resized.
+    public let size: [Double]
 
     init(_ j: JSON) {
         id = j["id"]?.uint ?? 0
@@ -31,6 +34,8 @@ public struct StickyView: Identifiable, Hashable, Sendable {
         pos = p.count == 2 ? p : [0, 0]
         text = j["text"]?.string ?? ""
         color = (j["color"]?.array ?? []).compactMap { $0.int.map(Int.init) }
+        let s = (j["size"]?.array ?? []).compactMap(\.double)
+        size = s.count == 2 && s[0] > 0 && s[1] > 0 ? s : [WhiteboardView.noteSize.w, WhiteboardView.noteSize.h]
     }
 }
 

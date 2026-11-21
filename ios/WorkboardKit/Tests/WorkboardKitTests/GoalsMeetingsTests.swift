@@ -226,6 +226,20 @@ final class WhiteboardTests: XCTestCase {
         XCTAssertNil(board(d)["shapes"]?.array?.first, "\(board(d))")
         XCTAssertNil(board(d)["lines"]?.array?.first)
     }
+
+    func testANoteResizedOnTheMacKeepsItsSize() {
+        var d = boardWithShapes()
+        var bs = d.at("extra.whiteboards")!.array!
+        var notes = bs[0]["notes"]!.array!
+        notes[0]["size"] = [.double(300), .double(200)]
+        notes.append(["id": .id(601), "pos": [.double(0), .double(0)], "text": "", "color": [.int(8), .int(128), .int(234)],
+                      "size": [.double(0), .double(0)]])
+        bs[0]["notes"] = .array(notes)
+        d.set("extra.whiteboards", .array(bs))
+        let ns = WorkspaceView(d).whiteboards(d)[0].notes
+        XCTAssertEqual(ns[0].size, [300, 200])
+        XCTAssertEqual(ns[1].size, [160, 120], "0, 0 is a note never resized")
+    }
 }
 
 final class TemplateTests: XCTestCase {

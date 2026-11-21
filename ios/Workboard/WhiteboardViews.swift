@@ -72,7 +72,7 @@ struct WhiteboardCanvas: View {
                         Text(n.text.isEmpty ? " " : n.text)
                             .font(.callout)
                             .padding(10)
-                            .frame(width: WhiteboardView.noteSize.w, height: WhiteboardView.noteSize.h, alignment: .topLeading)
+                            .frame(width: n.size[0], height: n.size[1], alignment: .topLeading)
                             .background(RoundedRectangle(cornerRadius: 4).fill(Color(rgb: n.color).opacity(0.85)))
                             .offset(x: n.pos[0] + offset.width + (dragging?.id == n.id ? 0 : 0), y: n.pos[1] + offset.height)
                             .onTapGesture { if tool != .move { noteText = n.text; editing = n } }
@@ -151,7 +151,7 @@ struct WhiteboardCanvas: View {
                     // a note under the finger moves; otherwise the board does
                     let start = board(g.startLocation)
                     if dragging == nil, panStart == nil {
-                        if let n = b?.notes.last(where: { start[0] >= $0.pos[0] && start[0] <= $0.pos[0] + WhiteboardView.noteSize.w && start[1] >= $0.pos[1] && start[1] <= $0.pos[1] + WhiteboardView.noteSize.h }) {
+                        if let n = b?.notes.last(where: { start[0] >= $0.pos[0] && start[0] <= $0.pos[0] + $0.size[0] && start[1] >= $0.pos[1] && start[1] <= $0.pos[1] + $0.size[1] }) {
                             dragging = (n.id, n.pos)
                         } else {
                             panStart = offset

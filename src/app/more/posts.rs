@@ -558,6 +558,16 @@ impl App {
                                             self.link_pending = Some(link);
                                         }
                                     }
+                                    // its pictures and files, as in the channel
+                                    if let Some(index) = self.attachment_tiles(ui, &m) {
+                                        self.apply_chat(vec![
+                                            crate::app::chat::ChatAction::OpenMedia {
+                                                ch: cid,
+                                                msg: m.id,
+                                                index,
+                                            },
+                                        ]);
+                                    }
                                 });
                             });
                     });

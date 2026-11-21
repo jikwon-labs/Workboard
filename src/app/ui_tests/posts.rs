@@ -787,3 +787,37 @@ fn a_post_starts_the_channels_workflows() {
         format!("{me} posted: Another outage")
     );
 }
+
+/// A post sent with pictures (from a channel's Post box) shows them on its
+/// card, as in the channel, and a click opens one large. The card used to
+/// show only the title, so a post of pictures alone looked empty.
+#[test]
+fn a_post_card_shows_its_pictures_and_opens_them() {
+    let mut h = posts_page();
+    let gen = channel_id(&h, "general");
+    add_post(&mut h, gen, 2, "Update", "", "Announcement", 60);
+    let c = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == gen)
+        .unwrap();
+    c.messages.last_mut().unwrap().attachments.push(Attachment {
+        file: "0".repeat(64),
+        name: "beach.jpg".into(),
+        kind: MediaKind::Image,
+        bytes: 1000,
+        w: 800,
+        h: 600,
+        secs: 0.0,
+        thumb: None,
+    });
+    h.settle();
+    assert!(h.has("Picture beach.jpg"), "the picture is on the card");
+    h.click("Picture beach.jpg");
+    assert!(h.app.viewer.is_some(), "and opens large");
+    h.key(egui::Key::Escape);
+    assert!(h.app.viewer.is_none());
+    assert_eq!(h.app.section, Section::Posts, "still on the Posts page");
+}

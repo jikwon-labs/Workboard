@@ -46,6 +46,15 @@ pub(crate) use whiteboard::GUIDE as WB_GUIDE;
 #[cfg(test)]
 pub use whiteboard::{WB_COLORS, WB_ORIGIN};
 
+/// A destructive button on an app page waiting for "Yes".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Confirm {
+    /// Empty trash, in the Trash dialog.
+    EmptyTrash,
+    /// Clear board, in this whiteboard's menu.
+    WbClear(u64),
+}
+
 /// Screen state of the app pages (not saved).
 #[derive(Default)]
 pub struct SweepUi {
@@ -61,8 +70,8 @@ pub struct SweepUi {
     pub search_q: String,
     /// Searches run with Enter, newest first.
     pub search_recent: Vec<String>,
-    /// A destructive button waiting for "Yes" (e.g. "wb_clear", "goal").
-    pub confirm: Option<String>,
+    /// A destructive button waiting for "Yes".
+    pub confirm: Option<Confirm>,
     /// The whiteboard pages.
     pub wb: WhiteboardUi,
     /// The form `form_fill` holds answers for.

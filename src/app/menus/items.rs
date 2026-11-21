@@ -334,7 +334,7 @@ impl App {
             ui.label(RichText::new(tr("Trash is empty.")).color(t.text3));
         } else {
             ui.horizontal(|ui| {
-                if self.sweep.confirm.as_deref() == Some("empty_trash") {
+                if self.sweep.confirm == Some(crate::app::more::Confirm::EmptyTrash) {
                     ui.label(
                         RichText::new(trf!(
                             "Delete all {} items for good?",
@@ -356,7 +356,7 @@ impl App {
                     ))
                     .clicked()
                 {
-                    self.sweep.confirm = Some("empty_trash".into());
+                    self.sweep.confirm = Some(crate::app::more::Confirm::EmptyTrash);
                 }
             });
             ui.add_space(4.0);

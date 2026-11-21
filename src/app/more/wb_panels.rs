@@ -301,19 +301,16 @@ impl App {
                 line_icon(p, "dots", c, fg);
             },
         );
-        let clear_key = format!("wb_clear:{}", wid);
-        if menu.clicked() && self.sweep.confirm.as_deref() == Some(clear_key.as_str()) {
+        if menu.clicked() && self.sweep.confirm == Some(Confirm::WbClear(wid)) {
             self.sweep.confirm = None;
         }
-        popup(ui, &menu, pop, 230.0, |ui| {
-            self.wb_menu(ui, t, wid, &clear_key)
-        });
+        popup(ui, &menu, pop, 230.0, |ui| self.wb_menu(ui, t, wid));
     }
 
     /// The board menu: the view and the two things that take the board away,
     /// kept here instead of beside the zoom buttons. Clearing asks first.
-    fn wb_menu(&mut self, ui: &mut Ui, t: &Theme, wid: u64, clear_key: &str) {
-        if self.sweep.confirm.as_deref() == Some(clear_key) {
+    fn wb_menu(&mut self, ui: &mut Ui, t: &Theme, wid: u64) {
+        if self.sweep.confirm == Some(Confirm::WbClear(wid)) {
             // wide enough for the words on one line in English too
             ui.set_min_width(250.0);
             // room inside the menu's thin edge, like a dialog's
@@ -392,7 +389,7 @@ impl App {
         })
         .clicked()
         {
-            self.sweep.confirm = Some(clear_key.to_string());
+            self.sweep.confirm = Some(Confirm::WbClear(wid));
         }
         ui.separator();
         if danger_row(ui, t, "Delete whiteboard", tr("Delete whiteboard"), "trash").clicked() {

@@ -270,7 +270,7 @@ fn form_list_picker_marks_an_archived_list_already_picked() {
     let mut h = Ui1::new();
     let web = list_id(&h, "Website Redesign");
     h.app.new_form();
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     h.app
         .data
         .extra

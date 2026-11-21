@@ -39,7 +39,7 @@ fn a_new_form_is_listed_at_once() {
     let mut h = Ui1::new();
     open_forms(&mut h);
     h.click("New form");
-    let fid = h.app.form_open.expect("the new form opens");
+    let fid = h.app.form.open.expect("the new form opens");
     let name = form(&h, fid).name;
     assert!(
         h.has(&format!("Open form {}", name)),
@@ -48,13 +48,13 @@ fn a_new_form_is_listed_at_once() {
     assert!(h.app.toast.as_ref().is_some_and(|(m, _)| m.contains(&name)));
     assert!(form(&h, fid).updated > 0);
     h.click("Back to all forms");
-    assert!(h.app.form_open.is_none());
+    assert!(h.app.form.open.is_none());
     assert!(h.has(&format!("Form {}", name)), "and the table");
     assert!(!h.painted_text("Just made").is_empty());
     // a row opens its form; its Fill out opens that tab
     h.click(&format!("Fill out {}", name));
-    assert_eq!(h.app.form_open, Some(fid));
-    assert_eq!(h.app.form_tab, FormTab::Fill);
+    assert_eq!(h.app.form.open, Some(fid));
+    assert_eq!(h.app.form.tab, FormTab::Fill);
 }
 
 /// All / My / Favorites narrow the table, and the sidebar's search narrows
@@ -83,7 +83,7 @@ fn form_filters_and_search() {
         .find(|f| f.id == it)
         .unwrap()
         .owner = other;
-    h.app.form_open = None;
+    h.app.form.open = None;
     h.settle();
     assert!(h.has("Form Feedback Form") && h.has("Form IT Requests"));
     h.click("My forms");
@@ -109,7 +109,7 @@ fn template_and_icon_picker() {
     let mut h = Ui1::new();
     open_forms(&mut h);
     h.click("IT Requests");
-    let fid = h.app.form_open.expect("the form opens");
+    let fid = h.app.form.open.expect("the form opens");
     let f = form(&h, fid);
     assert_eq!((f.icon.as_str(), f.color.as_str()), ("settings", "blue"));
     assert_eq!(f.fields.len(), 3);
@@ -123,7 +123,7 @@ fn template_and_icon_picker() {
     h.click("Change icon IT Requests");
     h.click("Icon bolt");
     assert_eq!(form(&h, fid).icon, "bolt");
-    assert_eq!(h.app.form_open, None, "the tile doesn't open the form");
+    assert_eq!(h.app.form.open, None, "the tile doesn't open the form");
 }
 
 /// Add question offers every kind but those a form has one of when one is
@@ -133,7 +133,7 @@ fn question_kinds_from_the_menus() {
     let mut h = Ui1::new();
     h.app.new_form();
     h.settle();
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     h.click("Add question");
     assert!(
         !h.painted_text("In use").is_empty(),
@@ -155,7 +155,7 @@ fn dropdown_choices_are_typed_in() {
     let mut h = Ui1::new();
     h.app.new_form();
     h.settle();
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     h.click("Question 2 kind");
     h.click("Kind Dropdown");
     h.click("Add choice 2");
@@ -178,7 +178,7 @@ fn questions_drag_copy_and_delete() {
     let mut h = Ui1::new();
     h.app.new_form();
     h.settle();
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     h.drag("Drag question 2", "Drag question 1");
     assert_eq!(form(&h, fid).fields[0].label, "Details");
     h.click("Question 2 menu");
@@ -203,7 +203,7 @@ fn fill_out_and_see_the_answers() {
     let mut h = Ui1::new();
     open_forms(&mut h);
     h.click("IT Requests");
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     h.click("Required 1");
     h.click("Fill out");
     let n = h.app.data.tasks.len();
@@ -246,7 +246,7 @@ fn a_form_without_a_list_gets_one() {
     let mut h = Ui1::new();
     open_forms(&mut h);
     h.app.new_form();
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     let name = form(&h, fid).name;
     h.app
         .data
@@ -256,10 +256,10 @@ fn a_form_without_a_list_gets_one() {
         .find(|f| f.id == fid)
         .unwrap()
         .list_id = 0;
-    h.app.form_open = None;
+    h.app.form.open = None;
     h.settle();
     h.click(&format!("Choose a List for {}", name));
-    assert_eq!(h.app.form_open, Some(fid));
+    assert_eq!(h.app.form.open, Some(fid));
     let (list, path) = h.app.all_list_paths()[0].clone();
     h.click("Pick the List for new tasks");
     h.click(&path);
@@ -325,7 +325,7 @@ fn blank_form(h: &mut Ui1) -> u64 {
     h.app.new_form();
     h.settle();
     h.hover(pos2(700.0, 450.0));
-    h.app.form_open.expect("the new form opens")
+    h.app.form.open.expect("the new form opens")
 }
 
 /// Answers typed on Fill out stay with their question when the questions
@@ -410,8 +410,8 @@ fn answers_stay_put_when_a_question_is_renamed_like_another() {
     h.type_text("Details");
     assert_eq!(form(&h, fid).fields[0].label, "Details");
     h.click("Fill out");
-    assert_eq!(h.app.form_fill.get(&0).map(String::as_str), Some("555"));
-    assert_eq!(h.app.form_fill.get(&1).map(String::as_str), Some("hello"));
+    assert_eq!(h.app.form.fill.get(&0).map(String::as_str), Some("555"));
+    assert_eq!(h.app.form.fill.get(&1).map(String::as_str), Some("hello"));
 }
 
 /// A question's kind changed on Edit drops what was typed for it (a
@@ -469,7 +469,7 @@ fn a_removed_choice_is_no_longer_the_answer() {
     h.type_text("Paint the wall");
     h.click("Answer 2");
     h.click("Choice Blue");
-    assert_eq!(h.app.form_fill.get(&1).map(String::as_str), Some("Blue"));
+    assert_eq!(h.app.form.fill.get(&1).map(String::as_str), Some("Blue"));
     h.click("Edit");
     h.click("Remove choice Blue");
     assert_eq!(form(&h, fid).fields[1].options, ["Red"]);
@@ -634,7 +634,7 @@ fn forms_go_between_teammates_through_a_server() {
     // the owner makes a form; the teammate finds it in the sidebar
     open_forms(&mut a);
     a.click("IT Requests");
-    let fid = a.app.form_open.unwrap();
+    let fid = a.app.form.open.unwrap();
     a.app.notify_scan(); // (the first look only remembers what is there)
     send(&mut a);
     receive(&mut b, "the form at B", |x| {
@@ -642,7 +642,7 @@ fn forms_go_between_teammates_through_a_server() {
     });
     open_forms(&mut b);
     b.click("Open form IT Requests");
-    assert_eq!(b.app.form_open, Some(fid));
+    assert_eq!(b.app.form.open, Some(fid));
 
     // the teammate answers; the owner sees the answer and is told
     b.click("Fill out");
@@ -712,7 +712,7 @@ fn forms_go_between_teammates_through_a_server() {
     receive(&mut b, "the delete at B", |x| {
         x.data.extra.forms.iter().all(|f| f.id != fid)
     });
-    assert_eq!(b.app.form_open, None, "back to the list");
+    assert_eq!(b.app.form.open, None, "back to the list");
     assert!(!b.has("Open form Help desk"));
     assert!(
         b.app.data.tasks.iter().any(|t| t.name == "Printer jams"),
@@ -723,7 +723,7 @@ fn forms_go_between_teammates_through_a_server() {
     a.app.create_personal_list();
     a.settle();
     a.click("New form");
-    let private = a.app.form_open.unwrap();
+    let private = a.app.form.open.unwrap();
     a.click("Pick the List for new tasks");
     a.click("Personal / Personal List");
     send(&mut a);
@@ -786,8 +786,8 @@ fn a_form_from_the_search_opens_on_edit() {
     h.click("Search");
     h.type_text("Feedback");
     h.click("Feedback Form");
-    assert_eq!(h.app.form_open, Some(form_named(&h, "Feedback Form")));
-    assert_eq!(h.app.form_tab, FormTab::Edit);
+    assert_eq!(h.app.form.open, Some(form_named(&h, "Feedback Form")));
+    assert_eq!(h.app.form.tab, FormTab::Edit);
 }
 
 /// In the smallest window, with a long form name, the header's tabs stay
@@ -799,7 +799,7 @@ fn a_long_form_name_leaves_the_tabs_room_in_a_small_window() {
         let mut h = Ui1::sized(900.0, 560.0);
         crate::i18n::set_lang(lang);
         h.app.new_form_from(Some(4));
-        let fid = h.app.form_open.unwrap();
+        let fid = h.app.form.open.unwrap();
         h.app.data.extra.forms[0].name =
             "A very long form name that goes on and on for quite a while".into();
         h.settle();
@@ -828,7 +828,7 @@ fn the_editor_fits_the_smallest_window() {
     h.app.new_form_from(Some(4));
     h.settle();
     h.hover(pos2(600.0, 300.0));
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     let hint = h.painted_text("Saved as the priority: Urgent, High, Normal or Low");
     let req = h.rect("Required 2");
     assert!(
@@ -860,7 +860,7 @@ fn a_form_made_from_a_spaces_plus_goes_to_that_space() {
     assert_ne!(h.app.current_space(), Some(side), "somewhere else now");
     h.click("Create in Side Projects");
     h.click("Form");
-    let fid = h.app.form_open.expect("the form opens");
+    let fid = h.app.form.open.expect("the form opens");
     assert_eq!(h.app.section, Section::Forms);
     assert_eq!(
         h.app
@@ -881,7 +881,7 @@ fn a_form_made_from_a_spaces_plus_goes_to_that_space() {
     h.settle();
     h.click("Create in Team Space");
     h.click("Form");
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     assert_eq!(form(&h, fid).list_id, marketing);
     // a space with no List yet: the form asks for one
     h.app.data.spaces.push(Space {
@@ -893,7 +893,7 @@ fn a_form_made_from_a_spaces_plus_goes_to_that_space() {
     h.click("Rail Home");
     h.click("Create in Empty space");
     h.click("Form");
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     assert_eq!(form(&h, fid).list_id, 0);
 }
 
@@ -971,7 +971,7 @@ fn every_kind_of_answer_lands_on_the_task() {
         t.description,
         "For the design desk\nShort text: 27 inch\nDropdown: Large\nNumber: 2\nEmail: desk@team.io\nCheckbox: Yes"
     );
-    assert!(h.app.form_fill.values().all(|v| v.is_empty()), "emptied");
+    assert!(h.app.form.fill.values().all(|v| v.is_empty()), "emptied");
     assert!(h
         .app
         .toast
@@ -990,7 +990,7 @@ fn the_forms_table_sorts_by_last_edited_or_name() {
         ("Job Application", 200),
     ] {
         h.click(tpl);
-        let id = h.app.form_open.unwrap();
+        let id = h.app.form.open.unwrap();
         h.app
             .data
             .extra
@@ -1035,7 +1035,7 @@ fn a_deleted_form_comes_back_from_trash_as_it_was() {
     let mut h = Ui1::new();
     open_forms(&mut h);
     h.click("Job Application");
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     h.click("Change icon");
     h.click("Color green");
     h.key(egui::Key::Escape);
@@ -1051,7 +1051,7 @@ fn a_deleted_form_comes_back_from_trash_as_it_was() {
         .is_empty());
     confirm_delete(&mut h);
     assert!(h.app.data.extra.forms.iter().all(|f| f.id != fid));
-    assert_eq!(h.app.form_open, None);
+    assert_eq!(h.app.form.open, None);
     assert!(!h.has("Open form Job Application"));
     task_named(&h, "Kim Bora");
     h.app.modal = Some(Modal::Trash);
@@ -1136,7 +1136,7 @@ fn the_forms_search_takes_korean_case_and_spaces() {
     open_forms(&mut h);
     h.app.new_form_from(Some(0));
     h.app.new_form_from(Some(4));
-    h.app.form_open = None;
+    h.app.form.open = None;
     h.settle();
     h.click("Find a form");
     h.frame(vec![
@@ -1189,7 +1189,7 @@ fn older_answers_stay_with_a_renamed_form() {
     let mut h = Ui1::new();
     open_forms(&mut h);
     h.click("IT Requests");
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     let list = form(&h, fid).list_id;
     old_app_answer(&mut h, list, "IT Requests", "Printer offline");
     h.click("Answers");
@@ -1206,14 +1206,14 @@ fn older_answers_stay_with_a_renamed_form() {
     old_app_answer(&mut h, list, "Help desk", "Scanner jam");
     h.click("Back to all forms");
     h.click("IT Requests");
-    let twin = h.app.form_open.unwrap();
+    let twin = h.app.form.open.unwrap();
     assert_ne!(twin, fid);
     h.click("Form name");
     h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
     h.type_text("Help desk");
     h.click("Answers");
     assert!(!h.has("Answer task Scanner jam"), "the twin didn't take it");
-    h.app.form_open = Some(fid);
+    h.app.form.open = Some(fid);
     h.settle();
     assert!(h.has("Answer task Scanner jam"));
     assert!(h.has("Answer task Printer offline"));
@@ -1247,8 +1247,8 @@ fn older_answers_to_same_named_forms_are_told_apart_by_list() {
         (ids[0], "Loved the demo", "More dark mode"),
         (ids[1], "More dark mode", "Loved the demo"),
     ] {
-        h.app.form_open = Some(id);
-        h.app.form_tab = FormTab::Answers;
+        h.app.form.open = Some(id);
+        h.app.form.tab = FormTab::Answers;
         h.settle();
         assert!(h.has(&format!("Answer task {}", mine)));
         assert!(!h.has(&format!("Answer task {}", other)));
@@ -1318,8 +1318,8 @@ fn a_restored_form_gets_back_its_older_answers_beside_a_namesake() {
         (ids[0], "Printer offline", "Idea box broken"),
         (ids[1], "Idea box broken", "Printer offline"),
     ] {
-        h.app.form_open = Some(id);
-        h.app.form_tab = FormTab::Answers;
+        h.app.form.open = Some(id);
+        h.app.form.tab = FormTab::Answers;
         h.settle();
         assert!(h.has(&format!("Answer task {}", mine)));
         assert!(!h.has(&format!("Answer task {}", other)));
@@ -1333,7 +1333,7 @@ fn a_restored_form_gets_back_its_older_answers_beside_a_namesake() {
 fn the_header_fits_beside_the_widest_sidebar() {
     let mut h = Ui1::sized(900.0, 560.0);
     h.app.new_form_from(Some(4));
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     h.app.data.extra.forms[0].name = "A long form name that goes on".into();
     h.settle();
     let edge = h.rect("Close sidebar").right() + 9.0;
@@ -1349,7 +1349,7 @@ fn the_header_fits_beside_the_widest_sidebar() {
     h.click(&format!("Star form:{}", fid));
     assert!(h.app.data.extra.starred.contains(&format!("form:{}", fid)));
     h.click("Fill out");
-    assert_eq!(h.app.form_tab, FormTab::Fill);
+    assert_eq!(h.app.form.tab, FormTab::Fill);
 }
 
 /// An Assignee question offers the people on the team, not someone only
@@ -1413,7 +1413,7 @@ fn will_be_created_chips_wrap_whole() {
     let mut h = Ui1::new();
     open_forms(&mut h);
     h.click("Feedback Form");
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     let qs: Vec<String> = form(&h, fid)
         .fields
         .iter()
@@ -1439,7 +1439,7 @@ fn long_choices_wrap_inside_the_window() {
     let mut h = Ui1::sized(900.0, 560.0);
     h.app.new_form();
     h.settle();
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     h.click("Question 2 kind");
     h.click("Kind Dropdown");
     h.click("Add choice 2");

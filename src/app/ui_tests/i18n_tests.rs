@@ -421,7 +421,7 @@ pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             name.into(),
             Box::new(move |a: &mut App| {
                 a.new_form();
-                a.form_tab = tab;
+                a.form.tab = tab;
             }),
         ));
     }
@@ -429,7 +429,7 @@ pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
         "forms table".into(),
         Box::new(move |a: &mut App| {
             a.new_form();
-            a.form_open = None;
+            a.form.open = None;
         }),
     ));
     v.push((

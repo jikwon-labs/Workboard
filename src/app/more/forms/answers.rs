@@ -124,7 +124,7 @@ impl App {
                     )
                     .clicked()
                     {
-                        self.form_tab = FormTab::Fill;
+                        self.form.tab = FormTab::Fill;
                     }
                 });
             });

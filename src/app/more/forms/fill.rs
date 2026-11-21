@@ -134,7 +134,7 @@ impl App {
                         );
                         name_it(&clear, "Clear answers");
                         if clear.clicked() {
-                            self.form_fill.clear();
+                            self.form.fill.clear();
                             self.sweep.form_error = None;
                             self.sweep.forms.error_at = None;
                         }
@@ -171,7 +171,7 @@ impl App {
             }
         });
         let name = format!("Answer {}", i + 1);
-        let v = self.form_fill.entry(i).or_default();
+        let v = self.form.fill.entry(i).or_default();
         let w = ui.available_width();
         ui.scope(|ui| {
             if bad {
@@ -370,7 +370,7 @@ impl App {
     /// Submit: checks the answers, then makes the task in the form's List,
     /// or says what stopped it.
     fn form_submit(&mut self, f: &Form) {
-        match form_check(f, &self.form_fill) {
+        match form_check(f, &self.form.fill) {
             Err((i, e)) => {
                 self.sweep.form_error = Some(e);
                 self.sweep.forms.error_at = Some(i);
@@ -382,7 +382,7 @@ impl App {
                 ));
                 self.sweep.form_error = None;
                 self.sweep.forms.error_at = None;
-                self.form_tab = FormTab::Edit;
+                self.form.tab = FormTab::Edit;
             }
             Ok(a) => {
                 // in the language of the person submitting, like a new task's name
@@ -405,7 +405,7 @@ impl App {
                 // tells the form's owner (notify.rs); shared history, so in English
                 self.pending.log = Some(format!("submitted the form {}", f.name));
                 self.pending.form = Some(f.id);
-                self.form_fill.clear();
+                self.form.fill.clear();
                 self.sweep.form_error = None;
                 self.sweep.forms.error_at = None;
                 self.toast(trf!(

@@ -82,7 +82,7 @@ fn click_form_template_and_submit() {
     h.click("Rail More");
     h.click("Forms");
     h.click("IT Requests");
-    let fid = h.app.form_open.expect("form opens");
+    let fid = h.app.form.open.expect("form opens");
     assert_eq!(
         h.app
             .data
@@ -1111,7 +1111,7 @@ fn form_questions_reorder_require_and_block_bad_submit() {
     let mut h = Ui1::new();
     h.app.new_form();
     h.settle();
-    let fid = h.app.form_open.unwrap();
+    let fid = h.app.form.open.unwrap();
     let form = |h: &Ui1| {
         h.app
             .data
@@ -1127,7 +1127,7 @@ fn form_questions_reorder_require_and_block_bad_submit() {
     assert_eq!(form(&h).fields[0].label, "Details");
     h.click("Required 1");
     assert!(form(&h).fields[0].required);
-    h.app.form_tab = super::more::FormTab::Fill;
+    h.app.form.tab = super::more::FormTab::Fill;
     h.settle();
     let n = h.app.data.tasks.len();
     h.click("Submit");
@@ -1148,10 +1148,10 @@ fn form_questions_reorder_require_and_block_bad_submit() {
     h.click("Submit");
     assert_eq!(h.app.data.tasks.len(), n + 1);
     // answers don't follow you to another form
-    h.app.form_fill.insert(0, "left over".into());
+    h.app.form.fill.insert(0, "left over".into());
     h.app.new_form();
     h.settle();
-    assert!(!h.app.form_fill.values().any(|v| v == "left over"));
+    assert!(!h.app.form.fill.values().any(|v| v == "left over"));
 }
 
 #[test]

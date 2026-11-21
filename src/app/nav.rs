@@ -540,7 +540,7 @@ impl App {
             Section::Chat => self.chat.open,
             Section::Docs => self.doc_open,
             Section::Whiteboards => self.sweep.wb.open,
-            Section::Forms => self.form_open,
+            Section::Forms => self.form.open,
             Section::Dashboards => self.dash_open,
             _ => None,
         };
@@ -598,7 +598,7 @@ impl App {
             }
             Section::Docs => self.doc_open = s.item,
             Section::Whiteboards => self.sweep.wb.open = s.item,
-            Section::Forms => self.form_open = s.item,
+            Section::Forms => self.form.open = s.item,
             Section::Dashboards => self.dash_open = s.item,
             _ => {}
         }

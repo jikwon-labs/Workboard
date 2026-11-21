@@ -1556,7 +1556,7 @@ fn small_window_docs_list_headers_and_form_footer_fit() {
     let over = overlapping(&h.texts_in(page, Seen::Visible));
     assert!(over.is_empty(), "Docs: {:?}", over);
     h.app.new_form();
-    h.app.form_tab = crate::app::more::FormTab::Fill;
+    h.app.form.tab = crate::app::more::FormTab::Fill;
     h.app.toast = None;
     h.settle();
     // the footer is at the bottom of the form: scroll there

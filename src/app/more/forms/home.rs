@@ -22,7 +22,7 @@ impl App {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
             .show_inside(ui, |ui| {
-                if self.form_open.is_some() {
+                if self.form.open.is_some() {
                     self.form_detail(ui);
                 } else {
                     self.forms_home(ui);
@@ -106,10 +106,10 @@ impl App {
                 ),
             })
             .collect();
-            let sel = app.form_open.is_none().then_some(app.hub.forms.key());
+            let sel = app.form.open.is_none().then_some(app.hub.forms.key());
             if let Some(i) = app.side_filters(ui, &filters, sel) {
                 app.hub.forms = OwnFilter::from_key(i);
-                app.form_open = None;
+                app.form.open = None;
             }
             side_rule(ui, &t);
             if side_heading(ui, &t, tr("Forms"), Some(("Add a form", tr("New form")))) {
@@ -145,7 +145,7 @@ impl App {
         let (r, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
         let title = form_title(f);
         name_it(&resp, &format!("Open form {}", title));
-        let open = self.form_open == Some(f.id);
+        let open = self.form.open == Some(f.id);
         if open {
             ui.painter().rect_filled(r, 7.0, t.row_selected);
         } else if resp.hovered() {

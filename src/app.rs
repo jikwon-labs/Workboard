@@ -532,10 +532,6 @@ pub struct App {
     ws_places: HashMap<String, &'static str>,
     create_text: String,
     new_message_open: bool,
-    form_open: Option<u64>,
-    form_fill: HashMap<usize, String>,
-    /// The open form's tab: Edit, Fill out or Answers.
-    form_tab: more::FormTab,
     dash_open: Option<u64>,
     meeting_open: Option<u64>,
     goal_open: Option<u64>,
@@ -639,6 +635,8 @@ pub struct App {
     cal: CalendarUi,
     /// The Gantt view's scale.
     gantt: GanttUi,
+    /// The open form: which, its tab and the answers being filled in.
+    form: FormPage,
 }
 
 /// Quitting (`ask_before_quit`).
@@ -696,6 +694,16 @@ struct GanttUi {
     /// Scroll to today on the next draw (on opening, and after the scale
     /// changes or Today is pressed).
     jump: bool,
+}
+
+/// The open form.
+#[derive(Default)]
+struct FormPage {
+    open: Option<u64>,
+    /// The answers being filled in, by question.
+    fill: HashMap<usize, String>,
+    /// The open form's tab: Edit, Fill out or Answers.
+    tab: more::FormTab,
 }
 
 /// The open channel and thread: what is being written, edited or deleted.
@@ -1132,9 +1140,6 @@ impl App {
             ws_places: HashMap::new(),
             create_text: String::new(),
             new_message_open: false,
-            form_open: None,
-            form_fill: HashMap::new(),
-            form_tab: more::FormTab::Edit,
             dash_open: None,
             meeting_open: None,
             goal_open: None,
@@ -1171,6 +1176,7 @@ impl App {
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,
+            form: Default::default(),
             gantt: GanttUi {
                 zoom: Default::default(),
                 jump: true,

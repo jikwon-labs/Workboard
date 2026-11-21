@@ -44,7 +44,7 @@ pub struct FormsUi {
     pub drag: Option<usize>,
     /// The Answers tab's filter: 0 all, 1 not done, 2 done.
     pub answers_filter: u8,
-    /// The open form's questions as (text, kind) when `form_fill` and
+    /// The open form's questions as (text, kind) when `App::form.fill` and
     /// `error_at` were last fitted to them (`App::fit_form_fill`).
     fill_shape: Vec<(String, String)>,
     /// Answers per form, and the workspace state they were counted for.
@@ -371,8 +371,8 @@ impl App {
             color,
             updated: now_ts(),
         });
-        self.form_open = Some(id);
-        self.form_tab = FormTab::Edit;
+        self.form.open = Some(id);
+        self.form.tab = FormTab::Edit;
         self.sweep.forms.made.push(id);
         self.section = Section::Forms;
         self.dirty = true;
@@ -400,7 +400,8 @@ impl App {
             })
             .unwrap_or(0);
         if let Some(f) = self
-            .form_open
+            .form
+            .open
             .and_then(|id| self.data.extra.forms.iter_mut().find(|f| f.id == id))
         {
             f.list_id = list;
@@ -450,14 +451,14 @@ impl App {
             });
         }
         self.section = Section::Forms;
-        self.form_open = Some(fid);
-        self.form_tab = match tab {
+        self.form.open = Some(fid);
+        self.form.tab = match tab {
             "fill" => FormTab::Fill,
             "answers" => FormTab::Answers,
             _ => FormTab::Edit,
         };
         if tab == "home" {
-            self.form_open = None;
+            self.form.open = None;
         }
     }
 
@@ -483,8 +484,8 @@ impl App {
 
     /// Opens a form on one of its tabs.
     fn open_form(&mut self, id: u64, tab: FormTab) {
-        self.form_open = Some(id);
-        self.form_tab = tab;
+        self.form.open = Some(id);
+        self.form.tab = tab;
     }
 
     /// The tasks each form's answers made, newest first: those that say so
@@ -521,28 +522,29 @@ impl App {
     /// The open form: its header with the tabs, then the tab.
     pub(crate) fn form_detail(&mut self, ui: &mut Ui) {
         let Some(fi) = self
-            .form_open
+            .form
+            .open
             .and_then(|id| self.data.extra.forms.iter().position(|f| f.id == id))
         else {
             // deleted meanwhile (here or by a teammate): back to the list
-            self.form_open = None;
+            self.form.open = None;
             self.forms_home(ui);
             return;
         };
         // what was typed, flagged or picked on one form doesn't stay on another
-        if self.sweep.form_for != self.form_open {
+        if self.sweep.form_for != self.form.open {
             self.sweep.form_error = None;
-            self.sweep.form_for = self.form_open;
+            self.sweep.form_for = self.form.open;
             self.sweep.forms.error_at = None;
             self.sweep.forms.choice = None;
             self.sweep.forms.picked = None;
             self.sweep.forms.drag = None;
             self.sweep.forms.answers_filter = 0;
-            self.form_fill.clear();
+            self.form.fill.clear();
         }
         self.fit_form_fill(fi);
         self.form_header(ui, fi);
-        match self.form_tab {
+        match self.form.tab {
             FormTab::Edit => self.form_editor(ui, fi),
             FormTab::Fill => self.form_fill_page(ui, fi),
             FormTab::Answers => self.form_answers_page(ui, fi),
@@ -594,9 +596,9 @@ impl App {
                     to[i] = Some(i);
                 }
             }
-            for (i, v) in std::mem::take(&mut self.form_fill) {
+            for (i, v) in std::mem::take(&mut self.form.fill) {
                 if let Some(Some(j)) = to.get(i) {
-                    self.form_fill.insert(*j, v);
+                    self.form.fill.insert(*j, v);
                 }
             }
             self.sweep.forms.error_at = error_at;
@@ -649,14 +651,14 @@ impl App {
                 .on_hover_text(tr("All forms"))
                 .clicked()
                 {
-                    self.form_open = None;
+                    self.form.open = None;
                 }
                 let crumb = left.add(ghost(egui::Button::new(
                     RichText::new(tr("All forms")).size(13.0).color(t.text2),
                 )));
                 name_it(&crumb, "Forms crumb");
                 if crumb.clicked() {
-                    self.form_open = None;
+                    self.form.open = None;
                 }
                 left.label(RichText::new("/").color(t.text3));
                 let (tile, _) = left.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
@@ -695,7 +697,7 @@ impl App {
                 let left_end = left.min_rect().right();
                 // the tabs: in the middle when there is room, else after the
                 // name and before the star
-                let sel = match self.form_tab {
+                let sel = match self.form.tab {
                     FormTab::Edit => 0,
                     FormTab::Fill => 1,
                     FormTab::Answers => 2,
@@ -709,7 +711,7 @@ impl App {
                         .layout(Layout::left_to_right(Align::Center)),
                 );
                 if let Some(i) = seg(&mut mid, &t, &items, sel) {
-                    self.form_tab = [FormTab::Edit, FormTab::Fill, FormTab::Answers][i];
+                    self.form.tab = [FormTab::Edit, FormTab::Fill, FormTab::Answers][i];
                 }
                 let mid_end = mid.min_rect().right();
                 // "Saved automatically" before the star when it fits

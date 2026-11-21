@@ -74,7 +74,7 @@ pub struct SweepUi {
     pub confirm: Option<Confirm>,
     /// The whiteboard pages.
     pub wb: WhiteboardUi,
-    /// The form `form_fill` holds answers for.
+    /// The form `App::form.fill` holds answers for.
     pub form_for: Option<u64>,
     pub form_error: Option<String>,
     /// The rest of the form pages' screen state.
@@ -1045,8 +1045,8 @@ impl App {
             "form" => {
                 x.forms.retain(|f| f.id != id);
                 x.starred.retain(|s| s != &format!("form:{}", id));
-                if self.form_open == Some(id) {
-                    self.form_open = None;
+                if self.form.open == Some(id) {
+                    self.form.open = None;
                 }
             }
             "goal" => {

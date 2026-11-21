@@ -101,6 +101,14 @@ impl Ui1 {
             self.commands.extend(v.commands.iter().cloned());
         }
         if let Some(update) = out.platform_output.accesskit_update {
+            // a screen reader (or any app reading the window) panics on a
+            // focus that has no node: accesskit_consumer's "Focused id ...
+            // is not in the node list"
+            assert!(
+                update.tree.as_ref().is_some_and(|t| t.root == update.focus)
+                    || update.nodes.iter().any(|(id, _)| *id == update.focus),
+                "the focused widget has no accessibility node"
+            );
             self.tree.clear();
             self.nodes.clear();
             for (id, node) in update.nodes {

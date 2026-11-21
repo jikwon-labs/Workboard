@@ -24,6 +24,13 @@ the egui contributors) so text boxes edit like the Mac. Used through
   `PaintList::shapes_mut`, so `src/emoji.rs` can draw color emoji over the
   black-and-white emoji glyphs in every layer just before the pass ends.
 
+- `src/context.rs` (accesskit update in `end_pass`): the focus reported to
+  the accessibility tree is the root when the focused widget made no node
+  this pass (focus asked for before the widget is drawn, as a new whiteboard
+  note does). Before, macOS apps reading the window (VoiceOver, automation
+  tools) made accesskit_consumer panic with "Focused id ... is not in the
+  node list" and the app quit.
+
 - `src/lib.rs`: `#![allow(warnings)]`, so the old code does not fill every
   build with warnings.
 

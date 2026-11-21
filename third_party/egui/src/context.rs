@@ -2336,17 +2336,22 @@ impl ContextImpl {
             let state = viewport.this_pass.accesskit_state.take();
             if let Some(state) = state {
                 let root_id = crate::accesskit_root_id().accesskit_id();
-                let nodes = {
+                let nodes: Vec<(accesskit::NodeId, accesskit::Node)> = {
                     state
                         .nodes
                         .into_iter()
                         .map(|(id, node)| (id.accesskit_id(), node))
                         .collect()
                 };
+                // Workboard patch: focus given to a widget not drawn this pass
+                // (asked for before it appears) has no node, and a screen
+                // reader's accesskit_consumer panics on it: report the root
                 let focus_id = self
                     .memory
                     .focused()
-                    .map_or(root_id, |id| id.accesskit_id());
+                    .map(|id| id.accesskit_id())
+                    .filter(|f| nodes.iter().any(|(n, _)| n == f))
+                    .unwrap_or(root_id);
                 platform_output.accesskit_update = Some(accesskit::TreeUpdate {
                     nodes,
                     tree: Some(accesskit::Tree::new(root_id)),

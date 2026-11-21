@@ -7,6 +7,7 @@ use super::*;
 use egui::Pos2;
 use workboard_server::testing::temp_home;
 
+mod ai;
 mod archived;
 mod chat;
 mod comments;

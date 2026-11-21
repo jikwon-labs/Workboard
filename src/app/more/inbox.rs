@@ -76,15 +76,12 @@ impl App {
             .cloned()
             .filter(|x| x.tab == self.inbox_tab)
             .collect();
-        let on_tab = items.len();
         match self.inbox_filter {
             1 => items.retain(|x| x.comment),
             2 => items.retain(|x| x.mention),
             3 => items.retain(|x| x.assigned),
             _ => {}
         }
-        // the tab has rows, only the filter hides them all
-        let filtered_out = items.is_empty() && on_tab > 0;
         items.sort_by_key(|x| std::cmp::Reverse(x.ts));
         let mut clear_all = false;
         egui::Frame::new()
@@ -165,7 +162,7 @@ impl App {
                                 .reminders
                                 .iter()
                                 .any(|r| r.owner == self.data.me && !r.done);
-                        if items.is_empty() && reminders_shown && !filtered_out {
+                        if items.is_empty() && reminders_shown {
                             ui.add_space(16.0);
                             ui.label(
                                 RichText::new(tr("No new comments, mentions or assignments."))
@@ -190,15 +187,9 @@ impl App {
                                             && self.data.task_live(x)
                                     })
                                     .count();
-                                let point_to_due =
-                                    self.inbox_tab == 0 && alone && due_work > 0 && !filtered_out;
+                                let point_to_due = self.inbox_tab == 0 && alone && due_work > 0;
                                 // the people icon only where it invites people
                                 let (title, sub, icon) = match self.inbox_tab {
-                                    _ if filtered_out => (
-                                        "Nothing matches this filter",
-                                        "This tab has items the filter hides.",
-                                        "filter",
-                                    ),
                                     0 if point_to_due => (
                                         "Nothing from other people",
                                         "The Inbox collects comments, mentions and assignments from others.",
@@ -248,12 +239,7 @@ impl App {
                                 ui.add_space(10.0);
                                 ui.label(RichText::new(tr(title)).size(18.0).color(t.text));
                                 ui.label(RichText::new(tr(sub)).size(14.0).color(t.text2));
-                                if filtered_out {
-                                    ui.add_space(10.0);
-                                    if ui.button(tr("Show everything")).clicked() {
-                                        self.inbox_filter = 0;
-                                    }
-                                } else if point_to_due {
+                                if point_to_due {
                                     ui.add_space(10.0);
                                     ui.label(
                                         RichText::new(trf!(
@@ -286,7 +272,7 @@ impl App {
                                             role: "Member".into(),
                                         });
                                     }
-                                } else if self.inbox_tab == 0 && invite && !filtered_out {
+                                } else if self.inbox_tab == 0 && invite {
                                     ui.add_space(10.0);
                                     if ui
                                         .add(Tint(
@@ -335,11 +321,7 @@ impl App {
                                 }
                                 _ => false,
                             };
-                            // the title stops where the line under it does, before the
-                            // time and the buttons on the right
-                            let text_clip =
-                                Rect::from_min_max(r.min, pos2(r.right() - 190.0, r.bottom()));
-                            ui.painter().with_clip_rect(text_clip).text(
+                            ui.painter().text(
                                 r.left_top() + vec2(48.0, 18.0),
                                 Align2::LEFT_CENTER,
                                 if archived {
@@ -353,7 +335,10 @@ impl App {
                             let line = self
                                 .inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
                             ui.painter()
-                                .with_clip_rect(text_clip)
+                                .with_clip_rect(Rect::from_min_max(
+                                    r.min,
+                                    pos2(r.right() - 190.0, r.bottom()),
+                                ))
                                 .text(
                                     r.left_top() + vec2(48.0, 40.0),
                                     Align2::LEFT_CENTER,
@@ -361,20 +346,15 @@ impl App {
                                     FontId::proportional(13.0),
                                     t.text2,
                                 );
-                            // under the pointer the row's buttons take the time's place: a
-                            // long time ("Oct 17 at 4:19 PM") would show through them
-                            let buttons = resp.hovered() || ui.rect_contains_pointer(r);
-                            if !buttons {
-                                ui.painter().text(
-                                    r.right_center() - vec2(12.0, 0.0),
-                                    Align2::RIGHT_CENTER,
-                                    fmt_ago(ts),
-                                    FontId::proportional(12.0),
-                                    t.text3,
-                                );
-                            }
+                            ui.painter().text(
+                                r.right_center() - vec2(12.0, 0.0),
+                                Align2::RIGHT_CENTER,
+                                fmt_ago(ts),
+                                FontId::proportional(12.0),
+                                t.text3,
+                            );
                             let mut handled = false;
-                            if buttons {
+                            if resp.hovered() || ui.rect_contains_pointer(r) {
                                 let lr = Rect::from_min_size(
                                     pos2(r.right() - 180.0, r.center().y - 13.0),
                                     vec2(56.0, 26.0),
@@ -384,14 +364,12 @@ impl App {
                                     vec2(56.0, 26.0),
                                 );
                                 if self.inbox_tab != 2
-                                    && pressed_once(
-                                        &put_over(
-                                            ui,
-                                            lr,
-                                            egui::Button::new(tr("Later")).corner_radius(6),
-                                        ),
-                                        &mut handled,
+                                    && put_over(
+                                        ui,
+                                        lr,
+                                        egui::Button::new(tr("Later")).corner_radius(6),
                                     )
+                                    .clicked()
                                 {
                                     // a cleared row moves to Later, as it does on the iPhone
                                     let x = &mut self.data.extra;
@@ -404,15 +382,13 @@ impl App {
                                 }
                                 // Later items can go back to the inbox
                                 if self.inbox_tab == 2
-                                    && pressed_once(
-                                        &put_over(
-                                            ui,
-                                            lr,
-                                            egui::Button::new(tr("Primary")).corner_radius(6),
-                                        )
-                                        .on_hover_text(tr("Back to the inbox")),
-                                        &mut handled,
+                                    && put_over(
+                                        ui,
+                                        lr,
+                                        egui::Button::new(tr("Primary")).corner_radius(6),
                                     )
+                                    .on_hover_text(tr("Back to the inbox"))
+                                    .clicked()
                                 {
                                     self.data.extra.inbox_later.retain(|x| x != &key);
                                     self.dirty = true;
@@ -427,14 +403,12 @@ impl App {
                                 // Restore would do nothing
                                 let can_restore = !it.imported;
                                 if (self.inbox_tab != 3 || can_restore)
-                                    && pressed_once(
-                                        &put_over(
-                                            ui,
-                                            cr,
-                                            egui::Button::new(tr(ctext)).corner_radius(6),
-                                        ),
-                                        &mut handled,
+                                    && put_over(
+                                        ui,
+                                        cr,
+                                        egui::Button::new(tr(ctext)).corner_radius(6),
                                     )
+                                    .clicked()
                                 {
                                     if self.inbox_tab == 3 {
                                         self.data.extra.inbox_cleared.retain(|x| x != &key);
@@ -453,16 +427,4 @@ impl App {
                     });
             });
     }
-}
-
-/// A row button pressed once, not by the second (or third) click of a quick
-/// double click: the first click moves its row away and the next row comes
-/// up under the pointer, so the second click would land on that row's
-/// button. Any click on a button keeps the row itself from opening.
-fn pressed_once(r: &egui::Response, handled: &mut bool) -> bool {
-    if !r.clicked() {
-        return false;
-    }
-    *handled = true;
-    !r.double_clicked() && !r.triple_clicked()
 }

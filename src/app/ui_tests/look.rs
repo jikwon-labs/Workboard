@@ -235,7 +235,7 @@ fn dark_theme_post_chip_and_ai_hint_read() {
     h.key(egui::Key::Escape);
     // the AI page hint
     h.click("Rail AI");
-    let hint = h.painted_text("Ask anything... (available with the server)");
+    let hint = h.painted_text("Ask anything about this workspace…");
     assert!(!hint.is_empty(), "the hint is shown");
     for (_, c) in &hint {
         assert!(best(*c) >= 3.0, "AI hint contrast {:.1}", best(*c));

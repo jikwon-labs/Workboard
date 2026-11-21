@@ -510,8 +510,7 @@ impl App {
                         DATE_MENU_W,
                         |ui| date_menu(ui, &t, ui.id().with(("rem_edit_cal", id)), date),
                     );
-                    let tf = ui.add(field(time).hint_text("09:00").desired_width(54.0));
-                    name_field(&tf, "Reminder time");
+                    ui.add(field(time).hint_text("09:00").desired_width(54.0));
                     save = ui.button(tr("Save")).clicked()
                         || (te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                     cancel = ui.button(tr("Cancel")).clicked();
@@ -521,12 +520,9 @@ impl App {
                     let text = text.trim().to_string();
                     if let Some(x) = self.data.extra.reminders.iter_mut().find(|x| x.id == id) {
                         x.text = text;
-                        // a new time alerts again; the same minute (the field
-                        // shows no seconds) keeps the time and its notice
-                        if ts / 60 != x.due_ts / 60 {
-                            x.due_ts = ts;
-                            x.alerted = false;
-                        }
+                        x.due_ts = ts;
+                        // a new time alerts again
+                        x.alerted = false;
                         self.dirty = true;
                     }
                     self.sweep.reminder_edit = None;
@@ -550,14 +546,7 @@ impl App {
                 } else {
                     RichText::new(&r.text)
                 };
-                // what `open_reminder` can still open: the task, or the
-                // message's conversation (a deleted one leaves plain text)
-                let opens = r
-                    .task
-                    .is_some_and(|id| self.data.tasks.iter().any(|t| t.id == id))
-                    || r.message
-                        .is_some_and(|(ch, _)| self.data.channels.iter().any(|c| c.id == ch));
-                if opens {
+                if r.task.is_some() || r.message.is_some() {
                     // opens the task or message it is about
                     if ui.link(text).clicked() {
                         self.open_reminder(&r);
@@ -789,37 +778,6 @@ impl App {
                     qa.assignees.push(self.data.me);
                 }
             }
-        }
-    }
-
-    // ---------------------------------------------------------------- AI
-
-    pub(super) fn ai_page(&mut self, ui: &mut Ui) {
-        let t = self.t();
-        let mut close = false;
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(40, 40)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(26.0, 28.0), Sense::hover());
-                line_icon_scaled(ui.painter(), "sparkle", r.center(), t.text, 1.4);
-                ui.label(RichText::new(tr("AI")).size(24.0));
-                // the page has nothing to do yet, so give an obvious way out
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close = icon_button(ui, &t, "close", "", "Close AI", false)
-                        .on_hover_text(format!("{} (Esc)", tr("Close")))
-                        .clicked();
-                });
-            });
-            ui.add_space(8.0);
-            ui.label(RichText::new(tr("Ask, Build, Create, Skills, Artifacts, Super Agents, AI Chats and the AI Notetaker need an AI service.")).color(t.text2));
-            ui.label(RichText::new(tr("They will be connected together with the shared server. Everything else works now.")).color(t.text2));
-            ui.add_space(16.0);
-            // read-only rather than disabled: a disabled field fades its hint
-            // to an unreadable grey on the dark theme
-            ui.add(field_multi(&mut String::new()).interactive(false).hint_text(RichText::new(tr("Ask anything... (available with the server)")).color(t.text3)).desired_rows(3).desired_width(600.0));
-        });
-        close |= self.modal.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape));
-        if close {
-            self.section = Section::Home;
         }
     }
 }

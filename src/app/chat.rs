@@ -182,7 +182,7 @@ pub(super) fn newest_ts(c: &Channel) -> i64 {
 /// Takes a press of Enter (without Shift, Cmd or Option) meant for the text
 /// box `id` before the box sees it, so sending doesn't also put a line break
 /// where the cursor is. True when there was one.
-fn take_enter(ui: &Ui, id: egui::Id) -> bool {
+pub(super) fn take_enter(ui: &Ui, id: egui::Id) -> bool {
     if !ui.memory(|m| m.has_focus(id)) {
         return false;
     }
@@ -1169,7 +1169,7 @@ impl App {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
                         line_icon(ui.painter(), "lock", r.center(), t.text2);
                     }
-                    ui.label(RichText::new(title).size(15.5).color(t.text));
+                    ui.label(RichText::new(title.clone()).size(15.5).color(t.text));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if channel.kind == ChannelKind::Channel {
                             // how this channel notifies me (notify.rs)
@@ -1189,6 +1189,14 @@ impl App {
                         }
                         if icon_button_ex(ui, &t, "edit", tr("Ask"), "Ask", false, 0.0, t.text2, t.text2).clicked() {
                             self.section = Section::Ai;
+                        }
+                        if self.ai_offered() && !no_messages {
+                            let b = icon_button_ex(ui, &t, "sparkle", tr("Summarize"), "Summarize conversation", false, 0.0, t.text2, super::ai::AI_VIOLET)
+                                .on_hover_text(tr("Sum up this conversation with AI"));
+                            if b.clicked() {
+                                let label = title.clone();
+                                self.ai_summarize_channel(cid, &label);
+                            }
                         }
                         if icon_button(ui, &t, "phone", "", "Start a SyncUp", false).on_hover_text(tr("Start a SyncUp")).clicked() {
                             self.open_call_dialog();
@@ -1577,6 +1585,23 @@ impl App {
                             .input(|i| i.viewport().inner_rect)
                             .map(|w| ui.clip_rect().translate(w.min.to_vec2()));
                         acts.push(ChatAction::ThreadWindow { ch: cid, at });
+                    }
+                }
+                if self.ai_offered() && !parent.replies.is_empty() {
+                    let b = icon_button_ex(
+                        ui,
+                        &t,
+                        "sparkle",
+                        "",
+                        "Summarize thread",
+                        false,
+                        0.0,
+                        t.text2,
+                        super::ai::AI_VIOLET,
+                    )
+                    .on_hover_text(tr("Sum up this thread with AI"));
+                    if b.clicked() {
+                        self.ai_summarize_thread(tid);
                     }
                 }
             });

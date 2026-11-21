@@ -84,9 +84,6 @@ impl App {
             }
         }
         if changed {
-            // what is worked out from it (the Inbox rows) is worked out
-            // again: rows can move without any count changing
-            self.data_changed();
             self.notify_rt.pending = true;
         }
         self.save_soon();

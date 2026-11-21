@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 #[cfg(test)]
 mod account_tests;
+mod ai;
 mod board;
 mod chat;
 mod chatfmt;
@@ -511,6 +512,8 @@ pub struct App {
     notepad_open: bool,
     toast: Option<(String, i64)>,
     sync_rt: together::SyncRt,
+    /// the AI tools' requests and the AI page's conversation (ai.rs)
+    ai: ai::AiRt,
     /// A workspace being made on the team server (see together.rs).
     making_ws: Option<together::MakingWs>,
     /// a delete asked of the team server, waiting for its answer
@@ -1020,6 +1023,7 @@ impl App {
                 None
             },
             sync_rt: Default::default(),
+            ai: Default::default(),
             making_ws: None,
             deleting_ws: None,
             huddle: Default::default(),
@@ -5552,6 +5556,8 @@ impl App {
                 email: String::new(),
             });
         }
+        // after the dialogs: answers nothing shows any more are stopped
+        self.ai_tick();
         self.handle_screenshot(ctx);
         self.chat.shown = self.chat.drawn_pass == ctx.cumulative_pass_nr();
         // read at the end of the pass: egui drops the focus on Escape before

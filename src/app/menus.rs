@@ -230,6 +230,9 @@ pub(super) enum Modal {
     GoalSettings {
         id: u64,
     },
+    /// An AI answer and what to do with it (ai.rs). Last, so the other
+    /// dialogs keep their window ids.
+    Ai(Box<super::ai::AiDialog>),
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -638,6 +641,8 @@ impl App {
             self.chat.open = None;
             self.recent.clear();
             self.clear_history();
+            // the AI conversation stays with the workspace it was about
+            self.ai_forget();
             self.sync_rt = Default::default();
             self.leave_huddle();
         }
@@ -1348,6 +1353,7 @@ impl App {
             Modal::SlackImport(_) => tr("Import from Slack").into(),
             Modal::Bookmark { .. } => tr("Add bookmark").into(),
             Modal::SwitchUser => tr("Switch person").into(),
+            Modal::Ai(d) => d.title.clone(),
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
             Modal::NewGoal(_) => tr("New goal").into(),
             Modal::GoalAchieved { .. } => tr("Goal achieved").into(),
@@ -1587,6 +1593,7 @@ impl App {
             }
             Modal::Update => close = crate::updater::status_ui(ui, t, true),
             Modal::Bookmark { title, url } => close = self.bookmark_body(ui, t, title, url),
+            Modal::Ai(d) => close = self.ai_dialog_body(ui, t, d),
             Modal::SwitchUser if self.on_server() => close = self.switch_user_on_server_body(ui, t),
             Modal::SwitchUser => close = self.switch_user_body(ui, t),
             Modal::ConfirmRemove { kind, id, name } => {

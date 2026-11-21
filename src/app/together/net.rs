@@ -257,6 +257,8 @@ impl App {
                         _ => {}
                     }
                     if s != NetStatus::Connected {
+                        // answers on their way won't come
+                        self.ai_lost();
                         // the list comes again after the next welcome
                         self.sync_rt.online = None;
                         // and my reading state with it, from servers that keep it
@@ -311,6 +313,8 @@ impl App {
                         crate::updater::set_server(&addr);
                     }
                     changed |= self.net_welcome(tag, snapshot, member, &hidden);
+                    // whether this server has an AI, its ai_ready says next
+                    self.ai_welcomed();
                     // what I scheduled (servers from before scheduling don't answer)
                     if let Some(net) = &self.sync_rt.net {
                         net.send(wb_net::Msg::ScheduledList);
@@ -383,6 +387,9 @@ impl App {
                 NetEvent::Integrations { hooks, commands } => {
                     self.sync_rt.integrations = Some((hooks, commands))
                 }
+                NetEvent::AiReady(model) => self.ai_ready_now(model),
+                NetEvent::AiText { id, text } => self.ai_text_came(id, &text),
+                NetEvent::AiDone { id, error } => self.ai_done_came(id, error),
                 NetEvent::Typing {
                     channel,
                     member,

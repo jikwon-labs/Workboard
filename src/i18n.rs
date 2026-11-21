@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 mod ko_account;
+mod ko_ai;
 mod ko_app;
 mod ko_chat;
 mod ko_common;
@@ -81,9 +82,10 @@ fn table() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-const ALL: [&[(&str, &str)]; 13] = [
+const ALL: [&[(&str, &str)]; 14] = [
     ko_common::T,
     ko_account::T,
+    ko_ai::T,
     ko_app::T,
     ko_chat::T,
     ko_hubs::T,

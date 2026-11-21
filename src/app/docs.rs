@@ -2,6 +2,7 @@
 // bar, "/" commands and a rendered view. Doc text is kept as Markdown so
 // Export and the shared-folder copy stay plain text.
 
+use super::icons::icon_button_ex;
 use super::parity::close_any;
 use super::*;
 
@@ -406,6 +407,25 @@ impl App {
                                     }
                                 });
                         });
+                        if self.ai_offered() {
+                            let ar = icon_button_ex(
+                                ui,
+                                &t,
+                                "sparkle",
+                                tr("AI"),
+                                "Doc AI",
+                                false,
+                                0.0,
+                                t.text,
+                                super::ai::AI_VIOLET,
+                            )
+                            .on_hover_text(tr(
+                                "Improve, shorten, translate or continue the writing with AI",
+                            ));
+                            popup(ui, &ar, ui.id().with("doc_ai"), 240.0, |ui| {
+                                self.doc_ai_menu(ui, idx, body_id);
+                            });
+                        }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let d = &self.data.docs[idx];
@@ -1117,7 +1137,7 @@ impl App {
 }
 
 /// Moves the text cursor of a text field and gives it focus.
-fn set_cursor(ctx: &egui::Context, id: egui::Id, c: usize) {
+pub(super) fn set_cursor(ctx: &egui::Context, id: egui::Id, c: usize) {
     let mut st = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
     st.cursor.set_char_range(Some(egui::text::CCursorRange::one(
         egui::text::CCursor::new(c),

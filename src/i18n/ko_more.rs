@@ -31,9 +31,6 @@ pub const T: &[(&str, &str)] = &[
     ("Use Later on an item to come back to it.", "항목에서 나중에를 누르면 다시 볼 수 있습니다."),
     ("Nothing cleared yet", "아직 정리한 항목이 없습니다"),
     ("Cleared items show up here.", "정리한 항목이 여기에 표시됩니다."),
-    ("Nothing matches this filter", "이 필터에 맞는 항목이 없습니다"),
-    ("This tab has items the filter hides.", "이 탭의 다른 항목은 필터에 가려져 있습니다."),
-    ("Show everything", "전체 보기"),
     // posts
     ("New Post", "새 게시물"),
     ("Channel:", "채널:"),
@@ -335,9 +332,6 @@ pub const T: &[(&str, &str)] = &[
     ("Tasks assigned to you show up here by due date, with your due reminders and upcoming meetings.", "나에게 할당된 작업이 마감일별로 여기에 나타납니다. 시간이 된 리마인더와 다가오는 회의도 함께 보입니다."),
     ("Tasks live in Lists: make one in the Lists card first.", "작업은 목록에 들어갑니다. 먼저 목록 카드에서 목록을 만드세요."),
     ("+ Add a task for me", "+ 내 작업 추가"),
-    ("Ask, Build, Create, Skills, Artifacts, Super Agents, AI Chats and the AI Notetaker need an AI service.", "질문, 빌드, 만들기, 스킬, 아티팩트, 슈퍼 에이전트, AI 채팅, AI 노트테이커에는 AI 서비스가 필요합니다."),
-    ("They will be connected together with the shared server. Everything else works now.", "공유 서버와 함께 연결될 예정입니다. 나머지 기능은 지금 바로 쓸 수 있습니다."),
-    ("Ask anything... (available with the server)", "무엇이든 물어보세요... (서버 연결 시 사용 가능)"),
     // overview
     ("+ Add card", "+ 카드 추가"),
     ("Customize", "사용자 지정"),

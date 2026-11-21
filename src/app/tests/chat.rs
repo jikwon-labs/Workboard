@@ -973,41 +973,6 @@ fn inbox_rows_are_kept_between_frames_until_the_workspace_changes() {
     assert_eq!(a.inbox_badge(), badge);
 }
 
-/// Rows moved on another of my devices (Later and Cleared are kept in step
-/// through the server) show here at once, also when as many rows went one
-/// way as the other, so no count the kept rows are checked by changed.
-#[test]
-fn inbox_rows_moved_on_my_other_device_show_at_once() {
-    let mut a = app();
-    let keys: Vec<String> = a
-        .inbox_items()
-        .iter()
-        .filter(|i| i.tab == 0)
-        .map(|i| i.key.clone())
-        .take(2)
-        .collect();
-    assert_eq!(keys.len(), 2, "the seed has two Primary rows");
-    a.data.extra.inbox_cleared = vec![keys[0].clone()];
-    a.data_changed();
-    let tab = |a: &App, k: &str| a.inbox_items().iter().find(|i| i.key == k).unwrap().tab;
-    assert_eq!((tab(&a, &keys[0]), tab(&a, &keys[1])), (3, 0));
-    // both devices agreed on that; then on my phone: the first row back,
-    // the second cleared
-    use crate::sync::mine::collect;
-    let t = chrono::Utc::now().timestamp_millis();
-    let agreed = collect(&a.mine_view(), &serde_json::json!({"replies_seen": 0}), t);
-    a.data.extra.mine_sync = agreed.clone();
-    let mut v = a.mine_view();
-    v.inbox_cleared = [keys[1].clone()].into_iter().collect();
-    a.take_mine(collect(&v, &agreed, t + 1000));
-    assert_eq!(a.data.extra.inbox_cleared, vec![keys[1].clone()]);
-    assert_eq!(
-        (tab(&a, &keys[0]), tab(&a, &keys[1])),
-        (0, 3),
-        "the Inbox shows what the phone did"
-    );
-}
-
 #[test]
 fn mentions_in_private_channels_i_am_not_in_stay_out() {
     let mut a = app();

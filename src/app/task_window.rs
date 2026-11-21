@@ -1,6 +1,7 @@
 // The task window: the dialog a task opens in, with its fields on the left
 // and comments and activity on the right.
 
+use super::icons::icon_button_ex;
 use super::*;
 
 impl App {
@@ -108,6 +109,29 @@ impl App {
                         ui.painter()
                             .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
                         ui.add_space(10.0);
+                        if self.ai_offered() {
+                            // the AI's writing tools for the description
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(tr("Description")).strong());
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    let b = icon_button_ex(
+                                        ui,
+                                        &t,
+                                        "sparkle",
+                                        tr("Write with AI"),
+                                        "Description AI",
+                                        false,
+                                        0.0,
+                                        t.text2,
+                                        super::ai::AI_VIOLET,
+                                    );
+                                    let now_says = task.clone();
+                                    popup(ui, &b, ui.id().with(("desc_ai", tid)), 240.0, |ui| {
+                                        self.description_ai_menu(ui, &now_says);
+                                    });
+                                });
+                            });
+                        }
                         self.description_field(ui, &t, &mut task);
                         ui.add_space(16.0);
                         self.task_subtasks(ui, t, tid, &mut task, win_id, &statuses);
@@ -754,6 +778,24 @@ impl App {
             ui.label(RichText::new(tr("Subtasks")).strong());
             if !subs.is_empty() {
                 ui.label(RichText::new(format!("{}/{}", done, subs.len())).color(t.text3));
+            }
+            if self.ai_offered() {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let b = icon_button_ex(
+                        ui,
+                        &t,
+                        "sparkle",
+                        tr("Suggest subtasks"),
+                        "Suggest subtasks",
+                        false,
+                        0.0,
+                        t.text2,
+                        super::ai::AI_VIOLET,
+                    );
+                    if b.clicked() {
+                        self.ai_suggest_subtasks(task);
+                    }
+                });
             }
         });
         for s in &subs {

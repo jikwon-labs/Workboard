@@ -1053,6 +1053,40 @@ fn table_sorts_renames_and_chooses_columns() {
 }
 
 #[test]
+fn planner_with_monday_weeks_shows_this_week_on_sundays_too() {
+    // with weeks starting on Monday, a Sunday is the last day of its week:
+    // the Planner opened (or Today pressed) on a Sunday showed next week
+    let mut d = Data::seed();
+    d.set_lab(Lab::WeekMonday, true);
+    let mut h = Ui1::new();
+    h.app = App::build(None, Some(d));
+    h.app.notify_rt.last_clock = i64::MAX;
+    h.app.section = Section::Planner;
+    h.settle();
+    let td = today();
+    let day = |d: NaiveDate| format!("Add task on {}", d.format("%a %-d"));
+    let week = h.app.planner_week;
+    assert_eq!(week.weekday(), chrono::Weekday::Mon);
+    assert!(
+        (0..7).contains(&(td - week).num_days()),
+        "{week} holds {td}"
+    );
+    assert!(h.has(&day(td)));
+    h.click("Next period");
+    assert!(!h.has(&day(td)));
+    h.click("Today");
+    assert_eq!(h.app.planner_week, week);
+    assert!(h.has(&day(td)));
+    // the Labs option off: the week that overlaps most, from Sunday
+    h.app.data.set_lab(Lab::WeekMonday, false);
+    h.settle();
+    assert_eq!(
+        h.app.planner_week,
+        sunday_week_start(week + Duration::days(3))
+    );
+}
+
+#[test]
 fn planner_day_adds_a_task_for_me() {
     let mut h = Ui1::new();
     h.app.section = Section::Planner;

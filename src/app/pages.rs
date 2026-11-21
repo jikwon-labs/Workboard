@@ -166,14 +166,10 @@ impl App {
     pub(super) fn planner(&mut self, ui: &mut Ui) {
         let t = self.t();
         let me = self.data.me;
-        // Labs: start the week on Monday
-        let monday = self.data.lab(Lab::WeekMonday);
-        let wd = self.planner_week.weekday().num_days_from_sunday();
-        if monday && wd == 0 {
-            self.planner_week += Duration::days(1);
-        } else if !monday && wd == 1 {
-            self.planner_week -= Duration::days(1);
-        }
+        // the week starts on Sunday or, with the Labs option, Monday. When
+        // the option changes, the week that overlaps most stays: its middle
+        // day is in both
+        self.planner_week = self.data.week_start(self.planner_week + Duration::days(3));
         let week = self.planner_week;
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(20, 14))
@@ -182,8 +178,7 @@ impl App {
                     ui.label(RichText::new(tr("Planner")).size(20.0).strong());
                     ui.add_space(16.0);
                     if ui.button(tr("Today")).clicked() {
-                        self.planner_week =
-                            sunday_week_start(today()) + Duration::days(if monday { 1 } else { 0 });
+                        self.planner_week = self.data.week_start(today());
                     }
                     let (back, fwd) = super::icons::period_arrows(ui, &t);
                     if back {

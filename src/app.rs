@@ -911,6 +911,7 @@ impl App {
             .map(Location::List)
             .unwrap_or(Location::Home);
         let t = today();
+        let planner_week = data.week_start(t);
         let args: Vec<String> = std::env::args().collect();
         let arg = |k: &str| {
             args.iter()
@@ -1046,7 +1047,7 @@ impl App {
             },
             recent: vec![],
             doc_open: None,
-            planner_week: t - Duration::days(t.weekday().num_days_from_sunday() as i64),
+            planner_week,
             sheet_week: sunday_week_start(t),
             assignee_filter: None,
             show_search: false,

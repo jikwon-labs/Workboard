@@ -765,6 +765,10 @@ pub struct Extra {
     /// Sidebar sections folded shut by clicking their heading.
     pub folded_nav: Vec<String>,
     pub hidden_views: Vec<String>,
+    /// The tabs over each channel in my order, by channel id: "Channel" and
+    /// view names ("List"). A channel not here has the usual row. Only mine.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub channel_tabs: std::collections::BTreeMap<u64, Vec<String>>,
     /// How the Goals page lists goals: "" cards, "list" rows.
     pub goals_view: String,
     /// Theme colour: black, purple, blue, pink, violet, indigo, orange, teal, bronze, mint.
@@ -892,6 +896,7 @@ impl Default for Extra {
             hidden_nav: vec![],
             folded_nav: vec![],
             hidden_views: vec![],
+            channel_tabs: Default::default(),
             goals_view: String::new(),
             accent: "black".into(),
             auto_theme: false,

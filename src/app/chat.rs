@@ -1264,28 +1264,94 @@ impl App {
                 // wraps in a narrow conversation instead of widening it
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 14.0;
-                    let g = ui.painter().layout_no_wrap(tr("Channel").into(), FontId::proportional(14.0), t.text);
-                    let (r, _) = ui.allocate_exact_size(vec2(g.size().x + 34.0, 34.0), Sense::hover());
-                    let ic = Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(15.0, 15.0));
-                    ui.painter().rect_filled(ic, 3.0, Color32::from_rgb(0x5f, 0x55, 0xee));
-                    ui.painter().text(ic.center(), Align2::CENTER_CENTER, "#", FontId::proportional(10.0), Color32::WHITE);
-                    ui.painter().galley(pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0), g.clone(), t.text);
-                    ui.painter().galley(pos2(r.left() + 26.3, r.center().y - g.size().y / 2.0), g, t.text);
-                    ui.painter().rect_filled(Rect::from_min_max(pos2(r.left(), r.bottom() - 2.0), r.max), 1.0, t.text);
-                    for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar)] {
-                        if ui.add(ghost(egui::Button::new(RichText::new(tr(label)).size(14.0).color(t.text2)).min_size(vec2(0.0, 30.0)))).clicked() {
-                            self.view = v;
-                            // a channel made with "Add a List" opens its own List
-                            let to = channel.list.filter(|l| self.data.location_exists(Location::List(*l))).map(Location::List).unwrap_or(Location::Everything);
-                            self.actions.push(Action::Go(to));
+                    // the tabs in my order: each can be dragged to another
+                    // place, the others leave a line where it lands
+                    let tabs = self.channel_tabs(cid);
+                    let mut rects: Vec<Rect> = Vec::with_capacity(tabs.len());
+                    let mut lifted: Option<(usize, bool)> = None; // (tab, let go this frame)
+                    let mut remove: Option<usize> = None;
+                    for (i, tab) in tabs.iter().enumerate() {
+                        let chan = tab == "Channel";
+                        let color = if chan { t.text } else { t.text2 };
+                        let g = ui.painter().layout_no_wrap(tr(tab).into(), FontId::proportional(14.0), color);
+                        let w = if chan { g.size().x + 34.0 } else { g.size().x + 8.0 };
+                        let (r, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
+                        let resp = ui.interact(r, ui.id().with(("chan_tab", cid, tab.as_str())), Sense::click_and_drag());
+                        name_it(&resp, &format!("Tab {}", tab));
+                        rects.push(r);
+                        if resp.dragged() || resp.drag_stopped() {
+                            lifted = Some((i, resp.drag_stopped()));
+                        }
+                        let dim = if resp.dragged() { 0.35 } else { 1.0 };
+                        let p = ui.painter();
+                        if chan {
+                            let ic = Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(15.0, 15.0));
+                            p.rect_filled(ic, 3.0, Color32::from_rgb(0x5f, 0x55, 0xee).gamma_multiply(dim));
+                            p.text(ic.center(), Align2::CENTER_CENTER, "#", FontId::proportional(10.0), Color32::WHITE.gamma_multiply(dim));
+                            let at = pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0);
+                            p.galley(at, g.clone(), color.gamma_multiply(dim));
+                            p.galley(at + vec2(0.3, 0.0), g, color.gamma_multiply(dim));
+                            p.rect_filled(Rect::from_min_max(pos2(r.left(), r.bottom() - 2.0), r.max), 1.0, t.text.gamma_multiply(dim));
+                        } else {
+                            if resp.hovered() && !resp.dragged() {
+                                p.rect_filled(r.shrink2(vec2(-2.0, 2.0)), 6.0, t.hover);
+                            }
+                            p.galley(r.center() - g.size() / 2.0, g, color.gamma_multiply(dim));
+                        }
+                        if resp.clicked() {
+                            if let Some(v) = ViewKind::ALL.into_iter().find(|v| v.label() == tab) {
+                                self.view = v;
+                                // a channel made with "Add a List" opens its own List
+                                let to = channel.list.filter(|l| self.data.location_exists(Location::List(*l))).map(Location::List).unwrap_or(Location::Everything);
+                                self.actions.push(Action::Go(to));
+                            }
+                        }
+                        if !chan {
+                            resp.context_menu(|ui| {
+                                if ui.button(tr("Remove")).clicked() {
+                                    remove = Some(i);
+                                    ui.close_menu();
+                                }
+                            });
                         }
                     }
+                    if let (Some((from, dropped)), Some(p)) = (lifted, ui.ctx().pointer_latest_pos()) {
+                        let to = tab_drop_place(&rects, from, p);
+                        if dropped {
+                            let mut order = tabs.clone();
+                            let tab = order.remove(from);
+                            order.insert(to, tab);
+                            self.set_channel_tabs(cid, order);
+                        } else {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                            // the line where it lands, halfway into the gap
+                            if to != from {
+                                let x = if to < from { rects[to].left() - 7.0 } else { rects[to].right() + 7.0 };
+                                let row = rects[to];
+                                ui.painter().line_segment([pos2(x, row.top() + 6.0), pos2(x, row.bottom() - 6.0)], Stroke::new(2.0_f32, t.primary));
+                            }
+                            // the tab follows the mouse
+                            let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, ui.id().with(("chan_tab_lift", cid))));
+                            let g = fg.layout_no_wrap(tr(&tabs[from]).into(), FontId::proportional(14.0), t.text);
+                            let r = Rect::from_center_size(p, g.size() + vec2(20.0, 12.0));
+                            fg.rect(r, 6.0, t.bg, Stroke::new(1.0_f32, t.border), egui::StrokeKind::Inside);
+                            fg.galley(r.center() - g.size() / 2.0, g, t.text);
+                        }
+                    }
+                    if let Some(i) = remove {
+                        let mut order = tabs.clone();
+                        order.remove(i);
+                        self.set_channel_tabs(cid, order);
+                    }
+                    // "+ View" adds a tab here; it doesn't leave the channel
                     let vr = ui.add(ghost(egui::Button::new(RichText::new(tr("+  View")).size(14.0).color(t.text2)).min_size(vec2(0.0, 30.0))));
                     popup(ui, &vr, ui.id().with(("chan_view", cid)), 180.0, |ui| {
-                        for (label, v) in [("List", ViewKind::List), ("Board", ViewKind::Board), ("Calendar", ViewKind::Calendar), ("Gantt", ViewKind::Gantt), ("Timeline", ViewKind::Timeline), ("Table", ViewKind::Table)] {
-                            if ui.button(tr(label)).clicked() {
-                                self.view = v;
-                                self.actions.push(Action::Go(Location::Everything));
+                        for v in ViewKind::ALL.into_iter().filter(|v| *v != ViewKind::Overview) {
+                            let have = tabs.iter().any(|x| x == v.label());
+                            if ui.add_enabled(!have, egui::Button::new(tr(v.label()))).clicked() {
+                                let mut order = tabs.clone();
+                                order.push(v.label().to_string());
+                                self.set_channel_tabs(cid, order);
                                 close_popup(ui);
                             }
                         }
@@ -4355,4 +4421,43 @@ pub(super) fn mention_layout(
         job.append(&text[at..], 0.0, plain);
     }
     ui.fonts(|f| f.layout_job(job))
+}
+
+/// The tabs over a channel when I haven't changed them.
+pub(super) const CHANNEL_TABS: [&str; 4] = ["Channel", "List", "Board", "Calendar"];
+
+impl App {
+    /// The tabs over this channel in my order: "Channel" and view names.
+    pub(super) fn channel_tabs(&self, cid: u64) -> Vec<String> {
+        match self.data.extra.channel_tabs.get(&cid) {
+            Some(v) => v.clone(),
+            None => CHANNEL_TABS.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// Keeps a new order (or set) of this channel's tabs; the default one is
+    /// not written down.
+    pub(super) fn set_channel_tabs(&mut self, cid: u64, tabs: Vec<String>) {
+        if tabs == CHANNEL_TABS {
+            self.data.extra.channel_tabs.remove(&cid);
+        } else {
+            self.data.extra.channel_tabs.insert(cid, tabs);
+        }
+        self.dirty = true;
+    }
+}
+
+/// Where the tab dragged from `from` lands with the mouse at `p`: its place
+/// in the row once it is taken out and put back. The tabs can wrap onto more
+/// rows; above or below them the mouse counts as on the nearest row.
+pub(super) fn tab_drop_place(rects: &[Rect], from: usize, p: egui::Pos2) -> usize {
+    let (Some(first), Some(last)) = (rects.first(), rects.last()) else {
+        return from;
+    };
+    let y = p.y.clamp(first.top() + 1.0, last.bottom() - 1.0);
+    rects
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| *i != from && (y > r.bottom() || (y >= r.top() && p.x > r.center().x)))
+        .count()
 }

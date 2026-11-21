@@ -25,6 +25,7 @@ pub(crate) const PERSONAL_EXTRA: &[&str] = &[
     "rail_items",
     "hidden_nav",
     "hidden_views",
+    "channel_tabs",
     "hidden_cards",
     "accent",
     "auto_theme",

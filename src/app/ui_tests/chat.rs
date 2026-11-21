@@ -611,7 +611,7 @@ fn create_channel_window_with_private_and_list() {
     assert_eq!(h.app.chat.open, Some(c.id));
     assert!(h.app.modal.is_none());
     // the channel's List tab opens that List
-    h.click("List");
+    h.click("Tab List");
     h.app.apply_actions();
     h.settle();
     assert_eq!(h.app.loc, Location::List(lid));
@@ -3647,5 +3647,63 @@ fn an_empty_direct_message_is_a_chat_with_someone() {
         !h.painted_text(&head).is_empty(),
         "{:?}",
         drawn_texts(&h.shapes)
+    );
+}
+
+/// The tabs over a channel are dragged into a new order (the Channel tab
+/// too), "+ View" adds a tab there without leaving the channel, and a view
+/// tab is taken off with a right click. The order is kept per channel.
+#[test]
+fn channel_tabs_drag_into_a_new_order_and_add_view_adds_a_tab() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.expect("general is open");
+    let order = |h: &Ui1| h.app.channel_tabs(cid);
+    assert_eq!(order(&h), ["Channel", "List", "Board", "Calendar"]);
+    let x = |h: &Ui1, n: &str| h.rect(&format!("Tab {}", n)).center().x;
+    assert!(x(&h, "List") < x(&h, "Board") && x(&h, "Board") < x(&h, "Calendar"));
+
+    // Calendar dropped on the left half of List goes before it
+    let list = h.rect("Tab List");
+    let from = h.rect("Tab Calendar").center();
+    h.drag_by(from, pos2(list.left() + 3.0, list.center().y));
+    assert_eq!(order(&h), ["Channel", "Calendar", "List", "Board"]);
+    assert!(x(&h, "Calendar") < x(&h, "List"), "drawn in the new order");
+    assert_eq!(h.app.chat.open, Some(cid), "a drag doesn't open the view");
+    assert_eq!(h.app.section, Section::Chat);
+
+    // the Channel tab moves too, here to the end
+    let board = h.rect("Tab Board");
+    let from = h.rect("Tab Channel").center();
+    h.drag_by(from, pos2(board.right() + 20.0, board.center().y));
+    assert_eq!(order(&h), ["Calendar", "List", "Board", "Channel"]);
+
+    // "+ View" adds a tab and stays in the channel; one already there is greyed
+    h.click(tr("+  View"));
+    h.click(tr("Gantt"));
+    assert_eq!(order(&h), ["Calendar", "List", "Board", "Channel", "Gantt"]);
+    assert_eq!(h.app.section, Section::Chat, "still in the channel");
+    assert_eq!(h.app.chat.open, Some(cid));
+    assert!(h.has("Tab Gantt"));
+
+    // a right click takes a view tab off again
+    h.right_click("Tab Gantt", 4.0);
+    h.click(tr("Remove"));
+    assert_eq!(order(&h), ["Calendar", "List", "Board", "Channel"]);
+    assert!(!h.has("Tab Gantt"));
+
+    // a click on a tab still opens its view
+    h.click("Tab Board");
+    h.app.apply_actions();
+    h.settle();
+    assert!(h.app.view == ViewKind::Board);
+
+    // other channels keep the usual row; the order survives a save
+    assert!(h.app.channel_tabs(cid + 1) == crate::app::chat::CHANNEL_TABS);
+    let json = serde_json::to_string(&h.app.data).unwrap();
+    let back: crate::model::Data = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        back.extra.channel_tabs[&cid],
+        ["Calendar", "List", "Board", "Channel"]
     );
 }

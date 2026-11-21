@@ -339,8 +339,6 @@ pub fn outcome(status: u16, body: &str) -> Outcome {
 
 impl Sender for Apns {
     fn send(&self, env: &str, token: &str, payload: &Value) -> Outcome {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -357,34 +355,22 @@ impl Sender for Apns {
             ("apns-priority", "10".to_string()),
         ];
         let config = curl_config(&url, &headers, &payload.to_string());
-        let child = Command::new(&self.curl)
-            .args([
-                "--http2",
-                "--silent",
-                "--show-error",
-                "--max-time",
-                "20",
-                "--config",
-                "-",
-                "--output",
-                "-",
-                "--write-out",
-                "\n%{http_code}",
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        let mut child = match child {
-            Ok(c) => c,
-            Err(e) => return Outcome::Failed(format!("couldn't run {}: {}", self.curl, e)),
-        };
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(config.as_bytes());
-        }
-        let out = match child.wait_with_output() {
+        let args = [
+            "--http2",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "20",
+            "--config",
+            "-",
+            "--output",
+            "-",
+            "--write-out",
+            "\n%{http_code}",
+        ];
+        let out = match crate::curl::run(&self.curl, &args, config.as_bytes()) {
             Ok(o) => o,
-            Err(e) => return Outcome::Failed(e.to_string()),
+            Err(e) => return Outcome::Failed(e),
         };
         let text = String::from_utf8_lossy(&out.stdout);
         let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));

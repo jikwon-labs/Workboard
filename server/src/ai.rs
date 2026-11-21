@@ -304,8 +304,7 @@ impl Claude for CurlClaude {
         text: &mut dyn FnMut(&str),
         stop: &(dyn Fn() -> bool + Sync),
     ) -> Result<Usage, String> {
-        use std::io::{BufRead, Write};
-        use std::process::{Command, Stdio};
+        use std::io::BufRead;
         use std::sync::atomic::{AtomicBool, Ordering};
         let mut headers = vec![
             ("content-type", "application/json".to_string()),
@@ -316,32 +315,24 @@ impl Claude for CurlClaude {
             headers.push(("anthropic-beta", FALLBACK_BETA.to_string()));
         }
         let config = crate::push::curl_config(&self.url, &headers, &body.to_string());
-        let mut child = Command::new("curl")
-            .args([
-                "--silent",
-                "--show-error",
-                "--no-buffer",
-                "--max-time",
-                "600",
-                "--proto",
-                self.protos,
-                "--config",
-                "-",
-                // (curl itself turns each \n here into a new line)
-                "--write-out",
-                "\\nwb-http-status %{http_code}\\n",
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                eprintln!("AI: couldn't run curl: {}", e);
-                AI_FAILED.to_string()
-            })?;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(config.as_bytes());
-        }
+        let args = [
+            "--silent",
+            "--show-error",
+            "--no-buffer",
+            "--max-time",
+            "600",
+            "--proto",
+            self.protos,
+            "--config",
+            "-",
+            // (curl itself turns each \n here into a new line)
+            "--write-out",
+            "\\nwb-http-status %{http_code}\\n",
+        ];
+        let mut child = crate::curl::spawn("curl", &args, config.as_bytes()).map_err(|e| {
+            eprintln!("AI: couldn't run curl: {}", e);
+            AI_FAILED.to_string()
+        })?;
         let out = child.stdout.take();
         let child = Mutex::new(child);
         let mut sse = Sse::default();

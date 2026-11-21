@@ -120,6 +120,7 @@ pub const MAX_HELLO: usize = 64 << 10;
 mod admin;
 mod auth;
 mod canon;
+mod curl;
 pub mod hooks;
 mod livekit;
 mod mine;

@@ -167,7 +167,9 @@ pub fn pct_encode(s: &str) -> String {
         .collect()
 }
 
-fn pct_decode(s: &str) -> String {
+/// Undo `pct_encode` (and form encoding): %XX becomes its byte, + a
+/// space; a % not followed by two hex digits stays as it is.
+pub fn pct_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -1731,6 +1733,16 @@ fn on_server_msg(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Form-encoded text (an incoming webhook's payload=) and query values
+    /// come back as sent; a stray % is kept.
+    #[test]
+    fn pct_decode_undoes_encoding_and_keeps_bad_escapes() {
+        assert_eq!(pct_decode(&pct_encode("a b+c/한")), "a b+c/한");
+        assert_eq!(pct_decode("Build+passed"), "Build passed");
+        assert_eq!(pct_decode("100%zz%4"), "100%zz%4");
+        assert_eq!(pct_decode("%7B%22x%22%7D"), "{\"x\"}");
+    }
 
     /// AI requests and answers on the wire: the kind of request rides in
     /// `kind`, empty extras stay out, and the answer's pieces and end carry

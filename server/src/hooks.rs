@@ -39,37 +39,26 @@ pub struct Curl;
 
 impl Poster for Curl {
     fn post(&self, url: &str, body: &Value) -> Result<String, String> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
         if !(url.starts_with("https://") || url.starts_with("http://")) {
             return Err("not a web address".into());
         }
-        let mut child = Command::new("curl")
-            .args([
-                "--silent",
-                "--show-error",
-                "--max-time",
-                "10",
-                "--max-filesize",
-                "1000000",
-                "--proto",
-                "=http,https",
-                "-H",
-                "Content-Type: application/json",
-                "--data-binary",
-                "@-",
-                "--",
-                url,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("couldn't run curl: {}", e))?;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(body.to_string().as_bytes());
-        }
-        let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        let args = [
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "10",
+            "--max-filesize",
+            "1000000",
+            "--proto",
+            "=http,https",
+            "-H",
+            "Content-Type: application/json",
+            "--data-binary",
+            "@-",
+            "--",
+            url,
+        ];
+        let out = crate::curl::run("curl", &args, body.to_string().as_bytes())?;
         if !out.status.success() {
             return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
         }
@@ -105,30 +94,7 @@ pub fn incoming_text(body: &[u8]) -> Option<(String, Option<String>)> {
     }
     // payload=<url-encoded JSON>
     let p = s.split('&').find_map(|kv| kv.strip_prefix("payload="))?;
-    answer_text(&url_decode(p))
-}
-
-fn url_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'+' => out.push(b' '),
-            b'%' if i + 2 < b.len() => {
-                match u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or(""), 16) {
-                    Ok(v) => {
-                        out.push(v);
-                        i += 2;
-                    }
-                    Err(_) => out.push(b'%'),
-                }
-            }
-            c => out.push(c),
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).to_string()
+    answer_text(&wb_net::pct_decode(p))
 }
 
 fn token() -> String {

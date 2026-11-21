@@ -393,7 +393,7 @@ impl Hub {
                 .get(device)
                 .is_some_and(|d| d.member == member)
             {
-                return Err("Your access to this server was removed.".into());
+                return Err(crate::ws::ACCESS_REMOVED.into());
             }
             let existing = g.saved.accounts.get(&member).cloned();
             if let Some(a) = &existing {

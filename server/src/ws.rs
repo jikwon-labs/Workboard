@@ -212,6 +212,19 @@ pub(crate) static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
 /// (the blocking task panicked).
 const PROBLEM: &str = "The server had a problem. Try again.";
 
+/// What a device whose access was taken away hears before it's let go.
+pub(crate) const ACCESS_REMOVED: &str = "Your access to this server was removed.";
+
+/// The error a device whose access was taken away hears.
+fn access_removed() -> String {
+    Msg::error(ACCESS_REMOVED, Some(CODE_AUTH)).to_json()
+}
+
+/// The error a request that isn't allowed (or failed) is answered with.
+fn denied(why: &str) -> String {
+    Msg::error(why, Some(CODE_DENIED)).to_json()
+}
+
 /// Run `f` away from the connections (password hashing takes a moment);
 /// PROBLEM when it failed on the way.
 async fn off_thread<T: Send + 'static>(
@@ -390,6 +403,14 @@ impl Conn {
         Msg::IntegrationList { hooks, commands }.to_json()
     }
 
+    /// The `integrations` answer after a change to them, or why it was refused.
+    fn integrations_after(&self, hub: &Arc<Hub>, member: u64, r: Result<(), String>) -> String {
+        match r {
+            Ok(()) => self.integrations(hub, member),
+            Err(why) => denied(&why),
+        }
+    }
+
     /// What to answer a message from the app with, if anything.
     async fn answer(&mut self, msg: Option<Msg>) -> Option<String> {
         let (hub, member, conn) = (&self.hub, self.member, self.conn);
@@ -397,7 +418,7 @@ impl Conn {
             Some(Msg::Push { .. }) if self.too_old => {
                 // said once per connection; the app stays connected
                 (!std::mem::replace(&mut self.told_too_old, true))
-                    .then(|| Msg::error(wb_net::UPDATE_NEEDED, Some(CODE_DENIED)).to_json())
+                    .then(|| denied(wb_net::UPDATE_NEEDED))
             }
             Some(Msg::Push { data }) => {
                 let (hub2, device2) = (hub.clone(), self.device.clone());
@@ -406,7 +427,7 @@ impl Conn {
                 let refused = match off_thread(move || Ok(hub2.push(member, &device2, data))).await
                 {
                     Ok(refused) => refused,
-                    Err(why) => return Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
+                    Err(why) => return Some(denied(&why)),
                 };
                 // said once in a while, as an app may send again before the update reaches it
                 let quiet = self
@@ -421,7 +442,7 @@ impl Conn {
             Some(Msg::Mine { data }) => hub.take_mine(member, &data),
             Some(Msg::Schedule { item }) => Some(match hub.schedule(member, item) {
                 Ok(items) => Msg::Scheduled { items }.to_json(),
-                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+                Err(why) => denied(&why),
             }),
             Some(Msg::Unschedule { id }) => Some(
                 Msg::Scheduled {
@@ -430,22 +451,18 @@ impl Conn {
                 .to_json(),
             ),
             Some(Msg::Integrations) => Some(self.integrations(hub, member)),
-            Some(Msg::HookAdd { hook }) => Some(match hub.add_hook(member, hook) {
-                Ok(()) => self.integrations(hub, member),
-                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
-            }),
-            Some(Msg::HookRemove { token }) => Some(match hub.remove_hook(member, &token) {
-                Ok(()) => self.integrations(hub, member),
-                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
-            }),
-            Some(Msg::CommandAdd { command }) => Some(match hub.add_command(member, command) {
-                Ok(()) => self.integrations(hub, member),
-                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
-            }),
-            Some(Msg::CommandRemove { name }) => Some(match hub.remove_command(member, &name) {
-                Ok(()) => self.integrations(hub, member),
-                Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
-            }),
+            Some(Msg::HookAdd { hook }) => {
+                Some(self.integrations_after(hub, member, hub.add_hook(member, hook)))
+            }
+            Some(Msg::HookRemove { token }) => {
+                Some(self.integrations_after(hub, member, hub.remove_hook(member, &token)))
+            }
+            Some(Msg::CommandAdd { command }) => {
+                Some(self.integrations_after(hub, member, hub.add_command(member, command)))
+            }
+            Some(Msg::CommandRemove { name }) => {
+                Some(self.integrations_after(hub, member, hub.remove_command(member, &name)))
+            }
             Some(Msg::Command {
                 channel,
                 parent,
@@ -453,7 +470,7 @@ impl Conn {
                 text,
             }) => match hub.run_command(member, channel, parent, &name, &text) {
                 Ok(()) => None,
-                Err(why) => Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
+                Err(why) => Some(denied(&why)),
             },
             Some(Msg::ScheduledList) => Some(
                 Msg::Scheduled {
@@ -525,7 +542,7 @@ impl Conn {
                 .await;
                 Some(match r {
                     Ok(m) => m.to_json(),
-                    Err(why) => Msg::error(&why, Some(CODE_DENIED)).to_json(),
+                    Err(why) => denied(&why),
                 })
             }
             Some(
@@ -557,7 +574,7 @@ impl Conn {
                     )
                 }
                 Reply::To(r) => Some(r.to_json()),
-                Reply::Denied(why) => Some(Msg::error(&why, Some(CODE_DENIED)).to_json()),
+                Reply::Denied(why) => Some(denied(&why)),
             },
             _ => None,
         }
@@ -615,11 +632,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     let mut kicks = hub.kicks.subscribe();
     // a Revoke between signing in and listening for kicks isn't heard: look
     if !hub.device_is(&device, member) {
-        let _ = send(
-            &mut socket,
-            &Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json(),
-        )
-        .await;
+        let _ = send(&mut socket, &access_removed()).await;
         return;
     }
     let mut access = hub.access.subscribe();
@@ -684,7 +697,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                     Err(broadcast::error::RecvError::Closed) => false,
                 };
                 if out {
-                    let _ = send(&mut socket, &Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json()).await;
+                    let _ = send(&mut socket, &access_removed()).await;
                     break;
                 }
             }
@@ -805,10 +818,8 @@ async fn watching(
 ) {
     let mut notes = hub.notes.subscribe();
     let mut kicks = hub.kicks.subscribe();
-    let removed =
-        || Msg::error("Your access to this server was removed.", Some(CODE_AUTH)).to_json();
     if !hub.device_is(&device, member) {
-        let _ = send(&mut socket, &removed()).await;
+        let _ = send(&mut socket, &access_removed()).await;
         return;
     }
     if !send(&mut socket, &Msg::Watching.to_json()).await {
@@ -830,7 +841,7 @@ async fn watching(
                     Err(broadcast::error::RecvError::Closed) => false,
                 };
                 if out {
-                    let _ = send(&mut socket, &removed()).await;
+                    let _ = send(&mut socket, &access_removed()).await;
                     break;
                 }
             }

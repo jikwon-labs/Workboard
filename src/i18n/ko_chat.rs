@@ -36,6 +36,12 @@ pub const T: &[(&str, &str)] = &[
     ("Files", "파일"),
     ("Messages with files", "파일이 있는 메시지"),
     ("Messages with links", "링크가 있는 메시지"),
+    ("Narrow messages with has:file, has:link or from:name", "has:file, has:link, from:이름 으로 메시지를 좁힐 수 있습니다"),
+    ("Pictures and videos", "사진과 동영상"),
+    ("Other files", "다른 파일"),
+    ("Show in conversation", "대화에서 보기"),
+    ("No files in this conversation yet", "이 대화에 아직 파일이 없습니다"),
+    ("No links in this conversation yet", "이 대화에 아직 링크가 없습니다"),
     ("Messages turned into tasks", "작업으로 만든 메시지"),
     // a long channel shows its newest messages first
     ("Show 1 earlier message", "이전 메시지 1개 보기"),

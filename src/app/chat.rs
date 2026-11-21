@@ -4,6 +4,7 @@
 // right, and turning a message into a task. Everything stays on this computer.
 
 use super::icons::{icon_button, icon_button_ex, line_icon};
+use super::msgquery::{has_files, has_links, in_thread, MsgQuery};
 use super::*;
 
 pub(super) const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F440}", "\u{1F389}"];
@@ -490,17 +491,6 @@ fn stands_without_text(m: &Message) -> bool {
         || m.post_title.as_ref().is_some_and(|t| !t.trim().is_empty())
 }
 
-/// A message with pictures, videos or other files sent in it (the channel
-/// panel's Files).
-pub(super) fn has_files(m: &Message) -> bool {
-    !m.attachments.is_empty()
-}
-
-/// A message with a web address in its text (the channel panel's Links).
-pub(super) fn has_links(m: &Message) -> bool {
-    m.preview.is_some() || super::chatfmt::first_url(&m.text).is_some()
-}
-
 fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
     for m in msgs.iter_mut() {
         if m.id == id {
@@ -690,6 +680,28 @@ impl App {
             .filter(|d| d.kind == ChannelKind::Direct && dm_people(d) == mine)
             .min_by_key(|d| dm_rank(d))
             .map_or(c.id, |d| d.id)
+    }
+
+    /// Opens a conversation at one of its messages, with nothing filtered
+    /// out of the list; a thread's reply opens its thread beside the
+    /// message it hangs from.
+    pub(super) fn show_message(&mut self, ch: u64, msg: u64) {
+        let parent = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == ch)
+            .and_then(|c| {
+                c.messages
+                    .iter()
+                    .find(|m| m.id == msg || m.replies.iter().any(|r| r.id == msg))
+                    .map(|m| m.id)
+            });
+        let thread = parent.filter(|p| *p != msg);
+        self.open_chat_at(ch, thread);
+        self.chat.jump_to = Some(parent.unwrap_or(msg));
+        self.channel_find = None;
+        self.channel_panel = 0;
     }
 
     /// Which copy of a conversation holds a message or reply: `ch`, or one of
@@ -1449,7 +1461,7 @@ impl App {
                     self.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
                 }
                 if let Some(mut q) = self.channel_find.take() {
-                    let r = ui.add(field(&mut q).id(find_id).hint_text(tr("Find in channel")).desired_width(200.0));
+                    let r = ui.add(field(&mut q).id(find_id).hint_text(tr("Find in channel")).desired_width(200.0)).on_hover_text(tr("Narrow messages with has:file, has:link or from:name"));
                     // Escape in it closes it, and every message shows again
                     if !(r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
                         self.channel_find = Some(q);
@@ -1476,19 +1488,22 @@ impl App {
             ui.painter().hline(line.left() + 14.0..=line.right() - 14.0, line.top(), Stroke::new(0.5_f32, t.border));
             ui.add_space(2.0);
             let composer_h = (140.0_f32 + if self.chat.files.is_empty() { 0.0 } else { 76.0 }).max(composer_seen(ui, ("chat_composer_h", cid)));
-            let q = self.channel_find.clone().unwrap_or_default().to_lowercase();
+            // "has:file", "has:link" and "from:name" narrow it (msgquery.rs)
+            let find = MsgQuery::parse(&self.channel_find.clone().unwrap_or_default());
+            let q = find.text.clone();
             let panel = self.channel_panel;
             let matching: Vec<&Message> = at
                 .iter()
                 .filter_map(|&(c, m)| self.data.channels.get(c)?.messages.get(m))
                 .filter(|m| q.is_empty() || m.text.to_lowercase().contains(&q) || typed_post_title(m).is_some_and(|t| t.to_lowercase().contains(&q)))
+                .filter(|m| find.fits(m, &self.data))
                 .filter(|m| match panel {
                     1 => m.pinned,
                     2 => !m.replies.is_empty(),
                     3 => m.task.is_some(),
                     4 => m.saved || m.replies.iter().any(|r| r.saved),
-                    5 => has_files(m),
-                    6 => has_links(m),
+                    5 => in_thread(m, has_files),
+                    6 => in_thread(m, has_links),
                     _ => true,
                 })
                 .collect();
@@ -1515,9 +1530,19 @@ impl App {
                 self.chat.flash = None;
             }
             let going = self.chat.jump_to.is_some() || self.chat.flash.is_some_and(|(c, _, _)| c == cid);
-            let earlier = matching.len().saturating_sub(limit);
-            let shown: Vec<Message> = matching[earlier..].iter().map(|m| (*m).clone()).collect();
-            let list = egui::ScrollArea::vertical().id_salt(("chat_scroll", cid)).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(!going).show(ui, |ui| {
+            // Files: the files themselves in place of their messages
+            let gallery = (panel == 5).then(|| {
+                let ids: std::collections::HashSet<u64> = matching.iter().map(|m| m.id).collect();
+                let msgs = at.iter().filter_map(|&(c, m)| {
+                    let ch = self.data.channels.get(c)?;
+                    Some((ch.id, ch.messages.get(m)?)).filter(|(_, m)| ids.contains(&m.id))
+                });
+                self.sent_files(msgs, |m| has_files(m) && find.fits(m, &self.data))
+            });
+            let links_none = panel == 6 && matching.is_empty();
+            let earlier = if gallery.is_some() { 0 } else { matching.len().saturating_sub(limit) };
+            let shown: Vec<Message> = if gallery.is_some() { vec![] } else { matching[earlier..].iter().map(|m| (*m).clone()).collect() };
+            let list = egui::ScrollArea::vertical().id_salt(("chat_scroll", cid, gallery.is_some())).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(!going && gallery.is_none()).show(ui, |ui| {
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 10)).show(ui, |ui| {
                     if earlier > 0 {
                         ui.vertical_centered(|ui| {
@@ -1528,7 +1553,15 @@ impl App {
                         });
                         ui.add_space(6.0);
                     }
-                    if no_messages {
+                    if let Some(files) = &gallery {
+                        self.files_gallery(ui, cid, files, &mut acts);
+                    } else if links_none {
+                        ui.add_space(40.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(RichText::new(tr("No links in this conversation yet")).color(t.text3));
+                        });
+                    }
+                    if no_messages && gallery.is_none() {
                         // empty state, as in the original
                         ui.add_space(50.0);
                         let w = ui.available_width();

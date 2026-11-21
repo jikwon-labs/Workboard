@@ -71,7 +71,6 @@ impl App {
 
     pub(crate) fn search_rows(&self, q: &str, kind: u8) -> Vec<SearchRow> {
         let ql = q.trim().to_lowercase();
-        let show = |k: u8| kind == 0 || kind == k;
         let many = |k: u8| if kind == k { 60 } else { 8 };
         let mut rows: Vec<SearchRow> = vec![];
         // a pasted workboard:// link (from Copy link)
@@ -151,7 +150,13 @@ impl App {
             }
             return rows;
         }
-        if ql.is_empty() && kind == 0 {
+        // "has:file", "has:link" and "from:name" ask for messages only
+        // (msgquery.rs); what's left is the text to find
+        let mq = super::msgquery::MsgQuery::parse(q);
+        let narrowed = mq.narrows();
+        let show = |k: u8| (kind == 0 || kind == k) && (!narrowed || k == 5);
+        let ql = if narrowed { mq.text.clone() } else { ql };
+        if ql.is_empty() && kind == 0 && !narrowed {
             for (k, id, name, place) in self.recent_items(None).into_iter().take(8) {
                 let (g, hit) = match k.as_str() {
                     "task" => ("task", Hit::Task(id)),
@@ -270,7 +275,7 @@ impl App {
                 )
             }));
         }
-        if show(5) && ql.len() > 1 {
+        if show(5) && (ql.len() > 1 || narrowed) {
             let mut n = 0;
             'outer: for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
                 let place = if c.kind == ChannelKind::Direct {
@@ -290,7 +295,7 @@ impl App {
                     let title = super::chat::typed_post_title(m);
                     let in_text = m.text.to_lowercase().contains(&ql);
                     let in_title = title.is_some_and(|t| t.to_lowercase().contains(&ql));
-                    if in_text || in_title {
+                    if (in_text || in_title) && mq.fits(m, &self.data) {
                         let shown = match title {
                             Some(t) if !in_text => t.to_string(),
                             _ => super::chat::shown_text(m),
@@ -582,6 +587,21 @@ impl App {
                             });
                             ui.add_space(14.0);
                         }
+                        // the words that narrow messages, where they help
+                        if (rows.is_empty() && !q.trim().is_empty())
+                            || (kind == 5 && q.trim().is_empty())
+                        {
+                            ui.vertical_centered(|ui| {
+                                ui.label(
+                                    RichText::new(tr(
+                                        "Narrow messages with has:file, has:link or from:name",
+                                    ))
+                                    .small()
+                                    .color(t.text3),
+                                );
+                            });
+                            ui.add_space(8.0);
+                        }
                         // archived ones are left out: say so rather than drop them silently
                         let arch = self.archived_matches(&q, kind);
                         if arch > 0 {
@@ -617,10 +637,14 @@ impl App {
                             self.sweep.search_recent.truncate(8);
                         }
                         // where it leads, the searched words light up a moment
-                        let words = if super::nav::parse_link(&typed).is_none() {
-                            typed.as_str()
-                        } else {
+                        // (only the words to find, not has:file or from:name)
+                        let mq = super::msgquery::MsgQuery::parse(&typed);
+                        let words = if super::nav::parse_link(&typed).is_some() {
                             ""
+                        } else if mq.narrows() {
+                            mq.text.as_str()
+                        } else {
+                            typed.as_str()
                         };
                         crate::find_flash::start(ui.ctx(), words);
                         self.open_hit(hit);

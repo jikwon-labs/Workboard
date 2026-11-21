@@ -3734,42 +3734,43 @@ fn channel_tabs_drag_into_a_new_order_and_add_view_adds_a_tab() {
     );
 }
 
-/// Files and Links in a conversation's panel show only the messages that
-/// sent a file or a web address; clicking the row again shows them all.
-#[test]
-fn files_and_links_show_only_those_messages() {
-    let mut h = Ui1::new();
+fn att(name: &str, kind: MediaKind) -> Attachment {
+    Attachment {
+        file: format!("{:0>64}", name.len()),
+        name: name.into(),
+        kind,
+        bytes: 1000,
+        w: 800,
+        h: 600,
+        secs: 0.0,
+        thumb: None,
+    }
+}
+
+/// #general with a picture, a file, a link, a plain message whose thread
+/// has a link, and a thread reply with a file. Returns the channel and the
+/// plain message's id.
+fn files_and_links_channel(h: &mut Ui1) -> (u64, u64) {
     h.click("general");
     let cid = h.app.chat.open.unwrap();
     let me = h.app.data.me;
-    let mut file = crate::app::slack::new_message(
-        h.app.data.new_id(),
-        me,
-        "Here is the plan".into(),
-        now_ts(),
-    );
-    file.attachments.push(Attachment {
-        file: "0".repeat(64),
-        name: "plan.pdf".into(),
-        kind: MediaKind::File,
-        bytes: 1000,
-        w: 0,
-        h: 0,
-        secs: 0.0,
-        thumb: None,
-    });
-    let link = crate::app::slack::new_message(
-        h.app.data.new_id(),
-        me,
-        "The spec is at https://example.com/spec".into(),
-        now_ts() + 1,
-    );
-    let plain = crate::app::slack::new_message(
-        h.app.data.new_id(),
-        me,
-        "Lunch at noon".into(),
-        now_ts() + 2,
-    );
+    let now = now_ts();
+    let mut msg = |h: &mut Ui1, text: &str, ts: i64| {
+        crate::app::slack::new_message(h.app.data.new_id(), me, text.into(), ts)
+    };
+    let mut pic = msg(h, "From the beach", now);
+    pic.attachments.push(att("beach.jpg", MediaKind::Image));
+    let mut file = msg(h, "Here is the plan", now + 1);
+    file.attachments.push(att("plan.pdf", MediaKind::File));
+    let link = msg(h, "The spec is at https://example.com/spec", now + 2);
+    let mut plain = msg(h, "Lunch at noon", now + 3);
+    plain
+        .replies
+        .push(msg(h, "Menu: https://example.com/menu", now + 4));
+    let mut notes = msg(h, "My notes", now + 5);
+    notes.attachments.push(att("notes.md", MediaKind::File));
+    plain.replies.push(notes);
+    let plain_id = plain.id;
     let ch = h
         .app
         .data
@@ -3777,38 +3778,180 @@ fn files_and_links_show_only_those_messages() {
         .iter_mut()
         .find(|c| c.id == cid)
         .unwrap();
-    ch.messages.extend([file, link, plain]);
+    ch.messages.extend([pic, file, link, plain]);
     h.settle();
-    let shown = |h: &Ui1, text: &str| !h.painted_text(text).is_empty();
-    // the rows of the panel on the right, by the words on them
-    let row = |h: &mut Ui1, label: &str| {
-        let r = h.painted_text(label).first().expect(label).0;
-        h.click_at(r.center());
-    };
-    assert!(shown(&h, "Here is the plan") && shown(&h, "Lunch at noon"));
+    (cid, plain_id)
+}
 
-    row(&mut h, "Files");
+/// A row of the panel on the right, by the words on it.
+fn panel_row(h: &mut Ui1, label: &str) {
+    let r = h.painted_text(label).first().expect(label).0;
+    h.click_at(r.center());
+}
+
+fn shown(h: &Ui1, text: &str) -> bool {
+    !h.painted_text(text).is_empty()
+}
+
+/// Files in a conversation's panel gathers its files in place of the
+/// messages: pictures and videos as a grid, other files as a list, thread
+/// replies' files too. A picture opens large, a file's "Show in
+/// conversation" goes to its message (a reply's opens its thread).
+#[test]
+fn files_shows_the_conversations_files_in_one_place() {
+    let mut h = Ui1::new();
+    let (_, plain) = files_and_links_channel(&mut h);
+    assert!(shown(&h, "Lunch at noon"));
+
+    panel_row(&mut h, "Files");
     assert_eq!(h.app.channel_panel, 5);
-    assert!(shown(&h, "Here is the plan"), "the message with a file");
-    assert!(!shown(&h, "Lunch at noon"), "not the others");
-    assert!(!shown(&h, "The spec is at https://example.com/spec"));
     assert!(
         h.has("Messages with files  \u{00D7}"),
         "named over the list"
     );
-
-    row(&mut h, "Links");
-    assert_eq!(h.app.channel_panel, 6);
     assert!(
-        shown(&h, "The spec is at https://example.com/spec"),
-        "the message with a link"
+        !shown(&h, "Lunch at noon") && !shown(&h, "Here is the plan"),
+        "no messages"
     );
-    assert!(!shown(&h, "Here is the plan"));
-    assert!(!shown(&h, "Lunch at noon"));
+    assert!(h.has("Picture beach.jpg"), "the picture in the grid");
+    assert!(!h.has("File plan.pdf"), "the other files wait on their tab");
+    h.click("Picture beach.jpg");
+    assert!(h.app.viewer.is_some(), "opens large");
+    h.key(egui::Key::Escape);
+    assert!(h.app.viewer.is_none());
 
-    row(&mut h, "Links");
+    h.click("Other files  2");
+    assert!(h.has("File plan.pdf"), "a message's file");
+    assert!(h.has("File notes.md"), "and a thread reply's");
+    assert!(!h.has("Picture beach.jpg"));
+    // newest first: the reply's file above the message's
+    let notes = h.rect("File notes.md");
+    assert!(notes.top() < h.rect("File plan.pdf").top());
+    let go = h
+        .painted_text("Show in conversation")
+        .into_iter()
+        .map(|(r, _)| r.center())
+        .find(|p| notes.y_range().contains(p.y))
+        .expect("beside the reply's file");
+    h.click_at(go);
+    assert_eq!(h.app.channel_panel, 0, "every message again");
+    assert_eq!(
+        h.app.chat.thread_open,
+        Some(plain),
+        "the reply's thread opens"
+    );
+    assert!(shown(&h, "Lunch at noon"));
+}
+
+/// Links shows the messages with a web address, and the ones whose thread
+/// has one; clicking the row again shows them all.
+#[test]
+fn links_shows_messages_with_web_addresses() {
+    let mut h = Ui1::new();
+    files_and_links_channel(&mut h);
+    panel_row(&mut h, "Links");
+    assert_eq!(h.app.channel_panel, 6);
+    assert!(h.has("Messages with links  \u{00D7}"));
+    assert!(shown(&h, "The spec is at https://example.com/spec"));
+    assert!(shown(&h, "Lunch at noon"), "a link in its thread");
+    assert!(!shown(&h, "Here is the plan") && !shown(&h, "From the beach"));
+    panel_row(&mut h, "Links");
     assert_eq!(h.app.channel_panel, 0);
-    assert!(shown(&h, "Lunch at noon"), "every message again");
+    assert!(shown(&h, "Here is the plan"));
+}
+
+/// A conversation with no files or links says so under Files and Links.
+#[test]
+fn files_and_links_say_when_there_are_none() {
+    let mut h = Ui1::new();
+    h.click("general");
+    panel_row(&mut h, "Files");
+    assert!(shown(&h, "No files in this conversation yet"));
+    panel_row(&mut h, "Links");
+    assert!(shown(&h, "No links in this conversation yet"));
+}
+
+/// "has:file", "has:link" and "from:name" typed in the channel's Find box
+/// narrow its messages.
+#[test]
+fn find_in_channel_narrows_by_files_links_and_writer() {
+    let mut h = Ui1::new();
+    files_and_links_channel(&mut h);
+    panel_row(&mut h, "Find in channel");
+    let row = h.rect("Add bookmarks, notes, and more").center().y;
+    let find = h
+        .painted_text("Find in channel")
+        .into_iter()
+        .map(|(r, _)| r.center())
+        .find(|p| (p.y - row).abs() < 12.0)
+        .unwrap();
+    h.click_at(find);
+    h.type_text("has:file");
+    h.settle();
+    assert!(shown(&h, "Here is the plan") && shown(&h, "From the beach"));
+    assert!(!shown(&h, "Lunch at noon"));
+    for _ in 0.."has:file".len() {
+        h.key(egui::Key::Backspace);
+    }
+    h.type_text("has:link spec");
+    h.settle();
+    assert!(shown(&h, "The spec is at https://example.com/spec"));
+    assert!(!shown(&h, "Here is the plan") && !shown(&h, "Lunch at noon"));
+    for _ in 0.."has:link spec".len() {
+        h.key(egui::Key::Backspace);
+    }
+    h.type_text("from:nobody");
+    h.settle();
+    assert!(!shown(&h, "Here is the plan") && !shown(&h, "Lunch at noon"));
+}
+
+/// Search finds messages by "has:file", "has:link" and "from:name" (thread
+/// replies too), lists only messages then, and a result opens the
+/// conversation at its message.
+#[test]
+fn search_narrows_messages_and_opens_one() {
+    let mut h = Ui1::new();
+    let (cid, plain) = files_and_links_channel(&mut h);
+    let titles = |h: &Ui1, q: &str| -> Vec<String> {
+        h.app.search_rows(q, 0).into_iter().map(|r| r.2).collect()
+    };
+    let files = titles(&h, "has:file");
+    assert!(files.iter().any(|t| t == "Here is the plan"), "{:?}", files);
+    assert!(
+        files.iter().any(|t| t == "My notes"),
+        "a reply: {:?}",
+        files
+    );
+    assert!(!files.iter().any(|t| t == "Lunch at noon"), "{:?}", files);
+    assert!(
+        h.app
+            .search_rows("has:file", 0)
+            .iter()
+            .all(|r| r.0 == "Messages"),
+        "only messages"
+    );
+    let me = h.app.data.member(h.app.data.me).unwrap().name.clone();
+    let first = me.split_whitespace().next().unwrap().to_lowercase();
+    let mine = titles(&h, &format!("has:link from:{}", first));
+    assert!(mine.iter().any(|t| t.starts_with("Menu:")), "{:?}", mine);
+    assert!(titles(&h, "has:link from:nobody").is_empty());
+    assert!(titles(&h, "has:link from:me spec")
+        .iter()
+        .all(|t| t.contains("spec")));
+
+    // typed in the box and picked: at the reply, in its thread
+    h.app.chat.open = None;
+    h.app.section = Section::Home;
+    h.app.palette = Some(String::new());
+    h.settle();
+    h.type_text("has:file notes");
+    h.settle();
+    assert!(h.has("My notes"), "listed");
+    h.key(egui::Key::Enter);
+    assert!(h.app.palette.is_none());
+    assert_eq!(h.app.section, Section::Chat);
+    assert_eq!(h.app.chat.open, Some(cid));
+    assert_eq!(h.app.chat.thread_open, Some(plain));
 }
 
 /// Cmd+F in a conversation opens its find box with the cursor in it: what is

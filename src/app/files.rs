@@ -2225,84 +2225,7 @@ impl App {
                     let h = 150.0;
                     vec2((h * aspect).clamp(100.0, 260.0), h)
                 };
-                let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-                let label = format!(
-                    "{} {}",
-                    if a.kind == MediaKind::Video {
-                        "Video"
-                    } else {
-                        "Picture"
-                    },
-                    a.name
-                );
-                resp.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Image, true, label.clone())
-                });
-                if !ui.is_rect_visible(rect) {
-                    continue;
-                }
-                // a video with a still shows the still; the video itself is
-                // fetched when it's played
-                let s = shown(a);
-                self.files.want(&s, THUMB);
-                let painter = ui.painter_at(rect);
-                match self.files.texture(&s.file, THUMB) {
-                    Some(tex) => {
-                        let uv = cover_uv(tex.size_vec2(), size);
-                        painter.add(
-                            egui::epaint::RectShape::filled(rect, 8.0, Color32::WHITE)
-                                .with_texture(tex.id(), uv),
-                        );
-                    }
-                    None => {
-                        painter.rect_filled(rect, 8.0, t.hover);
-                        let status = match self.files.state(&s.file) {
-                            Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
-                            _ if self.files.on_its_way(&s.file) => tr("Loading...").into(),
-                            Some(Transfer::Failed(e)) => {
-                                format!("{}\n{}", App::error_text(&e), tr("Click to try again"))
-                            }
-                            _ if self.files.broken(&s.file, THUMB) => {
-                                tr("Can't show this file").into()
-                            }
-                            _ => a.name.clone(),
-                        };
-                        painter.text(
-                            rect.center()
-                                + vec2(
-                                    0.0,
-                                    if a.kind == MediaKind::Video {
-                                        26.0
-                                    } else {
-                                        0.0
-                                    },
-                                ),
-                            Align2::CENTER_CENTER,
-                            status,
-                            FontId::proportional(12.0),
-                            t.text3,
-                        );
-                    }
-                }
-                if a.kind == MediaKind::Video {
-                    play_badge(&painter, rect.center(), 20.0);
-                    if a.secs > 0.0 {
-                        let txt = media::clock(a.secs);
-                        let g =
-                            painter.layout_no_wrap(txt, FontId::proportional(11.5), Color32::WHITE);
-                        let r = Rect::from_min_size(
-                            rect.right_bottom() - g.size() - vec2(14.0, 10.0),
-                            g.size() + vec2(8.0, 4.0),
-                        );
-                        painter.rect_filled(r, 4.0, Color32::from_black_alpha(160));
-                        painter.galley(r.min + vec2(4.0, 2.0), g, Color32::WHITE);
-                    }
-                }
-                // mine, still going up: how far
-                if let Some(Transfer::Up(f)) = self.files.state(&a.file) {
-                    upload_bar(&painter, rect, f);
-                }
-                if resp.clicked() {
+                if self.media_tile(ui, a, size).clicked() {
                     clicked = Some(i);
                 }
             }
@@ -2344,9 +2267,96 @@ impl App {
         clicked
     }
 
+    /// A picture or video as a tile of `size`: its thumbnail (a video's
+    /// still, with a play badge and its length), or how its download is
+    /// going, and how far its upload is.
+    pub(super) fn media_tile(
+        &self,
+        ui: &mut Ui,
+        a: &Attachment,
+        size: egui::Vec2,
+    ) -> egui::Response {
+        let t = self.t();
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+        let label = format!(
+            "{} {}",
+            if a.kind == MediaKind::Video {
+                "Video"
+            } else {
+                "Picture"
+            },
+            a.name
+        );
+        resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Image, true, label.clone())
+        });
+        if !ui.is_rect_visible(rect) {
+            return resp;
+        }
+        // a video with a still shows the still; the video itself is
+        // fetched when it's played
+        let s = shown(a);
+        self.files.want(&s, THUMB);
+        let painter = ui.painter_at(rect);
+        match self.files.texture(&s.file, THUMB) {
+            Some(tex) => {
+                let uv = cover_uv(tex.size_vec2(), size);
+                painter.add(
+                    egui::epaint::RectShape::filled(rect, 8.0, Color32::WHITE)
+                        .with_texture(tex.id(), uv),
+                );
+            }
+            None => {
+                painter.rect_filled(rect, 8.0, t.hover);
+                let status = match self.files.state(&s.file) {
+                    Some(Transfer::Down(f)) => trf!("Loading {}%", (f * 100.0) as u32),
+                    _ if self.files.on_its_way(&s.file) => tr("Loading...").into(),
+                    Some(Transfer::Failed(e)) => {
+                        format!("{}\n{}", App::error_text(&e), tr("Click to try again"))
+                    }
+                    _ if self.files.broken(&s.file, THUMB) => tr("Can't show this file").into(),
+                    _ => a.name.clone(),
+                };
+                painter.text(
+                    rect.center()
+                        + vec2(
+                            0.0,
+                            if a.kind == MediaKind::Video {
+                                26.0
+                            } else {
+                                0.0
+                            },
+                        ),
+                    Align2::CENTER_CENTER,
+                    status,
+                    FontId::proportional(12.0),
+                    t.text3,
+                );
+            }
+        }
+        if a.kind == MediaKind::Video {
+            play_badge(&painter, rect.center(), 20.0);
+            if a.secs > 0.0 {
+                let txt = media::clock(a.secs);
+                let g = painter.layout_no_wrap(txt, FontId::proportional(11.5), Color32::WHITE);
+                let r = Rect::from_min_size(
+                    rect.right_bottom() - g.size() - vec2(14.0, 10.0),
+                    g.size() + vec2(8.0, 4.0),
+                );
+                painter.rect_filled(r, 4.0, Color32::from_black_alpha(160));
+                painter.galley(r.min + vec2(4.0, 2.0), g, Color32::WHITE);
+            }
+        }
+        // mine, still going up: how far
+        if let Some(Transfer::Up(f)) = self.files.state(&a.file) {
+            upload_bar(&painter, rect, f);
+        }
+        resp
+    }
+
     /// A plain file in a message: its kind, name and size, or how its
     /// download is going. True when clicked (to save it).
-    fn file_card(&self, ui: &mut Ui, a: &Attachment, avail: f32) -> bool {
+    pub(super) fn file_card(&self, ui: &mut Ui, a: &Attachment, avail: f32) -> bool {
         let t = self.t();
         let size = vec2(260.0_f32.min(avail).max(160.0), 52.0);
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());

@@ -18,6 +18,7 @@ mod account_tests;
 mod ai;
 mod board;
 mod chat;
+mod chat_gallery;
 mod chatfmt;
 mod comments;
 mod delete_ws;
@@ -34,6 +35,7 @@ mod listview;
 mod login;
 mod menus;
 mod more;
+mod msgquery;
 mod nav;
 mod notify;
 #[cfg(test)]

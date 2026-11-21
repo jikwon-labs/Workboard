@@ -249,6 +249,10 @@ impl App {
                     }
                 }
                 "dropdown" => {
+                    // a choice removed on Edit since it was picked: ask again
+                    if !fld.options.iter().any(|o| o == v) {
+                        v.clear();
+                    }
                     let (text, color) = if v.is_empty() {
                         (tr("Choose").to_string(), t.text3)
                     } else {

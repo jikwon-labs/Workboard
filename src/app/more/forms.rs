@@ -130,10 +130,14 @@ pub struct FormAnswers {
 fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (usize, String)> {
     let mut a = FormAnswers::default();
     for (i, fld) in f.fields.iter().enumerate() {
-        let v = fill
+        let mut v = fill
             .get(&i)
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
+        // a choice removed since it was picked is no answer
+        if fld.map == "dropdown" && !fld.options.iter().any(|o| o.trim() == v) {
+            v.clear();
+        }
         if v.is_empty() {
             if fld.required {
                 return Err((i, trf!("Please answer \"{}\".", fld.label)));

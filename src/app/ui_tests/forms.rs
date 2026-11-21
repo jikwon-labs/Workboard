@@ -409,3 +409,32 @@ fn a_kind_change_drops_the_answer_and_the_problem_moves_along() {
     assert_eq!(h.app.sweep.forms.error_at, None);
     assert!(h.painted_text("Please answer \"Title\".").is_empty());
 }
+
+/// A choice picked on Fill out and then removed on Edit is no longer the
+/// answer: the dropdown asks again, and Submit doesn't send it.
+#[test]
+fn a_removed_choice_is_no_longer_the_answer() {
+    let mut h = Ui1::new();
+    let fid = blank_form(&mut h);
+    h.click("Question 2 kind");
+    h.click("Kind Dropdown");
+    h.click("Add choice 2");
+    h.type_text("Red, Blue");
+    h.key(egui::Key::Enter);
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("Paint the wall");
+    h.click("Answer 2");
+    h.click("Choice Blue");
+    assert_eq!(h.app.form_fill.get(&1).map(String::as_str), Some("Blue"));
+    h.click("Edit");
+    h.click("Remove choice Blue");
+    assert_eq!(form(&h, fid).fields[1].options, ["Red"]);
+    h.click("Fill out");
+    assert!(
+        !h.painted_text("Choose").is_empty(),
+        "the dropdown asks again"
+    );
+    h.click("Submit");
+    assert_eq!(task_named(&h, "Paint the wall").description, "");
+}

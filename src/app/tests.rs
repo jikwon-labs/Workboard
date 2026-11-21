@@ -1362,6 +1362,12 @@ fn form_answers_check_required_number_and_email() {
     assert_eq!(ans.name, "New desk");
     assert_eq!(ans.assignees, vec![2]);
     assert!(ans.description.contains("Seats: 4") && ans.description.contains("Size: M"));
+    // a dropdown answer that is no longer one of its choices is no answer
+    fill.insert(4, "XL".into());
+    assert!(!form_answers(&f, &fill).unwrap().description.contains("XL"));
+    let mut f = f;
+    f.fields[4].required = true;
+    assert!(form_answers(&f, &fill).unwrap_err().contains("Size"));
 }
 
 #[test]

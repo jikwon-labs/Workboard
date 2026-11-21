@@ -56,7 +56,7 @@ final class NextStepsUITests: WorkboardUITestCase {
     func testHuddleOnServerWithCallsTriesToJoin() {
         let a = launchApp(["-wbReset", "YES", "-wbServer", signInServer])
         join(a, member: 2, email: "alex@example.test", password: "alex-password-1")
-        a.tabBars.buttons["Chat"].tap()
+        openPlace(a, "chats")
         a.buttons["channel-301"].tap()
         let huddle = a.buttons["huddleButton"]
         _ = huddle.waitForExistence(timeout: 5)
@@ -106,8 +106,8 @@ final class NextStepsUITests: WorkboardUITestCase {
         XCTAssertTrue(b.staticTexts["Picking this up"].waitForExistence(timeout: 5))
 
         b.terminate()
-        let c = launchApp(["-wbServer", openServer, "-wbTab", "docs"])
-        let newDoc = c.navigationBars.buttons["New doc"]
+        let c = launchApp(["-wbServer", openServer, "-wbOpen", "docs"])
+        let newDoc = c.buttons["newDocButton"]
         XCTAssertTrue(newDoc.waitForExistence(timeout: 5))
         newDoc.tap()
         let editor = c.textViews["docEditor"]

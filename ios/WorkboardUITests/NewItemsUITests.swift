@@ -6,7 +6,7 @@ import XCTest
 
 final class NewItemsUITests: WorkboardUITestCase {
     func testStartADirectMessageAndOpenTheOneThereIs() {
-        let a = launchFresh(["-wbTab", "chat"])
+        let a = launchFresh(["-wbOpen", "chats"])
         let new = a.buttons["newDMButton"]
         waitEnabled(new)
         new.tap()

@@ -116,13 +116,13 @@ extension XCTestCase {
         type(a.secureTextFields["newPasswordField"], password)
         type(a.secureTextFields["confirmPasswordField"], password)
         a.buttons["joinButton"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in")
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "signed in")
     }
 
     func signOut(_ a: XCUIApplication) {
         a.buttons["settingsButton"].tap()
         let out = a.buttons["signOutButton"]
-        XCTAssertTrue(out.waitForExistence(timeout: 5))
+        XCTAssertTrue(reveal(out, in: a))
         out.tap()
         XCTAssertTrue(a.textFields["emailField"].waitForExistence(timeout: 10), "back on the sign-in screen")
     }
@@ -130,6 +130,36 @@ extension XCTestCase {
 
 /// A test that stops at its first failure, with helpers to launch the app.
 class WorkboardUITestCase: XCTestCase {
+    /// Back to Home, one "<" at a time.
+    func goHome(_ a: XCUIApplication) {
+        let home = a.buttons["quickFind"]
+        for _ in 0..<6 where !home.waitForExistence(timeout: 1) {
+            a.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        XCTAssertTrue(home.waitForExistence(timeout: 5), "on Home")
+    }
+
+    /// Opens a place (inbox, today, upcoming, chats, docs, tools) from Home.
+    func openPlace(_ a: XCUIApplication, _ place: String) {
+        goHome(a)
+        let row = a.buttons["place-\(place)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+    }
+
+    /// Unfolds a task's More details (tags, dates, fields, links, files, time).
+    func showTaskDetails(_ a: XCUIApplication) {
+        let toggle = a.buttons["taskDetailsToggle"]
+        scrollTo(toggle, in: a)
+        if toggle.value as? String != "Shown" { toggle.tap() }
+        XCTAssertTrue(wait(for: toggle, value: "Shown"))
+    }
+
+    private func wait(for e: XCUIElement, value: String) -> Bool {
+        let done = expectation(for: NSPredicate(format: "value == %@", value), evaluatedWith: e)
+        return XCTWaiter().wait(for: [done], timeout: 5) == .completed
+    }
+
     override func setUp() { continueAfterFailure = false }
 
     /// Launches the app with these arguments (and `testArgs`).

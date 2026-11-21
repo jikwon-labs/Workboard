@@ -18,7 +18,7 @@ struct RootView: View {
             } else if client.me == nil || client.view.member(client.me!) == nil {
                 ChooseMemberView(isFirstRun: true)
             } else {
-                MainTabs()
+                MainScreen()
             }
         }
         .sheet(isPresented: $nav.showSettings) { SettingsView() }
@@ -89,48 +89,22 @@ struct RootView: View {
     }
 }
 
-struct MainTabs: View {
+/// Signed in: Home, with every other screen pushed on top of it (no tab bar).
+struct MainScreen: View {
     @Environment(SyncClient.self) private var client
     @Environment(Nav.self) private var nav
 
     var body: some View {
         @Bindable var nav = nav
-        // the banner sits above the tabs (not as a safe-area inset), so it never
-        // covers the navigation bar's buttons
+        // the banner sits above the screens (not as a safe-area inset), so it
+        // never covers the navigation bar's buttons
         VStack(spacing: 0) {
             ConnectionBanner()
             OngoingCallBar()
-            tabs
+            NavigationStack(path: $nav.path) { HomeView().wbDestinations() }
         }
         .animation(.default, value: client.state.isConnected)
         .overlay(alignment: .top) { NoticeToast() }
-    }
-
-    var tabs: some View {
-        @Bindable var nav = nav
-        return TabView(selection: $nav.tab) {
-            NavigationStack(path: $nav.home) { HomeView().wbDestinations() }
-                .tabItem { Label("Home", systemImage: "house") }
-                .tag(Nav.Tab.home)
-            NavigationStack(path: $nav.chat) { ChatListView().wbDestinations() }
-                .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
-                .badge(unreadTotal)
-                .tag(Nav.Tab.chat)
-            NavigationStack(path: $nav.tasks) { SpacesView().wbDestinations() }
-                .tabItem { Label("Tasks", systemImage: "checklist") }
-                .tag(Nav.Tab.tasks)
-            NavigationStack(path: $nav.docs) { DocsView().wbDestinations() }
-                .tabItem { Label("Docs", systemImage: "doc.text") }
-                .tag(Nav.Tab.docs)
-            NavigationStack(path: $nav.more) { MoreView().wbDestinations() }
-                .tabItem { Label("More", systemImage: "square.grid.2x2") }
-                .tag(Nav.Tab.more)
-        }
-    }
-
-    var unreadTotal: Int {
-        guard let me = client.me else { return 0 }
-        return client.view.visibleChannels(me: me).reduce(0) { $0 + $1.unread(me: me) }
     }
 }
 
@@ -138,12 +112,20 @@ extension View {
     func wbDestinations() -> some View {
         navigationDestination(for: Nav.Route.self) { r in
             switch r {
+            case .place(.inbox): InboxScreen()
+            case .place(.today): TodayView()
+            case .place(.upcoming): UpcomingView()
+            case .place(.chats): ChatListView()
+            case .place(.docs): DocsView()
+            case .place(.tools): ToolsView()
+            case .search: SearchView()
             case .channel(let id): ConversationView(channelId: id)
             case let .thread(c, m): ThreadView(channelId: c, messageId: m)
             case .space(let id): SpaceDetailView(spaceId: id)
             case .list(let id): ListTasksView(listId: id)
             case .task(let id): TaskDetailView(taskId: id)
             case .doc(let id): DocDetailView(docId: id)
+            case .docsIn(let space): DocsInSpaceView(spaceId: space)
             case .statuses(let id): StatusEditorView(spaceId: id)
             case .app(let name): AppPage(name: name)
             case .goal(let id): GoalDetailView(goalId: id)
@@ -153,16 +135,20 @@ extension View {
     }
 }
 
-/// The gear in each tab's top bar.
+/// Settings, at the bottom left of Home.
 struct SettingsButton: View {
     @Environment(Nav.self) private var nav
-    @Environment(SyncClient.self) private var client
 
     var body: some View {
         Button { nav.showSettings = true } label: {
-            Avatar(member: client.me.flatMap { client.view.member($0) }, size: 28)
+            Label("Settings", systemImage: "gearshape")
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .contentShape(Rectangle())
         }
-        .accessibilityLabel("Settings")
+        .buttonStyle(.plain)
         .accessibilityIdentifier("settingsButton")
     }
 }

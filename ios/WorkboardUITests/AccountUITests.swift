@@ -28,7 +28,7 @@ final class AccountUITests: WorkboardUITestCase {
         let code = admin("invite?member=3")["code"] as! String
         type(a.textFields["inviteField"], code)
         a.buttons["joinButton"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in as the invited member; no member picker")
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "signed in as the invited member; no member picker")
         a.buttons["settingsButton"].tap()
         waitLabel(a.staticTexts["signedInAs"], contains: "Signed in as Sam Lee")
         waitLabel(a.staticTexts["accountEmail"], contains: "sam@example.com")
@@ -42,7 +42,7 @@ final class AccountUITests: WorkboardUITestCase {
         waitLabel(a.staticTexts["signInError"], contains: "That email and password don't match.")
         type(a.secureTextFields["passwordField"], "sam-password-1")
         a.buttons["signInButton"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in with email and password")
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "signed in with email and password")
     }
 
     func testForgotPasswordWithResetCode() {
@@ -61,14 +61,14 @@ final class AccountUITests: WorkboardUITestCase {
         type(a.secureTextFields["resetPasswordField"], "remembered-pass-2")
         type(a.secureTextFields["resetConfirmField"], "remembered-pass-2")
         a.buttons["resetButton"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in with the new password")
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "signed in with the new password")
 
         // and the new password is the one that works now
         signOut(a)
         type(a.textFields["emailField"], "sam@example.com")
         type(a.secureTextFields["passwordField"], "remembered-pass-2")
         a.buttons["signInButton"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10))
     }
 
     func testSetAndChangePasswordFromSettings() {
@@ -78,7 +78,7 @@ final class AccountUITests: WorkboardUITestCase {
         admin("drop-account?member=2")
         a.terminate()
         a = launchApp(["-wbServer", signInServer])
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in with the saved token")
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "signed in with the saved token")
         a.buttons["settingsButton"].tap()
         waitLabel(a.staticTexts["accountEmail"], contains: "No password yet")
         let link = a.buttons["passwordLink"]
@@ -117,7 +117,7 @@ final class AccountUITests: WorkboardUITestCase {
         type(a.secureTextFields["newPasswordField"], "alex-password-1")
         type(a.secureTextFields["confirmPasswordField"], "alex-password-1")
         a.buttons["joinButton"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10))
     }
 
     func testCodeFromTheComputerSignsInWithoutAPassword() {
@@ -136,7 +136,7 @@ final class AccountUITests: WorkboardUITestCase {
         let code = admin("link-code?member=3")["code"] as! String
         type(field, code.lowercased())
         a.buttons["linkSignInButton"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "signed in as the computer's person")
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "signed in as the computer's person")
         a.buttons["settingsButton"].tap()
         waitLabel(a.staticTexts["signedInAs"], contains: "Signed in as Sam Lee")
     }
@@ -152,7 +152,7 @@ final class AccountUITests: WorkboardUITestCase {
         // what the Camera app opens after reading the QR code
         let code = admin("link-code?member=2")["code"] as! String
         a.open(URL(string: "workboard://link?server=ws%3A%2F%2F127.0.0.1%3A18788&code=\(code)")!)
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "the link set the server and signed in with no form")
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "the link set the server and signed in with no form")
     }
 
     func testComputerLinkShowsASpinnerUntilTheServerAnswers() throws {

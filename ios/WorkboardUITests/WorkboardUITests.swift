@@ -23,12 +23,12 @@ final class WorkboardUITests: WorkboardUITestCase {
         let me = app.buttons["member-1"]
         XCTAssertTrue(me.waitForExistence(timeout: 10), "member list after connecting")
         me.tap()
-        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["quickFind"].waitForExistence(timeout: 5))
     }
 
     func testSendMessageAndReply() {
         let app = launch()
-        app.tabBars.buttons["Chat"].tap()
+        openPlace(app, "chats")
         let general = app.buttons["channel-301"]
         XCTAssertTrue(general.waitForExistence(timeout: 10))
         general.tap()
@@ -67,8 +67,7 @@ final class WorkboardUITests: WorkboardUITestCase {
         wait(for: [reopened], timeout: 5)
 
         // add a task in the same list
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-        app.tabBars.buttons["Tasks"].tap()
+        goHome(app)
         app.buttons["space-100"].tap()
         app.buttons["list-112"].tap()
         app.buttons["addTaskButton"].tap()

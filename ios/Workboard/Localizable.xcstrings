@@ -311,6 +311,26 @@
         }
       }
     },
+    "%lld files": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일 %lld개"
+          }
+        }
+      }
+    },
+    "%lld links": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연결 %lld개"
+          }
+        }
+      }
+    },
     "%lld minutes before": {
       "localizations": {
         "ko": {
@@ -347,6 +367,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "작업 %2$lld개 중 %1$lld개에 날짜가 있습니다"
+          }
+        }
+      }
+    },
+    "%lld overdue": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지난 마감 %lld"
           }
         }
       }
@@ -398,6 +428,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "선 %1$lld개 · 메모 %2$lld개"
+          }
+        }
+      }
+    },
+    "%lld tags": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "태그 %lld개"
           }
         }
       }
@@ -495,6 +535,26 @@
         }
       }
     },
+    "1 file": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일 1개"
+          }
+        }
+      }
+    },
+    "1 link": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연결 1개"
+          }
+        }
+      }
+    },
     "1 new message": {
       "localizations": {
         "ko": {
@@ -532,6 +592,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "답글 1개"
+          }
+        }
+      }
+    },
+    "1 tag": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "태그 1개"
           }
         }
       }
@@ -859,6 +929,16 @@
         }
       }
     },
+    "All": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전체"
+          }
+        }
+      }
+    },
     "All People": {
       "extractionState": "manual",
       "localizations": {
@@ -887,6 +967,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "모든 타임시트"
+          }
+        }
+      }
+    },
+    "All tools": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "모든 도구"
           }
         }
       }
@@ -1248,6 +1338,16 @@
         }
       }
     },
+    "By space": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스페이스별"
+          }
+        }
+      }
+    },
     "Calendar": {
       "extractionState": "manual",
       "localizations": {
@@ -1481,6 +1581,16 @@
         }
       }
     },
+    "Cleared %lld": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "확인함 %lld"
+          }
+        }
+      }
+    },
     "Close": {
       "localizations": {
         "ko": {
@@ -1559,6 +1669,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "댓글"
+          }
+        }
+      }
+    },
+    "Comments and activity": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "댓글과 활동"
           }
         }
       }
@@ -1811,6 +1931,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "체크리스트 만들기"
+          }
+        }
+      }
+    },
+    "Create new": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새로 만들기"
           }
         }
       }
@@ -2088,6 +2218,16 @@
         }
       }
     },
+    "Doc": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "문서"
+          }
+        }
+      }
+    },
     "Doc title": {
       "localizations": {
         "ko": {
@@ -2218,6 +2358,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "이 채널의 새 메시지(트리거 단어가 있으면 그 단어로 시작하는 것만)를 이 주소로 보냅니다. {\"text\": \"...\"} 로 답하면 그 답이 채널에 올라갑니다."
+          }
+        }
+      }
+    },
+    "Earlier": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이전"
           }
         }
       }
@@ -2729,6 +2879,36 @@
         }
       }
     },
+    "Hidden": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "접힘"
+          }
+        }
+      }
+    },
+    "Hide cleared": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "확인한 것 숨기기"
+          }
+        }
+      }
+    },
+    "Hide completed tasks": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "완료한 작업 숨기기"
+          }
+        }
+      }
+    },
     "Hide keyboard": {
       "localizations": {
         "ko": {
@@ -2845,7 +3025,17 @@
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "받은 편지함"
+            "value": "받은함"
+          }
+        }
+      }
+    },
+    "Inbox, Today and Chat are always there.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "받은함, 오늘, 채팅은 항상 보입니다."
           }
         }
       }
@@ -3099,6 +3289,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "나중에"
+          }
+        }
+      }
+    },
+    "Later %lld": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "나중에 %lld"
           }
         }
       }
@@ -3367,6 +3567,16 @@
         }
       }
     },
+    "Me": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "나"
+          }
+        }
+      }
+    },
     "Meeting": {
       "localizations": {
         "ko": {
@@ -3537,6 +3747,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "더 보기"
+          }
+        }
+      }
+    },
+    "More details": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "세부 항목"
           }
         }
       }
@@ -3814,6 +4034,26 @@
         }
       }
     },
+    "New notices": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 알림"
+          }
+        }
+      }
+    },
+    "New notices %lld": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 알림 %lld"
+          }
+        }
+      }
+    },
     "New password (at least %lld characters)": {
       "localizations": {
         "ko": {
@@ -4086,6 +4326,16 @@
         }
       }
     },
+    "No space": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스페이스 없음"
+          }
+        }
+      }
+    },
     "No spaces yet": {
       "localizations": {
         "ko": {
@@ -4277,6 +4527,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "나에게 맡겨진 작업이 없습니다"
+          }
+        }
+      }
+    },
+    "Nothing coming up": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "예정된 일이 없습니다"
+          }
+        }
+      }
+    },
+    "Nothing due today": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘 마감인 일이 없습니다"
           }
         }
       }
@@ -4679,6 +4949,16 @@
         }
       }
     },
+    "Personal": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "개인"
+          }
+        }
+      }
+    },
     "Photo": {
       "localizations": {
         "ko": {
@@ -4885,6 +5165,16 @@
         }
       }
     },
+    "Quick find": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "빠른 찾기"
+          }
+        }
+      }
+    },
     "Quote": {
       "localizations": {
         "ko": {
@@ -4931,6 +5221,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "여기까지 읽음"
+          }
+        }
+      }
+    },
+    "Recent": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "최근"
           }
         }
       }
@@ -5429,6 +5729,16 @@
         }
       }
     },
+    "Schedule today": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "일정"
+          }
+        }
+      }
+    },
     "Scheduled messages": {
       "localizations": {
         "ko": {
@@ -5701,12 +6011,42 @@
         }
       }
     },
+    "Show %lld completed": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "완료한 작업 %lld개 보기"
+          }
+        }
+      }
+    },
+    "Show on Home": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "첫 화면에 보일 곳"
+          }
+        }
+      }
+    },
     "Show password": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "비밀번호 보기"
+          }
+        }
+      }
+    },
+    "Shown": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "펼침"
           }
         }
       }
@@ -6024,6 +6364,16 @@
         }
       }
     },
+    "Swipe left to clear, right for later.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "왼쪽으로 밀면 확인, 오른쪽으로 밀면 나중에"
+          }
+        }
+      }
+    },
     "Switch": {
       "localizations": {
         "ko": {
@@ -6071,6 +6421,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "태그"
+          }
+        }
+      }
+    },
+    "Tags, dates, custom fields, links, files and time": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "태그, 날짜, 사용자 필드, 연결, 파일, 시간 기록"
           }
         }
       }
@@ -6174,6 +6534,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "나에게 맡겨진 작업이 여기 나옵니다."
+          }
+        }
+      }
+    },
+    "Tasks assigned to you that are due today show up here.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "나에게 맡겨진 작업 중 오늘 마감인 것이 여기 나옵니다."
+          }
+        }
+      }
+    },
+    "Tasks assigned to you with a later due date show up here.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "나에게 맡겨진 작업 중 마감일이 뒤인 것이 여기 나옵니다."
           }
         }
       }
@@ -6433,6 +6813,16 @@
         }
       }
     },
+    "This evening": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘 저녁"
+          }
+        }
+      }
+    },
     "This form is gone": {
       "localizations": {
         "ko": {
@@ -6679,12 +7069,42 @@
         }
       }
     },
+    "To": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "받는 곳"
+          }
+        }
+      }
+    },
     "To do": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "할 일"
+          }
+        }
+      }
+    },
+    "To do %lld": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "할 일 %lld"
+          }
+        }
+      }
+    },
+    "To look at later": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "나중에 볼 것"
           }
         }
       }
@@ -6696,6 +7116,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "오늘"
+          }
+        }
+      }
+    },
+    "Today %lld": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘 %lld"
           }
         }
       }
@@ -6741,6 +7171,16 @@
       }
     },
     "Tool": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "도구"
+          }
+        }
+      }
+    },
+    "Tools": {
       "localizations": {
         "ko": {
           "stringUnit": {
@@ -6942,6 +7382,16 @@
         }
       }
     },
+    "Unread": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "안 읽음"
+          }
+        }
+      }
+    },
     "Until tomorrow": {
       "localizations": {
         "ko": {
@@ -6958,6 +7408,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "제목 없음"
+          }
+        }
+      }
+    },
+    "Untitled doc": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "제목 없는 문서"
           }
         }
       }
@@ -7030,6 +7490,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "써 본 태그"
+          }
+        }
+      }
+    },
+    "Used most": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자주 쓰는 도구"
           }
         }
       }

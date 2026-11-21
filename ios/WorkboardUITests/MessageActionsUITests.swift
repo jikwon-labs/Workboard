@@ -47,7 +47,7 @@ final class MessageActionsUITests: WorkboardUITestCase {
     }
 
     func testCreateChannelAndDeleteTask() {
-        let a = launchFresh(["-wbTab", "chat"])
+        let a = launchFresh(["-wbOpen", "chats"])
         let new = a.buttons["newChannelButton"]
         waitEnabled(new)
         new.tap()

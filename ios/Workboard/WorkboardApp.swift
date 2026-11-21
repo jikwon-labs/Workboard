@@ -6,9 +6,10 @@
 //   -wbReset YES         start from nothing (removes this app's saved copy and token)
 //   -wbServer ws://...   server address
 //   -wbMe 1              who I am (servers without sign-in)
-//   -wbTab chat          home | chat | tasks | docs
-//   -wbOpen channel:301  also task:ID, doc:ID, thread:CHANNEL:MESSAGE,
-//                        list:SPACE:LIST, settings
+//   -wbOpen channel:301  a place (inbox, today, upcoming, chats, docs,
+//                        tools, search), or task:ID, doc:ID,
+//                        thread:CHANNEL:MESSAGE, list:SPACE:LIST, app:NAME,
+//                        goal:ID, meeting:ID, settings
 //   -wbOpenURL URL       open a link at launch, as if tapped (workboard://join?...)
 //   -wbNoPasswordAutoFill YES  no saved or strong passwords offered in the
 //                        sign-in fields (UI tests type passwords themselves)
@@ -46,7 +47,7 @@ struct WorkboardApp: App {
         if let server = args.string(forKey: "wbServer") { c.setServer(server) }
         if args.double(forKey: "wbAskTimeout") > 0 { c.askTimeout = args.double(forKey: "wbAskTimeout") }
         _client = State(initialValue: c)
-        let nav = Nav(tab: args.string(forKey: "wbTab"), open: args.string(forKey: "wbOpen"))
+        let nav = Nav(open: args.string(forKey: "wbOpen"))
         if let u = args.string(forKey: "wbOpenURL") { nav.openedLink = InviteLink.parse(u) }
         _nav = State(initialValue: nav)
     }
@@ -81,7 +82,7 @@ struct WorkboardApp: App {
         let (c, n, nv) = (client, notifier, nav)
         c.onUpdate = { n.scan(client: c, nav: nv) }
         n.scan(client: c, nav: nv) // the first look only remembers what is there
-        appDelegate.onOpenTask = { id in nv.showSettings = false; nv.tab = .tasks; nv.tasks = [.task(id)] }
+        appDelegate.onOpenTask = { id in nv.open(task: id) }
         appDelegate.currentChannel = { nv.currentChannel }
         appDelegate.otherWorkspace = { ws in c.savedWorkspace(pushKey: ws) != nil }
         // a push from a workspace kept on this iPhone opens that workspace first
@@ -101,32 +102,30 @@ struct WorkboardApp: App {
     }
 }
 
-/// Which tab is shown and what is open in each, so links, notifications and
-/// launch arguments can jump straight to a screen.
+/// What is open: one stack of screens on top of Home, so links,
+/// notifications and launch arguments can jump straight to a screen and
+/// "<" always goes one step up.
 @MainActor
 @Observable
 final class Nav {
-    enum Tab: String, Hashable { case home, chat, tasks, docs, more }
-
     enum Route: Hashable {
+        case place(Place)
+        case search
         case channel(UInt64)
         case thread(channel: UInt64, message: UInt64)
         case space(UInt64)
         case list(UInt64)
         case task(UInt64)
         case doc(UInt64)
+        /// a space's docs (nil: docs in no space)
+        case docsIn(space: UInt64?)
         case statuses(UInt64)
         case app(String)
         case goal(UInt64)
         case meeting(UInt64)
     }
 
-    var tab: Tab = .home
-    var home: [Route] = []
-    var chat: [Route] = []
-    var tasks: [Route] = []
-    var docs: [Route] = []
-    var more: [Route] = []
+    var path: [Route] = []
     var showSettings = false
     /// An invite link just opened, waiting for RootView to act on it.
     var openedLink: InviteLink?
@@ -142,21 +141,25 @@ final class Nav {
     /// A doc made with the New button, to open in edit mode.
     var newDoc: UInt64?
 
-    init(tab: String? = nil, open: String? = nil) {
-        if let t = tab.flatMap(Tab.init(rawValue:)) { self.tab = t }
+    /// `open`: inbox, today, upcoming, chats, docs, tools, search,
+    /// channel:ID, thread:CHANNEL:MESSAGE, task:ID, list:SPACE:LIST, doc:ID,
+    /// app:NAME, goal:ID, meeting:ID or settings.
+    init(open: String? = nil) {
         guard let open else { return }
+        if let p = Place(rawValue: open) { path = [.place(p)]; return }
+        if open == "search" { path = [.search]; return }
         let parts = open.split(separator: ":").map(String.init)
         let ids = parts.dropFirst().compactMap { UInt64($0) }
         switch (parts.first, ids.count) {
-        case ("channel", 1): self.tab = .chat; chat = [.channel(ids[0])]
-        case ("thread", 2): self.tab = .chat; chat = [.channel(ids[0]), .thread(channel: ids[0], message: ids[1])]
-        case ("task", 1): self.tab = .tasks; tasks = [.task(ids[0])]
-        case ("list", 2): self.tab = .tasks; tasks = [.space(ids[0]), .list(ids[1])]
-        case ("doc", 1): self.tab = .docs; docs = [.doc(ids[0])]
+        case ("channel", 1): path = [.place(.chats), .channel(ids[0])]
+        case ("thread", 2): path = [.place(.chats), .channel(ids[0]), .thread(channel: ids[0], message: ids[1])]
+        case ("task", 1): path = [.task(ids[0])]
+        case ("list", 2): path = [.space(ids[0]), .list(ids[1])]
+        case ("doc", 1): path = [.place(.docs), .doc(ids[0])]
         case ("settings", _): showSettings = true
-        case ("app", _) where parts.count == 2: self.tab = .more; more = [.app(parts[1])]
-        case ("goal", 1): self.tab = .more; more = [.app("goals"), .goal(ids[0])]
-        case ("meeting", 1): self.tab = .more; more = [.app("meetings"), .meeting(ids[0])]
+        case ("app", _) where parts.count == 2: path = [.place(.tools), .app(parts[1])]
+        case ("goal", 1): path = [.place(.tools), .app("goals"), .goal(ids[0])]
+        case ("meeting", 1): path = [.place(.tools), .app("meetings"), .meeting(ids[0])]
         default: break
         }
     }
@@ -164,34 +167,27 @@ final class Nav {
     /// Open a conversation (and a thread in it) from a notification.
     func open(channel: UInt64, parent: UInt64?) {
         showSettings = false
-        tab = .chat
-        chat = [.channel(channel)] + (parent.map { [.thread(channel: channel, message: $0)] } ?? [])
+        path = [.place(.chats), .channel(channel)] + (parent.map { [.thread(channel: channel, message: $0)] } ?? [])
+    }
+
+    /// Open a task from a reminder.
+    func open(task: UInt64) {
+        showSettings = false
+        path = [.task(task)]
     }
 
     /// The task on screen, if any (no notification for it).
     var currentTask: UInt64? {
-        let path: [Route]
-        switch tab {
-        case .home: path = home
-        case .chat: path = chat
-        case .tasks: path = tasks
-        case .docs: path = docs
-        case .more: path = more
-        }
         if case .task(let id)? = path.last { return id }
         return nil
     }
 
     /// The conversation on screen, if any (no notification for it).
     var currentChannel: UInt64? {
-        guard tab == .chat else { return nil }
-        for r in chat.reversed() {
-            switch r {
-            case .channel(let c): return c
-            case .thread(let c, _): return c
-            default: continue
-            }
+        switch path.last {
+        case .channel(let c)?: return c
+        case .thread(let c, _)?: return c
+        default: return nil
         }
-        return nil
     }
 }

@@ -9,7 +9,7 @@ import XCTest
 
 final class Round5UITests: WorkboardUITestCase {
     func testImportedSlackMessageDoesNotNotify() {
-        let a = launchFresh(["-wbTab", "chat"], server: adminServer)
+        let a = launchFresh(["-wbOpen", "chats"], server: adminServer)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let card = a.buttons["notifyCardButton"]
         if card.waitForExistence(timeout: 8) {
@@ -17,8 +17,7 @@ final class Round5UITests: WorkboardUITestCase {
             let allow = springboard.buttons["Allow"]
             if allow.waitForExistence(timeout: 5) { allow.tap() }
         }
-        a.tabBars.buttons["Home"].tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 5))
+        goHome(a)
         func banner(_ text: String) -> XCUIElement {
             springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         }

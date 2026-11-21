@@ -1,57 +1,7 @@
 import SwiftUI
 import WorkboardKit
 
-/// Spaces -> folders -> lists -> tasks.
-struct SpacesView: View {
-    @Environment(SyncClient.self) private var client
-    @State private var prompt: NamePrompt?
-
-    var body: some View {
-        let spaces = client.view.visibleSpaces(me: client.me ?? 0)
-        List {
-            if spaces.isEmpty {
-                EmptyNote(title: "No spaces yet", systemImage: "square.grid.2x2").listRowBackground(Color.clear)
-            }
-            ForEach(spaces) { s in
-                NavigationLink(value: Nav.Route.space(s.id)) {
-                    HStack(spacing: 12) {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color(rgb: s.color))
-                            .frame(width: 28, height: 28)
-                            .overlay(Text(String(s.name.prefix(1)).uppercased()).font(.footnote.weight(.bold)).foregroundStyle(.white))
-                        Text(s.privateOwner != nil ? "Personal" : s.name)
-                        Spacer()
-                        Text("\(openCount(s))").foregroundStyle(.secondary).monospacedDigit()
-                    }
-                }
-                .accessibilityIdentifier("space-\(s.id)")
-                .contextMenu {
-                    if client.canEdit && s.privateOwner == nil {
-                        Button { prompt = .renameSpace(s.id) } label: { Label("Rename", systemImage: "pencil") }
-                        ColorMenu(title: "Color") { c in client.edit { d, _ in Edits.setSpaceColor(&d, space: s.id, to: c) } }
-                        Button(role: .destructive) {
-                            client.edit { d, _ in Edits.setSpaceArchived(&d, space: s.id, true) }
-                        } label: { Label("Archive", systemImage: "archivebox") }
-                    }
-                }
-            }
-        }
-        .navigationTitle("Tasks")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
-            ToolbarItem(placement: .topBarTrailing) {
-                AddButton("New space", id: "newSpaceButton") { prompt = .newSpace }
-            }
-        }
-        .namePrompt($prompt)
-    }
-
-    func openCount(_ s: SpaceView) -> Int {
-        let ids = Set(s.allListIds)
-        return client.view.tasks.filter { ids.contains($0.listId) && $0.parent == nil && !client.view.status(of: $0).isClosed }.count
-    }
-}
-
+/// A space's lists and folders, and its menu (statuses, rename, colour, archive).
 struct SpaceDetailView: View {
     @Environment(SyncClient.self) private var client
     @Environment(\.dismiss) private var dismiss
@@ -63,8 +13,10 @@ struct SpaceDetailView: View {
         if let s = v.spaces.first(where: { $0.id == spaceId }) {
             List {
                 if !s.lists.isEmpty {
-                    Section("Lists") {
+                    Section {
                         ForEach(s.lists) { l in listLink(l) }
+                    } header: {
+                        CalmHeader("Lists")
                     }
                 }
                 ForEach(s.folders) { f in
@@ -72,7 +24,8 @@ struct SpaceDetailView: View {
                         ForEach(f.lists) { l in listLink(l) }
                     } header: {
                         HStack {
-                            Label(f.name, systemImage: "folder")
+                            Label { CalmHeader(verbatim: f.name) } icon: { Image(systemName: "folder") }
+                                .foregroundStyle(.secondary)
                             Spacer()
                             if client.canEdit {
                                 Menu {
@@ -94,7 +47,9 @@ struct SpaceDetailView: View {
                     EmptyNote(title: "No lists in this space", systemImage: "list.bullet").listRowBackground(Color.clear)
                 }
             }
-            .navigationTitle(s.name)
+            .calmList()
+            .navigationTitle(s.privateOwner != nil ? String(localized: "Personal") : s.name)
+            .toolbarRole(.editor)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -127,12 +82,15 @@ struct SpaceDetailView: View {
 
     func listLink(_ l: ListView) -> some View {
         NavigationLink(value: Nav.Route.list(l.id)) {
-            HStack {
-                Label(l.name, systemImage: "list.bullet")
+            let tasks = client.view.tasks(inList: l.id).filter { $0.parent == nil }
+            let open = tasks.filter { !client.view.status(of: $0).isClosed }.count
+            HStack(spacing: 14) {
+                ProgressRing(done: tasks.isEmpty ? 0 : Double(tasks.count - open) / Double(tasks.count)).frame(width: 26)
+                Text(l.name).font(.system(size: 17))
                 Spacer()
-                Text("\(client.view.tasks(inList: l.id).filter { !client.view.status(of: $0).isClosed }.count)")
-                    .foregroundStyle(.secondary).monospacedDigit()
+                Text("\(open)").foregroundStyle(.secondary).monospacedDigit()
             }
+            .frame(minHeight: 30)
         }
         .accessibilityIdentifier("list-\(l.id)")
         .contextMenu {
@@ -155,13 +113,14 @@ struct ListTasksView: View {
     let listId: UInt64
     @State private var adding = false
     @State private var newName = ""
+    @State private var showDone = false
     @FocusState private var newFocused: Bool
     /// List, Board or Calendar, remembered per list on this phone.
     @State private var mode: ListMode = .list
 
     var body: some View {
-        content
-            .navigationTitle(client.view.list(listId)?.name ?? "List")
+        let name = client.view.list(listId)?.name ?? String(localized: "List")
+        titled(name)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -179,6 +138,15 @@ struct ListTasksView: View {
             .onChange(of: mode) { UserDefaults.standard.set(mode.rawValue, forKey: "listMode-\(listId)") }
     }
 
+    /// The list view draws its title in the page; the others keep it in the bar.
+    @ViewBuilder func titled(_ name: String) -> some View {
+        if mode == .list {
+            listBody.calmBar(name)
+        } else {
+            content.navigationTitle(name).navigationBarTitleDisplayMode(.inline).toolbarRole(.editor)
+        }
+    }
+
     @ViewBuilder var content: some View {
         switch mode {
         case .list: listBody
@@ -194,35 +162,13 @@ struct ListTasksView: View {
         let v = client.view
         let tasks = v.tasks(inList: listId)
         let statuses = v.statuses(forList: listId)
+        let top = tasks.filter { $0.parent == nil }
+        let closedCount = tasks.filter { v.status(of: $0).isClosed }.count
+        let space = v.space(ofList: listId)
         return List {
-            ForEach(statuses, id: \.name) { st in
-                let group = tasks.filter { v.status(of: $0).name == st.name }
-                if !group.isEmpty {
-                    Section {
-                        ForEach(group) { t in
-                            NavigationLink(value: Nav.Route.task(t.id)) { TaskRow(task: t) }
-                                .swipeActions(edge: .leading) {
-                                    if client.canEdit {
-                                        Button(st.isClosed ? "Reopen" : "Complete") {
-                                            client.edit { d, me in Edits.setDone(&d, task: t.id, done: !st.isClosed, me: me, ts: nowTs()) }
-                                        }
-                                        .tint(st.isClosed ? .gray : .green)
-                                    }
-                                }
-                                .accessibilityIdentifier("task-\(t.id)")
-                        }
-                    } header: {
-                        HStack(spacing: 6) {
-                            StatusDot(status: st, size: 10)
-                            Text(st.name.uppercased())
-                            Text("\(group.count)").foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            if tasks.isEmpty && !adding {
-                EmptyNote(title: "No tasks yet", systemImage: "checklist").listRowBackground(Color.clear)
-            }
+            CalmTitle(verbatim: v.list(listId)?.name ?? "",
+                      detail: space.map { $0.privateOwner != nil ? String(localized: "Personal") : $0.name },
+                      icon: ProgressRing(done: top.isEmpty ? 0 : Double(top.filter { v.status(of: $0).isClosed }.count) / Double(top.count), color: .wbAccent, size: 24))
             if adding {
                 Section {
                     TextField("Task name", text: $newName)
@@ -232,17 +178,58 @@ struct ListTasksView: View {
                         .accessibilityIdentifier("newTaskField")
                 }
             }
+            ForEach(statuses, id: \.name) { st in
+                let group = tasks.filter { v.status(of: $0).name == st.name }
+                if !group.isEmpty && (!st.isClosed || showDone) {
+                    Section {
+                        ForEach(group) { t in
+                            CalmTaskRow(task: t, showList: false, showPeople: true)
+                                .swipeActions(edge: .leading) {
+                                    if client.canEdit {
+                                        Button(st.isClosed ? "Reopen" : "Complete") {
+                                            client.edit { d, me in Edits.setDone(&d, task: t.id, done: !st.isClosed, me: me, ts: nowTs()) }
+                                        }
+                                        .tint(st.isClosed ? .gray : .green)
+                                    }
+                                }
+                        }
+                    } header: {
+                        HStack(spacing: 6) {
+                            StatusDot(status: st, size: 9)
+                            CalmHeader(verbatim: st.name)
+                            Text("\(group.count)").font(.system(size: 13)).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+            if closedCount > 0 {
+                Section {
+                    Button(showDone ? String(localized: "Hide completed tasks") : String(localized: "Show \(closedCount) completed")) {
+                        withAnimation { showDone.toggle() }
+                    }
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("showCompleted")
+                }
+            }
+            if tasks.isEmpty && !adding {
+                EmptyNote(title: "No tasks yet", systemImage: "checklist").listRowBackground(Color.clear)
+            }
+        }
+        .calmList()
+        .floatingAdd("New task", id: "addTaskButton") {
+            if adding { add() } else {
+                adding = true
+                newFocused = true
+            }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if adding {
                     Button("Add", action: add)
                         .disabled(newName.isBlank)
-                } else {
-                    AddButton("New task", id: "addTaskButton") {
-                        adding = true
-                        newFocused = true
-                    }
+                        .accessibilityIdentifier("addTaskDone")
                 }
             }
         }
@@ -278,6 +265,9 @@ struct TaskDetailView: View {
     @State private var sheet: Sheet?
     @State private var renaming: Int?
     @State private var renameText = ""
+    /// More details (tags, dates, custom fields, links, files, time) open,
+    /// remembered on this phone.
+    @AppStorage("task.detailsOpen") private var detailsOpen = false
 
     enum Sheet: Identifiable { case move, parent, remind; var id: Self { self } }
 
@@ -289,52 +279,35 @@ struct TaskDetailView: View {
             let can = client.canEdit
             ScrollViewReader { proxy in
                 Form {
+                    // the name and its notes
                     Section {
-                        TextField("Task name", text: $name, axis: .vertical)
-                            .font(.title3.weight(.semibold))
-                            .focused($focus, equals: .name)
-                            .disabled(!can)
-                            .submitLabel(.done)
-                            .onChange(of: name) {
-                                // a return key ends the edit, like the Mac app's one-line name
-                                if name.contains("\n") {
-                                    name = name.replacingOccurrences(of: "\n", with: "")
-                                    focus = nil
+                        HStack(alignment: .top, spacing: 8) {
+                            TaskCheck(task: t)
+                                .padding(.top, -6)
+                            TextField("Task name", text: $name, axis: .vertical)
+                                .font(.system(size: 22, weight: .bold))
+                                .focused($focus, equals: .name)
+                                .disabled(!can)
+                                .submitLabel(.done)
+                                .onChange(of: name) {
+                                    // a return key ends the edit, like the Mac app's one-line name
+                                    if name.contains("\n") {
+                                        name = name.replacingOccurrences(of: "\n", with: "")
+                                        focus = nil
+                                    }
                                 }
-                            }
-                            .accessibilityIdentifier("taskName")
-                        if let l = v.list(t.listId) {
-                            LabeledContent("List", value: l.name)
+                                .accessibilityIdentifier("taskName")
                         }
-                    }
-                    TaskPropertiesSection(task: t, can: can)
-                    TaskDetailsSection(task: t, can: can)
-                    Section("Description") {
                         TextField("Add a description", text: $desc, axis: .vertical)
-                            .lineLimit(3...)
+                            .font(.system(size: 15))
+                            .lineLimit(2...)
+                            .padding(.leading, 38)
                             .focused($focus, equals: .desc)
                             .disabled(!can)
                             .accessibilityIdentifier("taskDescription")
                     }
-                    CustomFieldsSection(task: t, can: can)
-                    let subs = v.subtasks(of: t.id)
-                    if !subs.isEmpty || can {
-                        Section("Subtasks") {
-                            ForEach(subs) { s in
-                                NavigationLink(value: Nav.Route.task(s.id)) { TaskRow(task: s) }
-                                    .accessibilityIdentifier("subtask-\(s.id)")
-                            }
-                            if can {
-                                TextField("Add subtask", text: $newSubtask)
-                                    .focused($focus, equals: .subtask)
-                                    .submitLabel(.done)
-                                    .onSubmit { addSubtask(t) }
-                                    .accessibilityIdentifier("newSubtaskField")
-                            }
-                        }
-                    }
-                    RelationshipsSection(task: t, can: can)
-                    TaskAttachmentsSection(task: t, can: can)
+                    // when, where, who, how urgent
+                    TaskPropertiesSection(task: t, can: can)
                     if !t.checklist.isEmpty || can {
                         Section {
                             ChecklistRows(task: t, can: can) { i, text in renameText = text; renaming = i }
@@ -347,20 +320,72 @@ struct TaskDetailView: View {
                             }
                         } header: {
                             HStack {
-                                Text("Checklist")
+                                CalmHeader("Checklist")
                                 if !t.checklist.isEmpty {
                                     Text("\(t.checklist.filter(\.done).count)/\(t.checklist.count)")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.secondary)
                                         .monospacedDigit()
                                         .accessibilityIdentifier("checklistCount")
                                 }
                             }
                         }
                     }
-                    if v.apps.timeTracking {
-                        TimeSection(task: t, can: can)
+                    let subs = v.subtasks(of: t.id)
+                    if !subs.isEmpty || can {
+                        Section {
+                            ForEach(subs) { s in
+                                NavigationLink(value: Nav.Route.task(s.id)) { TaskRow(task: s) }
+                                    .accessibilityIdentifier("subtask-\(s.id)")
+                            }
+                            if can {
+                                TextField("Add subtask", text: $newSubtask)
+                                    .focused($focus, equals: .subtask)
+                                    .submitLabel(.done)
+                                    .onSubmit { addSubtask(t) }
+                                    .accessibilityIdentifier("newSubtaskField")
+                            }
+                        } header: {
+                            CalmHeader("Subtasks")
+                        }
+                    }
+                    // the rest, folded away until asked for
+                    Section {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.15)) { detailsOpen.toggle() }
+                        } label: {
+                            HStack {
+                                Text("More details").foregroundStyle(.primary)
+                                Spacer()
+                                if !detailsOpen, let sum = detailsSummary(t) {
+                                    Text(verbatim: sum).font(.system(size: 14)).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                                    .rotationEffect(.degrees(detailsOpen ? 90 : 0))
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityValue(detailsOpen ? "Shown" : "Hidden")
+                        .accessibilityIdentifier("taskDetailsToggle")
+                    } footer: {
+                        if !detailsOpen { Text("Tags, dates, custom fields, links, files and time") }
+                    }
+                    if detailsOpen {
+                        TaskDetailsSection(task: t, can: can)
+                        CustomFieldsSection(task: t, can: can)
+                        RelationshipsSection(task: t, can: can)
+                        TaskAttachmentsSection(task: t, can: can)
+                        if v.apps.timeTracking {
+                            TimeSection(task: t, can: can)
+                        }
                     }
                     TaskActivitySection(task: t)
                 }
+                .scrollContentBackground(.hidden)
+                .background(Calm.page)
                 .onChange(of: commented) {
                     withAnimation { proxy.scrollTo("latestActivity", anchor: .top) }
                 }
@@ -372,8 +397,7 @@ struct TaskDetailView: View {
                     return ok
                 }
             }
-            .navigationTitle("Task")
-            .navigationBarTitleDisplayMode(.inline)
+            .calmBar(String(localized: "Task"))
             .toolbar {
                 if focus != nil {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -406,7 +430,7 @@ struct TaskDetailView: View {
                             Button(role: .destructive) { confirmDelete = true } label: { Label("Delete task", systemImage: "trash") }
                                 .accessibilityIdentifier("deleteTaskButton")
                         } label: {
-                            Image(systemName: "ellipsis.circle")
+                            Image(systemName: "ellipsis")
                         }
                         .disabled(!client.canEdit)
                         .accessibilityLabel("More")
@@ -459,6 +483,18 @@ struct TaskDetailView: View {
         } else {
             EmptyNote(title: "This task is gone", systemImage: "checklist")
         }
+    }
+
+    /// What More details holds, while it is folded: "2 files · 1h 20m".
+    func detailsSummary(_ t: TaskView) -> String? {
+        var parts: [String] = []
+        if !t.tags.isEmpty { parts.append(t.tags.count == 1 ? String(localized: "1 tag") : String(localized: "\(t.tags.count) tags")) }
+        let links = t.linked.count + t.waitingOn.count
+        if links > 0 { parts.append(links == 1 ? String(localized: "1 link") : String(localized: "\(links) links")) }
+        if !t.attachments.isEmpty { parts.append(t.attachments.count == 1 ? String(localized: "1 file") : String(localized: "\(t.attachments.count) files")) }
+        let mins = t.timeEntries.reduce(0) { $0 + Int(max(0, $1.end - $1.start) / 60) }
+        if mins > 0 { parts.append(Duration.seconds(mins * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// Like the Mac app's "Add subtask": in the parent's list, under it.
@@ -550,6 +586,12 @@ struct TaskPropertiesSection: View {
             .disabled(!can)
             .accessibilityIdentifier("assigneeMenu")
             DueRow(task: t, enabled: can)
+            if let l = v.list(t.listId) {
+                let sp = v.space(ofList: l.id)
+                LabeledContent("List") {
+                    Text(verbatim: sp.map { "\($0.privateOwner != nil ? String(localized: "Personal") : $0.name) · \(l.name)" } ?? l.name).lineLimit(1)
+                }
+            }
             if v.apps.priorities {
             Menu {
                 ForEach(0..<5) { p in
@@ -561,8 +603,12 @@ struct TaskPropertiesSection: View {
                 }
             } label: {
                 LabeledContent("Priority") {
-                    Label(L(Edits.priorityLabels[min(max(t.priority, 0), 4)]), systemImage: t.priority == 0 ? "flag" : "flag.fill")
-                        .foregroundStyle(priorityColor(t.priority))
+                    // not a Label: in a menu row it made the row run on far below its text
+                    HStack(spacing: 6) {
+                        Image(systemName: t.priority == 0 ? "flag" : "flag.fill")
+                        Text(L(Edits.priorityLabels[min(max(t.priority, 0), 4)]))
+                    }
+                    .foregroundStyle(priorityColor(t.priority))
                 }
             }
             .disabled(!can)
@@ -664,7 +710,7 @@ struct TaskActivitySection: View {
                 .id(i == 0 ? "latestActivity" : "activity-\(i)")
             }
         } header: {
-            Text("Activity")
+            CalmHeader("Comments and activity")
         }
     }
 }

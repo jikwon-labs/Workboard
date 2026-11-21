@@ -87,7 +87,7 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 
 예제 작업공간에서는 Sam Lee(멤버 3)에게만 이메일(`sam@example.com`)이 있다. 초대 코드에 이메일을 비워도 되는 경우와 이메일을 꼭 넣어야 하는 경우(멤버 2)를 둘 다 시험하기 위해서다.
 
-앱 실행 인자(스크린샷·UI 테스트용): `-wbReset YES`, `-wbServer URL`, `-wbMe ID`, `-wbTab home|chat|tasks|docs`, `-wbOpen channel:ID | thread:CH:MSG | task:ID | list:SPACE:LIST | doc:ID | settings`, `-wbOpenURL workboard://join?...`, `-wbAskTimeout 2`(관리 요청의 답을 기다리는 초, 기본 15), `-wbNoPasswordAutoFill YES`(로그인 칸에 저장된 비밀번호·강한 비밀번호를 내놓지 않는다. iOS 의 "Use Strong Password" 시트가 타이핑 도중 키보드를 가로채서 UI 테스트가 흔들렸다. 모든 UI 테스트가 이것으로 띄운다).
+앱 실행 인자(스크린샷·UI 테스트용): `-wbReset YES`, `-wbServer URL`, `-wbMe ID`, `-wbOpen inbox|today|upcoming|chats|docs|tools|search | channel:ID | thread:CH:MSG | task:ID | list:SPACE:LIST | doc:ID | app:NAME | goal:ID | meeting:ID | settings`(곳 이름은 첫 화면의 그 줄을 누른 화면을 연다. 예전 `-wbTab` 은 2026-11-21 탭바와 함께 없앴다), `-wbOpenURL workboard://join?...`, `-wbAskTimeout 2`(관리 요청의 답을 기다리는 초, 기본 15), `-wbNoPasswordAutoFill YES`(로그인 칸에 저장된 비밀번호·강한 비밀번호를 내놓지 않는다. iOS 의 "Use Strong Password" 시트가 타이핑 도중 키보드를 가로채서 UI 테스트가 흔들렸다. 모든 UI 테스트가 이것으로 띄운다).
 
 ## TestFlight
 

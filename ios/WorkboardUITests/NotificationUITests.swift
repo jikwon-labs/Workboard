@@ -6,7 +6,7 @@ import XCTest
 
 final class NotificationUITests: WorkboardUITestCase {
     func testBannerForNewMessageOpensConversation() {
-        let app = launchFresh(["-wbTab", "chat"], server: adminServer)
+        let app = launchFresh(["-wbOpen", "chats"], server: adminServer)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
         // turn on notifications from the card in the chat list (once per install)
@@ -16,10 +16,9 @@ final class NotificationUITests: WorkboardUITestCase {
             let allow = springboard.buttons["Allow"]
             if allow.waitForExistence(timeout: 5) { allow.tap() }
         }
-        // look at another tab, then someone mentions me in #general (channels
+        // look at another screen, then someone mentions me in #general (channels
         // notify about mentions unless set to all messages, as on the Mac)
-        app.tabBars.buttons["Home"].tap()
-        XCTAssertTrue(app.navigationBars["Home"].waitForExistence(timeout: 5))
+        goHome(app)
         let text = "Banner check \(Int(Date().timeIntervalSince1970) % 100000)"
         say("@Jamie Park " + text, channel: 301)
         let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
@@ -32,7 +31,7 @@ final class NotificationUITests: WorkboardUITestCase {
     /// Tapping a notification while the app is in the background brings it
     /// forward on the conversation (this used to stop the app).
     func testTappingABannerFromTheBackgroundOpensConversation() {
-        let app = launchFresh(["-wbTab", "chat"], server: adminServer)
+        let app = launchFresh(["-wbOpen", "chats"], server: adminServer)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let card = app.buttons["notifyCardButton"]
         if card.waitForExistence(timeout: 8) {

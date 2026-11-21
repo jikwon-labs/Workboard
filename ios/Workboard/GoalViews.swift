@@ -36,7 +36,7 @@ struct GoalsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 AddButton("New goal", id: "newGoalButton") {
                     let id = client.newId()
-                    if client.edit({ d, me in Edits.addGoal(&d, name: "New goal", me: me, id: id) }) { nav.more.append(.goal(id)) }
+                    if client.edit({ d, me in Edits.addGoal(&d, name: "New goal", me: me, id: id) }) { nav.path.append(.goal(id)) }
                 }
             }
         }

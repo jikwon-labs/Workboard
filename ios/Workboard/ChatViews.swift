@@ -2,6 +2,8 @@ import PhotosUI
 import SwiftUI
 import WorkboardKit
 
+/// Chat: unread conversations first, then channels and direct messages,
+/// each in a card. The "+" starts a direct message.
 struct ChatListView: View {
     @Environment(SyncClient.self) private var client
     @Environment(Notifier.self) private var notifier
@@ -14,9 +16,14 @@ struct ChatListView: View {
         let me = client.me ?? 0
         let v = client.view
         let all = v.visibleChannels(me: me)
-        let channels = all.filter { $0.kind == .channel }.sorted { $0.name < $1.name }
-        let dms = all.filter { $0.kind == .direct }.sorted { ($0.messages.last?.ts ?? 0) > ($1.messages.last?.ts ?? 0) }
+        let quiet = { (c: ChannelView) in c.kind == .channel && notifier.prefs.channelMode(c.id) == "nothing" }
+        let isUnread = { (c: ChannelView) in !quiet(c) && c.unread(me: me) > 0 }
+        let byLast = { (a: ChannelView, b: ChannelView) in (a.messages.last?.ts ?? 0) > (b.messages.last?.ts ?? 0) }
+        let unread = all.filter(isUnread).sorted(by: byLast)
+        let channels = all.filter { $0.kind == .channel && !isUnread($0) }.sorted { $0.name < $1.name }
+        let dms = all.filter { $0.kind == .direct && !isUnread($0) }.sorted(by: byLast)
         List {
+            CalmTitle(place: .chats)
             if notifier.permission == .unknown && !all.isEmpty {
                 Section {
                     HStack(spacing: 12) {
@@ -33,36 +40,18 @@ struct ChatListView: View {
                 EmptyNote(title: "No channels yet", systemImage: "bubble.left.and.bubble.right")
                     .listRowBackground(Color.clear)
             }
-            if !channels.isEmpty {
-                Section("Channels") {
-                    ForEach(channels) { c in
-                        NavigationLink(value: Nav.Route.channel(c.id)) { ChannelRow(channel: c) }
-                            .accessibilityIdentifier("channel-\(c.id)")
-                    }
-                }
-            }
-            if !dms.isEmpty {
-                Section("Direct messages") {
-                    ForEach(dms) { c in
-                        NavigationLink(value: Nav.Route.channel(c.id)) { ChannelRow(channel: c) }
-                            .accessibilityIdentifier("channel-\(c.id)")
-                    }
-                }
-            }
+            section("Unread", unread)
+            section("Channels", channels)
+            section("Direct messages", dms)
         }
-        .navigationTitle("Chat")
+        .calmList()
+        .calmBar(String(localized: "Chat"))
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { newChannel = true } label: { Image(systemName: "square.and.pencil") }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { newChannel = true } label: { Image(systemName: "number") }
                     .disabled(!client.canEdit)
                     .accessibilityLabel("New channel")
                     .accessibilityIdentifier("newChannelButton")
-            }
-            ToolbarItem(placement: .topBarLeading) {
-                Button { newDM = true } label: { Image(systemName: "person.crop.circle.badge.plus") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("New message")
-                    .accessibilityIdentifier("newDMButton")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -72,12 +61,26 @@ struct ChatListView: View {
                 .accessibilityLabel("Drafts and scheduled")
                 .accessibilityIdentifier("draftsMenu")
             }
-            ToolbarItem(placement: .topBarTrailing) { SettingsButton() }
         }
+        .floatingAdd("New message", id: "newDMButton") { newDM = true }
         .sheet(isPresented: $newChannel) { NewChannelSheet() }
         .sheet(isPresented: $newDM) { NewDMSheet() }
         .sheet(isPresented: $showDrafts) { DraftsSheet() }
         .sheet(isPresented: $showScheduled) { ScheduledSheet() }
+    }
+
+    @ViewBuilder
+    func section(_ title: LocalizedStringKey, _ list: [ChannelView]) -> some View {
+        if !list.isEmpty {
+            Section {
+                ForEach(list) { c in
+                    NavigationLink(value: Nav.Route.channel(c.id)) { ChannelRow(channel: c) }
+                        .accessibilityIdentifier("channel-\(c.id)")
+                }
+            } header: {
+                CalmHeader(title)
+            }
+        }
     }
 }
 
@@ -120,7 +123,7 @@ struct NewDMSheet: View {
         let ok = client.edit { d, me in opened = Edits.openDM(&d, with: person, me: me, id: newId, ts: nowTs()) }
         guard ok, let id = opened else { return }
         dismiss()
-        nav.chat.append(Nav.Route.channel(id))
+        nav.path.append(Nav.Route.channel(id))
     }
 }
 
@@ -169,7 +172,7 @@ struct NewChannelSheet: View {
         let ok = client.edit { d, me in Edits.createChannel(&d, name: name, isPrivate: isPrivate, me: me, id: id, ts: nowTs()) }
         guard ok else { return }
         dismiss()
-        nav.chat.append(Nav.Route.channel(id))
+        nav.path.append(Nav.Route.channel(id))
     }
 }
 
@@ -186,11 +189,11 @@ struct ChannelRow: View {
         let unread = quiet ? 0 : channel.unread(me: me)
         HStack(spacing: 12) {
             if channel.kind == .direct {
-                Avatar(member: v.member(channel.members.first { $0 != me } ?? me), size: 36)
+                Avatar(member: v.member(channel.members.first { $0 != me } ?? me), size: 34)
             } else {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color(.secondarySystemFill))
-                    .frame(width: 36, height: 36)
+                Circle()
+                    .fill(Color(.tertiarySystemFill))
+                    .frame(width: 34, height: 34)
                     .overlay(Image(systemName: "number").font(.system(size: 15, weight: .semibold)).foregroundStyle(.secondary))
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -1496,7 +1499,7 @@ struct DraftsSheet: View {
                 ForEach(drafts, id: \.2) { ch, thread, text in
                     Button {
                         dismiss()
-                        nav.chat = [.channel(ch)] + (thread.map { [.thread(channel: ch, message: $0)] } ?? [])
+                        nav.path = [.place(.chats), .channel(ch)] + (thread.map { [.thread(channel: ch, message: $0)] } ?? [])
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             let c = v.channels.first { $0.id == ch }
@@ -1546,7 +1549,7 @@ struct ScheduledSheet: View {
                                 client.unschedule(item.id)
                                 ChatDrafts.save(item.text, key: "\(item.channel)|\(item.parent ?? 0)", server: client.settings.server)
                                 dismiss()
-                                nav.chat = [.channel(item.channel)]
+                                nav.path = [.place(.chats), .channel(item.channel)]
                             }
                             .accessibilityIdentifier("editScheduled-\(item.id)")
                             Button("Cancel", role: .destructive) { client.unschedule(item.id) }

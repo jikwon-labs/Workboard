@@ -1,52 +1,65 @@
 import SwiftUI
 import WorkboardKit
 
+/// Docs: the newest ones, then each space's docs a tap away. The "+"
+/// starts a new doc.
 struct DocsView: View {
     @Environment(SyncClient.self) private var client
     @Environment(Nav.self) private var nav
 
     var body: some View {
-        let all = client.view.visibleDocs(me: client.me ?? 0)
-        let ids = Set(all.map(\.id))
-        // sub pages are listed in their page; one whose page is gone shows here
-        let docs = all.filter { $0.parent.map { !ids.contains($0) } ?? true }
+        let v = client.view
+        let docs = topDocs(client)
+        let recent = docs.sorted { $0.updated > $1.updated }.prefix(5)
+        let spaces = v.visibleSpaces(me: client.me ?? 0)
+        let noSpace = docs.filter { d in !spaces.contains { $0.id == d.space } }
         List {
+            CalmTitle(place: .docs)
             if docs.isEmpty {
                 EmptyNote(title: "No docs yet", systemImage: "doc.text").listRowBackground(Color.clear)
             }
-            ForEach(docs) { d in
-                NavigationLink(value: Nav.Route.doc(d.id)) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(d.title.isEmpty ? String(localized: "Untitled") : d.title).fontWeight(.medium).lineLimit(1)
-                            if d.isPrivate { Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.secondary) }
-                        }
-                        Text(firstLine(d.body))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        HStack(spacing: 6) {
-                            Text("Edited \(Fmt.relative(d.updated))")
-                            let pages = all.filter { $0.parent == d.id }.count
-                            if pages > 0 { Text(pages == 1 ? "· 1 page" : "· \(pages) pages") }
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    }
-                    .padding(.vertical, 2)
+            if !recent.isEmpty {
+                Section {
+                    ForEach(Array(recent)) { d in DocRow(doc: d) }
+                } header: {
+                    CalmHeader("Recent")
                 }
-                .accessibilityIdentifier("doc-\(d.id)")
+            }
+            if !docs.isEmpty {
+                Section {
+                    ForEach(spaces) { s in
+                        let n = docs.filter { $0.space == s.id }.count
+                        if n > 0 {
+                            NavigationLink(value: Nav.Route.docsIn(space: s.id)) {
+                                spaceRow(Text(s.privateOwner != nil ? String(localized: "Personal") : s.name), color: Color(rgb: s.color), count: n)
+                            }
+                            .accessibilityIdentifier("docsIn-\(s.id)")
+                        }
+                    }
+                    if !noSpace.isEmpty {
+                        NavigationLink(value: Nav.Route.docsIn(space: nil)) {
+                            spaceRow(Text("No space"), color: .secondary, count: noSpace.count)
+                        }
+                        .accessibilityIdentifier("docsIn-none")
+                    }
+                } header: {
+                    CalmHeader("By space")
+                }
             }
         }
-        .navigationTitle("Docs")
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button(action: newDoc) { Image(systemName: "square.and.pencil") }
-                    .disabled(!client.canEdit)
-                    .accessibilityLabel("New doc")
-                SettingsButton()
-            }
+        .calmList()
+        .calmBar(String(localized: "Docs"))
+        .floatingAdd("New doc", id: "newDocButton", action: newDoc)
+    }
+
+    func spaceRow(_ name: Text, color: Color, count: Int) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "shippingbox").font(.system(size: 17)).foregroundStyle(color).frame(width: 26)
+            name.font(.system(size: 16))
+            Spacer()
+            Text("\(count)").font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit()
         }
+        .frame(minHeight: 32)
     }
 
     func newDoc() {
@@ -54,11 +67,74 @@ struct DocsView: View {
         let space = client.view.visibleSpaces(me: client.me ?? 0).first { $0.privateOwner == nil }?.id
         guard client.edit({ d, me in Edits.addDoc(&d, title: "Untitled", space: space, me: me, id: id, ts: nowTs()) }) else { return }
         nav.newDoc = id
-        nav.docs.append(.doc(id))
+        nav.path.append(.doc(id))
     }
+}
 
-    func firstLine(_ body: String) -> String {
-        body.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? "Empty"
+/// Docs with no page above them (sub pages are listed in their page; one
+/// whose page is gone shows here too).
+@MainActor
+func topDocs(_ client: SyncClient) -> [DocView] {
+    let all = client.view.visibleDocs(me: client.me ?? 0)
+    let ids = Set(all.map(\.id))
+    return all.filter { $0.parent.map { !ids.contains($0) } ?? true }
+}
+
+/// One space's docs (or the docs in no space).
+struct DocsInSpaceView: View {
+    @Environment(SyncClient.self) private var client
+    let spaceId: UInt64?
+
+    var body: some View {
+        let v = client.view
+        let spaces = v.visibleSpaces(me: client.me ?? 0)
+        let space = spaces.first { $0.id == spaceId }
+        let docs = topDocs(client).filter { d in spaceId == nil ? !spaces.contains { $0.id == d.space } : d.space == spaceId }
+            .sorted { $0.updated > $1.updated }
+        let name = space.map { $0.privateOwner != nil ? String(localized: "Personal") : $0.name } ?? String(localized: "No space")
+        List {
+            CalmTitle(verbatim: name, icon: Image(systemName: "shippingbox").font(.system(size: 24, weight: .semibold)).foregroundStyle(space.map { Color(rgb: $0.color) } ?? .secondary))
+            Section {
+                ForEach(docs) { d in DocRow(doc: d) }
+            }
+            if docs.isEmpty {
+                EmptyNote(title: "No docs yet", systemImage: "doc.text").listRowBackground(Color.clear)
+            }
+        }
+        .calmList()
+        .calmBar(name)
+    }
+}
+
+/// A doc: its icon, title, and who changed it when.
+struct DocRow: View {
+    @Environment(SyncClient.self) private var client
+    let doc: DocView
+
+    var body: some View {
+        let all = client.view.visibleDocs(me: client.me ?? 0)
+        let pages = all.filter { $0.parent == doc.id }.count
+        NavigationLink(value: Nav.Route.doc(doc.id)) {
+            HStack(spacing: 14) {
+                Image(systemName: "doc.text").font(.system(size: 19)).foregroundStyle(.tertiary).frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(doc.title.isEmpty ? String(localized: "Untitled") : doc.title).font(.system(size: 16)).lineLimit(1)
+                        if doc.isPrivate { Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.secondary) }
+                    }
+                    HStack(spacing: 4) {
+                        if let who = client.view.member(doc.owner) { Text(verbatim: who.name + " ·") }
+                        Text("Edited \(Fmt.relative(doc.updated))")
+                        if pages > 0 { Text(pages == 1 ? "· 1 page" : "· \(pages) pages") }
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+            }
+            .padding(.vertical, 3)
+        }
+        .accessibilityIdentifier("doc-\(doc.id)")
     }
 }
 
@@ -200,15 +276,9 @@ struct DocDetailView: View {
         }
     }
 
-    /// Opens a page in whichever tab this doc is in.
+    /// Opens a page on top of this doc.
     func path(append id: UInt64) {
-        switch nav.tab {
-        case .home: nav.home.append(.doc(id))
-        case .chat: nav.chat.append(.doc(id))
-        case .tasks: nav.tasks.append(.doc(id))
-        case .more: nav.more.append(.doc(id))
-        case .docs: nav.docs.append(.doc(id))
-        }
+        nav.path.append(.doc(id))
     }
 
     func save(_ d: DocView) {

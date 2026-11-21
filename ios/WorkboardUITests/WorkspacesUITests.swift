@@ -16,8 +16,8 @@ final class WorkspacesUITests: WorkboardUITestCase {
     }
 
     func testSwitchToAnotherServerAndBack() {
-        let a = launchFresh(["-wbTab", "home"])
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
+        let a = launchFresh([])
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10))
 
         // another server's address: its own workspace, the first one kept
         openSettings(a)
@@ -28,7 +28,7 @@ final class WorkspacesUITests: WorkboardUITestCase {
         let me = a.buttons["member-1"]
         XCTAssertTrue(me.waitForExistence(timeout: 10), "a server not opened here before: pick who you are")
         me.tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10))
 
         openSettings(a)
         let current = a.descendants(matching: .any)["currentWorkspace"].firstMatch
@@ -38,7 +38,7 @@ final class WorkspacesUITests: WorkboardUITestCase {
 
         // back with one tap: no picking again, straight to Home
         kept.tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10))
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10))
         XCTAssertFalse(a.buttons["member-1"].exists)
         openSettings(a)
         waitLabel(a.descendants(matching: .any)["currentWorkspace"].firstMatch, contains: "18787")
@@ -84,7 +84,7 @@ final class WorkspacesUITests: WorkboardUITestCase {
 
         // open it: signed in there with the same password, the first one kept
         other.tap()
-        XCTAssertTrue(a.navigationBars["Home"].waitForExistence(timeout: 10), "opened without the sign-in screen")
+        XCTAssertTrue(a.buttons["quickFind"].waitForExistence(timeout: 10), "opened without the sign-in screen")
         XCTAssertFalse(a.textFields["emailField"].exists)
         openSettings(a)
         waitLabel(a.descendants(matching: .any)["currentWorkspace"].firstMatch, contains: "/w/k3x9")

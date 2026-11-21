@@ -13,7 +13,7 @@ final class SpacesUITests: WorkboardUITestCase {
     }
 
     func testMakeASpaceWithAFolderAndListThenEditStatusesAndArchive() {
-        let a = launchFresh(["-wbTab", "tasks"])
+        let a = launchFresh()
         let tag = "\(Int.random(in: 100000...999999))"
 
         let new = a.buttons["newSpaceButton"]

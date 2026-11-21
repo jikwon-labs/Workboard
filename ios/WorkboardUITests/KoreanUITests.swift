@@ -1,4 +1,4 @@
-// The app in Korean: tab names, screens and task history lines, as the Mac
+// The app in Korean: Home's places, screens and task history lines, as the Mac
 // shows them. Needs the open fake server:
 //   swift run wb-fake-server --port 18787
 
@@ -13,18 +13,25 @@ final class KoreanUITests: WorkboardUITestCase {
         return a
     }
 
-    func testTabsAndHomeAreInKorean() {
-        let a = launch(["-wbTab", "home"])
-        XCTAssertTrue(a.navigationBars["홈"].waitForExistence(timeout: 10))
-        XCTAssertTrue(a.tabBars.buttons["채팅"].exists)
-        XCTAssertTrue(a.tabBars.buttons["더 보기"].exists)
-        a.tabBars.buttons["더 보기"].tap()
+    func testHomeIsInKorean() {
+        let a = launch([])
+        let find = a.buttons["quickFind"]
+        XCTAssertTrue(find.waitForExistence(timeout: 10))
+        XCTAssertTrue(find.label.contains("빠른 찾기"))
+        for (id, ko) in [("inbox", "받은함"), ("today", "오늘"), ("upcoming", "예정"), ("chats", "채팅"), ("docs", "문서"), ("tools", "도구")] {
+            XCTAssertTrue(a.buttons["place-\(id)"].label.contains(ko), "\(id) is \(ko)")
+        }
+        XCTAssertTrue(a.buttons["settingsButton"].label.contains("설정"))
+        XCTAssertEqual(a.buttons["newItemButton"].label, "새로 만들기")
+        a.buttons["place-tools"].tap()
         XCTAssertTrue(a.buttons["app-goals"].waitForExistence(timeout: 5))
         XCTAssertTrue(a.buttons["app-goals"].label.contains("목표"))
+        XCTAssertTrue(a.staticTexts["자주 쓰는 도구"].exists)
+        XCTAssertTrue(a.staticTexts["모든 도구"].exists)
     }
 
     func testTheNamePromptIsInKorean() {
-        let a = launch(["-wbTab", "tasks"])
+        let a = launch([])
         let new = a.buttons["newSpaceButton"]
         waitEnabled(new)
         new.tap()

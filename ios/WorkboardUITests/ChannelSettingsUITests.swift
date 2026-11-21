@@ -6,7 +6,7 @@ import XCTest
 
 final class ChannelSettingsUITests: WorkboardUITestCase {
     func testMakeAGroupConversationAndRenameIt() {
-        let a = launchFresh(["-wbTab", "chat"])
+        let a = launchFresh(["-wbOpen", "chats"])
         let tag = "\(Int.random(in: 100000...999999))"
         let newChannel = a.buttons["newChannelButton"]
         waitEnabled(newChannel)

@@ -96,20 +96,18 @@ private struct UseTemplateSheet: View {
             var lid: UInt64?
             client.edit { d, me in lid = Edits.useListTemplate(&d, template, name: n, space: dest == 0 ? nil : dest, me: me, ts: nowTs()) { client.newId() } }
             dismiss()
-            if let lid, let s = client.view.space(ofList: lid) { nav.tab = .tasks; nav.tasks = [.space(s.id), .list(lid)] }
+            if let lid, let s = client.view.space(ofList: lid) { nav.path.append(contentsOf: [.space(s.id), .list(lid)]) }
         case "doc":
             let id = client.newId()
             let space = client.view.visibleSpaces(me: client.me ?? 0).first { $0.privateOwner == nil }?.id
             client.edit { d, me in Edits.useDocTemplate(&d, template, title: n, space: space, me: me, id: id, ts: nowTs()) }
             dismiss()
-            nav.tab = .docs
-            nav.docs = [.doc(id)]
+            nav.path.append(.doc(id))
         default:
             let id = client.newId()
             client.edit { d, me in Edits.useTaskTemplate(&d, template, name: n, list: dest, me: me, id: id, ts: nowTs()) }
             dismiss()
-            nav.tab = .tasks
-            nav.tasks = [.task(id)]
+            nav.path.append(.task(id))
         }
     }
 }

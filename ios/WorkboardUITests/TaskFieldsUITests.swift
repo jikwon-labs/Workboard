@@ -10,6 +10,7 @@ final class TaskFieldsUITests: WorkboardUITestCase {
         let a = launchFresh(["-wbOpen", "task:\(id)"])
         XCTAssertTrue(a.descendants(matching: .any)["taskName"].firstMatch.waitForExistence(timeout: 10))
         waitEnabled(a.buttons["taskMoreMenu"])
+        showTaskDetails(a)
         return a
     }
 

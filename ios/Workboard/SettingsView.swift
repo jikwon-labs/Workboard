@@ -7,10 +7,22 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
     @State private var forgetting: SavedWorkspace?
+    @AppStorage(Place.upcoming.shownKey) private var showUpcoming = true
+    @AppStorage(Place.docs.shownKey) private var showDocs = true
+    @AppStorage(Place.tools.shownKey) private var showTools = true
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Toggle("Upcoming", isOn: $showUpcoming).accessibilityIdentifier("showOnHome-upcoming")
+                    Toggle("Docs", isOn: $showDocs).accessibilityIdentifier("showOnHome-docs")
+                    Toggle("Tools", isOn: $showTools).accessibilityIdentifier("showOnHome-tools")
+                } header: {
+                    CalmHeader("Show on Home")
+                } footer: {
+                    Text("Inbox, Today and Chat are always there.")
+                }
                 workspacesSection
                 Section("Server") {
                     TextField("https://wb.example.com", text: $address)
@@ -167,6 +179,8 @@ struct SettingsView: View {
                     LabeledContent("This device's id tag", value: client.settings.tag.map(String.init) ?? "Not given yet")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Calm.page)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -24,7 +24,7 @@ struct MeetingsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 AddButton("New meeting", id: "newMeetingButton") {
                     let id = client.newId()
-                    if client.edit({ d, me in Edits.addMeeting(&d, title: "New meeting", date: dayString(), me: me, id: id) }) { nav.more.append(.meeting(id)) }
+                    if client.edit({ d, me in Edits.addMeeting(&d, title: "New meeting", date: dayString(), me: me, id: id) }) { nav.path.append(.meeting(id)) }
                 }
             }
         }

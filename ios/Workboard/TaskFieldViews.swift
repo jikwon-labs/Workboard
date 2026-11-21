@@ -33,7 +33,10 @@ struct TaskDetailsSection: View {
                 }
             } label: {
                 LabeledContent("Task type") {
-                    Label(task.milestone ? "Milestone" : "Task", systemImage: task.milestone ? "diamond" : "checkmark.circle")
+                    HStack(spacing: 6) {
+                        Image(systemName: task.milestone ? "diamond" : "checkmark.circle")
+                        Text(task.milestone ? "Milestone" : "Task")
+                    }
                 }
             }
             .disabled(!can)

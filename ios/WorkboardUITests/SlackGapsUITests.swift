@@ -61,7 +61,7 @@ final class SlackGapsUITests: WorkboardUITestCase {
         XCTAssertTrue(banner.waitForExistence(timeout: 10), "a keyword notifies like a mention")
 
         app.activate()
-        app.tabBars.buttons["Chat"].tap()
+        openPlace(app, "chats")
         XCTAssertTrue(app.descendants(matching: .any)["Notifications off"].waitForExistence(timeout: 5), "#design is marked quiet")
     }
 }

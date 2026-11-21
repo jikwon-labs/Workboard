@@ -30,6 +30,7 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 - Rust 앱에는 Xcode 프로젝트가 없어서 iPhone 앱 프로젝트를 빌린다. 이 앱의 번들 ID 로 묶고(아이콘과 App Store Connect 가 보는 SDK 정보가 따라온다), 묶음 안의 실행 파일을 Rust 앱으로, Info.plist 를 `ios/ipad-egui/Info.plist` 로 바꾼 뒤 Xcode 가 배포용으로 서명해 올린다(`ios/ipad-egui/ExportOptions.plist`). 빌드 번호는 App Store Connect 가 고르고, 버전은 `Cargo.toml` 의 것을 쓴다.
 - 처음 한 번 사람이 할 일: App Store Connect 웹에서 앱을 만든다(API 로는 못 만든다). 플랫폼 iOS, 이름 "Workboard Desk"(이미 쓰는 이름이면 다른 이름), 기본 언어 한국어, 번들 ID `com.seojigwon.workboard.desk`, SKU 아무거나. 그 앱의 TestFlight 에서 내부 테스트 그룹을 만들고 "자동 배포"를 켜고 팀원을 넣는다. 스크립트는 `swift ios/scripts/asc.swift app-id --bundle com.seojigwon.workboard.desk` 로 앱이 있는지 먼저 본다.
 - API 키는 iPhone 앱과 같은 `~/.appstoreconnect/workboard.env`.
+- 2026-11-22 App Store Connect 에 "Workboard Desk"(앱 ID 6837779375)를 만들고 내부 그룹 "Internal"(자동 배포, 테스터: 계정 주인)을 두었다. 첫 빌드 0.1.22 를 올렸다. App Store Connect 는 64비트 앱에 `UIRequiredDeviceCapabilities` = arm64 를 요구해서 Info.plist 에 넣었다.
 
 ## 손으로 누르는 시험
 

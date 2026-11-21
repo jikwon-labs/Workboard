@@ -1074,8 +1074,6 @@ fn recent_items_remember_tasks_lists_and_docs() {
     assert!(items.iter().any(|i| i.0 == "list" && i.1 == list));
 }
 
-/// A real workboard-server on a free local port, data in a temporary folder.
-/// Keep taking in what the server sends until `cond` holds.
 /// Ticks `a` until the server has saved the workspace file in `folder`
 /// (the server's home, or a workspace's folder in it); fails the test after
 /// the same wait as `net_until`.
@@ -1084,6 +1082,8 @@ pub(super) fn net_until_saved(a: &mut App, folder: &std::path::Path) {
     net_until(a, "the server saving the workspace", |_| file.is_file());
 }
 
+/// Keeps taking in what the server sends until `cond` holds; fails the test
+/// after 15 seconds.
 pub(super) fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
     let held = wait_until(
         std::time::Duration::from_secs(15),
@@ -1100,6 +1100,85 @@ pub(super) fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
         "timed out waiting for: {} ({:?}, toast {:?})",
         what, a.sync_rt.net_status, a.toast
     );
+}
+
+/// `a` brings its workspace to the empty `server` and becomes its owner;
+/// returns once the server has saved it.
+pub(super) fn share_on(a: &mut App, server: &TestServer) {
+    a.connect_server(&server.addr(), "").unwrap();
+    net_until(a, "A shared on the server", |a| {
+        a.data.extra.shared.is_some()
+    });
+    net_until_saved(a, &server.home);
+}
+
+/// Waits until the server has told `a` an invite code for `member`.
+pub(super) fn wait_invite(a: &mut App, member: u64) -> String {
+    net_until(a, "invite code", |a| {
+        a.sync_rt
+            .people
+            .iter()
+            .any(|p| p.member == member && p.invite.is_some())
+    });
+    a.sync_rt
+        .people
+        .iter()
+        .find(|p| p.member == member)
+        .and_then(|p| p.invite.clone())
+        .unwrap()
+}
+
+/// The owner `a` makes an invite code for `member` with `role`.
+pub(super) fn invite_code(a: &mut App, member: u64, role: wb_net::Role) -> String {
+    a.access_request(wb_net::Msg::CreateInvite { member, role });
+    wait_invite(a, member)
+}
+
+/// The owner on `server` makes an invite code for member 3 (Sam).
+pub(super) fn invite_code_for_sam(a: &mut App, server: &TestServer) -> String {
+    net_until_saved(a, &server.home);
+    net_until(a, "the people list", |a| {
+        a.sync_rt.people.iter().any(|p| p.member == 3)
+    });
+    invite_code(a, 3, wb_net::Role::Member)
+}
+
+/// A teammate's computer with a blank workspace of its own joins the team
+/// on `addr` with `code`.
+pub(super) fn join_with(addr: &str, code: &str) -> App {
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
+    b.connect_server(addr, code).unwrap();
+    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    b
+}
+
+/// Two computers on a real team server: the owner `a` (the seed) brought
+/// its workspace to the server, and Sam (member 3) joined as `b` with an
+/// invite code.
+pub(super) struct ServerTeam {
+    pub(super) server: TestServer,
+    pub(super) a: App,
+    pub(super) b: App,
+}
+
+impl ServerTeam {
+    /// A new server with the owner and Sam as a Member on it.
+    pub(super) fn start() -> Self {
+        Self::on(TestServer::start(), wb_net::Role::Member)
+    }
+
+    /// The owner and Sam (with `role`) on `server`.
+    pub(super) fn on(server: TestServer, role: wb_net::Role) -> Self {
+        let addr = server.addr();
+        let mut a = app();
+        share_on(&mut a, &server);
+        net_until(&mut a, "A sees the people list", |a| {
+            a.sync_rt.people.iter().any(|p| p.member == 3)
+        });
+        let code = invite_code(&mut a, 3, role);
+        let b = join_with(&addr, &code);
+        ServerTeam { server, a, b }
+    }
 }
 
 fn tid(a: &App, name: &str) -> u64 {

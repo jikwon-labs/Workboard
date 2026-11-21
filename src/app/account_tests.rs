@@ -2,7 +2,7 @@
 // when setting up the server, signs in on a second computer with it, invites
 // someone (the code goes out by mail) who joins with the code and a password.
 
-use super::tests::{blank_as, net_until, net_until_saved};
+use super::tests::{blank_as, net_until, net_until_saved, wait_invite};
 use super::together::How;
 use super::*;
 use workboard_server::testing::{temp_home, TestServer};
@@ -568,19 +568,7 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
         .id;
     a.sync_note_change();
     a.write_shared();
-    net_until(&mut a, "Sam's code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == sam && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == sam)
-        .and_then(|p| p.invite.clone())
-        .unwrap();
+    let code = wait_invite(&mut a, sam);
     let mut s = computer("Sam's");
     s.connect_with(
         &addr,

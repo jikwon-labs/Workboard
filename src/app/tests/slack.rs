@@ -1277,41 +1277,14 @@ fn slack_matches_from_an_earlier_version_move_into_the_map_without_an_edit() {
 #[test]
 fn concurrent_slack_matches_go_through_a_server() {
     use crate::app::slack::{plan, Assign};
-    let server = TestServer::start();
-    let addr = format!("127.0.0.1:{}", server.port);
     let (alex, sam, jordan) = (2, 3, 4);
-    let mut a = app();
-    a.connect_server(&addr, "").unwrap();
-    net_until(&mut a, "A shared on the server", |a| {
-        a.data.extra.shared.is_some()
-    });
-    net_until_saved(&mut a, &server.home);
-    net_until(&mut a, "A sees the people list", |a| {
-        a.sync_rt.people.iter().any(|p| p.member == sam)
-    });
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: sam,
-        // Import from Slack is for owners and admins
-        role: wb_net::Role::Admin,
-    });
-    net_until(&mut a, "invite code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == sam && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == sam)
-        .and_then(|p| p.invite.clone())
-        .unwrap();
-    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
-    b.connect_server(&addr, &code).unwrap();
-    net_until(&mut b, "B joined", |b| {
-        b.data.extra.shared.is_some() && b.data.member(alex).is_some()
-    });
+    // Import from Slack is for owners and admins
+    let ServerTeam {
+        server: _server,
+        mut a,
+        mut b,
+    } = ServerTeam::on(TestServer::start(), wb_net::Role::Admin);
+    net_until(&mut b, "B has the team", |b| b.data.member(alex).is_some());
 
     // A points UA at Jordan and UB at Jordan; B, a moment later, UA at Sam
     // and UC at Jordan

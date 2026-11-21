@@ -171,39 +171,11 @@ fn starting_a_call_posts_a_join_link() {
 #[test]
 fn a_teammates_message_through_the_server_becomes_a_notification() {
     use crate::app::notify::Kind;
-    let server = TestServer::start();
-    let addr = format!("127.0.0.1:{}", server.port);
-    let mut a = app();
-    a.connect_server(&addr, "").unwrap();
-    net_until(&mut a, "A shared on the server", |a| {
-        a.data.extra.shared.is_some()
-    });
-    net_until_saved(&mut a, &server.home);
-    net_until(&mut a, "A sees the people list", |a| {
-        a.sync_rt.people.iter().any(|p| p.member == 3)
-    });
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    net_until(&mut a, "invite code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .unwrap()
-        .invite
-        .clone()
-        .unwrap();
-    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
-    b.connect_server(&addr, &code).unwrap();
-    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    let ServerTeam {
+        server: _server,
+        mut a,
+        mut b,
+    } = ServerTeam::start();
     assert_eq!(b.data.me, 3);
 
     // A's window is in the background; what both have now is old news
@@ -338,36 +310,13 @@ fn a_huddle_on_the_server_connects_two_computers() {
     // the server makes its folder when it starts serving; don't race it
     std::fs::create_dir_all(&server.home).unwrap();
     std::fs::write(server.home.join(workboard_server::LIVEKIT_FILE), serde_json::json!({"url": format!("ws://127.0.0.1:{}", lk.port), "key": "appkey", "secret": LK_SECRET}).to_string()).unwrap();
-    let addr = format!("127.0.0.1:{}", server.port);
 
     // A sets the server up, Sam (member 3) joins with a code
-    let mut a = app();
-    a.connect_server(&addr, "").unwrap();
-    net_until(&mut a, "A on the server", |a| {
-        a.data.extra.shared.is_some() && a.sync_rt.people.iter().any(|p| p.member == 3)
-    });
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    net_until(&mut a, "code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .unwrap()
-        .invite
-        .clone()
-        .unwrap();
-    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
-    b.connect_server(&addr, &code).unwrap();
-    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    let ServerTeam {
+        server: _server,
+        mut a,
+        mut b,
+    } = ServerTeam::on(server, wb_net::Role::Member);
     b.sync_note_change();
     b.write_shared();
     let ch = a

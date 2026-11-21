@@ -130,6 +130,11 @@ impl TestServer {
         }
     }
 
+    /// Where the apps connect: 127.0.0.1 and its port.
+    pub fn addr(&self) -> String {
+        format!("127.0.0.1:{}", self.port)
+    }
+
     /// The mails to `to` in outbox/ (see `with_mail_folder`), oldest first.
     pub fn mails_to(&self, to: &str) -> Vec<String> {
         let mut files: Vec<_> = std::fs::read_dir(self.home.join(OUTBOX_DIR))

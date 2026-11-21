@@ -149,30 +149,6 @@ fn two_computers_work_in_one_shared_folder() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The owner on `addr` makes an invite code for member 3 (Sam).
-fn invite_code_for_sam(a: &mut App, server: &TestServer) -> String {
-    net_until_saved(a, &server.home);
-    net_until(a, "the people list", |a| {
-        a.sync_rt.people.iter().any(|p| p.member == 3)
-    });
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    net_until(a, "invite code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    a.sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .and_then(|p| p.invite.clone())
-        .unwrap()
-}
-
 #[test]
 fn joining_another_team_keeps_the_workspace_already_here() {
     let _home = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -184,10 +160,7 @@ fn joining_another_team_keeps_the_workspace_already_here() {
     let theirs = TestServer::start();
     let their_addr = format!("127.0.0.1:{}", theirs.port);
     let mut a = app();
-    a.connect_server(&their_addr, "").unwrap();
-    net_until(&mut a, "A shared on the server", |a| {
-        a.data.extra.shared.is_some()
-    });
+    share_on(&mut a, &theirs);
     let code = invite_code_for_sam(&mut a, &theirs);
 
     // Sam's own workspace, already on Sam's own server
@@ -290,25 +263,7 @@ fn two_computers_work_through_a_server() {
     net_until(&mut a, "A sees the people list", |a| {
         a.sync_rt.people.iter().any(|p| p.member == 3)
     });
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    net_until(&mut a, "invite code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .unwrap()
-        .invite
-        .clone()
-        .unwrap();
+    let code = invite_code(&mut a, 3, wb_net::Role::Member);
 
     // without a code nobody gets in
     let mut x = App::build(None, Some(blank_as("Nope", 1, "X")));
@@ -319,9 +274,7 @@ fn two_computers_work_through_a_server() {
     assert!(x.data.extra.shared.is_none(), "nothing changes for them");
 
     // Sam joins from their own computer with the code
-    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
-    b.connect_server(&addr, &code.to_lowercase()).unwrap();
-    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    let mut b = join_with(&addr, &code.to_lowercase());
     assert_eq!(
         b.data.tasks.len(),
         a.data.tasks.len(),
@@ -422,25 +375,7 @@ fn two_computers_work_through_a_server() {
     net_until(&mut b, "B signed out", |b| {
         matches!(b.sync_rt.net_status, Some(wb_net::Status::Refused(_)))
     });
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    net_until(&mut a, "new code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .unwrap()
-        .invite
-        .clone()
-        .unwrap();
+    let code = invite_code(&mut a, 3, wb_net::Role::Member);
     b.sign_in_again(&code);
     net_until(&mut b, "B back in", |b| {
         b.sync_rt.net_status == Some(wb_net::Status::Connected)
@@ -1160,23 +1095,7 @@ fn an_edit_in_a_view_only_space_comes_back_with_a_word() {
     });
     a.sync_note_change();
     a.write_shared();
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    net_until(&mut a, "invite code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .and_then(|p| p.invite.clone())
-        .unwrap();
+    let code = invite_code(&mut a, 3, wb_net::Role::Member);
     let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
     b.connect_server(&addr, &code).unwrap();
     net_until(&mut b, "Sam has the space, to view", |b| {
@@ -1524,12 +1443,9 @@ fn a_goal_is_worked_on_from_two_computers() {
     let server = TestServer::start();
     let addr = format!("127.0.0.1:{}", server.port);
     let mut a = app();
-    a.connect_server(&addr, "").unwrap();
-    net_until(&mut a, "A shared", |a| a.data.extra.shared.is_some());
+    share_on(&mut a, &server);
     let code = invite_code_for_sam(&mut a, &server);
-    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
-    b.connect_server(&addr, &code.to_lowercase()).unwrap();
-    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    let mut b = join_with(&addr, &code.to_lowercase());
     let (ann, sam) = (a.data.me, b.data.me);
     let push = |x: &mut App| {
         x.sync_note_change();
@@ -1703,12 +1619,9 @@ fn posts_reach_the_team_through_a_server() {
         .find(|c| c.name == "general")
         .unwrap()
         .id;
-    a.connect_server(&addr, "").unwrap();
-    net_until(&mut a, "A shared", |a| a.data.extra.shared.is_some());
+    share_on(&mut a, &server);
     let code = invite_code_for_sam(&mut a, &server);
-    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
-    b.connect_server(&addr, &code.to_lowercase()).unwrap();
-    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    let mut b = join_with(&addr, &code.to_lowercase());
     assert_eq!(b.data.me, 3);
     assert!(
         !b.data.channels.iter().any(|c| c.id == web),

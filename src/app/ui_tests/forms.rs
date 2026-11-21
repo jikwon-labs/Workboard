@@ -623,30 +623,9 @@ fn forms_go_between_teammates_through_a_server() {
     let server = workboard_server::testing::TestServer::start();
     let addr = format!("127.0.0.1:{}", server.port);
     let mut a = Ui1::new();
-    a.app.connect_server(&addr, "").unwrap();
-    receive(&mut a, "A on the server", |x| x.data.extra.shared.is_some());
-    crate::app::tests::net_until_saved(&mut a.app, &server.home);
-    receive(&mut a, "the people list", |x| {
-        x.sync_rt.people.iter().any(|p| p.member == 3)
-    });
-    a.app.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    receive(&mut a, "an invite code", |x| {
-        x.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    let code = a
-        .app
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .and_then(|p| p.invite.clone())
-        .unwrap();
+    crate::app::tests::share_on(&mut a.app, &server);
+    let code = crate::app::tests::invite_code_for_sam(&mut a.app, &server);
+    a.settle();
     let mut b = Ui1::with_data(crate::app::tests::blank_as("Theirs", 1, "B"));
     b.app.connect_server(&addr, &code.to_lowercase()).unwrap();
     receive(&mut b, "B joined", |x| x.data.extra.shared.is_some());

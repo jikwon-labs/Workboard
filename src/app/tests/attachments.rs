@@ -50,38 +50,11 @@ fn until_ready(a: &mut App, thread: bool) -> Vec<Attachment> {
 
 #[test]
 fn a_picture_goes_through_the_server_to_the_other_computer() {
-    let server = TestServer::start();
-    let addr = format!("127.0.0.1:{}", server.port);
-    let mut a = app();
-    a.connect_server(&addr, "").unwrap();
-    net_until(&mut a, "A shared on the server", |a| {
-        a.data.extra.shared.is_some()
-    });
-    net_until(&mut a, "A sees the people list", |a| {
-        a.sync_rt.people.iter().any(|p| p.member == 3)
-    });
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    net_until(&mut a, "invite code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .unwrap()
-        .invite
-        .clone()
-        .unwrap();
-    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
-    b.connect_server(&addr, &code).unwrap();
-    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    let ServerTeam {
+        server,
+        mut a,
+        mut b,
+    } = ServerTeam::start();
 
     // A puts a picture in the message box: it's checked, then sent to the server
     let ch = a
@@ -159,38 +132,11 @@ fn a_picture_goes_through_the_server_to_the_other_computer() {
 
 #[test]
 fn a_pdf_goes_through_the_server_and_the_other_computer_saves_it() {
-    let server = TestServer::start();
-    let addr = format!("127.0.0.1:{}", server.port);
-    let mut a = app();
-    a.connect_server(&addr, "").unwrap();
-    net_until(&mut a, "A shared on the server", |a| {
-        a.data.extra.shared.is_some()
-    });
-    net_until(&mut a, "A sees the people list", |a| {
-        a.sync_rt.people.iter().any(|p| p.member == 3)
-    });
-    a.access_request(wb_net::Msg::CreateInvite {
-        member: 3,
-        role: wb_net::Role::Member,
-    });
-    net_until(&mut a, "invite code", |a| {
-        a.sync_rt
-            .people
-            .iter()
-            .any(|p| p.member == 3 && p.invite.is_some())
-    });
-    let code = a
-        .sync_rt
-        .people
-        .iter()
-        .find(|p| p.member == 3)
-        .unwrap()
-        .invite
-        .clone()
-        .unwrap();
-    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
-    b.connect_server(&addr, &code).unwrap();
-    net_until(&mut b, "B joined", |b| b.data.extra.shared.is_some());
+    let ServerTeam {
+        server,
+        mut a,
+        mut b,
+    } = ServerTeam::start();
 
     let ch = a
         .data

@@ -545,13 +545,23 @@ impl Conn {
                     Err(why) => denied(&why),
                 })
             }
+            // reading a backup, merging it and saving it to disk takes a
+            // moment: away from the connections
+            Some(m @ Msg::Restore { .. }) => {
+                let h = hub.clone();
+                let r = off_thread(move || match h.request(member, conn, m) {
+                    Reply::To(r) => Ok(r.to_json()),
+                    Reply::Denied(why) => Err(why),
+                })
+                .await;
+                Some(r.unwrap_or_else(|why| denied(&why)))
+            }
             Some(
                 m @ (Msg::CreateInvite { .. }
                 | Msg::SetRole { .. }
                 | Msg::Revoke { .. }
                 | Msg::AccessList
-                | Msg::BackupList
-                | Msg::Restore { .. }),
+                | Msg::BackupList),
             ) => match hub.request(member, conn, m) {
                 Reply::To(Msg::Invite {
                     member: who, code, ..

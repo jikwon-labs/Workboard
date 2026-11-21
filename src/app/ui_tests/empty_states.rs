@@ -420,6 +420,50 @@ fn timesheet_options_with_no_tasks_say_why() {
 }
 
 #[test]
+fn timesheet_says_what_it_is_for_and_how_to_fill_it() {
+    const WHAT: &str = "Write down how long you worked on each task, day by day. Time from a task's timer is filled in for you.";
+    const HOW: &str =
+        "Add a task you worked on below, then type how long you spent under each day.";
+    let says = |h: &Ui1, s: &str| h.texts().iter().any(|x| x == s);
+    // no tasks at all: the start card says what a timesheet is
+    let mut h = with(solo(), 1440.0, 900.0);
+    h.app.section = Section::Timesheets;
+    h.settle();
+    assert!(says(&h, WHAT), "{:?}", h.texts());
+    // an empty grid says how to fill it in
+    h.click("Individual tasks");
+    assert!(says(&h, HOW), "{:?}", h.texts());
+    // nothing to add: the menu says why instead of opening as a bare dot
+    h.click("+ Add task");
+    assert!(says(&h, "Make a task first: time is tracked on tasks"));
+
+    // with tasks: once a row is in, the hint goes
+    let mut h = Ui1::new();
+    let td = today();
+    let ws = td - Duration::days(td.weekday().num_days_from_sunday() as i64);
+    for t in &mut h.app.data.tasks {
+        t.time_entries.clear();
+    }
+    h.app.section = Section::Timesheets;
+    h.app.hub_filter = 0;
+    h.app.sheet_week = ws;
+    h.app.sheet_entries = false;
+    h.settle();
+    h.click("Individual tasks");
+    assert!(says(&h, HOW));
+    h.click("+ Add task");
+    h.click("Renew passport");
+    assert!(h.has("Remove row Renew passport"));
+    assert!(!says(&h, HOW), "the hint goes once a row is in");
+    // every task on the sheet: the menu says so
+    let all: Vec<u64> = h.app.data.tasks.iter().map(|t| t.id).collect();
+    h.app.add_sheet_rows(ws, all);
+    h.settle();
+    h.click("+ Add task");
+    assert!(says(&h, "Every task is already on this week's timesheet"));
+}
+
+#[test]
 fn dark_mode_tag_chips_are_readable() {
     let card = crate::theme::theme(true).card;
     for c in STATUS_PALETTE.iter().skip(1) {

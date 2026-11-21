@@ -1721,9 +1721,12 @@ impl App {
                     if self.hub_filter == 0 {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             // the view shown is outlined, like the composer's tabs
-                            for (on, kind, label) in [(true, "list", "Time entries"), (false, "table", "Timesheet")] {
+                            for (on, kind, label, hint) in [
+                                (true, "list", "Time entries", "Each piece of time you tracked this week, newest first"),
+                                (false, "table", "Timesheet", "Your time on each task for each day of the week"),
+                            ] {
                                 let sel = self.sheet_entries == on;
-                                if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, if sel { t.text } else { t.text2 }, t.text2).clicked() {
+                                if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, if sel { t.text } else { t.text2 }, t.text2).on_hover_text(tr(hint)).clicked() {
                                     self.sheet_entries = on;
                                 }
                             }
@@ -1742,6 +1745,9 @@ impl App {
                                     let (r, _) = ui.allocate_exact_size(vec2(48.0, 48.0), Sense::hover());
                                     line_icon_scaled(ui.painter(), "timesheets", r.center(), t.text3, 2.6);
                                     ui.label(RichText::new(tr("Add entries to this week's timesheet")).size(17.0));
+                                    ui.add_space(4.0);
+                                    // what a timesheet is for: nothing else on the page says it
+                                    ui.label(RichText::new(tr("Write down how long you worked on each task, day by day. Time from a task's timer is filled in for you.")).size(13.5).color(t.text2));
                                     ui.add_space(14.0);
                                 });
                                 let w = ui.available_width();
@@ -1928,21 +1934,27 @@ impl App {
                             let mut hours = before;
                             // never clamp what is already there: a day over 24h
                             // (entries from elsewhere) would be cut just by drawing
-                            let r = ui.add_sized(
-                                [col - 8.0, 26.0],
-                                egui::DragValue::new(&mut hours)
-                                    .range(0.0..=24.0)
-                                    .clamp_existing_to_range(false)
-                                    .speed(0.05)
-                                    .custom_formatter(|h, _| fmt_hm((h * 3600.0).round() as i64))
-                                    .custom_parser(|s| {
-                                        if s.trim() == "-" {
-                                            return Some(0.0);
-                                        }
-                                        super::taskfields::parse_estimate(s)
-                                            .map(|m| m as f64 / 60.0)
-                                    }),
-                            );
+                            let r = ui
+                                .add_sized(
+                                    [col - 8.0, 26.0],
+                                    egui::DragValue::new(&mut hours)
+                                        .range(0.0..=24.0)
+                                        .clamp_existing_to_range(false)
+                                        .speed(0.05)
+                                        .custom_formatter(
+                                            |h, _| fmt_hm((h * 3600.0).round() as i64),
+                                        )
+                                        .custom_parser(|s| {
+                                            if s.trim() == "-" {
+                                                return Some(0.0);
+                                            }
+                                            super::taskfields::parse_estimate(s)
+                                                .map(|m| m as f64 / 60.0)
+                                        }),
+                                )
+                                .on_hover_text(tr(
+                                    "Type the time, like 1h 30m, or drag left and right",
+                                ));
                             ui.add_space(8.0);
                             if r.changed() && hours != before {
                                 let tid = self.data.tasks[ti].id;
@@ -1958,6 +1970,17 @@ impl App {
                             t.text,
                         );
                     });
+                }
+                // no rows yet: say how the grid is filled in instead of a blank gap
+                if !ids.iter().any(|id| self.task(*id).is_some()) {
+                    let (hr, _) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
+                    ui.painter().text(
+                        hr.left_center() + vec2(8.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        tr("Add a task you worked on below, then type how long you spent under each day."),
+                        FontId::proportional(13.5),
+                        t.text3,
+                    );
                 }
                 if let Some(id) = drop_row {
                     self.drop_sheet_row(ws, id);
@@ -2020,7 +2043,20 @@ impl App {
                         .filter(|x| !ids.contains(&x.id) && self.data.task_live(x))
                         .map(|x| (x.id, x.name.clone()))
                         .collect();
+                    let any_task = self.data.tasks.iter().any(|x| self.data.task_live(x));
                     ui.menu_button(tr("+ Add task"), |ui| {
+                        // an empty menu showed as a bare dot: say why there is nothing
+                        if tasks.is_empty() {
+                            ui.add(
+                                egui::Label::new(RichText::new(tr(if any_task {
+                                    "Every task is already on this week's timesheet"
+                                } else {
+                                    "Make a task first: time is tracked on tasks"
+                                }))
+                                .color(t.text2))
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                            );
+                        }
                         egui::ScrollArea::vertical()
                             .max_height(420.0)
                             .show(ui, |ui| {

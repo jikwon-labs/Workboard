@@ -130,6 +130,30 @@ pub const T: &[(&str, &str)] = &[
     ("+ Add task", "+ 작업 추가"),
     ("No time entries this week", "이번 주 시간 항목이 없습니다"),
     (
+        "Write down how long you worked on each task, day by day. Time from a task's timer is filled in for you.",
+        "작업마다 하루에 몇 시간 일했는지 적는 곳입니다. 작업 타이머로 잰 시간은 저절로 채워집니다.",
+    ),
+    (
+        "Add a task you worked on below, then type how long you spent under each day.",
+        "아래에서 일한 작업을 추가하고, 날짜 칸에 걸린 시간을 적으세요.",
+    ),
+    (
+        "Type the time, like 1h 30m, or drag left and right",
+        "1시간 30분처럼 적거나, 좌우로 끌어서 바꿉니다",
+    ),
+    (
+        "Every task is already on this week's timesheet",
+        "모든 작업이 이미 이번 주 타임시트에 있습니다",
+    ),
+    (
+        "Each piece of time you tracked this week, newest first",
+        "이번 주에 기록한 시간을 하나씩, 최근 것부터 봅니다",
+    ),
+    (
+        "Your time on each task for each day of the week",
+        "작업별로 요일마다 쓴 시간을 표로 봅니다",
+    ),
+    (
         "The time entry you were changing was changed somewhere else, so it was closed without saving.",
         "고치던 시간 항목이 다른 곳에서 바뀌어 저장하지 않고 닫았습니다.",
     ),

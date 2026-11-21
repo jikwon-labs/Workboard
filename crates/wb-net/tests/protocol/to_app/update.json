@@ -1,0 +1,16 @@
+{
+  "type": "update",
+  "data": {
+    "channels": [
+      {
+        "id": 301,
+        "name": "general"
+      }
+    ],
+    "next_id": 7
+  },
+  "rev": 13,
+  "hidden": [
+    9001
+  ]
+}

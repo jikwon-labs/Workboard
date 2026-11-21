@@ -1,0 +1,12 @@
+{
+  "type": "hook_add",
+  "hook": {
+    "token": "hk_abc",
+    "kind": "outgoing",
+    "channel": 301,
+    "name": "Deploy bot",
+    "url": "https://example.com/hook",
+    "trigger": "deploy",
+    "creator": 2
+  }
+}

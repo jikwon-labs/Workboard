@@ -1,0 +1,22 @@
+{
+  "type": "welcome",
+  "tag": 5,
+  "snapshot": {
+    "channels": [
+      {
+        "id": 301,
+        "name": "general"
+      }
+    ],
+    "next_id": 7
+  },
+  "rev": 12,
+  "member": 2,
+  "role": "admin",
+  "token": "tok-123",
+  "email": "sam@example.com",
+  "hidden": [
+    9001
+  ],
+  "deltas": true
+}

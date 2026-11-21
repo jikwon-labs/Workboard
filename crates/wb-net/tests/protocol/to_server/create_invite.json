@@ -1,0 +1,5 @@
+{
+  "type": "create_invite",
+  "member": 2,
+  "role": "admin"
+}

@@ -1,0 +1,14 @@
+{
+  "type": "delta",
+  "data": {
+    "channels": [
+      {
+        "id": 301,
+        "name": "general"
+      }
+    ],
+    "next_id": 7
+  },
+  "rev": 14,
+  "base": 13
+}

@@ -1,0 +1,6 @@
+{
+  "type": "call_token",
+  "channel": 301,
+  "url": "wss://lk.example.com",
+  "token": "jwt"
+}

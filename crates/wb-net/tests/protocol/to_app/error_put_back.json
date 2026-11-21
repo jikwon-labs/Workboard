@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "message": "Some changes were turned down.",
+  "code": "denied",
+  "put_back": true
+}

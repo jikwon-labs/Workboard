@@ -1,0 +1,7 @@
+{
+  "type": "hello",
+  "device": "dev-1",
+  "invite": "ABCD-EFGH-JKLM",
+  "email": "sam@example.com",
+  "new_password": "new-secret"
+}

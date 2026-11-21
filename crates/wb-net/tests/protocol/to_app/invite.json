@@ -1,0 +1,6 @@
+{
+  "type": "invite",
+  "member": 2,
+  "code": "ABCD-EFGH-JKLM",
+  "emailed": "sam@example.com"
+}

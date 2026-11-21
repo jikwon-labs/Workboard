@@ -1,0 +1,19 @@
+{
+  "type": "access",
+  "people": [
+    {
+      "member": 1,
+      "role": "owner",
+      "devices": 2,
+      "account": true
+    },
+    {
+      "member": 2,
+      "role": "member",
+      "devices": 0,
+      "invite": "ABCD-EFGH-JKLM"
+    }
+  ],
+  "role": "owner",
+  "answer": true
+}

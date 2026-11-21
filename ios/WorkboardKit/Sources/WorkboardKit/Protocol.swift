@@ -328,8 +328,9 @@ public enum ServerMessage: Equatable, Sendable {
     case pong
     /// `channel` is set when a call_join for it was turned down; `putBack`
     /// when changes pushed from here were turned down (not an answer to a
-    /// request, so never mixed up with one).
-    case error(code: String?, message: String, channel: UInt64? = nil, putBack: Bool = false)
+    /// request, so never mixed up with one). `gone`: the workspace was
+    /// deleted from the server (code "auth", message WorkspaceAPI.goneMessage).
+    case error(code: String?, message: String, channel: UInt64? = nil, putBack: Bool = false, gone: Bool = false)
     case unknown(String)
 
     public var json: JSON {
@@ -382,11 +383,12 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "integration_list", "hooks": .array(hooks), "commands": .array(commands)]
         case .ping: return ["type": "ping"]
         case .pong: return ["type": "pong"]
-        case let .error(code, m, channel, putBack):
+        case let .error(code, m, channel, putBack, gone):
             var o: [String: JSON] = ["type": "error", "message": .string(m)]
             if let code { o["code"] = .string(code) }
             if let channel { o["channel"] = .id(channel) }
             if putBack { o["put_back"] = true }
+            if gone { o["gone"] = true }
             return .object(o)
         case let .unknown(t): return ["type": .string(t)]
         }
@@ -448,7 +450,8 @@ public enum ServerMessage: Equatable, Sendable {
             self = .integrationList(hooks: j["hooks"]?.array ?? [], commands: j["commands"]?.array ?? [])
         case "ping": self = .ping
         case "pong": self = .pong
-        case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint, putBack: j["put_back"]?.bool ?? false)
+        case "error": self = .error(code: j["code"]?.string, message: j["message"]?.string ?? "", channel: j["channel"]?.uint, putBack: j["put_back"]?.bool ?? false,
+                                           gone: j["gone"]?.bool ?? false)
         default: self = .unknown(type)
         }
     }

@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "message": "Huddles aren't set up.",
+  "code": "denied",
+  "channel": 301
+}

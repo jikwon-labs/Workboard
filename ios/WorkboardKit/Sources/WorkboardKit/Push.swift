@@ -134,7 +134,7 @@ extension SyncClient {
                         ws.sendPing { e in if let e { c.resume(throwing: e) } else { c.resume() } }
                     }
                     return true
-                case let .error(code, _, _, _):
+                case let .error(code, _, _, _, _):
                     // signed out there for good (token unknown, access removed): the
                     // server dropped this device's notifications with it
                     return code == ServerErrorCode.auth.rawValue

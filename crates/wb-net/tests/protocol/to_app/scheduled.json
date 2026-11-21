@@ -1,0 +1,15 @@
+{
+  "type": "scheduled",
+  "items": [
+    {
+      "id": 1763000000123,
+      "channel": 301,
+      "parent": 5001,
+      "text": "Standup in 5 @Sam",
+      "at": 1763003600,
+      "mentions": [
+        3
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "type": "hello",
+  "device": "dev-1",
+  "email": "sam@example.com",
+  "new_password": "new-secret",
+  "reset_code": "RSET-CODE-0001"
+}

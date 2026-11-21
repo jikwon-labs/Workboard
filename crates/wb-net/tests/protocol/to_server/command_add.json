@@ -1,0 +1,8 @@
+{
+  "type": "command_add",
+  "command": {
+    "name": "weather",
+    "description": "Today's weather",
+    "url": "https://example.com/weather"
+  }
+}

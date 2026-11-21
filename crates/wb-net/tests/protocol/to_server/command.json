@@ -1,0 +1,7 @@
+{
+  "type": "command",
+  "channel": 301,
+  "parent": 5001,
+  "name": "weather",
+  "text": "Seoul"
+}

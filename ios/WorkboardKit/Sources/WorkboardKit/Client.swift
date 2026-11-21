@@ -708,7 +708,7 @@ public final class SyncClient {
             send(.pong, on: ws)
         case .pong:
             break
-        case let .error(code, message, channel, putBack):
+        case let .error(code, message, channel, putBack, gone):
             if let channel {
                 // a call_join turned down (one that timed out meanwhile is
                 // over already); the connection stays
@@ -716,7 +716,7 @@ public final class SyncClient {
             } else if putBack || message == Self.updateNeeded {
                 // about pushed changes, not an answer to a request
                 notice = message
-            } else if code == ServerErrorCode.auth.rawValue, message == WorkspaceAPI.goneMessage {
+            } else if gone || (code == ServerErrorCode.auth.rawValue && message == WorkspaceAPI.goneMessage) {
                 workspaceDeleted(message)
             } else {
                 handleError(code.flatMap(ServerErrorCode.init(rawValue:)), message: message)

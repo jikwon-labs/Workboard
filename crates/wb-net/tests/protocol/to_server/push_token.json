@@ -1,0 +1,24 @@
+{
+  "type": "push_token",
+  "token": "apns-token",
+  "platform": "ios",
+  "env": "production",
+  "workspace": "macmini:8787",
+  "prefs": {
+    "direct": true,
+    "mentions": false,
+    "replies": true,
+    "channel_default": "all",
+    "channel_modes": [
+      {
+        "channel": 301,
+        "mode": "nothing"
+      }
+    ],
+    "keywords": [
+      "launch",
+      "deploy"
+    ],
+    "muted_until": 1763009999
+  }
+}

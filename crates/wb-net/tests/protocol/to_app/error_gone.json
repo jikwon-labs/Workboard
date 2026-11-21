@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "message": "This workspace was deleted from the server by its owner.",
+  "code": "auth",
+  "gone": true
+}

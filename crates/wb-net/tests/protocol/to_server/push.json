@@ -1,0 +1,12 @@
+{
+  "type": "push",
+  "data": {
+    "channels": [
+      {
+        "id": 301,
+        "name": "general"
+      }
+    ],
+    "next_id": 7
+  }
+}

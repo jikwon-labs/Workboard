@@ -25,6 +25,15 @@ public struct HookItem: Identifiable, Hashable, Sendable {
         url = j["url"]?.string ?? ""
         trigger = j["trigger"]?.string ?? ""
     }
+
+    /// A new webhook as hook_add sends it; the server fills in the token
+    /// and creator.
+    static func request(kind: String, channel: UInt64, name: String, url: String = "", trigger: String = "") -> JSON {
+        var h: [String: JSON] = ["kind": .string(kind), "channel": .id(channel), "name": .string(name.trimmed)]
+        if !url.trimmed.isEmpty { h["url"] = .string(url.trimmed) }
+        if !trigger.trimmed.isEmpty { h["trigger"] = .string(trigger.trimmed) }
+        return .object(h)
+    }
 }
 
 /// A slash command (wb_net::CommandInfo).
@@ -39,6 +48,11 @@ public struct CommandItem: Identifiable, Hashable, Sendable {
         name = n
         description = j["description"]?.string ?? ""
         url = j["url"]?.string ?? ""
+    }
+
+    /// A new command as command_add sends it.
+    static func request(name: String, url: String, description: String) -> JSON {
+        ["name": .string(name.trimmed), "url": .string(url.trimmed), "description": .string(description.trimmed)]
     }
 }
 
@@ -141,10 +155,7 @@ extension SyncClient {
 
     public func addHook(kind: String, channel: UInt64, name: String, url: String = "", trigger: String = "") {
         guard let ws = socket else { return }
-        var h: [String: JSON] = ["kind": .string(kind), "channel": .id(channel), "name": .string(name.trimmed)]
-        if !url.trimmed.isEmpty { h["url"] = .string(url.trimmed) }
-        if !trigger.trimmed.isEmpty { h["trigger"] = .string(trigger.trimmed) }
-        send(.hookAdd(hook: .object(h)), on: ws)
+        send(.hookAdd(hook: HookItem.request(kind: kind, channel: channel, name: name, url: url, trigger: trigger)), on: ws)
     }
 
     public func removeHook(_ token: String) {
@@ -154,7 +165,7 @@ extension SyncClient {
 
     public func addCommand(name: String, url: String, description: String) {
         guard let ws = socket else { return }
-        send(.commandAdd(command: ["name": .string(name.trimmed), "url": .string(url.trimmed), "description": .string(description.trimmed)]), on: ws)
+        send(.commandAdd(command: CommandItem.request(name: name, url: url, description: description)), on: ws)
     }
 
     public func removeCommand(_ name: String) {

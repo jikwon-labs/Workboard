@@ -1,0 +1,21 @@
+{
+  "type": "integration_list",
+  "hooks": [
+    {
+      "token": "hk_abc",
+      "kind": "outgoing",
+      "channel": 301,
+      "name": "Deploy bot",
+      "url": "https://example.com/hook",
+      "trigger": "deploy",
+      "creator": 2
+    }
+  ],
+  "commands": [
+    {
+      "name": "weather",
+      "description": "Today's weather",
+      "url": "https://example.com/weather"
+    }
+  ]
+}

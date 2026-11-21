@@ -1056,15 +1056,15 @@ fn small_window_sidebar_scrolls_without_a_scroll_bar() {
     let side = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sidebar"))
         .expect("the sidebar is open")
         .rect;
-    // the "+ New message" row at the bottom of the sidebar list
+    // the last conversation at the bottom of the sidebar list
     let last_row = |h: &Ui1| {
-        h.painted_text(&tr("New message"))
-            .into_iter()
-            .map(|(r, _)| r)
-            .filter(|r| side.x_range().contains(r.left()))
-            .max_by(|a, b| a.top().total_cmp(&b.top()))
+        h.tree
+            .iter()
+            .map(|(_, r)| *r)
+            .filter(|r| side.x_range().contains(r.left()) && r.right() <= side.right())
+            .max_by(|a, b| a.bottom().total_cmp(&b.bottom()))
     };
-    let start = last_row(&h).expect("the sidebar lists New message");
+    let start = last_row(&h).expect("the sidebar lists conversations");
     assert!(
         start.bottom() > h.size.y - 20.0,
         "the sidebar overflows a small window: {:?}",
@@ -1074,7 +1074,7 @@ fn small_window_sidebar_scrolls_without_a_scroll_bar() {
     let strip = side.with_min_x(side.right() - 30.0);
     assert_eq!(scroll_bars_in(&h, strip), 0, "no scroll bar at rest");
     wheel_down(&mut h, pos2(side.center().x, 300.0), strip, "sidebar");
-    let end = last_row(&h).expect("New message is still listed");
+    let end = last_row(&h).expect("the last conversation is still listed");
     assert!(
         end.bottom() <= h.size.y,
         "the wheel brings the bottom row into view: {:?}",

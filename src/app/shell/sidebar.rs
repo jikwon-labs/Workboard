@@ -691,8 +691,8 @@ impl App {
     }
 
     /// Channels: each channel I can see, with its unread count and settings
-    /// button, and the field for a new channel. "Add Channel" is the only add
-    /// button here (a "+" in the header too showed the same thing twice).
+    /// button, and the field for a new channel. The heading's "+" is the only
+    /// add button here (no "Add Channel" row under the list too).
     fn sidebar_channels(
         &mut self,
         ui: &mut Ui,
@@ -721,16 +721,26 @@ impl App {
                     .map(|c| c.2)
                     .sum()
             };
-            let (folded, hs) = self.side_header(
+            let (mut folded, hs) = self.side_header(
                 ui,
                 "Channels",
                 &[
                     ("edit", "Drafts"),
                     ("clock", "Scheduled messages"),
                     ("bookmark", "Saved messages"),
+                    ("+", "Add Channel"),
                 ],
                 total,
             );
+            if hs[3].clicked() {
+                // the name field sits at the end of the list: open it up
+                self.new_channel = Some(String::new());
+                if folded {
+                    self.data.extra.folded_nav.retain(|x| x != "Channels");
+                    self.dirty = true;
+                    folded = false;
+                }
+            }
             name_it(&hs[0], "Drafts");
             if hs[0].clicked() {
                 self.modal = Some(Modal::Drafts);
@@ -868,8 +878,6 @@ impl App {
                 if keep {
                     self.new_channel = Some(name);
                 }
-            } else if filter.is_empty() && self.add_row(ui, "Add Channel").clicked() {
-                self.new_channel = Some(String::new());
             }
         }
     }
@@ -903,9 +911,13 @@ impl App {
             } else {
                 dms.iter().map(|d| d.2).sum()
             };
-            // "New message" is the row at the end, not a "+" on the heading
-            // too (two buttons for the same thing)
-            let (folded, _) = self.side_header(ui, "Direct Messages", &[], total);
+            // the heading's "+" starts one (no "New message" row at the end
+            // too: two buttons for the same thing)
+            let (folded, hs) =
+                self.side_header(ui, "Direct Messages", &[("+", "New message")], total);
+            if hs[0].clicked() {
+                self.new_message_open = true;
+            }
             if !self.fold_shows(folded, filter) {
                 return;
             }
@@ -1000,9 +1012,6 @@ impl App {
                     self.chat.open = Some(id);
                     self.leave_thread();
                 }
-            }
-            if filter.is_empty() && self.add_row(ui, "New message").clicked() {
-                self.new_message_open = true;
             }
         }
     }

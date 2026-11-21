@@ -141,7 +141,7 @@ fn a_new_workspace_leaves_out_online_only_tools_but_saved_ones_keep_theirs() {
 #[test]
 fn add_channel_is_left_off_views_that_gather_tasks_and_share_names_them() {
     let mut h = Ui1::new();
-    // the sidebar has its own "Add Channel" row, left of 320
+    // the sidebar's own add button is "Sidebar Add Channel", left of 320
     let on_page = |h: &Ui1| {
         h.tree
             .iter()

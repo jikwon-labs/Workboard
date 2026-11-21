@@ -301,7 +301,6 @@ fn clicking_the_direct_messages_heading_folds_them_and_shows_the_count_on_it() {
     h.click("Direct Messages");
     h.settle();
     assert!(!h.has(&name), "the conversations fold away");
-    assert!(!h.has("New message"));
     assert!(h
         .app
         .data
@@ -325,8 +324,8 @@ fn clicking_the_direct_messages_heading_folds_them_and_shows_the_count_on_it() {
         "the heading carries the count while folded"
     );
 
-    // no "+" on the heading: the "New message" row is the one way in
-    assert!(!h.has("Sidebar New message"));
+    // the heading's "+" stays to start one while folded
+    assert!(h.has("Sidebar New message"));
 
     h.click("Direct Messages");
     h.settle();

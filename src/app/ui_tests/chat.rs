@@ -350,12 +350,20 @@ fn rail_has_no_labs_or_upgrade_and_empty_chat_can_start_a_channel() {
 
 #[test]
 fn sidebar_channels_have_one_add_button() {
-    // the header used to have a "+" next to the "Add Channel" row: two
-    // buttons for the same thing
+    // the "+" on the heading adds a channel; no "Add Channel" row under the
+    // list too (two buttons for the same thing)
     let mut h = Ui1::new();
     assert!(!h.has("Sidebar Create a Channel"));
+    assert!(
+        h.tree
+            .iter()
+            .filter(|(n, r)| n == "Add Channel" && r.left() < 320.0)
+            .count()
+            == 0,
+        "no Add Channel row in the sidebar"
+    );
     let n = h.app.data.channels.len();
-    h.click_side("Add Channel", false);
+    h.click_side("Sidebar Add Channel", false);
     h.type_text("one button");
     h.key(egui::Key::Enter);
     assert_eq!(h.app.data.channels.len(), n + 1);
@@ -393,18 +401,34 @@ fn sidebar_shows_each_button_once() {
 
 #[test]
 fn sidebar_direct_messages_have_one_add_button() {
-    // same for Direct Messages: the "New message" row, no "+" on the heading
+    // same for Direct Messages: the "+" on the heading, no "New message" row
     let mut h = Ui1::new();
-    assert!(!h.has("Sidebar New message"));
-    h.click_side("New message", false);
+    assert!(!h.has("New message"));
+    h.click_side("Sidebar New message", false);
     assert!(h.app.new_message_open);
+}
+
+#[test]
+fn folded_channels_open_up_for_a_new_channel() {
+    // the name field sits at the end of the list, so a folded section opens
+    let mut h = Ui1::new();
+    h.click("Channels");
+    h.settle();
+    assert!(!h.has("general"));
+    h.click_side("Sidebar Add Channel", false);
+    h.settle();
+    assert!(h.app.new_channel.is_some());
+    assert!(h.has("general"), "unfolded");
+    h.type_text("from folded");
+    h.key(egui::Key::Enter);
+    assert!(h.app.data.channels.iter().any(|c| c.name == "from-folded"));
 }
 
 #[test]
 fn sidebar_add_channel_takes_enter_and_lets_go_on_escape() {
     let mut h = Ui1::new();
     let n = h.app.data.channels.len();
-    h.click_side("Add Channel", false);
+    h.click_side("Sidebar Add Channel", false);
     assert!(h.app.new_channel.is_some());
     h.type_text("dev team");
     h.key(egui::Key::Enter);
@@ -418,7 +442,7 @@ fn sidebar_add_channel_takes_enter_and_lets_go_on_escape() {
     // Escape leaves the field and typing goes elsewhere again
     h.app.section = Section::Home;
     h.settle();
-    h.click_side("Add Channel", false);
+    h.click_side("Sidebar Add Channel", false);
     assert!(h.app.new_channel.is_some());
     h.key(egui::Key::Escape);
     assert!(h.app.new_channel.is_none(), "Escape closes the field");
@@ -484,7 +508,7 @@ fn chat_drafts_stay_with_their_channel() {
 #[test]
 fn new_channel_field_comes_into_view_in_a_long_sidebar() {
     // (+ Create > Channel now opens the Create Channel window; the sidebar's
-    // "Add Channel" row keeps the field at the end of the channel list)
+    // "+" on the Channels heading opens the field at the end of the list)
     for via_create in [false] {
         let mut h = Ui1::new();
         // a long sidebar: many lists in the first space
@@ -517,8 +541,8 @@ fn new_channel_field_comes_into_view_in_a_long_sidebar() {
             h.click("Create");
             h.click("Channel");
         } else {
-            // the sidebar's own "Add Channel" row, scrolled to with the wheel
-            h.click_side("Add Channel", false);
+            // the "+" on the Channels heading, scrolled to with the wheel
+            h.click_side("Sidebar Add Channel", false);
         }
         assert!(h.app.new_channel.is_some());
         for _ in 0..30 {
@@ -530,7 +554,7 @@ fn new_channel_field_comes_into_view_in_a_long_sidebar() {
             .expect("the field is drawn")
             .rect;
         assert!(
-            r.top() >= 40.0 && r.bottom() <= 880.0,
+            r.top() >= 40.0 && r.bottom() <= h.size.y - 10.0,
             "via_create={}: the field is on screen ({:?})",
             via_create,
             r
@@ -934,7 +958,8 @@ fn composer_mention_and_emoji_pickers() {
     let mut h = Ui1::new();
     h.click("general");
     h.click("Mention someone");
-    h.click("Alex Kim");
+    // the picker's entry, right of a sidebar row of the same name
+    h.click_side("Alex Kim", true);
     assert_eq!(h.app.chat.text, "@Alex Kim ");
     h.click("Emoji");
     h.click("\u{1F525}");
@@ -3603,7 +3628,8 @@ fn a_picked_mention_replaces_what_was_typed_after_the_at() {
         jordan,
         "and only the names with Al"
     );
-    h.click("Alex Kim");
+    // the picker's entry, right of a sidebar row of the same name
+    h.click_side("Alex Kim", true);
     assert_eq!(h.app.chat.text, "Hi @Alex Kim ");
 }
 

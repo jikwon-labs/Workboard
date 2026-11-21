@@ -290,8 +290,12 @@ impl App {
                                 .x
                         };
                         let owner = self.data.member(g.owner).map(|m| {
-                            let name =
-                                crate::widgets::fit_text(ui.painter(), m.shown(), &font, info_w - 60.0);
+                            let name = crate::widgets::fit_text(
+                                ui.painter(),
+                                m.shown(),
+                                &font,
+                                info_w - 60.0,
+                            );
                             (m, name)
                         });
                         let due_text = g.due.map(|d| (d.text("%b %-d"), dday(d, day)));
@@ -332,7 +336,13 @@ impl App {
                                                     vec2(20.0, 20.0),
                                                     Sense::hover(),
                                                 );
-                                                paint_avatar(ui.painter(), r.center(), 10.0, m, t.card);
+                                                paint_avatar(
+                                                    ui.painter(),
+                                                    r.center(),
+                                                    10.0,
+                                                    m,
+                                                    t.card,
+                                                );
                                                 ui.label(RichText::new(name).size(13.0));
                                             });
                                         }
@@ -879,10 +889,8 @@ impl App {
                             // through the goal's own edit, so picking tasks
                             // already closed moves it like any change here
                             for (id, name) in &all {
-                                if let Some(TargetKind::Tasks { ids }) = self.data.extra.goals[gi]
-                                    .targets
-                                    .get(i)
-                                    .map(|x| &x.kind)
+                                if let Some(TargetKind::Tasks { ids }) =
+                                    self.data.extra.goals[gi].targets.get(i).map(|x| &x.kind)
                                 {
                                     let mut on = ids.contains(id);
                                     if check(ui, &mut on, name).changed() {

@@ -1582,16 +1582,25 @@ fn a_goal_is_worked_on_from_two_computers() {
     net_until(&mut b, "the goal at B", |b| g_of(b).is_some());
 
     // Ann records 6 of 10 (30%): Sam sees it, her line and the 25% milestone
-    a.goal_apply(GoalAct::SetNumber { g: gid, i: 0, to: 6.0 });
+    a.goal_apply(GoalAct::SetNumber {
+        g: gid,
+        i: 0,
+        to: 6.0,
+    });
     push(&mut a);
     net_until(&mut b, "6 at B", |b| {
         matches!(g_of(b).unwrap().targets[0].kind,
             TargetKind::Number { current, .. } if current == 6.0)
     });
     let g = g_of(&b).unwrap();
-    assert!(g.log.iter().any(|e| e.who == ann
-        && matches!(e.what, GoalChange::Number { to, .. } if to == 6.0)));
-    assert!(g.log.iter().any(|e| e.who == ann && e.what == GoalChange::Milestone(25)));
+    assert!(g
+        .log
+        .iter()
+        .any(|e| e.who == ann && matches!(e.what, GoalChange::Number { to, .. } if to == 6.0)));
+    assert!(g
+        .log
+        .iter()
+        .any(|e| e.who == ann && e.what == GoalChange::Milestone(25)));
     // Sam's app takes it as it is: no second milestone of its own
     b.goal_watch(now_ts());
     assert_eq!(g_of(&b).unwrap().log.len(), g.log.len());
@@ -1607,7 +1616,10 @@ fn a_goal_is_worked_on_from_two_computers() {
     for x in [&a, &b] {
         let g = g_of(x).unwrap();
         assert_eq!(g.name, "Renamed by Ann");
-        assert!(matches!(g.targets[1].kind, TargetKind::TrueFalse { done: true }));
+        assert!(matches!(
+            g.targets[1].kind,
+            TargetKind::TrueFalse { done: true }
+        ));
         assert_eq!(g.reached, 75);
         let m75 = g
             .log
@@ -1615,11 +1627,18 @@ fn a_goal_is_worked_on_from_two_computers() {
             .filter(|e| e.what == GoalChange::Milestone(75))
             .count();
         assert_eq!(m75, 1, "one 75% milestone, Sam's: {:?}", g.log);
-        assert!(g.log.iter().any(|e| e.who == sam && e.what == GoalChange::Milestone(75)));
+        assert!(g
+            .log
+            .iter()
+            .any(|e| e.who == sam && e.what == GoalChange::Milestone(75)));
     }
 
     // at once, both on its targets: the copies end up the same
-    a.goal_apply(GoalAct::SetNumber { g: gid, i: 0, to: 8.0 });
+    a.goal_apply(GoalAct::SetNumber {
+        g: gid,
+        i: 0,
+        to: 8.0,
+    });
     b.goal_apply(GoalAct::ToggleDone { g: gid, i: 1 });
     push(&mut a);
     push(&mut b);
@@ -1633,7 +1652,11 @@ fn a_goal_is_worked_on_from_two_computers() {
 
     // Ann deletes it while Sam records: it stays deleted on both
     a.remove_item("goal", gid);
-    b.goal_apply(GoalAct::SetNumber { g: gid, i: 0, to: 2.0 });
+    b.goal_apply(GoalAct::SetNumber {
+        g: gid,
+        i: 0,
+        to: 2.0,
+    });
     push(&mut a);
     push(&mut b);
     settle(&mut a, &mut b);

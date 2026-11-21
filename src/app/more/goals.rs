@@ -743,9 +743,7 @@ impl App {
                                     .corner_radius(10)
                                     .inner_margin(egui::Margin::symmetric(8, 2))
                                     .show(ui, |ui| {
-                                        ui.label(
-                                            RichText::new(txt).size(11.5).color(fg).strong(),
-                                        );
+                                        ui.label(RichText::new(txt).size(11.5).color(fg).strong());
                                     });
                             };
                             ui.horizontal(|ui| {

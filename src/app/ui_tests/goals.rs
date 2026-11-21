@@ -914,7 +914,10 @@ fn every_new_goal_button_starts_in_the_next_colour() {
     let Some(Modal::NewGoal(d)) = &h.app.modal else {
         panic!("New goal opens")
     };
-    assert_eq!(d.color, next, "Set the next goal on an achieved goal's page");
+    assert_eq!(
+        d.color, next,
+        "Set the next goal on an achieved goal's page"
+    );
 }
 
 #[test]
@@ -1091,7 +1094,11 @@ fn a_long_owner_name_fits_in_a_card_and_a_row() {
     let card = h.rect("Goal Beta launch");
     assert!(card.width() < 500.0, "two to a row: {card:?}");
     let band = Rect::from_min_max(pos2(card.left(), card.bottom() - 50.0), card.max);
-    assert_apart(&texts_in(&h, band), band.shrink2(vec2(19.0, 0.0)), "card footer");
+    assert_apart(
+        &texts_in(&h, band),
+        band.shrink2(vec2(19.0, 0.0)),
+        "card footer",
+    );
 
     h.click("Show as list");
     let row = h.rect("Goal row Beta launch");
@@ -1105,15 +1112,18 @@ fn a_goals_page_fits_the_narrowest_window_with_big_numbers() {
     let id = add_goal_with(
         &mut h,
         "Revenue",
-        vec![GoalTarget {
-            name: "New contracts".into(),
-            kind: TargetKind::Number {
-                start: 0.0,
-                target: 10_000_000_000.0,
-                current: 4_200_000_000.0,
-                unit: "won".into(),
+        vec![
+            GoalTarget {
+                name: "New contracts".into(),
+                kind: TargetKind::Number {
+                    start: 0.0,
+                    target: 10_000_000_000.0,
+                    current: 4_200_000_000.0,
+                    unit: "won".into(),
+                },
             },
-        }, number("Most of all", -1e15, 1e15, 999_999_999_999_999.0)],
+            number("Most of all", -1e15, 1e15, 999_999_999_999_999.0),
+        ],
     );
     h.hover(pos2(450.0, 450.0));
     h.app.section = Section::Goals;
@@ -1229,7 +1239,11 @@ fn changing_a_targets_range_or_its_tasks_counts_as_mine() {
     );
     h.app.notify_clock(now_ts());
     assert!(
-        h.app.notify_rt.sent.iter().all(|n| !n.target.contains(&id.to_string())),
+        h.app
+            .notify_rt
+            .sent
+            .iter()
+            .all(|n| !n.target.contains(&id.to_string())),
         "nobody tells me what I just did: {:?}",
         h.app.notify_rt.sent
     );
@@ -1280,7 +1294,14 @@ fn picking_tasks_that_finish_a_goal_opens_goal_achieved() {
 fn goal_history_and_daily_progress_keep_their_limits() {
     let (mut h, a, _) = two_goals();
     h.app.goal_watch(now_ts());
-    let gi = h.app.data.extra.goals.iter().position(|g| g.id == a).unwrap();
+    let gi = h
+        .app
+        .data
+        .extra
+        .goals
+        .iter()
+        .position(|g| g.id == a)
+        .unwrap();
     // 150 recordings: the newest 100 lines stay, oldest first
     for n in 0..150 {
         h.app.goal_apply(crate::app::more::GoalAct::SetNumber {
@@ -1296,8 +1317,7 @@ fn goal_history_and_daily_progress_keep_their_limits() {
     let start = now_ts() - 90 * 86_400;
     for d in 0..80 {
         let pct = (d % 2) as f64 * 10.0;
-        if let TargetKind::Number { current, .. } =
-            &mut h.app.data.extra.goals[gi].targets[0].kind
+        if let TargetKind::Number { current, .. } = &mut h.app.data.extra.goals[gi].targets[0].kind
         {
             *current = pct;
         }
@@ -1315,7 +1335,11 @@ fn passing_several_milestones_at_once_notes_the_highest() {
     let id = add_goal_with(&mut h, "Signups", vec![number("People", 0.0, 100.0, 0.0)]);
     h.app.goal_watch(now_ts());
     h.click("Goal Signups");
-    h.app.goal_apply(crate::app::more::GoalAct::SetNumber { g: id, i: 0, to: 80.0 });
+    h.app.goal_apply(crate::app::more::GoalAct::SetNumber {
+        g: id,
+        i: 0,
+        to: 80.0,
+    });
     h.settle();
     let g = goal(&h, id).clone();
     let ms: Vec<u8> = g
@@ -1332,14 +1356,28 @@ fn passing_several_milestones_at_once_notes_the_highest() {
     // the page shows the ones below as reached too, without a day
     assert!(!h.painted_text("Reached").is_empty());
     // back to 30%: 75 leaves, 25 stays; a later 100% opens Goal achieved
-    h.app.goal_apply(crate::app::more::GoalAct::SetNumber { g: id, i: 0, to: 30.0 });
+    h.app.goal_apply(crate::app::more::GoalAct::SetNumber {
+        g: id,
+        i: 0,
+        to: 30.0,
+    });
     assert_eq!(goal(&h, id).reached, 25);
-    assert!(goal(&h, id).log.iter().all(|e| !matches!(e.what, GoalChange::Milestone(_))));
-    h.app.goal_apply(crate::app::more::GoalAct::SetNumber { g: id, i: 0, to: 100.0 });
+    assert!(goal(&h, id)
+        .log
+        .iter()
+        .all(|e| !matches!(e.what, GoalChange::Milestone(_))));
+    h.app.goal_apply(crate::app::more::GoalAct::SetNumber {
+        g: id,
+        i: 0,
+        to: 100.0,
+    });
     assert!(matches!(h.app.modal, Some(Modal::GoalAchieved { id: x }) if x == id));
     let g = goal(&h, id).clone();
     assert_eq!(g.done_on, Some(today()));
-    assert!(g.log.iter().any(|e| e.what == GoalChange::Milestone(100) && e.who == me));
+    assert!(g
+        .log
+        .iter()
+        .any(|e| e.what == GoalChange::Milestone(100) && e.who == me));
 }
 
 #[test]
@@ -1357,7 +1395,11 @@ fn a_goal_from_before_history_starts_it_quietly() {
     assert_eq!(g.reached, 100, "taken as it is");
     h.app.notify_clock(now_ts());
     assert!(
-        h.app.notify_rt.sent.iter().all(|n| !n.title.contains("Office move")),
+        h.app
+            .notify_rt
+            .sent
+            .iter()
+            .all(|n| !n.title.contains("Office move")),
         "not announced: {:?}",
         h.app.notify_rt.sent
     );

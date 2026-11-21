@@ -182,8 +182,46 @@ final class FormTests: XCTestCase {
         XCTAssertEqual(t["priority"], 2)
         XCTAssertEqual(t["description"], "Fast please\nSeats: 3")
         XCTAssertEqual(t["activity"]!.array!.last!["text"], "submitted the form New Form")
+        XCTAssertEqual(t["form"], 830, "the task says which form it answers, as on the Mac")
         XCTAssertTrue(Edits.removeFormField(&d, form: 830, index: 2))
         XCTAssertTrue(Edits.deleteForm(&d, form: 830))
+    }
+
+    /// The answers are checked and written as the Mac does (form_check): a
+    /// further Description answer is its own paragraph, an email needs a
+    /// name, an @ and a dotted domain, a number may have thousands commas
+    /// but must be finite, a choice no longer offered is no answer, a
+    /// dropdown with no choices can't hold the form up, and a question
+    /// without text is "Untitled question".
+    func testAnswersAreCheckedLikeTheMac() {
+        var d = SampleWorkspace.make()
+        Edits.addForm(&d, list: 120, me: 1, id: 830)
+        Edits.setFormField(&d, form: 830, index: nil, to: FormFieldView(label: "More", map: "description"))
+        Edits.setFormField(&d, form: 830, index: nil, to: FormFieldView(label: "Seats", map: "number"))
+        Edits.setFormField(&d, form: 830, index: nil, to: FormFieldView(label: "Mail", map: "email"))
+        Edits.setFormField(&d, form: 830, index: nil, to: FormFieldView(label: "Size", map: "dropdown", options: ["S", "M"]))
+        Edits.setFormField(&d, form: 830, index: nil, to: FormFieldView(label: "Empty", map: "dropdown", required: true))
+        var id: UInt64 = 9100
+        func submit(_ a: [Int: String]) -> Result<UInt64, Edits.FormError> {
+            id += 1
+            return Edits.submitForm(&d, form: 830, answers: a, me: 2, id: id, ts: 5)
+        }
+        for bad in ["@.", "a.b@", "@b.co", "a@b.", "a@.co", "a b@c.d"] {
+            XCTAssertEqual(submit([0: "x", 4: bad]), .failure(.answer("\"Mail\" needs an email address.")), bad)
+        }
+        for bad in ["inf", "NaN", "1e400", "twelve"] {
+            XCTAssertEqual(submit([0: "x", 3: bad]), .failure(.answer("\"Seats\" needs a number.")), bad)
+        }
+        XCTAssertEqual(submit([0: "Desk", 1: "First", 2: "Second", 3: "1,000", 4: "a@b.co", 5: "XL"]), .success(id))
+        let t = d["tasks"]!.array!.first { $0["id"]?.uint == id }!
+        XCTAssertEqual(t["description"], "First\n\nSecond\nSeats: 1,000\nMail: a@b.co")
+        // (the Mac lets a question's text be cleared; this app doesn't)
+        d.updateItem(at: "extra.forms", id: 830) { f in
+            var fs = f["fields"]!.array!
+            fs[0] = FormFieldView(label: " ", map: "name", required: true).json
+            f["fields"] = .array(fs)
+        }
+        XCTAssertEqual(submit([:]), .failure(.answer("Please answer \"Untitled question\".")))
     }
 }
 

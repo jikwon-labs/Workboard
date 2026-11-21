@@ -130,28 +130,38 @@ extension Edits {
     public enum FormError: Error, Equatable { case answer(String), noList }
 
     /// Submit: the answers (by question index) make a task in the form's
-    /// list, logged "submitted the form <name>" for its owner to hear about.
+    /// list, logged "submitted the form <name>" for its owner to hear about
+    /// and marked with the form (`form`, as the Mac's `Task::form`). The
+    /// answers are checked and written as the Mac's form_check does.
     public static func submitForm(_ data: inout JSON, form: UInt64, answers: [Int: String], me: UInt64, id: UInt64, ts: Int64) -> Result<UInt64, FormError> {
         guard let f = WorkspaceView(data).forms(data).first(where: { $0.id == form }) else { return .failure(.noList) }
         var name = "", desc = "", priority = 0, due: String?, assignees: [UInt64] = []
         for (i, fld) in f.fields.enumerated() {
-            let v = (answers[i] ?? "").trimmed
+            let label = fld.label.isBlank ? "Untitled question" : fld.label.trimmed
+            var v = (answers[i] ?? "").trimmed
+            // a choice removed since it was picked is no answer
+            if fld.map == "dropdown", !fld.options.contains(where: { $0.trimmed == v }) { v = "" }
             if v.isEmpty {
-                if fld.required { return .failure(.answer("Please answer \"\(fld.label)\".")) }
+                // a dropdown with no choices can't be answered, so it can't hold the form up
+                let answerable = fld.map != "dropdown" || fld.options.contains { !$0.isBlank }
+                if fld.required && answerable { return .failure(.answer("Please answer \"\(label)\".")) }
                 continue
             }
             switch fld.map {
             case "name": name = v
-            case "description": desc += v
+            case "description":
+                // a second one starts its own paragraph
+                if !desc.isEmpty { desc += "\n\n" }
+                desc += v
             case "priority": priority = priorityLabels.firstIndex(of: v) ?? 0
             case "due":
-                guard v.count == 10, CustomDate.valid(v) else { return .failure(.answer("\"\(fld.label)\" isn't a date. Write it as YYYY-MM-DD.")) }
+                guard v.count == 10, CustomDate.valid(v) else { return .failure(.answer("\"\(label)\" isn't a date. Write it as YYYY-MM-DD.")) }
                 due = v
             case "assignee": if let a = UInt64(v) { assignees.append(a) }
             default:
-                if fld.map == "number", Double(v) == nil { return .failure(.answer("\"\(fld.label)\" needs a number.")) }
-                if fld.map == "email", !(v.contains("@") && v.contains(".")) { return .failure(.answer("\"\(fld.label)\" needs an email address.")) }
-                desc += "\n\(fld.label): \(v)"
+                if fld.map == "number", formNumber(v) == nil { return .failure(.answer("\"\(label)\" needs a number.")) }
+                if fld.map == "email", !formEmailOK(v) { return .failure(.answer("\"\(label)\" needs an email address.")) }
+                desc += "\n\(label): \(v)"
             }
         }
         guard rawLists(data)[f.listId] != nil else { return .failure(.noList) }
@@ -159,9 +169,37 @@ extension Edits {
         data.updateItem(at: "tasks", id: id) { t in
             t["priority"] = .int(Int64(priority))
             t["description"] = .string(desc.trimmed)
+            t["form"] = .id(form)
             log(&t, me: me, text: "submitted the form \(f.name)", ts: ts)
         }
         return .success(id)
+    }
+
+    /// The form an answer from an app that doesn't record `form` went to,
+    /// from the name in its history line: the one form of that name, or,
+    /// when several have it, the one whose list the task is in (the Mac's
+    /// old_answer_form).
+    public static func oldAnswerForm(_ forms: [JSON], name: String, list: UInt64) -> UInt64? {
+        let named = forms.filter { $0["name"]?.string == name }
+        if named.count == 1 { return named[0]["id"]?.uint }
+        let inList = named.filter { $0["list_id"]?.uint == list }
+        return inList.count == 1 ? inList[0]["id"]?.uint : nil
+    }
+
+    /// A Number answer as the Mac reads one (goals' parse_number): thousands
+    /// commas and spaces ignored, finite numbers only.
+    static func formNumber(_ s: String) -> Double? {
+        let plain = String(s.filter { !$0.isWhitespace && $0 != "," }.map { $0 == "\u{2212}" ? "-" : $0 })
+        return Double(plain).flatMap { $0.isFinite ? $0 : nil }
+    }
+
+    /// An email address as the team server takes one: something before the
+    /// @, a dot inside what follows, no spaces.
+    static func formEmailOK(_ e: String) -> Bool {
+        guard let at = e.firstIndex(of: "@") else { return false }
+        let name = e[..<at], domain = e[e.index(after: at)...]
+        return !name.isEmpty && domain.contains(".") && !domain.hasPrefix(".") && !domain.hasSuffix(".")
+            && !e.contains(where: \.isWhitespace)
     }
 }
 

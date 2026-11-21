@@ -88,6 +88,73 @@ fn paint_key_hint(p: &egui::Painter, ibox: Rect, n: usize) {
     );
 }
 
+/// The line icon of an item the rail can hold.
+pub(super) fn rail_icon(label: &str) -> &'static str {
+    match label {
+        "Home" => "home",
+        "Planner" => "planner",
+        "AI" => "ai",
+        "Teams" => "teams",
+        "Chat" => "chat",
+        "Docs" => "docs",
+        "Dashboards" => "dashboards",
+        "Whiteboards" => "whiteboards",
+        "Forms" => "forms",
+        "Goals" => "goals",
+        "Timesheets" => "timesheets",
+        "Clips" => "video",
+        "Apps" => "apps",
+        "Spaces" => "space",
+        _ => "dots",
+    }
+}
+
+/// A rail item's name beside the bar, level with its icon (`ibox`), once
+/// the pointer has rested on it as long as egui waits for a tooltip, or at
+/// once while moving on from another item's. egui puts a tooltip under its
+/// item, which in the bar covered the next item.
+fn rail_tip(resp: &Response, rail: Rect, ibox: Rect, text: &str) {
+    let ctx = &resp.ctx;
+    if !resp.hovered() || ctx.memory(|m| m.any_popup_open()) {
+        return;
+    }
+    let style = ctx.style();
+    let (delay, grace) = (
+        style.interaction.tooltip_delay,
+        style.interaction.tooltip_grace_time,
+    );
+    let (now, still, since_click) = ctx.input(|i| {
+        (
+            i.time,
+            i.pointer.time_since_last_movement(),
+            i.pointer.time_since_last_click(),
+        )
+    });
+    // clicking an item and resting there shows nothing, as with egui's
+    if since_click < still + 0.1 {
+        return;
+    }
+    let last_id = egui::Id::new("rail_tip_shown");
+    let last: Option<f64> = ctx.data(|d| d.get_temp(last_id));
+    let recent = last.is_some_and(|t| now - t <= grace as f64 + 0.1);
+    if still < delay && !recent {
+        ctx.request_repaint_after_secs(delay - still);
+        return;
+    }
+    ctx.data_mut(|d| d.insert_temp(last_id, now));
+    egui::Area::new(resp.id.with("rail_tip"))
+        .kind(egui::UiKind::Popup)
+        .order(egui::Order::Tooltip)
+        .pivot(Align2::LEFT_CENTER)
+        .fixed_pos(pos2(rail.right() + 8.0, ibox.center().y))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.add(egui::Label::new(text).extend());
+            });
+        });
+}
+
 // moved to widgets.rs; kept here for code that names it `shell::fit_text`
 pub(super) use crate::widgets::fit_text;
 
@@ -569,29 +636,17 @@ impl App {
                 }
                 let cx = rect.center().x;
                 let white = Color32::WHITE;
+                // bottom group: Invite (every 56 px), only for whoever may
+                // invite; Labs, Upgrade and Install removed at the person's
+                // request. It stays at the bottom whatever the bar holds.
+                let bottom: &[(&str, &str)] = if self.may_manage() {
+                    &[("Invite", "")]
+                } else {
+                    &[]
+                };
+                let bottom_top = rect.bottom() - bottom.len() as f32 * 56.0 - 2.0;
                 let mut items: Vec<String> = vec!["Home".into()];
                 items.extend(self.data.extra.rail_items.iter().cloned());
-                let mut y = rect.top() + 4.0;
-                // the line icon of each item the rail can hold
-                let icon_of = |l: &str| -> &'static str {
-                    match l {
-                        "Home" => "home",
-                        "Planner" => "planner",
-                        "AI" => "ai",
-                        "Teams" => "teams",
-                        "Chat" => "chat",
-                        "Docs" => "docs",
-                        "Dashboards" => "dashboards",
-                        "Whiteboards" => "whiteboards",
-                        "Forms" => "forms",
-                        "Goals" => "goals",
-                        "Timesheets" => "timesheets",
-                        "Clips" => "video",
-                        "Apps" => "apps",
-                        "Spaces" => "space",
-                        _ => "dots",
-                    }
-                };
                 let section_of = |l: &str| -> Option<Section> {
                     match l {
                         "Home" => Some(Section::Home),
@@ -610,8 +665,37 @@ impl App {
                 };
                 let pinned_sections: Vec<Section> =
                     items.iter().filter_map(|l| section_of(l)).collect();
+                // an app opened from More stays in the bar while it's open
+                let temp = self.temp_app.and_then(|ts| {
+                    let label = match ts {
+                        Section::Docs => "Docs",
+                        Section::Dashboards => "Dashboards",
+                        Section::Whiteboards => "Whiteboards",
+                        Section::Forms => "Forms",
+                        Section::Goals => "Goals",
+                        Section::Timesheets => "Timesheets",
+                        _ => "",
+                    };
+                    (!label.is_empty() && !pinned_sections.contains(&ts)).then_some((ts, label))
+                });
+                // (label, the app opened from More)
+                let mut rows: Vec<(String, Option<Section>)> =
+                    items.into_iter().map(|l| (l, None)).collect();
+                if let Some((ts, label)) = temp {
+                    rows.push((label.to_string(), Some(ts)));
+                }
+                // as many as fit above the bottom group (62 px each, the last
+                // 60), More always among them; the rest are in More's menu
+                let mut y = rect.top() + 4.0;
+                let fits = (((bottom_top - y - 2.0) / 62.0).floor() as usize).max(2);
+                let hidden: Vec<String> = rows
+                    .split_off((fits - 1).min(rows.len()))
+                    .into_iter()
+                    .map(|(l, _)| l)
+                    .collect();
                 // red counts on Home (the Inbox) and Chat (unread messages);
-                // Chat counts on Home while it isn't in the bar of its own
+                // Chat counts on Home while it isn't in the bar of its own,
+                // and on More while it's pinned but hidden there
                 let (home_n, chat_n) = self.rail_unread(pinned_sections.contains(&Section::Chat));
                 // Cmd+1..9 open the bar's items from the top; holding Cmd
                 // shows each item's number at the corner of its icon
@@ -629,7 +713,8 @@ impl App {
                     }
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key))
                 };
-                for label in &items {
+                for (label, temp) in &rows {
+                    let label = label.as_str();
                     let sec = section_of(label);
                     let active = match sec {
                         Some(Section::Home) => {
@@ -645,20 +730,29 @@ impl App {
                     let ibox = Rect::from_center_size(pos2(cx, y + 22.0), vec2(32.0, 32.0));
                     let hit =
                         Rect::from_min_max(pos2(rect.left(), y), pos2(rect.right(), y + 60.0));
-                    let resp =
-                        ui.interact(hit, ui.id().with(("rail", label.as_str())), Sense::click());
+                    let id = match temp {
+                        Some(_) => ui.id().with("rail_temp"),
+                        None => ui.id().with(("rail", label)),
+                    };
+                    let resp = ui.interact(hit, id, Sense::click());
                     name_it(&resp, &format!("Rail {}", label));
                     if active {
                         p.circle_filled(ibox.center(), 17.0, Color32::from_white_alpha(46));
                     } else if resp.hovered() {
                         p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
                     }
-                    line_icon(&p, icon_of(label), ibox.center(), white);
+                    line_icon(&p, rail_icon(label), ibox.center(), white);
                     let pressed = next_key(&p, ibox);
+                    let shown = tr(label);
+                    let short = if temp.is_some() && shown.chars().count() > 8 {
+                        format!("{}..", shown.chars().take(7).collect::<String>())
+                    } else {
+                        shown.to_string()
+                    };
                     p.text(
                         pos2(cx, ibox.bottom() + 10.0),
                         Align2::CENTER_CENTER,
-                        tr(label),
+                        short,
                         FontId::proportional(11.0),
                         white,
                     );
@@ -670,64 +764,26 @@ impl App {
                     if unread > 0 {
                         paint_rail_badge(&p, t.danger, t.rail_top, ibox.center(), unread);
                     }
-                    if resp.on_hover_text(tr(label)).clicked() || pressed {
-                        self.open_app(label);
-                        if label == "Home" {
-                            self.section = Section::Home;
+                    rail_tip(&resp, rect, ibox, &shown);
+                    if resp.clicked() || pressed {
+                        match temp {
+                            Some(ts) => self.section = *ts,
+                            None => {
+                                self.open_app(label);
+                                if label == "Home" {
+                                    self.section = Section::Home;
+                                }
+                            }
                         }
                     }
                     y += 62.0;
-                }
-                // an app opened from More stays in the bar while it's open
-                if let Some(ts) = self.temp_app {
-                    let label = match ts {
-                        Section::Docs => "Docs",
-                        Section::Dashboards => "Dashboards",
-                        Section::Whiteboards => "Whiteboards",
-                        Section::Forms => "Forms",
-                        Section::Goals => "Goals",
-                        Section::Timesheets => "Timesheets",
-                        _ => "",
-                    };
-                    if !label.is_empty() && !pinned_sections.contains(&ts) {
-                        let ibox = Rect::from_center_size(pos2(cx, y + 22.0), vec2(32.0, 32.0));
-                        let hit =
-                            Rect::from_min_max(pos2(rect.left(), y), pos2(rect.right(), y + 60.0));
-                        let resp = ui.interact(hit, ui.id().with("rail_temp"), Sense::click());
-                        name_it(&resp, &format!("Rail {}", label));
-                        let active = self.section == ts;
-                        if active {
-                            p.circle_filled(ibox.center(), 17.0, Color32::from_white_alpha(46));
-                        } else if resp.hovered() {
-                            p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
-                        }
-                        line_icon(&p, icon_of(label), ibox.center(), white);
-                        let pressed = next_key(&p, ibox);
-                        let shown = tr(label);
-                        let short = if shown.chars().count() > 8 {
-                            format!("{}..", shown.chars().take(7).collect::<String>())
-                        } else {
-                            shown.to_string()
-                        };
-                        p.text(
-                            pos2(cx, ibox.bottom() + 10.0),
-                            Align2::CENTER_CENTER,
-                            short,
-                            FontId::proportional(11.0),
-                            white,
-                        );
-                        if resp.on_hover_text(tr(label)).clicked() || pressed {
-                            self.section = ts;
-                        }
-                        y += 62.0;
-                    }
                 }
                 // More
                 let ibox = Rect::from_center_size(pos2(cx, y + 22.0), vec2(32.0, 32.0));
                 let hit = Rect::from_min_max(pos2(rect.left(), y), pos2(rect.right(), y + 60.0));
                 let resp = ui.interact(hit, ui.id().with("rail_more"), Sense::click());
                 name_it(&resp, "Rail More");
-                let more_active = matches!(
+                let more_active = (matches!(
                     self.section,
                     Section::Docs
                         | Section::Dashboards
@@ -736,7 +792,8 @@ impl App {
                         | Section::Forms
                         | Section::Goals
                 ) && !pinned_sections.contains(&self.section)
-                    && self.temp_app != Some(self.section);
+                    && self.temp_app != Some(self.section))
+                    || hidden.iter().any(|l| section_of(l) == Some(self.section));
                 if more_active {
                     p.circle_filled(ibox.center(), 17.0, Color32::from_white_alpha(46));
                 } else if resp.hovered() {
@@ -750,21 +807,18 @@ impl App {
                     FontId::proportional(11.0),
                     white,
                 );
+                if chat_n > 0 && hidden.iter().any(|l| l == "Chat") {
+                    paint_rail_badge(&p, t.danger, t.rail_top, ibox.center(), chat_n);
+                }
+                rail_tip(&resp, rect, ibox, tr("More"));
                 if self.force_menu.as_deref() == Some("more") {
                     let pid = ui.id().with("more_pop");
                     ui.memory_mut(|m| m.open_popup(pid));
                 }
-                popup(ui, &resp, ui.id().with("more_pop"), 220.0, |ui| {
-                    self.rail_more_menu(ui)
+                popup_right(ui, &resp, ui.id().with("more_pop"), 220.0, |ui| {
+                    self.rail_more_menu(ui, &hidden)
                 });
-                // bottom group: Invite (every 56 px), only for whoever may
-                // invite; Labs, Upgrade and Install removed at the person's request
-                let bottom: &[(&str, &str)] = if self.may_manage() {
-                    &[("Invite", "")]
-                } else {
-                    &[]
-                };
-                let mut by = rect.bottom() - bottom.len() as f32 * 56.0 - 2.0;
+                let mut by = bottom_top;
                 for &(label, icon) in bottom {
                     let ibox = Rect::from_center_size(pos2(cx, by + 16.0), vec2(32.0, 32.0));
                     let hit = Rect::from_min_max(
@@ -795,7 +849,8 @@ impl App {
                         FontId::proportional(11.0),
                         white,
                     );
-                    if resp.on_hover_text(tr(label)).clicked() {
+                    rail_tip(&resp, rect, ibox, tr(label));
+                    if resp.clicked() {
                         self.modal = Some(Modal::Invite {
                             emails: String::new(),
                             role: "Member".into(),

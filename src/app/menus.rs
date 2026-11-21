@@ -1182,23 +1182,32 @@ impl App {
     }
 
     /// The rail's More menu: Spaces, Chat, Docs, Dashboards, Whiteboards,
-    /// Forms, Clips, Goals, Timesheets, Apps, Customize navigation.
-    pub(super) fn rail_more_menu(&mut self, ui: &mut Ui) {
+    /// Forms, Clips, Goals, Timesheets, Apps, Customize navigation. Apps
+    /// pinned to the bar that don't fit there (`hidden`) and aren't in that
+    /// list come first, so every one of them can still be opened.
+    pub(super) fn rail_more_menu(&mut self, ui: &mut Ui, hidden: &[String]) {
         let t = self.t();
         ui.set_width(220.0);
-        let items: [(&str, &str); 10] = [
-            ("space", "Spaces"),
-            ("chat", "Chat"),
-            ("docs", "Docs"),
-            ("dashboards", "Dashboards"),
-            ("whiteboards", "Whiteboards"),
-            ("forms", "Forms"),
-            ("video", "Clips"),
-            ("goals", "Goals"),
-            ("timesheets", "Timesheets"),
-            ("apps", "Apps"),
+        let listed = [
+            "Spaces",
+            "Chat",
+            "Docs",
+            "Dashboards",
+            "Whiteboards",
+            "Forms",
+            "Clips",
+            "Goals",
+            "Timesheets",
+            "Apps",
         ];
-        for (icon, label) in items {
+        let items: Vec<&str> = hidden
+            .iter()
+            .map(|l| l.as_str())
+            .filter(|l| !listed.contains(l))
+            .chain(listed)
+            .collect();
+        for label in items {
+            let icon = super::shell::rail_icon(label);
             let pinned = self.data.extra.rail_items.iter().any(|r| r == label);
             ui.horizontal(|ui| {
                 let w = ui.available_width() - 28.0 - ui.spacing().item_spacing.x;

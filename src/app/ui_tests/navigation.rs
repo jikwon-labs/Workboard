@@ -656,6 +656,186 @@ fn click_every_rail_more_app() {
 }
 
 #[test]
+fn a_rail_item_names_itself_beside_the_bar_level_with_its_icon() {
+    let mut h = Ui1::new();
+    let item = h.rect("Rail Planner");
+    let below = h.rect("Rail AI");
+    // the pointer comes in from the page (egui only counts it as moving
+    // from its third position on)
+    for x in [400.0, 300.0, 200.0] {
+        h.frame(vec![egui::Event::PointerMoved(pos2(x, item.center().y))]);
+    }
+    h.frame(vec![egui::Event::PointerMoved(item.center())]);
+    h.frame(vec![]);
+    assert_eq!(
+        h.painted_text("Planner").len(),
+        1,
+        "only under the icon until the pointer has rested a moment"
+    );
+    for _ in 0..14 {
+        h.frame(vec![]);
+    }
+    let names = h.painted_text("Planner");
+    let tips: Vec<Rect> = names
+        .iter()
+        .map(|(r, _)| *r)
+        .filter(|r| r.left() > item.right())
+        .collect();
+    assert_eq!(tips.len(), 1, "named beside the bar: {:?}", names);
+    let icon_y = item.top() + 22.0;
+    assert!(
+        (tips[0].center().y - icon_y).abs() < 3.0,
+        "level with the icon at {}: {:?}",
+        icon_y,
+        tips[0]
+    );
+    assert!(tips[0].left() < item.right() + 40.0, "{:?}", tips[0]);
+    assert!(
+        names.iter().all(|(r, _)| !r.intersects(below)),
+        "nothing over the item below: {:?}",
+        names
+    );
+
+    // moving on to the next item names that one at once, beside it
+    h.frame(vec![egui::Event::PointerMoved(below.center())]);
+    h.frame(vec![]);
+    h.frame(vec![]);
+    assert!(
+        h.painted_text("AI")
+            .iter()
+            .any(|(r, _)| r.left() > below.right()
+                && (r.center().y - (below.top() + 22.0)).abs() < 3.0),
+        "{:?}",
+        h.painted_text("AI")
+    );
+}
+
+#[test]
+fn the_more_menu_opens_beside_the_bar_and_stays_in_the_window() {
+    let mut h = Ui1::new();
+    let more = h.rect("Rail More");
+    h.click("Rail More");
+    h.settle();
+    let clips = h.rect("Clips");
+    assert!(clips.left() > more.right(), "beside the bar: {:?}", clips);
+    // (the sidebar has a Spaces heading of its own further down)
+    let first = h.rect_in(
+        "Spaces",
+        Rect::from_min_max(
+            pos2(more.right(), more.top() - 100.0),
+            pos2(more.right() + 400.0, more.bottom() + 100.0),
+        ),
+    );
+    assert!(
+        (first.top() - more.top()).abs() < 24.0,
+        "level with More at {}: {:?}",
+        more.top(),
+        first
+    );
+    h.key(egui::Key::Escape);
+
+    // with every app pinned More is far down the bar: the menu moves up
+    // as far as it must to stay whole in the window
+    h.app.data.extra.rail_items = [
+        "Planner",
+        "AI",
+        "Teams",
+        "Chat",
+        "Docs",
+        "Dashboards",
+        "Whiteboards",
+        "Forms",
+        "Goals",
+        "Timesheets",
+        "Clips",
+    ]
+    .map(String::from)
+    .to_vec();
+    h.settle();
+    let more = h.rect("Rail More");
+    h.click("Rail More");
+    h.settle();
+    let clips = h.rect("Clips");
+    let last = h.rect("Customize navigation");
+    assert!(clips.left() > more.right(), "beside the bar: {:?}", clips);
+    assert!(
+        last.bottom() <= h.size.y - 8.0,
+        "whole in the window: {:?}",
+        last
+    );
+    // (the seventh row: level with More it would be far below it)
+    assert!(clips.top() < more.top(), "moved up: {:?}", clips);
+}
+
+#[test]
+fn a_full_bar_keeps_invite_at_the_bottom_and_moves_the_rest_into_more() {
+    // the smallest window the app allows
+    let mut h = Ui1::sized(900.0, 560.0);
+    let pinned = [
+        "Docs",
+        "Dashboards",
+        "Whiteboards",
+        "Forms",
+        "Goals",
+        "Timesheets",
+        "AI",
+        "Teams",
+        "Planner",
+        "Chat",
+    ];
+    h.app.data.extra.rail_items = pinned.map(String::from).to_vec();
+    h.settle();
+    let invite = h.rect("Rail Invite");
+    let more = h.rect("Rail More");
+    assert!(
+        more.bottom() <= invite.top(),
+        "More above Invite: {:?} {:?}",
+        more,
+        invite
+    );
+    let shown: Vec<&str> = pinned
+        .into_iter()
+        .filter(|l| h.has(&format!("Rail {}", l)))
+        .collect();
+    assert!(
+        !shown.is_empty() && shown.len() < pinned.len(),
+        "{:?}",
+        shown
+    );
+    assert_eq!(shown, pinned[..shown.len()], "the first ones stay");
+    for l in &shown {
+        let r = h.rect(&format!("Rail {}", l));
+        assert!(r.bottom() <= more.top(), "{} above More: {:?}", l, r);
+    }
+
+    // Chat is hidden, so its unread messages count on More
+    two_unread_dms(&mut h);
+    h.settle();
+    let chat = h.app.chat_unread_total();
+    assert_eq!(red_badge_in(&h, "Rail More"), Some(chat.to_string()));
+
+    // the hidden ones open from More, Planner too though More doesn't list
+    // it otherwise, and then More stands for it
+    h.click("Rail More");
+    h.click("Planner");
+    assert_eq!(h.app.section, Section::Planner);
+    h.settle();
+    let more = h.rect("Rail More");
+    assert_eq!(
+        h.circle_fill_at(pos2(more.center().x, more.top() + 22.0)),
+        Some(Color32::from_white_alpha(46)),
+        "More is lit for the open app"
+    );
+
+    // a taller window has room for them all again
+    h.size = vec2(1440.0, 1200.0);
+    h.settle();
+    for l in pinned {
+        assert!(h.has(&format!("Rail {}", l)), "{}", l);
+    }
+}
+
+#[test]
 fn the_ai_page_closes_with_its_button_or_escape() {
     let mut h = Ui1::new();
     h.click("Rail Planner");

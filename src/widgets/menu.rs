@@ -56,35 +56,88 @@ pub fn popup<R>(
         resp,
         side,
         egui::PopupCloseBehavior::CloseOnClickOutside,
-        |ui| {
-            ui.set_min_width(width);
-            let out = if tall > room {
-                egui::ScrollArea::vertical()
-                    .id_salt(id.with("scroll"))
-                    .max_height(room)
-                    .auto_shrink([true, true])
-                    .show(ui, |ui| {
-                        ui.set_min_width(width);
-                        let r = add(ui);
-                        let h = ui.min_rect().height();
-                        ui.data_mut(|d| d.insert_temp(tall_id, h));
-                        r
-                    })
-                    .inner
-            } else {
-                let top = ui.min_rect().top();
+        |ui| popup_body(ui, id, width, tall > room, room, add),
+    )
+}
+
+/// Opens a popup to the right of `resp` when it is clicked, its top level
+/// with the button's and moved up as far as it must to stay in the window;
+/// shows `add` while open. For the left bar: below its button a popup
+/// covered the buttons under it, and slid down out of the window as apps
+/// pinned to the bar pushed the button down.
+pub fn popup_right<R>(
+    ui: &Ui,
+    resp: &Response,
+    id: egui::Id,
+    width: f32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    if resp.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(id));
+    }
+    let screen = ui.ctx().screen_rect();
+    // last frame's height (none before it has been shown: egui keeps that
+    // first frame inside the window)
+    let tall: f32 = ui.data(|d| d.get_temp(id.with("__tall"))).unwrap_or(0.0);
+    let margin = egui::Frame::popup(ui.style()).total_margin().sum().y;
+    let room = screen.height() - 16.0 - margin;
+    let top = resp
+        .rect
+        .top()
+        .min(screen.bottom() - 8.0 - tall.min(room) - margin)
+        .max(screen.top() + 8.0);
+    // egui opens a popup below the rect it is given: an empty one at the
+    // button's right edge. Clicks are still told apart by the button's own
+    // rect, so clicking the button again closes it.
+    let mut at = resp.clone();
+    at.rect = Rect::from_min_size(pos2(resp.rect.right() + 6.0, top), egui::Vec2::ZERO);
+    egui::popup_above_or_below_widget(
+        ui,
+        id,
+        &at,
+        egui::AboveOrBelow::Below,
+        egui::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| popup_body(ui, id, width, tall > room, room, add),
+    )
+}
+
+/// The inside of a popup at least `width` wide: `add`, in a scroll area
+/// `room` high when `scroll`. Remembers how tall and wide it was for the
+/// next frame's placement.
+fn popup_body<R>(
+    ui: &mut Ui,
+    id: egui::Id,
+    width: f32,
+    scroll: bool,
+    room: f32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let tall_id = id.with("__tall");
+    ui.set_min_width(width);
+    let out = if scroll {
+        egui::ScrollArea::vertical()
+            .id_salt(id.with("scroll"))
+            .max_height(room)
+            .auto_shrink([true, true])
+            .show(ui, |ui| {
+                ui.set_min_width(width);
                 let r = add(ui);
-                let h = ui.min_rect().bottom() - top;
+                let h = ui.min_rect().height();
                 ui.data_mut(|d| d.insert_temp(tall_id, h));
                 r
-            };
-            // the frame's margin on both sides
-            let w =
-                ui.min_rect().width() + 2.0 * egui::Frame::popup(ui.style()).total_margin().left;
-            ui.data_mut(|d| d.insert_temp(wide_id, w));
-            out
-        },
-    )
+            })
+            .inner
+    } else {
+        let top = ui.min_rect().top();
+        let r = add(ui);
+        let h = ui.min_rect().bottom() - top;
+        ui.data_mut(|d| d.insert_temp(tall_id, h));
+        r
+    };
+    // the frame's margin on both sides
+    let w = ui.min_rect().width() + 2.0 * egui::Frame::popup(ui.style()).total_margin().left;
+    ui.data_mut(|d| d.insert_temp(id.with("__wide"), w));
+    out
 }
 
 /// Opens a real egui menu below `resp` when it is clicked, the same kind a

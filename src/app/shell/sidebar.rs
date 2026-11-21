@@ -25,11 +25,33 @@ impl App {
             .resizable(false)
             .frame(side_panel_frame(&t, egui::Margin::same(6)))
             .show_inside(ui, |ui| {
-                let r = ui
-                    .add(ghost(egui::Button::new(
-                        RichText::new("\u{00BB}").size(16.0),
-                    )))
-                    .on_hover_text(tr("Open sidebar"));
+                // a square across the strip, its "»" drawn as two chevrons
+                // in the middle (the character sat high and to the left, in
+                // a button narrower than tall)
+                let w = ui.available_width();
+                let (br, r) = ui.allocate_exact_size(vec2(w, w), Sense::click());
+                if r.hovered() || r.is_pointer_button_down_on() {
+                    let fill = crate::widgets::hover_fill(ui);
+                    let fill = if r.is_pointer_button_down_on() {
+                        fill.gamma_multiply(1.5)
+                    } else {
+                        fill
+                    };
+                    ui.painter().rect_filled(br, 6.0, fill);
+                }
+                let s = Stroke::new(1.5_f32, if r.hovered() { t.text } else { t.text2 });
+                for dx in [-2.5, 2.5] {
+                    let c = br.center() + vec2(dx, 0.0);
+                    ui.painter().line(
+                        vec![
+                            c + vec2(-2.0, -4.0),
+                            c + vec2(2.0, 0.0),
+                            c + vec2(-2.0, 4.0),
+                        ],
+                        s,
+                    );
+                }
+                let r = r.on_hover_text(tr("Open sidebar"));
                 name_it(&r, "Open sidebar");
                 if r.clicked() {
                     self.sidebar_collapsed = false;

@@ -686,13 +686,31 @@ fn hub_sidebar_close_button_closes_it_and_the_strip_opens_it() {
     assert!(h.app.sidebar_collapsed);
     assert_eq!(h.app.section, Section::Whiteboards, "still on Whiteboards");
     assert!(!h.has("All Whiteboards"), "the sidebar is closed");
+    // the strip's "»" is a square across it, its chevrons in the middle
+    let r = h.rect("Open sidebar");
+    assert_eq!((r.width(), r.height()), (28.0, 28.0));
+    let marks: Vec<Pos2> = h
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Path(p)
+                if !p.closed && p.points.len() == 3 && p.points.iter().all(|q| r.contains(*q)) =>
+            {
+                Some(p.points.clone())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(marks.len(), 6, "two chevrons");
+    assert!((Rect::from_points(&marks).center() - r.center()).length() < 0.5);
     h.click("Open sidebar");
     assert!(!h.app.sidebar_collapsed);
     assert!(h.has("All Whiteboards"));
 }
 
 /// Whiteboards has no "+ Create" button by its title any more: boards are
-/// made from the "New whiteboard" row above the list of boards. A board
+/// made from the "+" by the "Boards" heading above the list. A board
 /// just made shows it was made: its row is in the list, its name is ready
 /// to type over, and a card offers ways to start until one is picked.
 #[test]
@@ -701,6 +719,15 @@ fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
     open_whiteboards(&mut h);
     assert!(!h.has("Create in Whiteboards"));
     assert!(!h.has("New in Whiteboards"));
+    // a small "+" by the "Boards" heading, not a whole row
+    let plus = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "New whiteboard")
+        .map(|(_, r)| *r)
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap();
+    assert!(plus.width() <= 24.0 && plus.height() <= 24.0);
     h.click("New whiteboard");
     let wid = h.app.wb_open.expect("a board was made and opened");
     let made = board_of(&h, wid).name;

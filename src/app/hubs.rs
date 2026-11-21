@@ -17,7 +17,7 @@ enum HubNew {
     /// A small framed "+".
     Plus,
     /// Nothing there: the hub makes new things from its own rows
-    /// (Whiteboards has a "New whiteboard" row above its boards).
+    /// (Whiteboards has a "+" by its "Boards" heading).
     None,
 }
 

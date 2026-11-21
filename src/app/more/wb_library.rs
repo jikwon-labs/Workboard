@@ -592,14 +592,16 @@ impl App {
         }
     }
 
-    /// The hub sidebar's "Boards": a row that makes a new board, then every
-    /// board with the open one marked. A board just made lights up for a
+    /// The hub sidebar's "Boards": its heading with a "+" that makes a new
+    /// board, then every board with the open one marked. A board just made lights up for a
     /// moment, so it is clear the click made it.
     pub(crate) fn wb_sidebar_boards(&mut self, ui: &mut Ui) {
         let t = self.t();
         let now = ui.input(|i| i.time);
         ui.add_space(14.0);
-        let (lr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), Sense::hover());
+        // the heading, with a framed "+" at its end that makes a new board
+        // (as Spaces and Channels have; a whole row said "New whiteboard")
+        let (lr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
         ui.painter().text(
             lr.left_center() + vec2(8.0, 0.0),
             Align2::LEFT_CENTER,
@@ -607,41 +609,26 @@ impl App {
             FontId::proportional(13.0),
             t.text2,
         );
-        ui.add_space(4.0);
-
-        let w = ui.available_width();
-        let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+        let br = Rect::from_center_size(pos2(lr.right() - 13.0, lr.center().y), vec2(22.0, 22.0));
+        let resp = ui.interact(br, ui.id().with("wb_new_board"), Sense::click());
         name_it(&resp, "New whiteboard");
-        let p = ui.painter();
+        ui.painter().rect_filled(
+            br,
+            5.0,
+            if resp.hovered() {
+                t.border
+            } else {
+                t.row_selected
+            },
+        );
+        crate::app::icons::paint_plus(ui.painter(), br.center(), 15.0, t.text2);
         if resp.hovered() {
-            p.rect_filled(r, 7.0, t.hover);
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        let b = Rect::from_center_size(r.left_center() + vec2(16.0, 0.0), vec2(16.0, 16.0));
-        let pts = [
-            b.left_top(),
-            b.right_top(),
-            b.right_bottom(),
-            b.left_bottom(),
-            b.left_top(),
-        ];
-        p.extend(egui::Shape::dashed_line(
-            &pts,
-            Stroke::new(1.0_f32, t.text3),
-            2.5,
-            2.0,
-        ));
-        crate::app::icons::paint_plus(p, b.center(), 11.0, t.text2);
-        p.text(
-            r.left_center() + vec2(34.0, 0.0),
-            Align2::LEFT_CENTER,
-            tr("New whiteboard"),
-            FontId::proportional(14.0),
-            t.text2,
-        );
-        if resp.clicked() {
+        if resp.on_hover_text(tr("New whiteboard")).clicked() {
             self.new_whiteboard();
         }
+        ui.add_space(4.0);
 
         let rows: Vec<(u64, String, Option<[u8; 3]>)> = self
             .data

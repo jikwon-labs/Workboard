@@ -470,3 +470,27 @@ fn the_post_button_tooltip_only_asks_for_a_channel() {
     }
     assert_eq!(tooltips(&h), 0, "no empty tooltip");
 }
+
+/// A post a minute or so old reads "1 min ago" on its card ("1분 전" in
+/// Korean), not "1 mins ago".
+#[test]
+fn a_minute_old_post_reads_one_min_ago() {
+    let mut h = posts_page();
+    let id = channel_id(&h, "general");
+    let mut m = crate::app::slack::new_message(9001, 2, "Coffee".into(), now_ts() - 90);
+    m.post_title = Some("Break".into());
+    let c = h.app.data.channels.iter_mut().find(|c| c.id == id).unwrap();
+    c.messages.push(m);
+    h.settle();
+    let line = "Announcement in # general \u{2022} 1 min ago";
+    assert!(
+        !h.painted_text(line).is_empty(),
+        "{:?}",
+        drawn_texts(&h.shapes)
+    );
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    h.settle();
+    let ko = h.painted_text("# general의 공지 \u{2022} 1분 전").len();
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert_eq!(ko, 1);
+}

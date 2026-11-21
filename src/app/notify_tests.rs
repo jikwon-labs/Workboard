@@ -1094,3 +1094,45 @@ fn an_answer_to_an_unnamed_form_says_untitled() {
     a.notify_scan();
     assert_eq!(a.notify_rt.sent[0].title, "New answer to Untitled form");
 }
+
+#[test]
+fn a_goal_far_behind_isnt_announced_again_after_many_other_notices() {
+    let mut a = app();
+    let day = today();
+    a.data.extra.goals.clear();
+    a.data.extra.notify.due = false;
+    let id = a.data.new_id();
+    let me = a.data.me;
+    let behind = |id: u64, name: &str, due: i64| Goal {
+        id,
+        name: name.into(),
+        owner: me,
+        start: Some(day - Duration::days(30)),
+        due: Some(day + Duration::days(due)),
+        targets: vec![GoalTarget {
+            name: "Write".into(),
+            kind: TargetKind::TrueFalse { done: false },
+        }],
+        ..Default::default()
+    };
+    a.data.extra.goals.push(behind(id, "Docs", 7));
+    a.notify_clock(at(day, 9, 30));
+    assert_eq!(a.notify_rt.sent.len(), 1);
+    // months of other notices after it
+    for n in 0..400 {
+        a.data.extra.notify.fired.push(format!("due:old-{}", n));
+    }
+    // the next notice trims the list
+    let other = a.data.new_id();
+    a.data.extra.goals.push(behind(other, "Other", 1));
+    a.notify_clock(at(day, 10, 0));
+    a.notify_clock(at(day, 10, 30));
+    let docs = a
+        .notify_rt
+        .sent
+        .iter()
+        .filter(|n| n.title == "Goal at risk: Docs")
+        .count();
+    assert_eq!(docs, 1, "once per due date: {:?}", a.notify_rt.sent);
+    assert!(a.data.extra.notify.fired.len() <= 310, "still trimmed");
+}

@@ -123,6 +123,16 @@ fn cut(s: &str, n: usize) -> String {
     truncate_chars(&s.replace('\n', " "), n)
 }
 
+/// The goal a notice's key is about ("goal:ID:...", "goalm:ID:...",
+/// "goalrisk:ID:...").
+fn goal_key(k: &str) -> Option<u64> {
+    ["goal:", "goalm:", "goalrisk:"]
+        .iter()
+        .find_map(|p| k.strip_prefix(p))
+        .and_then(|rest| rest.split(':').next())
+        .and_then(|id| id.parse().ok())
+}
+
 impl App {
     /// Everything that is news for me in the data as it is, with when it
     /// happened (i64::MAX: not known). Turned-off kinds are left out.
@@ -678,11 +688,24 @@ impl App {
     }
 
     fn mark_fired(&mut self, key: String) {
+        let goals: std::collections::HashSet<u64> =
+            self.data.extra.goals.iter().map(|g| g.id).collect();
         let f = &mut self.data.extra.notify.fired;
         f.push(key);
         if f.len() > FIRED_KEEP {
-            let extra = f.len() - FIRED_KEEP;
-            f.drain(..extra);
+            // the oldest go, but not a goal's while the goal is there:
+            // "far behind" (once per due date) and a milestone (once ever)
+            // would otherwise be told again months later
+            let mut extra = f.len() - FIRED_KEEP;
+            f.retain(|k| {
+                let keep = goal_key(k).is_some_and(|id| goals.contains(&id));
+                if extra > 0 && !keep {
+                    extra -= 1;
+                    false
+                } else {
+                    true
+                }
+            });
         }
         self.dirty = true;
     }

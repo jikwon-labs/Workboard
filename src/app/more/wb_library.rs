@@ -392,7 +392,7 @@ impl App {
                 [c.x, c.y]
             })
         };
-        for ((from, to, at, elbow, dashed, arrow), id) in lines.into_iter().zip(lids) {
+        for ((from, to, at, elbow, dashed, arrow), id) in lines.into_iter().zip(lids.clone()) {
             w.lines.push(WbLine {
                 id,
                 from: from.map_or(0, |k| sids[k]),
@@ -406,6 +406,12 @@ impl App {
             });
         }
         w.shapes.extend(made);
+        // Undo takes it back, as anything else added to the board
+        if !sids.is_empty() {
+            self.sweep
+                .wb_undo
+                .push((wid, super::whiteboard::WbUndo::Added(sids, lids)));
+        }
         self.dirty = true;
     }
 

@@ -1738,3 +1738,22 @@ fn escape_ends_typing_in_a_shape_before_letting_it_go() {
     h.key(egui::Key::Escape);
     assert_eq!(h.app.sweep.wb_sel, None);
 }
+
+/// Undo takes back a template laid out on a board, as it does everything
+/// else added to it.
+#[test]
+fn undo_takes_back_a_template() {
+    let mut h = Ui1::new();
+    open_whiteboards(&mut h);
+    h.click("New whiteboard");
+    let wid = h.app.wb_open.unwrap();
+    h.click("Flow Chart");
+    let b = board_of(&h, wid);
+    assert_eq!((b.shapes.len(), b.lines.len()), (3, 2));
+    h.click("Undo");
+    let b = board_of(&h, wid);
+    assert!(
+        b.shapes.is_empty() && b.lines.is_empty(),
+        "the template is gone"
+    );
+}

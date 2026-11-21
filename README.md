@@ -7,6 +7,13 @@ more. Built with Rust and egui for the Mac. Your data lives on your own
 computer, and a team server of your own (or a shared folder) lets the team
 work on it together. An iPhone app (`ios/`) connects to the same team server.
 
+On a team server whose owner has added an Anthropic API key (`ai.json`,
+see `deploy/README.md` "AI"), AI tools show up: the AI page answers
+questions about the workspace with links to the tasks, docs and messages it
+cites; conversations and threads can be summed up; doc pages and task
+descriptions can be improved, fixed, shortened, translated or drafted; and a
+task can get suggested subtasks. The AI reads only what the asker may see.
+
 The interface is in English or Korean (Settings > Language; by default it
 follows the system). Notifications for messages, mentions, assignments,
 due tasks and meetings show as banners and a Dock badge (Settings >

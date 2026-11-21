@@ -17,6 +17,10 @@
   - 시스템 설정 > 일반 > Time Machine > 백업 디스크 추가 → 그 디스크 선택 → **백업 암호화** 켜기(이 Mac mini 는 FileVault 를 켜 두므로 백업도 암호화한다). 디스크를 지워도 된다고 물으면 그 디스크가 비어 있는지 먼저 확인한다.
   - 옵션에서 `~/Library` 가 제외 목록에 없는지 본다(기본값은 포함). 서버 데이터 `~/Library/Application Support/WorkboardServer/` 가 여기 있다.
   - 확인: `tmutil destinationinfo` 에 디스크가 보이고, `tmutil startbackup --block` 뒤 `tmutil latestbackup` 이 오늘 날짜 경로를 찍으면 끝. 그 뒤로는 매시간 저절로 돈다.
+- [ ] **AI 켜기** (2026-11-21 추가, 서버 코드는 자동 업데이트로 들어간다): 앱의 AI 도구(대화·스레드 요약, 문서·설명 글쓰기, 하위 작업 제안, AI 페이지 질문)는 서버가 Claude 에게 물어서 답한다. 키가 없으면 앱에 AI 도구가 보이지 않는다.
+  - [ ] console.anthropic.com 에서 API 키를 만들고(요청마다 그 계정에 요금이 나간다), 서버 데이터 폴더 `~/Library/Application Support/WorkboardServer/` 에 `ai.json` 을 둔다: `{"api_key": "sk-ant-..."}`. `chmod 600`. 키는 출력하거나 레포에 두지 않는다. 형식과 선택 항목(`model`, `per_hour`)은 `deploy/README.md` "AI".
+  - [ ] `launchctl kickstart -k gui/$(id -u)/com.jikwon-labs.workboard-server` 로 다시 시작하고 `~/Library/Logs/workboard-server.log` 에 `AI tools on (claude-opus-5-5)` 가 찍히는지 본다.
+  - [ ] 앱(새 버전)에서 왼쪽 AI 를 눌러 "무엇을 도와드릴까요?" 화면과 질문 답이 나오는지, 채널 위 "요약" 이 되는지 확인한다. 서버 로그의 `AI: ...` 줄에서 쓴 토큰을 볼 수 있다.
 - [ ] **APNs 키 두고 푸시 켜기 — iPhone 실기기 확인 남음** (번들 ID `com.seojigwon.workboard`, `docs/ios-design.md` "알림")
   - [x] (2026-11-16) Apple Developer의 App ID·Push Notifications capability·APNs 키 준비. Key ID `7NH56246WD`, Team ID `K6599UJ4KM`.
   - [x] (2026-11-16) 전달받은 `.p8`을 서버 데이터 폴더에 설치하고 권한 `600` 적용. 키 내용은 출력하거나 레포에 보관하지 않았다.

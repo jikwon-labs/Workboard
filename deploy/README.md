@@ -119,6 +119,31 @@ bundle id) in the data folder, both mode 600, and restart the server
 The log says `iPhone notifications on` or `off: <why>` once at start.
 Details: the top of `server/src/push.rs`; steps: `docs/macmini/README.md`.
 
+## AI (summaries, writing help, questions about the workspace)
+
+The apps' AI tools ask Anthropic's Claude through the server, so the API key
+stays on the Mac mini. Put an `ai.json` in the data folder, readable only by
+you, and restart the server:
+
+    {
+      "api_key": "sk-ant-...",
+      "model": "claude-opus-5-5",
+      "per_hour": 60
+    }
+
+    chmod 600 ~/Library/Application\ Support/WorkboardServer/ai.json
+    launchctl kickstart -k gui/$(id -u)/com.jikwon-labs.workboard-server
+
+Only `api_key` is needed (an API key from console.anthropic.com > API keys);
+`model` defaults to `claude-opus-5-5`, `per_hour` (requests one person may
+make in an hour, per workspace) to 60. `base_url` points at a proxy instead of
+`https://api.anthropic.com` (plain `http://` only to this computer). The log
+says `AI tools on (<model>)` or `AI tools off: <why>` once at start, then one
+line per request with what it used (`AI: question for member 3: 12000 tokens
+in (8000 from the cache), 400 out`); nothing of the questions or answers is
+kept. Every request is billed to the key's Anthropic account. Without the file
+the apps show no AI tools. Details: the top of `server/src/ai.rs`.
+
 ## Keep the Mac mini reachable
 
 Run once in Terminal on the Mac mini (asks for your password):

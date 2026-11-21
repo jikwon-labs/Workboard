@@ -22,6 +22,15 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 - 글꼴: 맥은 `/System/Library/Fonts/SFNS.ttf`·`AppleSDGothicNeo.ttc` 를 읽지만 iPad 에는 그 경로가 없어 글자가 모두 네모로 나왔다. iPad 에서는 iOS 에 글꼴 파일 위치를 물어(`os::ios_font_files`, CoreText) `/System/Library/Fonts/Core/SFUI.ttf` 와 `.../Core/AppleSDGothicNeo.ttc` 를 읽는다. 시뮬레이터는 맥의 파일을 그대로 읽어서 이 차이가 보이지 않는다. 굵은 한글 제목은 묶음 안의 Bold 를 무게로 찾는다(맥 6번, iPad 9번).
 - 2026-11-22 iPad mini 6세대(iPad14,1, iPadOS 27.2.1)에 설치해 실행되는 것까지 확인했다.
 
+## TestFlight
+
+    scripts/ipad-testflight                    # 정식 빌드, 묶기, App Store Connect 에 올리기
+    WB_EXPORT_ONLY=1 scripts/ipad-testflight   # 올리지 않고 배포용 서명한 .ipa 까지
+
+- Rust 앱에는 Xcode 프로젝트가 없어서 iPhone 앱 프로젝트를 빌린다. 이 앱의 번들 ID 로 묶고(아이콘과 App Store Connect 가 보는 SDK 정보가 따라온다), 묶음 안의 실행 파일을 Rust 앱으로, Info.plist 를 `ios/ipad-egui/Info.plist` 로 바꾼 뒤 Xcode 가 배포용으로 서명해 올린다(`ios/ipad-egui/ExportOptions.plist`). 빌드 번호는 App Store Connect 가 고르고, 버전은 `Cargo.toml` 의 것을 쓴다.
+- 처음 한 번 사람이 할 일: App Store Connect 웹에서 앱을 만든다(API 로는 못 만든다). 플랫폼 iOS, 이름 "Workboard Desk"(이미 쓰는 이름이면 다른 이름), 기본 언어 한국어, 번들 ID `com.seojigwon.workboard.desk`, SKU 아무거나. 그 앱의 TestFlight 에서 내부 테스트 그룹을 만들고 "자동 배포"를 켜고 팀원을 넣는다. 스크립트는 `swift ios/scripts/asc.swift app-id --bundle com.seojigwon.workboard.desk` 로 앱이 있는지 먼저 본다.
+- API 키는 iPhone 앱과 같은 `~/.appstoreconnect/workboard.env`.
+
 ## 손으로 누르는 시험
 
 `ios/WorkboardUITests/DeskUITests.swift` 가 XCUITest 로 이 앱을 띄워 좌표로 누르고, 걸음마다 스크린샷을 남긴다. egui 가 iOS 에서 접근성 요소를 내놓지 않아 좌표로 누른다. 평소 iOS 테스트에서는 건너뛴다.

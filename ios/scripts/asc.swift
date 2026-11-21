@@ -1,6 +1,7 @@
 // App Store Connect API calls for TestFlight, used by ios/scripts/testflight.sh.
 //
 //   swift ios/scripts/asc.swift check
+//   swift ios/scripts/asc.swift app-id --bundle com.seojigwon.workboard.desk
 //   swift ios/scripts/asc.swift distribute --version 0.1.20 --notes-file FILE \
 //       [--since 2026-11-20T10:00:00Z] [--group Team]
 //
@@ -15,7 +16,9 @@
 import CryptoKit
 import Foundation
 
-let appID = "6835523119"
+/// The iPhone app; ASC_APP_ID picks another (the iPad's desktop app,
+/// scripts/ipad-testflight).
+let appID = ProcessInfo.processInfo.environment["ASC_APP_ID"] ?? "6835523119"
 /// ASC_API_URL points the script at a stand-in server for testing.
 let api =
     ProcessInfo.processInfo.environment["ASC_API_URL"] ?? "https://api.appstoreconnect.apple.com"
@@ -137,6 +140,16 @@ func check() async {
     }
 }
 
+/// The App Store Connect id of the app with this bundle id (made by hand on
+/// the website; the API can't make apps).
+func appForBundle(_ bundle: String) async {
+    let (_, apps) = await call("GET", "/v1/apps?filter[bundleId]=\(bundle)&limit=5")
+    guard let app = items(apps).first(where: { str($0, "bundleId") == bundle }) else {
+        fail("no app with bundle id \(bundle) in App Store Connect")
+    }
+    print(app["id"] as? String ?? "")
+}
+
 func distribute(version: String, since: Date?, groupName: String, notes: String) async {
     // The external group.
     // This endpoint takes no name filter, so match the name here.
@@ -250,6 +263,9 @@ func option(_ name: String) -> String? {
 switch args.first {
 case "check":
     await check()
+case "app-id":
+    guard let bundle = option("--bundle") else { fail("--bundle is required") }
+    await appForBundle(bundle)
 case "distribute":
     guard let version = option("--version") else { fail("--version is required") }
     guard let notesFile = option("--notes-file"),
@@ -264,5 +280,5 @@ case "distribute":
         version: version, since: since, groupName: option("--group") ?? "Team",
         notes: String(notes.trimmingCharacters(in: .whitespacesAndNewlines).prefix(4000)))
 default:
-    fail("usage: asc.swift check | distribute --version V --notes-file F [--since ISO] [--group G]")
+    fail("usage: asc.swift check | app-id --bundle B | distribute --version V --notes-file F [--since ISO] [--group G]")
 }

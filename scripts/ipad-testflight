@@ -1,0 +1,106 @@
+#!/bin/sh
+# Upload the iPad's desktop (egui) app to TestFlight as "Workboard Desk".
+# Experimental: see docs/ipad.md, "TestFlight".
+#   scripts/ipad-testflight            build, archive, upload
+#   WB_EXPORT_ONLY=1 scripts/ipad-testflight   stop at a signed .ipa (no upload)
+#
+# There is no Xcode project for the Rust app, so this borrows the iPhone app's:
+# it is archived with this app's bundle id (which brings the app icon and the
+# SDK details App Store Connect checks), the archived app's code is swapped
+# for the Rust binary and its Info.plist for ios/ipad-egui/Info.plist, and
+# Xcode then signs it for distribution and uploads it.
+#
+# Needs the app made once by hand in App Store Connect (bundle id
+# com.seojigwon.workboard.desk) and the API key in
+# ~/.appstoreconnect/workboard.env, as for ios/scripts/testflight.sh.
+set -eu
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.cargo/bin:$PATH"
+bundle=com.seojigwon.workboard.desk
+team=K6599UJ4KM
+target=aarch64-apple-ios
+# (Xcode's module cache breaks on a folder with a space in its path)
+out="${TMPDIR:-/tmp}/wb-desk-testflight"
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+
+env_file="$HOME/.appstoreconnect/workboard.env"
+if [ -f "$env_file" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+fi
+if [ "${WB_EXPORT_ONLY:-}" != 1 ]; then
+    swift ios/scripts/asc.swift app-id --bundle "$bundle" >/dev/null ||
+        { echo "ipad-testflight: make the app in App Store Connect first (docs/ipad.md)" >&2; exit 1; }
+fi
+
+cargo build --release --target "$target"
+
+rm -rf "$out"
+mkdir -p "$out"
+archive="$out/Desk.xcarchive"
+echo "ipad-testflight: archiving (the iPhone app's project, as $bundle $version)"
+xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard -configuration Release \
+    -destination 'generic/platform=iOS' -archivePath "$archive" -derivedDataPath "$out/dd" \
+    -allowProvisioningUpdates PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGN_ENTITLEMENTS= \
+    MARKETING_VERSION="$version" archive >"$out/archive.log" 2>&1 ||
+    { grep -E "error" "$out/archive.log" | tail -20 >&2; exit 1; }
+
+app="$archive/Products/Applications/Workboard.app"
+old="$out/old-Info.plist"
+cp "$app/Info.plist" "$old"
+# keep only the icons from the iPhone app's bundle
+find "$app" -mindepth 1 -maxdepth 1 ! -name 'Assets.car' ! -name 'AppIcon*.png' -exec rm -rf {} +
+rm -rf "$archive/dSYMs"
+cp target/$target/release/workboard "$app/workboard"
+plist="$app/Info.plist"
+# ours, with the version, the build number, the icons and the SDK the
+# archive was built with taken from Xcode's own plist
+python3 - ios/ipad-egui/Info.plist "$old" "$plist" "$version" <<'PY'
+import plistlib, sys
+ours, xcode, out, version = sys.argv[1:]
+p = plistlib.load(open(ours, "rb"))
+x = plistlib.load(open(xcode, "rb"))
+p["CFBundleShortVersionString"] = version
+for k in ["CFBundleVersion", "CFBundleIcons", "CFBundleIcons~ipad", "CFBundleSupportedPlatforms",
+          "BuildMachineOSBuild", "DTCompiler", "DTPlatformBuild", "DTPlatformName",
+          "DTPlatformVersion", "DTSDKBuild", "DTSDKName", "DTXcode", "DTXcodeBuild"]:
+    if k in x:
+        p[k] = x[k]
+plistlib.dump(p, open(out, "wb"))
+PY
+plutil -lint "$plist" >/dev/null
+
+# signed again for development, so Xcode can read the app's entitlements
+cat >"$out/entitlements.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>$team.$bundle</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>$team</string>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>
+PLIST
+identity=$(security find-identity -v -p codesigning | grep "Apple Development" | head -1 | sed -E 's/.*"(.*)"/\1/')
+codesign --force --sign "$identity" --entitlements "$out/entitlements.plist" "$app"
+
+options=ios/ipad-egui/ExportOptions.plist
+if [ "${WB_EXPORT_ONLY:-}" = 1 ]; then
+    sed 's#<string>upload</string>#<string>export</string>#' "$options" >"$out/ExportOptions.plist"
+    options="$out/ExportOptions.plist"
+fi
+xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
+    -exportPath "$out/export" -allowProvisioningUpdates >"$out/export.log" 2>&1 ||
+    { grep -E "error|Error" "$out/export.log" | tail -20 >&2; exit 1; }
+if [ "${WB_EXPORT_ONLY:-}" = 1 ]; then
+    echo "ipad-testflight: signed $out/export/*.ipa"
+else
+    echo "ipad-testflight: uploaded $version. App Store Connect processes it in a few minutes;"
+    echo "internal testers get it when the group has automatic distribution (docs/ipad.md)."
+fi

@@ -4,13 +4,13 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>ko</string>
+	<key>CFBundleDisplayName</key>
+	<string>Workboard Desk</string>
 	<key>CFBundleExecutable</key>
 	<string>workboard</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.seojigwon.workboard.desk</string>
 	<key>CFBundleName</key>
-	<string>Workboard Desk</string>
-	<key>CFBundleDisplayName</key>
 	<string>Workboard Desk</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -18,14 +18,16 @@
 	<string>0.1.21</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>17.0</string>
-	<key>UIDeviceFamily</key>
-	<array>
-		<integer>2</integer>
-	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Video calls use the camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Calls use the microphone.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -43,14 +45,16 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>2</integer>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UIStatusBarHidden</key>
 	<true/>
-	<key>UIViewControllerBasedStatusBarAppearance</key>
-	<false/>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
@@ -58,9 +62,7 @@
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>Video calls use the camera.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Calls use the microphone.</string>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
 </dict>
 </plist>

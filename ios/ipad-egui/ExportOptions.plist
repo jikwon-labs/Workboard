@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- scripts/ipad-testflight: upload the iPad's desktop app to App Store
+	     Connect. Like ios/Config/ExportOptions.plist, without symbols (the
+	     archive's dSYM is the iPhone app's, not the Rust binary's). -->
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>upload</string>
+	<key>teamID</key>
+	<string>K6599UJ4KM</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>manageAppVersionAndBuildNumber</key>
+	<true/>
+	<key>uploadSymbols</key>
+	<false/>
+</dict>
+</plist>

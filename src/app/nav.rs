@@ -460,6 +460,14 @@ impl App {
             .member(author)
             .map(|m| m.shown().to_string())
             .unwrap_or_default();
+        // one line under the title: a text written on several lines runs on
+        let text = text
+            .split(['\n', '\r'])
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let text = text.as_str();
         match src {
             InboxSrc::Chat {
                 thread: Some(_), ..

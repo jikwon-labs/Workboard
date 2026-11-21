@@ -209,3 +209,25 @@ fn a_filter_that_hides_every_row_says_so_and_offers_everything() {
     assert!(h.has("Nothing in Other"));
     assert!(!h.has("Nothing matches this filter"));
 }
+
+#[test]
+fn a_comment_on_several_lines_shows_on_one_line_under_its_title() {
+    let mut h = inbox(|d| {
+        comment_on(d, CASE, "First line\nSecond line\n\n  Third line", 60);
+    });
+    let line = h.painted_text("Alex Kim commented: First line Second line Third line");
+    assert_eq!(line.len(), 1, "the comment runs on in one line");
+    let title = h.painted_text(CASE);
+    let (t, l) = (title[0].0, line[0].0);
+    assert!(
+        l.top() >= t.bottom() - 1.0 && l.height() < 20.0,
+        "the line stays under the title and in its row: {t:?} {l:?}"
+    );
+    // the Replies page shows the same line
+    h.click("Replies");
+    assert_eq!(
+        h.painted_text("Alex Kim commented: First line Second line Third line")
+            .len(),
+        1
+    );
+}

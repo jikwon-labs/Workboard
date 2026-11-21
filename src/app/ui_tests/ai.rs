@@ -536,3 +536,22 @@ fn another_workspace_never_sees_the_conversation() {
     assert!(h.painted_text("What did the leads decide?").is_empty());
     assert_eq!(fake.asked().len(), 1);
 }
+
+/// On a computer the AI page opens with the cursor in its question box, so
+/// a question can be typed straight away; Escape still leaves the page.
+#[test]
+fn the_ai_page_opens_with_the_cursor_in_its_box() {
+    let (mut h, _server, _fake) = on_ai_server("");
+    h.click("Rail AI");
+    assert_eq!(h.app.section, Section::Ai);
+    assert_eq!(
+        h.ctx.memory(|m| m.focused()),
+        Some(egui::Id::new(crate::app::ai::AI_BOX))
+    );
+    h.type_text("typed right away");
+    assert_eq!(h.app.ai.draft, "typed right away");
+    h.app.ai.draft.clear();
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert_ne!(h.app.section, Section::Ai, "Escape leaves the page");
+}

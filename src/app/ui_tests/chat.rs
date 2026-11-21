@@ -4038,3 +4038,62 @@ fn cmd_f_finds_in_the_open_conversation() {
     assert!(shown(&h, &crate::os::keys("\u{2318}F")));
     assert!(shown(&h, "Find in a conversation"));
 }
+
+/// On a computer, opening a conversation puts the cursor in its message box
+/// (a thread's in its reply box), so typing goes straight in, as in Slack.
+/// A click elsewhere takes it out and it stays out until something is opened
+/// again.
+#[test]
+fn opening_a_conversation_puts_the_cursor_in_its_box() {
+    let chat_box = egui::Id::new(super::super::files::CHAT_BOX);
+    let thread_box = egui::Id::new(super::super::files::THREAD_BOX);
+    let focused = |h: &Ui1| h.ctx.memory(|m| m.focused());
+    let mut h = Ui1::new();
+    let mut random = h.app.data.channels[0].clone();
+    random.id = 7_777;
+    random.name = "random".into();
+    random.messages.clear();
+    h.app.data.channels.push(random);
+
+    h.click("general");
+    assert_eq!(focused(&h), Some(chat_box), "the channel's box");
+    h.type_text("typed right away");
+    assert_eq!(h.app.chat.text, "typed right away");
+
+    h.click("random");
+    assert_eq!(h.app.chat.open, Some(7_777));
+    assert_eq!(focused(&h), Some(chat_box), "another channel: its box");
+
+    // a click on the messages takes the cursor out, and it stays out
+    h.click("general");
+    let messages = h.find("Message composer").unwrap() - vec2(0.0, 300.0);
+    h.click_at(messages);
+    h.settle();
+    assert_eq!(focused(&h), None);
+
+    // a thread: its reply box; closing it, the channel's again
+    h.click("1 reply");
+    assert_eq!(focused(&h), Some(thread_box), "the thread's reply box");
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.chat.thread_open, None);
+    assert_eq!(focused(&h), Some(chat_box), "back to the channel's box");
+
+    // back to Chat from another page
+    h.click("Rail Home");
+    assert_ne!(h.app.section, Section::Chat);
+    h.click("general");
+    assert_eq!(h.app.section, Section::Chat);
+    assert_eq!(focused(&h), Some(chat_box), "Chat again: the box");
+}
+
+/// On an iPad the cursor doesn't jump into the box: the keyboard would
+/// come up over the conversation just from looking at it.
+#[test]
+fn on_an_ipad_opening_a_conversation_leaves_the_keyboard_down() {
+    let mut h = Ui1::new();
+    h.app.touch.enabled = true;
+    h.click("general");
+    h.settle();
+    assert_eq!(h.app.section, Section::Chat);
+    assert_eq!(h.ctx.memory(|m| m.focused()), None);
+}

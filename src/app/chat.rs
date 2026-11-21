@@ -504,6 +504,43 @@ fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
 }
 
 impl App {
+    /// On a computer, the text box `id` takes the cursor when `what` (the
+    /// conversation, the thread) is opened in `place`, or `place` is shown
+    /// again after a frame without it, so typing goes straight in, as in
+    /// Slack. Call it each frame `place` shows, before the box is drawn.
+    /// Not on an iPad (the keyboard would cover the screen), not under a
+    /// dialog or the task window, and not while another text field has the
+    /// cursor (it waits a couple of frames for one that is closing, such as
+    /// the quick switcher's).
+    pub(super) fn focus_on_open(
+        &mut self,
+        ctx: &egui::Context,
+        place: &str,
+        what: u64,
+        id: egui::Id,
+    ) {
+        let key = egui::Id::new(("focus_on_open", place));
+        let pass = ctx.cumulative_pass_nr();
+        // (what, the pass `place` was last shown in, focus until this pass)
+        let last: Option<(u64, u64, u64)> = ctx.data(|d| d.get_temp(key));
+        let opened = last.is_none_or(|(w, p, _)| w != what || p + 1 < pass);
+        let mut due = if opened {
+            pass + 2
+        } else {
+            last.map_or(0, |l| l.2)
+        };
+        if pass <= due && !self.touch.enabled && self.modal.is_none() && self.open_task.is_none() {
+            let focused = ctx.memory(|m| m.focused());
+            let typing_elsewhere =
+                focused.is_some_and(|f| f != id && egui::TextEdit::load_state(ctx, f).is_some());
+            if !typing_elsewhere {
+                ctx.memory_mut(|m| m.request_focus(id));
+                due = 0;
+            }
+        }
+        ctx.data_mut(|d| d.insert_temp(key, (what, pass, due)));
+    }
+
     /// A post of mine in conversation `ch`, from the channel's box (Post) or
     /// the Posts page: who it mentions worked out as for any message there
     /// (`picked`: the people chosen from the box's @ list). The title is one
@@ -1204,6 +1241,12 @@ impl App {
                         .width_range(300.0..=max_w)
                         .resizable(true)
                 };
+                self.focus_on_open(
+                    ui.ctx(),
+                    "thread",
+                    tid,
+                    egui::Id::new(super::files::THREAD_BOX),
+                );
                 let panel = panel
                     .frame(
                         egui::Frame::new()
@@ -1672,6 +1715,10 @@ impl App {
                 if below > 0 && new_below(ui, &t, list.inner_rect, below) {
                     self.chat.to_bottom = true;
                 }
+            }
+            // with a thread beside it, the cursor goes to the thread's box
+            if thread_rect.is_none() {
+                self.focus_on_open(ui.ctx(), "chat", cid, egui::Id::new(super::files::CHAT_BOX));
             }
             let composer_top = ui.cursor().top();
             egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 2 }).show(ui, |ui| {

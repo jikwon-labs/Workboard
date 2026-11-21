@@ -1292,6 +1292,9 @@ impl App {
     fn ai_composer(&mut self, ui: &mut Ui, t: &Theme, offered: bool) -> Option<String> {
         let busy = self.ai_answering();
         let box_id = egui::Id::new(AI_BOX);
+        if offered {
+            self.focus_on_open(ui.ctx(), "ai", 0, box_id);
+        }
         let focused = ui.memory(|m| m.has_focus(box_id));
         let can = offered && !busy && !self.ai.draft.trim().is_empty();
         let enter = offered && !busy && super::chat::take_enter(ui, box_id);
@@ -1445,7 +1448,7 @@ impl App {
 }
 
 /// The AI page's question box (its id).
-const AI_BOX: &str = "ai_question_box";
+pub(super) const AI_BOX: &str = "ai_question_box";
 
 /// The AI's own colours, a violet running into a pink.
 pub(super) const AI_VIOLET: Color32 = Color32::from_rgb(112, 82, 236);

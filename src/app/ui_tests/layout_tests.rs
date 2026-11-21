@@ -1439,3 +1439,26 @@ fn timesheet_and_calendar_side_shorten_long_names() {
         );
     }
 }
+
+/// An open Doc in the smallest window: the header's buttons don't run over
+/// the path (Last updated, Copy link and Duplicate give way), and the
+/// formatting bar wraps instead of running past the edge.
+#[test]
+fn small_window_doc_header_and_toolbar_fit() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        let mut h = Ui1::sized(900.0, 560.0);
+        crate::i18n::set_lang(lang);
+        let doc = h.app.data.docs.first().map(|d| d.id).unwrap();
+        h.app.section = Section::Docs;
+        h.app.doc_open = Some(doc);
+        h.settle();
+        let top = Rect::from_min_max(pos2(320.0, 40.0), pos2(h.size.x, 140.0));
+        let over = overlapping(&h.texts_in(top));
+        assert!(over.is_empty(), "{:?}: {:?}", lang, over);
+        for n in ["Link", "Checklist", "Doc options"] {
+            let r = h.rect(n);
+            assert!(r.right() <= h.size.x, "{:?} {}: {:?}", lang, n, r);
+        }
+        crate::i18n::set_lang(crate::i18n::Lang::En);
+    }
+}

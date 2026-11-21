@@ -929,17 +929,37 @@ impl App {
                             };
                             self.toast(msg);
                         }
-                        if ui
-                            .add(ghost(egui::Button::new(tr("Duplicate"))))
-                            .on_hover_text(tr("Copy this doc and its pages"))
-                            .clicked()
+                        // what's left of the row after the path on the left: a
+                        // narrow window drops Duplicate, Copy link (both in the
+                        // ⋯ menu too) and Last updated instead of drawing them
+                        // over the path
+                        // `after`: what still goes further left (Shared, the star)
+                        let room = |ui: &Ui, text: &str, after: f32| {
+                            let w = ui
+                                .painter()
+                                .layout_no_wrap(
+                                    text.to_string(),
+                                    egui::TextStyle::Button.resolve(ui.style()),
+                                    t.text,
+                                )
+                                .size()
+                                .x;
+                            ui.available_width() >= w + 16.0 + after
+                        };
+                        if room(ui, tr("Duplicate"), 110.0)
+                            && ui
+                                .add(ghost(egui::Button::new(tr("Duplicate"))))
+                                .on_hover_text(tr("Copy this doc and its pages"))
+                                .clicked()
                         {
                             if let Some(n) = self.duplicate_doc(id) {
                                 self.doc_open = Some(n);
                                 self.toast(tr("Doc duplicated"));
                             }
                         }
-                        if ui.add(ghost(egui::Button::new(tr("Copy link")))).clicked() {
+                        if room(ui, tr("Copy link"), 110.0)
+                            && ui.add(ghost(egui::Button::new(tr("Copy link")))).clicked()
+                        {
                             self.copy_link(ui, nav::doc_link(id));
                         }
                         let Some(idx) = self.data.docs.iter().position(|d| d.id == id) else {
@@ -979,7 +999,16 @@ impl App {
                             }
                             self.dirty = true;
                         }
-                        if let Some(d) = self.data.docs.iter().find(|d| d.id == id) {
+                        let updated = self
+                            .data
+                            .docs
+                            .iter()
+                            .find(|d| d.id == id)
+                            .map(|d| trf!("Last updated {}", fmt_ago(d.updated)));
+                        if let Some(d) = updated
+                            .filter(|u| room(ui, u, 0.0))
+                            .and(self.data.docs.iter().find(|d| d.id == id))
+                        {
                             ui.label(
                                 RichText::new(trf!("Last updated {}", fmt_ago(d.updated)))
                                     .small()

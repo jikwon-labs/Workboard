@@ -329,7 +329,9 @@ impl App {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(16, 6))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                // wraps in a narrow window: on one row the buttons ran past
+                // the right edge
+                ui.horizontal_wrapped(|ui| {
                     if ui.selectable_label(!self.doc_preview, tr("Edit")).clicked() {
                         self.doc_preview = false;
                     }
@@ -427,6 +429,21 @@ impl App {
                             });
                         }
                     }
+                    let d = &self.data.docs[idx];
+                    let words_text = trf!(
+                        "{} \u{00B7} {} words",
+                        self.data
+                            .member(d.owner)
+                            .map(|m| m.shown().to_string())
+                            .unwrap_or_default(),
+                        d.body.split_whitespace().count()
+                    );
+                    let w = ui
+                        .painter()
+                        .layout_no_wrap(words_text, FontId::proportional(11.0), t.text3)
+                        .size()
+                        .x;
+                    crate::widgets::wrap_unless_room(ui, w + 12.0);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let d = &self.data.docs[idx];
                         let words = d.body.split_whitespace().count();

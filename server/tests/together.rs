@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wb_net::{Client, Event, Msg, Person, Role, SignIn, Status};
 use wb_sync::SyncMeta;
-use workboard_server::testing::{temp_home, wait_until, TestServer as Server};
+use workboard_server::testing::{wait_until, TempHome, TestServer as Server};
 
 /// Milliseconds, like the app's change stamps.
 fn now() -> i64 {
@@ -452,7 +452,7 @@ fn second_device(port: u16, a: &mut App) -> App {
 #[test]
 fn my_reading_state_reaches_my_other_devices_only() {
     use wb_sync::mine::{collect, resolve, MineView};
-    let home = temp_home("mine");
+    let home = TempHome::new("mine");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let mut phone = second_device(server.port, &mut a);
@@ -535,14 +535,13 @@ fn my_reading_state_reaches_my_other_devices_only() {
             .is_some_and(|m| resolve(m).replies_read.contains("chat:10:11"))
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// A scheduled message waits on the server, then goes out as its writer's
 /// (for everyone, even with the writer gone); one taken back never does.
 #[test]
 fn scheduled_messages_go_out_at_their_time_from_the_server() {
-    let home = temp_home("schedule");
+    let home = TempHome::new("schedule");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let now = now() / 1000;
@@ -601,7 +600,7 @@ fn scheduled_messages_go_out_at_their_time_from_the_server() {
 
 #[test]
 fn a_chat_message_from_a_reaches_b() {
-    let home = temp_home("chat");
+    let home = TempHome::new("chat");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(say("hello from A", 2001));
@@ -613,12 +612,11 @@ fn a_chat_message_from_a_reaches_b() {
         texts(d).ends_with(&["hello from A".to_string(), "and from B".to_string()])
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn edits_to_different_tasks_at_once_both_stay() {
-    let home = temp_home("edits");
+    let home = TempHome::new("edits");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // both edit before seeing the other's change
@@ -628,12 +626,11 @@ fn edits_to_different_tasks_at_once_both_stay() {
     a.wait("both edits at A", both);
     b.wait("both edits at B", both);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_task_deleted_by_a_does_not_come_back_from_b() {
-    let home = temp_home("delete");
+    let home = TempHome::new("delete");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
@@ -661,12 +658,11 @@ fn a_task_deleted_by_a_does_not_come_back_from_b() {
     });
     assert_eq!(task_names(&a.data), ["Plan"]);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn the_team_copy_survives_a_server_restart() {
-    let home = temp_home("restart");
+    let home = TempHome::new("restart");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(say("before the restart", 2002));
@@ -697,12 +693,11 @@ fn the_team_copy_survives_a_server_restart() {
         texts(d).contains(&"before the restart".to_string()) && task_names(d) == ["Plan", "Ship"]
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn messages_written_while_disconnected_merge_after_reconnecting() {
-    let home = temp_home("offline");
+    let home = TempHome::new("offline");
     let server = Server::start_at(&home, 0);
     let port = server.port;
     let (mut a, mut b) = two_apps(port);
@@ -733,12 +728,11 @@ fn messages_written_while_disconnected_merge_after_reconnecting() {
         task_names(d)[0] == "Plan (offline B)"
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn everyone_sees_who_is_connected() {
-    let home = temp_home("presence");
+    let home = TempHome::new("presence");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     b.until("B sees A and itself online", |b| {
@@ -750,12 +744,11 @@ fn everyone_sees_who_is_connected() {
     drop(b);
     a.until("A hears B went away", |a| a.online.as_deref() == Some(&[1]));
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn typing_reaches_only_the_others_who_see_the_conversation() {
-    let home = temp_home("typing");
+    let home = TempHome::new("typing");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let code = a.invite(3, Role::Member);
@@ -829,12 +822,11 @@ fn typing_reaches_only_the_others_who_see_the_conversation() {
     b.until("B hears A in the thread", |b| !b.thread_typing.is_empty());
     assert_eq!(b.thread_typing, [(10, 1, 77)]);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn only_invited_people_get_in_and_only_admins_invite() {
-    let home = temp_home("access");
+    let home = TempHome::new("access");
     let server = Server::start_at(&home, 0);
     let port = server.port;
     let (mut a, mut b) = two_apps(port);
@@ -942,7 +934,6 @@ fn only_invited_people_get_in_and_only_admins_invite() {
         d["members"][1]["role"] == "Member"
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 fn http_get(port: u16, path: &str) -> (String, Vec<u8>) {
@@ -972,7 +963,7 @@ fn http_get_with(port: u16, path: &str, headers: &str) -> (String, Vec<u8>) {
 
 #[test]
 fn the_privacy_policy_page_is_served_to_anyone() {
-    let home = temp_home("privacy");
+    let home = TempHome::new("privacy");
     let server = Server::start_at(&home, 0);
     // no sign-in, and from the internet too (App Store Connect links here)
     for headers in [
@@ -990,7 +981,7 @@ fn the_privacy_policy_page_is_served_to_anyone() {
 
 #[test]
 fn app_updates_are_served_from_the_updates_folder() {
-    let home = temp_home("updates");
+    let home = TempHome::new("updates");
     let server = Server::start_at(&home, 0);
     // nothing published yet
     let (head, _) = http_get(server.port, "/updates/appcast.xml");
@@ -1030,7 +1021,7 @@ fn app_updates_are_served_from_the_updates_folder() {
 
 #[test]
 fn download_links_always_give_the_newest_app() {
-    let home = temp_home("downloads");
+    let home = TempHome::new("downloads");
     let server = Server::start_at(&home, 0);
     // nothing published yet: a page that says so, for either computer
     for (path, os) in [("/download/mac", "Mac"), ("/download/windows", "Windows")] {
@@ -1085,12 +1076,11 @@ fn download_links_always_give_the_newest_app() {
     let (head, _) = http_get(server.port, "/download/linux");
     assert!(head.starts_with("HTTP/1.1 404"), "{}", head);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn email_invite_cli_creates_member_and_reaches_connected_apps() {
-    let home = temp_home("email-invite-cli");
+    let home = TempHome::new("email-invite-cli");
     let server = Server::start_at(&home, 0);
     let mut owner = App::connect(server.port, Some(workspace()));
     owner.until("owner ready", |a| a.role == Some(Role::Owner));
@@ -1156,7 +1146,6 @@ fn email_invite_cli_creates_member_and_reaches_connected_apps() {
     });
     drop((joined, reused));
     restarted.stop();
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
@@ -1166,7 +1155,7 @@ fn email_invite_cli_storage_failure_preserves_workspace_and_pending_codes() {
         workboard_server::WORKSPACE_FILE,
     ] {
         for reinvite in [false, true] {
-            let home = temp_home("email-invite-write-failure");
+            let home = TempHome::new("email-invite-write-failure");
             let server = Server::start_at(&home, 0);
             let mut owner = App::connect(server.port, Some(workspace()));
             owner.until("owner ready", |a| a.role == Some(Role::Owner));
@@ -1254,14 +1243,13 @@ fn email_invite_cli_storage_failure_preserves_workspace_and_pending_codes() {
                     restarted.stop();
                 }
             }
-            let _ = std::fs::remove_dir_all(home);
         }
     }
 }
 
 #[test]
 fn email_invite_survives_stale_client_push_with_concurrent_general_edits() {
-    let home = temp_home("email-stale-push");
+    let home = TempHome::new("email-stale-push");
     let server = Server::start_at(&home, 0);
     let mut owner = App::connect(server.port, Some(workspace()));
     owner.until("owner ready", |a| a.role == Some(Role::Owner));
@@ -1322,7 +1310,6 @@ fn email_invite_survives_stale_client_push_with_concurrent_general_edits() {
     assert_eq!(disk["tasks"][0]["name"], "concurrent task");
     drop((owner, joined));
     server.stop();
-    let _ = std::fs::remove_dir_all(home);
 }
 
 /// How long a test waits for what the server does on its once-a-second tick:
@@ -1340,7 +1327,7 @@ fn local_admin(home: &PathBuf, request: Value) -> Value {
 
 #[test]
 fn email_invite_reuses_unregistered_member_case_insensitively_with_fresh_code() {
-    let home = temp_home("email-reinvite");
+    let home = TempHome::new("email-reinvite");
     let server = Server::start_at(&home, 0);
     let mut data = workspace();
     data["members"][1]["email"] = json!("Pending.Member@example.test");
@@ -1373,12 +1360,11 @@ fn email_invite_reuses_unregistered_member_case_insensitively_with_fresh_code() 
     assert_eq!(joined.data["members"].as_array().unwrap().len(), 3);
     drop((owner, old, joined));
     server.stop();
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn email_invite_protects_privileged_registered_and_ambiguous_identities() {
-    let home = temp_home("email-protected");
+    let home = TempHome::new("email-protected");
     std::fs::create_dir_all(&home).unwrap();
     let mut data = workspace();
     data["members"] = json!([
@@ -1455,12 +1441,11 @@ fn email_invite_protects_privileged_registered_and_ambiguous_identities() {
         serde_json::to_value(saved).unwrap(),
         "all accounts, roles, devices and codes unchanged"
     );
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn email_invite_rejects_invalid_addresses_before_queuing_and_on_server() {
-    let home = temp_home("email-invalid");
+    let home = TempHome::new("email-invalid");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_workboard-server"))
         .args(["invite-email", "not-an-email", "--home"])
         .arg(&home)
@@ -1526,12 +1511,11 @@ fn email_invite_rejects_invalid_addresses_before_queuing_and_on_server() {
     assert_eq!(owner.data["members"].as_array().unwrap().len(), 4);
     drop(owner);
     server.stop();
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn email_invite_cli_and_admin_explicitly_refuse_role_overrides() {
-    let home = temp_home("email-role");
+    let home = TempHome::new("email-role");
     for role in ["owner", "admin", "member", "invalid"] {
         let output = std::process::Command::new(env!("CARGO_BIN_EXE_workboard-server"))
             .args(["invite-email", "new@example.test", "--role", role, "--home"])
@@ -1567,12 +1551,11 @@ fn email_invite_cli_and_admin_explicitly_refuse_role_overrides() {
         .is_empty());
     drop(owner);
     server.stop();
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn email_invite_rejects_ambiguous_member_ids_without_changing_either_identity() {
-    let home = temp_home("email-id-duplicate");
+    let home = TempHome::new("email-id-duplicate");
     let server = Server::start_at(&home, 0);
     let mut data = workspace();
     data["members"][1]["email"] = json!("pending@example.test");
@@ -1590,12 +1573,11 @@ fn email_invite_rejects_ambiguous_member_ids_without_changing_either_identity() 
         .is_empty());
     drop(owner);
     server.stop();
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn email_invite_preserves_unrelated_sync_stamps_and_general_fields() {
-    let home = temp_home("email-sync-stamps");
+    let home = TempHome::new("email-sync-stamps");
     std::fs::create_dir_all(&home).unwrap();
     let mut data = workspace();
     let mut meta = SyncMeta::default();
@@ -1632,13 +1614,12 @@ fn email_invite_preserves_unrelated_sync_stamps_and_general_fields() {
     assert!(after.stamps[&res["member"].as_u64().unwrap()] > 1000);
     assert_eq!(disk["tasks"], data["tasks"]);
     server.stop();
-    let _ = std::fs::remove_dir_all(home);
 }
 
 #[test]
 fn email_invite_fails_closed_on_malformed_workspace_metadata_or_role() {
     for (tag, field) in [("sync", 0), ("extra", 1), ("role", 2), ("members", 3)] {
-        let home = temp_home(tag);
+        let home = TempHome::new(tag);
         std::fs::create_dir_all(&home).unwrap();
         let mut data = workspace();
         data["members"][1]["email"] = json!("pending@example.test");
@@ -1669,13 +1650,12 @@ fn email_invite_fails_closed_on_malformed_workspace_metadata_or_role() {
             .unwrap()
             .invites
             .is_empty());
-        let _ = std::fs::remove_dir_all(home);
     }
 }
 
 #[test]
 fn health_and_admin_commands_answer() {
-    let home = temp_home("health");
+    let home = TempHome::new("health");
     let server = Server::start_at(&home, 0);
     let (_a, _b) = two_apps(server.port);
     use std::io::{Read, Write};
@@ -1715,12 +1695,11 @@ fn health_and_admin_commands_answer() {
         1
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn restoring_a_backup_reaches_every_app() {
-    let home = temp_home("restore");
+    let home = TempHome::new("restore");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // the backup taken now has both tasks
@@ -1759,12 +1738,11 @@ fn restoring_a_backup_reaches_every_app() {
     });
     assert_eq!(task_names(&b.data), ["Plan", "Ship"]);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn two_people_setting_up_an_empty_server_at_once_get_one_owner_and_no_merge() {
-    let home = temp_home("race");
+    let home = TempHome::new("race");
     let server = Server::start_at(&home, 0);
     let mut theirs = workspace();
     theirs["tasks"] = json!([{"id": 900, "name": "Their own task", "activity": []}]);
@@ -1826,12 +1804,11 @@ fn two_people_setting_up_an_empty_server_at_once_get_one_owner_and_no_merge() {
         std::thread::sleep(Duration::from_millis(50));
     }
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn the_owner_restores_a_backup_from_the_app() {
-    let home = temp_home("apprestore");
+    let home = TempHome::new("apprestore");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // wait for the first backup (made within a minute of having a workspace)
@@ -1904,7 +1881,6 @@ fn the_owner_restores_a_backup_from_the_app() {
         "the copy from before is kept"
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------------------------ files
@@ -1933,7 +1909,7 @@ fn no_progress() -> impl FnMut(u64, u64) -> bool {
 
 #[test]
 fn a_picture_goes_up_from_a_and_comes_down_at_b() {
-    let home = temp_home("files");
+    let home = TempHome::new("files");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.until("A has a token", |a| a.token.is_some());
@@ -2005,12 +1981,11 @@ fn a_picture_goes_up_from_a_and_comes_down_at_b() {
     assert!(head.contains("content-type: image/jpeg"), "{}", head);
     assert_eq!(&out[split + 4..], &bytes[10..20]);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn files_need_a_valid_token_and_honest_contents() {
-    let home = temp_home("files-auth");
+    let home = TempHome::new("files-auth");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.until("A has a token", |a| a.token.is_some());
@@ -2089,12 +2064,11 @@ fn files_need_a_valid_token_and_honest_contents() {
         Err(wb_net::FileError::NotSignedIn)
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn files_over_the_limit_are_refused() {
-    let home = temp_home("files-big");
+    let home = TempHome::new("files-big");
     let server = Server::start_with(
         &home,
         0,
@@ -2134,12 +2108,11 @@ fn files_over_the_limit_are_refused() {
     )
     .unwrap();
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_broken_download_continues_where_it_stopped() {
-    let home = temp_home("files-resume");
+    let home = TempHome::new("files-resume");
     let server = Server::start_at(&home, 0);
     let (mut a, _b) = two_apps(server.port);
     a.until("A has a token", |a| a.token.is_some());
@@ -2174,7 +2147,6 @@ fn a_broken_download_continues_where_it_stopped() {
     assert_eq!(std::fs::read(&dest).unwrap(), bytes);
     assert!(!dest.with_extension("part").exists());
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// An app from before attachments (0.1.4) reads messages without the field
@@ -2182,7 +2154,7 @@ fn a_broken_download_continues_where_it_stopped() {
 /// ids), so the server keeps them from its own copy.
 #[test]
 fn attachments_survive_an_app_that_does_not_know_them() {
-    let home = temp_home("files-old-app");
+    let home = TempHome::new("files-old-app");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let pic = json!([{"file": "ab".repeat(32), "name": "photo.jpg", "kind": "Image", "bytes": 1234, "w": 640, "h": 480, "secs": 0.0}]);
@@ -2221,7 +2193,6 @@ fn attachments_survive_an_app_that_does_not_know_them() {
         .clone();
     assert_eq!(at_a["attachments"], pic, "the picture is still there");
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// A whiteboard's shapes and lines must survive a teammate on an app from
@@ -2231,7 +2202,7 @@ fn attachments_survive_an_app_that_does_not_know_them() {
 /// the server keeps them from its own copy.
 #[test]
 fn whiteboard_shapes_survive_an_app_that_does_not_know_them() {
-    let home = temp_home("shapes-old-app");
+    let home = TempHome::new("shapes-old-app");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let shapes = json!([
@@ -2272,15 +2243,14 @@ fn whiteboard_shapes_survive_an_app_that_does_not_know_them() {
     assert_eq!(w["shapes"], shapes, "the shapes are still there");
     assert_eq!(w["lines"], lines, "and the line");
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ---------------------------------------------------------------- accounts
 
 /// A workspace whose people have emails, and a server that writes its mails
 /// to outbox/ instead of sending them.
-fn mail_home(tag: &str) -> PathBuf {
-    let home = temp_home(tag);
+fn mail_home(tag: &str) -> TempHome {
+    let home = TempHome::new(tag);
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         home.join(workboard_server::MAIL_FILE),
@@ -2552,7 +2522,6 @@ fn an_emailed_invite_sets_a_password_that_signs_in_on_any_device() {
             && !state.contains("ann-secret-1")
             && !state.contains("cy-secret-33")
     );
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
@@ -2660,12 +2629,11 @@ fn a_forgotten_password_is_reset_with_an_emailed_code() {
         Ok(false)
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn someone_signed_in_without_a_password_sets_one_up_later() {
-    let home = temp_home("set-password");
+    let home = TempHome::new("set-password");
     let server = Server::start_at(&home, 0);
     let port = server.port;
     let mut a = App::connect(port, Some(emailed_workspace()));
@@ -2725,12 +2693,11 @@ fn someone_signed_in_without_a_password_sets_one_up_later() {
         p.member == Some(2)
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn the_join_page_opens_the_app_with_the_invite() {
-    let home = temp_home("join-page");
+    let home = TempHome::new("join-page");
     let server = Server::start_at(&home, 0);
     let (head, body) = http_get(server.port, "/join?code=ABCD-EFGH-JKMN&email=bo%40team.io");
     let body = String::from_utf8(body).unwrap();
@@ -2757,7 +2724,6 @@ fn the_join_page_opens_the_app_with_the_invite() {
         "what's typed into the link is escaped"
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------- private conversations
@@ -2772,7 +2738,7 @@ fn channel<'a>(d: &'a Value, id: u64) -> Option<&'a Value> {
 /// it, write in it or delete it by sending a doctored copy.
 #[test]
 fn private_conversations_reach_only_their_members_and_cannot_be_joined() {
-    let home = temp_home("private");
+    let home = TempHome::new("private");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
@@ -2889,7 +2855,6 @@ fn private_conversations_reach_only_their_members_and_cannot_be_joined() {
         "the team's copy has both DM messages"
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------------ hello size limit
@@ -2928,7 +2893,7 @@ fn raw_first_message(port: u16, payload: &[u8]) -> Vec<u8> {
 
 #[test]
 fn a_huge_message_before_signing_in_is_refused_but_big_copies_go_after() {
-    let home = temp_home("hello-size");
+    let home = TempHome::new("hello-size");
     let server = Server::start_at(&home, 0);
     // a small first message that isn't hello gets an answer
     let small = raw_first_message(server.port, br#"{"type":"ping"}"#);
@@ -2955,7 +2920,6 @@ fn a_huge_message_before_signing_in_is_refused_but_big_copies_go_after() {
     });
     b.wait("the long message at B", |d| texts(d).contains(&long));
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ---------------------------------------------------------- claims
@@ -2988,7 +2952,7 @@ fn claim_and_quit(port: u16, device: &str) -> Status {
 
 #[test]
 fn a_claim_whose_app_quit_can_be_made_again() {
-    let home = temp_home("reclaim");
+    let home = TempHome::new("reclaim");
     let server = Server::start_with(
         &home,
         0,
@@ -3042,14 +3006,13 @@ fn a_claim_whose_app_quit_can_be_made_again() {
         "the new claim's workspace is on the server"
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------------ broken copies
 
 #[test]
 fn a_broken_first_copy_is_ignored_and_the_server_keeps_working() {
-    let home = temp_home("broken");
+    let home = TempHome::new("broken");
     let server = Server::start_at(&home, 0);
     let mut a = App::start(
         server.port,
@@ -3082,12 +3045,11 @@ fn a_broken_first_copy_is_ignored_and_the_server_keeps_working() {
     });
     assert_eq!(b.data["members"][0]["role"], "Owner");
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn only_the_newest_copies_from_before_a_restore_are_kept() {
-    let home = temp_home("prune");
+    let home = TempHome::new("prune");
     let server = Server::start_at(&home, 0);
     let (mut a, _b) = two_apps(server.port);
     let dir = home.join(workboard_server::BACKUP_DIR);
@@ -3135,14 +3097,13 @@ fn only_the_newest_copies_from_before_a_restore_are_kept() {
     .expect("answered");
     assert_eq!(res["ok"], false, "{}", res);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ---------------------------------------------------- requests and calls
 
 #[test]
 fn a_request_made_while_reconnecting_goes_once_back_in() {
-    let home = temp_home("queued");
+    let home = TempHome::new("queued");
     let server = Server::start_at(&home, 0);
     let port = server.port;
     let (mut a, _b) = two_apps(port);
@@ -3162,12 +3123,11 @@ fn a_request_made_while_reconnecting_goes_once_back_in() {
         a.invites.iter().any(|(m, _)| *m == 3)
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_refused_call_says_which_conversation() {
-    let home = temp_home("calldenied");
+    let home = TempHome::new("calldenied");
     let server = Server::start_at(&home, 0);
     let (_a, b) = two_apps(server.port);
     // voice isn't set up on this server: the refusal names the conversation
@@ -3186,7 +3146,6 @@ fn a_refused_call_says_which_conversation() {
     assert_eq!(channel, 10);
     assert!(why.contains("aren't set up"), "{}", why);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 fn chan_mut(d: &mut Value, id: u64) -> &mut Value {
@@ -3203,7 +3162,7 @@ fn chan_mut(d: &mut Value, id: u64) -> &mut Value {
 /// what he sends afterwards deletes nothing for the others.
 #[test]
 fn someone_taken_out_of_a_private_channel_loses_it_without_deleting_it() {
-    let home = temp_home("removed");
+    let home = TempHome::new("removed");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
@@ -3249,7 +3208,6 @@ fn someone_taken_out_of_a_private_channel_loses_it_without_deleting_it() {
         channel(d, 30).is_some_and(|c| c["messages"][0]["text"] == "plans for all three")
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Ann's Personal space (with its list and task) and her private doc never
@@ -3257,7 +3215,7 @@ fn someone_taken_out_of_a_private_channel_loses_it_without_deleting_it() {
 /// Bo still has from an older version leaves his copy.
 #[test]
 fn personal_spaces_and_private_docs_stay_with_their_owner() {
-    let home = temp_home("personal");
+    let home = TempHome::new("personal");
     let server = Server::start_at(&home, 0);
     let mut ws = workspace();
     ws["spaces"] = json!([
@@ -3342,12 +3300,11 @@ fn personal_spaces_and_private_docs_stay_with_their_owner() {
         .iter()
         .any(|s| s["id"] == 50));
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_server_whose_workspace_file_went_missing_is_not_up_for_grabs() {
-    let home = temp_home("lostfile");
+    let home = TempHome::new("lostfile");
     let options = || workboard_server::Options {
         claim_wait: Duration::from_millis(100),
         ..Default::default()
@@ -3381,7 +3338,6 @@ fn a_server_whose_workspace_file_went_missing_is_not_up_for_grabs() {
     );
     assert_eq!(saved.devices.len(), 2);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------------------ iPhone pushes
@@ -3417,7 +3373,7 @@ fn message_with<'a>(d: &'a Value, text: &str) -> Option<&'a Value> {
 /// command's answer is posted too. A member can't set them up.
 #[test]
 fn webhooks_and_slash_commands_post_under_their_names() {
-    let home = temp_home("hooks");
+    let home = TempHome::new("hooks");
     let fake = Arc::new(FakePoster::default());
     let opts = workboard_server::Options {
         poster: Some(fake.clone()),
@@ -3649,7 +3605,7 @@ fn in_general(text: &str, id: u64, author: u64) -> impl FnOnce(&mut Value) + '_ 
 /// notifies like a mention, a channel set to nothing stays quiet.
 #[test]
 fn iphones_follow_the_choices_sent_with_their_token() {
-    let home = temp_home("push-prefs");
+    let home = TempHome::new("push-prefs");
     let fake = Arc::new(FakePush::default());
     let opts = || workboard_server::Options {
         push: Some(fake.clone()),
@@ -3690,7 +3646,7 @@ fn iphones_follow_the_choices_sent_with_their_token() {
 
 #[test]
 fn iphones_get_pushes_for_dms_mentions_and_their_threads_while_away() {
-    let home = temp_home("push");
+    let home = TempHome::new("push");
     let fake = Arc::new(FakePush::default());
     let opts = || workboard_server::Options {
         push: Some(fake.clone()),
@@ -3799,7 +3755,6 @@ fn iphones_get_pushes_for_dms_mentions_and_their_threads_while_away() {
     b.change(in_general("@Ann after the restart", 32, 2));
     wait_for("the mention after the restart", || fake.to(&ann).len() == 3);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Collect what a watcher hears until `cond` holds of all of it (10 s at most).
@@ -3833,7 +3788,7 @@ fn note_count(got: &[wb_net::Watch]) -> usize {
 
 #[test]
 fn a_computer_watching_a_workspace_hears_only_its_persons_new_messages() {
-    let home = temp_home("watch");
+    let home = TempHome::new("watch");
     let fake = Arc::new(FakePush::default());
     let server = Server::start_with(
         &home,
@@ -3939,12 +3894,11 @@ fn a_computer_watching_a_workspace_hears_only_its_persons_new_messages() {
         g.iter().any(|e| matches!(e, wb_net::Watch::Refused(_)))
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
-    let home = temp_home("nopush");
+    let home = TempHome::new("nopush");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let bo = "b2".repeat(32);
@@ -3971,14 +3925,13 @@ fn a_server_without_push_set_up_keeps_tokens_and_works_as_before() {
     let tokens = saved_tokens(&home);
     assert_eq!(tokens.len(), 1, "only the good token: {:?}", tokens);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------------- field-level merge
 
 #[test]
 fn two_people_editing_one_task_at_once_both_keep_their_change() {
-    let home = temp_home("fields");
+    let home = TempHome::new("fields");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // both edit task 100 before seeing the other's change: different fields
@@ -4010,12 +3963,11 @@ fn two_people_editing_one_task_at_once_both_keep_their_change() {
         });
     }
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn an_app_too_old_to_know_every_field_gets_changes_but_cannot_send_them() {
-    let home = temp_home("old-app");
+    let home = TempHome::new("old-app");
     let server = Server::start_at(&home, 0);
     let (mut a, b) = two_apps(server.port);
     // B's computer runs an app from before the hello said its version
@@ -4060,7 +4012,6 @@ fn an_app_too_old_to_know_every_field_gets_changes_but_cannot_send_them() {
     old.pump();
     assert_eq!(old.denied.len(), 1, "{:?}", old.denied);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------------------------ deltas
@@ -4072,7 +4023,7 @@ fn all_ids(v: &Value) -> Vec<u64> {
 
 #[test]
 fn after_the_first_copy_only_what_changed_travels() {
-    let home = temp_home("deltas");
+    let home = TempHome::new("deltas");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     b.updates.clear();
@@ -4134,12 +4085,11 @@ fn after_the_first_copy_only_what_changed_travels() {
         d["tasks"][0]["status"] == "closed"
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn an_app_that_was_away_catches_up_on_every_change() {
-    let home = temp_home("deltas-away");
+    let home = TempHome::new("deltas-away");
     let server = Server::start_at(&home, 0);
     let (mut a, b) = two_apps(server.port);
     let (token, device, kept) = (b.token.clone(), b.device.clone(), b.data.clone());
@@ -4167,7 +4117,6 @@ fn an_app_that_was_away_catches_up_on_every_change() {
     a.wait("B's change", |d| d["tasks"][0]["status"] == "done");
     assert_eq!(task_names(&a.data), ["one"]);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// A bare connection that speaks the protocol by hand.
@@ -4215,7 +4164,7 @@ impl Raw {
 
 #[test]
 fn a_missed_revision_brings_the_whole_copy_and_partial_pushes_merge() {
-    let home = temp_home("deltas-raw");
+    let home = TempHome::new("deltas-raw");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let mut raw = Raw::connect(
@@ -4258,12 +4207,11 @@ fn a_missed_revision_brings_the_whole_copy_and_partial_pushes_merge() {
     b.wait("and at B", |d| task_names(d) == ["r3", "Ship (partial)"]);
     assert_eq!(texts(&a.data), ["hi"], "nothing else went away");
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn change_times_from_the_future_dont_win_over_later_edits() {
-    let home = temp_home("future-stamps");
+    let home = TempHome::new("future-stamps");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let mut raw = Raw::connect(
@@ -4303,12 +4251,11 @@ fn change_times_from_the_future_dont_win_over_later_edits() {
         meta
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_deleted_message_comes_back_only_as_it_was() {
-    let home = temp_home("graves");
+    let home = TempHome::new("graves");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| d["channels"][0]["messages"] = json!([]));
@@ -4335,12 +4282,11 @@ fn a_deleted_message_comes_back_only_as_it_was() {
     a.wait("the real message is back", |d| texts(d) == ["hi"]);
     assert!(!a.data.to_string().contains("boss"));
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_plain_member_cant_move_someone_elses_message_away() {
-    let home = temp_home("move-away");
+    let home = TempHome::new("move-away");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // Bo's own private channel
@@ -4376,12 +4322,11 @@ fn a_plain_member_cant_move_someone_elses_message_away() {
     );
     assert!(!find(&a.data, "channels", 3100).is_some_and(|c| c.to_string().contains("\"hi\"")));
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_plain_member_cant_make_a_shared_space_or_doc_their_own() {
-    let home = temp_home("take-private");
+    let home = TempHome::new("take-private");
     let server = Server::start_at(&home, 0);
     let mut ws = plans_workspace("edit");
     ws["docs"]
@@ -4433,12 +4378,11 @@ fn a_plain_member_cant_make_a_shared_space_or_doc_their_own() {
     }
     assert!(find(&c.data, "docs", 3300).is_none(), "Bo's doc is his now");
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_private_channel_stays_closed_when_its_last_member_leaves() {
-    let home = temp_home("last-leaves");
+    let home = TempHome::new("last-leaves");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
     b.change(|d| {
@@ -4459,12 +4403,11 @@ fn a_private_channel_stays_closed_when_its_last_member_leaves() {
         c.data
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn hidden_items_never_leak_through_deltas() {
-    let home = temp_home("deltas-hidden");
+    let home = TempHome::new("deltas-hidden");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     let code = a.invite(3, Role::Member);
@@ -4543,7 +4486,6 @@ fn hidden_items_never_leak_through_deltas() {
     });
     assert!(!b.meta().tombs.contains_key(&20));
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// A channel Ann (1) made: Bo (2), a plain member, can join and leave it but
@@ -4552,7 +4494,7 @@ fn hidden_items_never_leak_through_deltas() {
 /// in it may.
 #[test]
 fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
-    let home = temp_home("changuard");
+    let home = TempHome::new("changuard");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
@@ -4620,7 +4562,6 @@ fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
         channel(d, 60).is_none()
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ---- spaces shared with chosen people
@@ -4727,7 +4668,7 @@ fn round_trip(from: &mut App, to: &mut App, text: &str, id: u64) {
 /// with; Bo gets it all. An admin sees it too.
 #[test]
 fn a_space_shared_with_chosen_people_reaches_only_them() {
-    let home = temp_home("sharehide");
+    let home = TempHome::new("sharehide");
     let server = Server::start_at(&home, 0);
     let (mut a, b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
     assert!(has_all(&b.data), "Bo gets Plans: {}", b.data);
@@ -4761,7 +4702,6 @@ fn a_space_shared_with_chosen_people_reaches_only_them() {
     });
     c.wait("Cy, now an admin, gets Plans", has_all);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Bo may only view Plans: renames, new and deleted tasks, list and doc
@@ -4770,7 +4710,7 @@ fn a_space_shared_with_chosen_people_reaches_only_them() {
 /// Opening a doc (his own view of it) still counts.
 #[test]
 fn a_view_only_member_changes_nothing_and_gets_the_teams_version_back() {
-    let home = temp_home("shareview");
+    let home = TempHome::new("shareview");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("view"));
     b.change(|d| {
@@ -4848,14 +4788,13 @@ fn a_view_only_member_changes_nothing_and_gets_the_teams_version_back() {
         b.put_back
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Bo may comment in Plans: his comments reach the team and he may edit and
 /// delete them, but not Ann's comment or the task itself.
 #[test]
 fn a_comment_member_comments_but_changes_nothing_else() {
-    let home = temp_home("sharecomment");
+    let home = TempHome::new("sharecomment");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("comment"));
     let comment = |d: &Value, id: u64| -> Option<Value> {
@@ -4915,7 +4854,6 @@ fn a_comment_member_comments_but_changes_nothing_else() {
     assert_eq!(find(&a.data, "tasks", 72).unwrap()["name"], "Secret task");
     assert_eq!(comment(&a.data, 76).unwrap()["text"], "secret comment");
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Bo may edit in Plans: tasks yes, but the space's settings, who it's
@@ -4923,7 +4861,7 @@ fn a_comment_member_comments_but_changes_nothing_else() {
 /// gives him Full, he shares it with Cy.
 #[test]
 fn only_full_members_and_admins_change_a_spaces_sharing() {
-    let home = temp_home("sharefull");
+    let home = TempHome::new("sharefull");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b, mut c) = ann_bo_cy(server.port, plans_workspace("edit"));
     b.change(|d| {
@@ -5002,7 +4940,6 @@ fn only_full_members_and_admins_change_a_spaces_sharing() {
         find(d, "spaces", 70).is_some() && find(d, "tasks", 72).is_some()
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// When Ann takes Plans away from Bo it leaves his copy without being
@@ -5010,7 +4947,7 @@ fn only_full_members_and_admins_change_a_spaces_sharing() {
 /// nothing from the team, and he gets it all back when it's shared again.
 #[test]
 fn losing_access_to_a_space_deletes_nothing() {
-    let home = temp_home("sharelose");
+    let home = TempHome::new("sharelose");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b, _c) = ann_bo_cy(server.port, plans_workspace("edit"));
     let stale = b.data.clone();
@@ -5048,7 +4985,6 @@ fn losing_access_to_a_space_deletes_nothing() {
     });
     b.wait("Plans back at Bo", has_all);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// A folder moved out of a space closed to Cy into one Cy sees reaches Cy
@@ -5056,7 +4992,7 @@ fn losing_access_to_a_space_deletes_nothing() {
 /// changed, so the change alone doesn't hold them.
 #[test]
 fn a_folder_moved_into_a_space_someone_sees_comes_with_its_lists() {
-    let home = temp_home("sharemove");
+    let home = TempHome::new("sharemove");
     let server = Server::start_at(&home, 0);
     let (mut a, _b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
     assert!(has_none(&c.data), "Cy gets none of Plans: {}", c.data);
@@ -5094,7 +5030,6 @@ fn a_folder_moved_into_a_space_someone_sees_comes_with_its_lists() {
     let team = find(&a.data, "spaces", 60).unwrap();
     assert_eq!(team["folders"][0]["lists"][0]["id"], 74);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Made an admin, Cy hears the new role before the copy it opens up: an
@@ -5102,7 +5037,7 @@ fn a_folder_moved_into_a_space_someone_sees_comes_with_its_lists() {
 /// not arrive while it still thinks it's a member.
 #[test]
 fn a_new_role_arrives_before_the_copy_it_opens_up() {
-    let home = temp_home("roleorder");
+    let home = TempHome::new("roleorder");
     let server = Server::start_at(&home, 0);
     let (a, _b, mut c) = ann_bo_cy(server.port, plans_workspace("view"));
     assert!(has_none(&c.data));
@@ -5120,12 +5055,11 @@ fn a_new_role_arrives_before_the_copy_it_opens_up() {
         .expect("Cy hears the new role");
     assert!(role < first_copy, "the role first: {:?}", c.heard);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_slack_import_of_the_last_day_sends_no_iphone_pushes() {
-    let home = temp_home("push-imported");
+    let home = TempHome::new("push-imported");
     let fake = Arc::new(FakePush::default());
     let server = Server::start_with(
         &home,
@@ -5165,7 +5099,6 @@ fn a_slack_import_of_the_last_day_sends_no_iphone_pushes() {
     );
     assert_eq!(sent[0]["aps"]["alert"]["body"], "@Ann written here");
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
@@ -5174,7 +5107,7 @@ fn an_app_on_sync_format_3_is_told_to_update_and_its_changes_are_not_taken() {
     // field, so its copy could undo a teammate's entry
     assert_eq!(wb_net::OLDEST_SYNC, 5);
     assert_eq!(wb_sync::META_V, wb_net::OLDEST_SYNC);
-    let home = temp_home("sync-3");
+    let home = TempHome::new("sync-3");
     let server = Server::start_at(&home, 0);
     let (mut a, b) = two_apps(server.port);
     let token = b.token.clone();
@@ -5208,14 +5141,13 @@ fn an_app_on_sync_format_3_is_told_to_update_and_its_changes_are_not_taken() {
         "the round-3 app's change was not taken"
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn an_app_on_sync_format_4_cannot_double_a_goals_targets() {
     // format 4 (0.1.21 and before) drops target ids and keeps both the
     // team's targets and its own id-less ones, so each round trip doubled them
-    let home = temp_home("sync-4");
+    let home = TempHome::new("sync-4");
     let server = Server::start_at(&home, 0);
     let (mut a, b) = two_apps(server.port);
     a.change(|d| {
@@ -5263,7 +5195,6 @@ fn an_app_on_sync_format_4_cannot_double_a_goals_targets() {
         "the format-4 app's id-less copy of the target was not taken"
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Everything a bare connection gets up to the pong for a ping sent now.
@@ -5289,7 +5220,7 @@ fn until_pong(raw: &mut Raw) -> Vec<Value> {
 /// weren't asked for.
 #[test]
 fn each_access_request_gets_one_answer_on_its_connection() {
-    let home = temp_home("one-answer");
+    let home = TempHome::new("one-answer");
     let server = Server::start_at(&home, 0);
     let (a, _b) = two_apps(server.port);
     let hello =
@@ -5351,7 +5282,6 @@ fn each_access_request_gets_one_answer_on_its_connection() {
     assert!(heard.iter().all(|m| m["answer"] == false), "{:?}", heard);
     assert_eq!(role_of_2(&heard[2]), "member");
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------- behind an HTTPS front
@@ -5416,7 +5346,7 @@ fn trust_test_certificate() {
 #[test]
 fn apps_work_through_an_https_front() {
     trust_test_certificate();
-    let home = temp_home("https-front");
+    let home = TempHome::new("https-front");
     let server = Server::start_at(&home, 0);
     let front = tls_front(server.port, "cert.der", "key.der");
     let addr = format!("https://localhost:{}", front);
@@ -5479,13 +5409,12 @@ fn apps_work_through_an_https_front() {
         "no mail set up on this server"
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_front_with_a_certificate_nobody_trusts_is_refused() {
     trust_test_certificate();
-    let home = temp_home("https-untrusted");
+    let home = TempHome::new("https-untrusted");
     let server = Server::start_at(&home, 0);
     let front = tls_front(server.port, "untrusted-cert.der", "untrusted-key.der");
     let addr = format!("https://localhost:{}", front);
@@ -5505,7 +5434,6 @@ fn a_front_with_a_certificate_nobody_trusts_is_refused() {
     .unwrap_err();
     assert!(matches!(err, wb_net::FileError::Net(_)), "{:?}", err);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// What Cloudflare Tunnel adds to a request it passes on from the internet.
@@ -5513,7 +5441,7 @@ const VIA_TUNNEL: &str = "Host: wb.example.com\r\nX-Forwarded-Proto: https\r\nX-
 
 #[test]
 fn through_the_tunnel_links_are_https_and_health_says_little() {
-    let home = temp_home("via-tunnel");
+    let home = TempHome::new("via-tunnel");
     let server = Server::start_at(&home, 0);
 
     // the join page gives the address the browser came to, as https
@@ -5553,13 +5481,12 @@ fn through_the_tunnel_links_are_https_and_health_says_little() {
         v
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn one_server_answers_on_two_addresses_as_one_team() {
     // --bind with two addresses (say 127.0.0.1 for cloudflared and a LAN one)
-    let home = temp_home("two-addresses");
+    let home = TempHome::new("two-addresses");
     let (ports_tx, ports_rx) = std::sync::mpsc::channel();
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let h = home.clone();
@@ -5606,12 +5533,11 @@ fn one_server_answers_on_two_addresses_as_one_team() {
             .contains("from the other side"),
         "saved when it stopped"
     );
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version_back() {
-    let home = temp_home("memberguard");
+    let home = TempHome::new("memberguard");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     // the workspace has a colour, and Bo's app has saved once, so a changed
@@ -5719,7 +5645,6 @@ fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version
                 .any(|m| m["id"] == 9005)
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// A plain member sending a copy made by hand: they can't post as someone
@@ -5728,7 +5653,7 @@ fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version
 /// comments, and deleting their own still go through.
 #[test]
 fn a_plain_member_cant_write_as_someone_else_or_change_their_words() {
-    let home = temp_home("authors");
+    let home = TempHome::new("authors");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| {
@@ -5819,14 +5744,13 @@ fn a_plain_member_cant_write_as_someone_else_or_change_their_words() {
         d.to_string().contains("imported for Ann")
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Who a Slack user comes in as is set by Import from Slack, which only the
 /// owner and admins run: a plain member's copy can't change it.
 #[test]
 fn a_plain_member_cant_change_who_slack_users_come_in_as() {
-    let home = temp_home("slackmap");
+    let home = TempHome::new("slackmap");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| d["extra"]["slack_map"] = json!({"U1": 1}));
@@ -5839,7 +5763,6 @@ fn a_plain_member_cant_change_who_slack_users_come_in_as() {
         d["extra"]["slack_map"] == json!({"U1": 1})
     });
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Admins are the owner's choice: an admin can't take another admin's role
@@ -5847,7 +5770,7 @@ fn a_plain_member_cant_change_who_slack_users_come_in_as() {
 /// step down themselves, and the owner does both.
 #[test]
 fn only_the_owner_changes_or_removes_another_admin() {
-    let home = temp_home("adminadmin");
+    let home = TempHome::new("adminadmin");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.client.send(Msg::SetRole {
@@ -5895,7 +5818,6 @@ fn only_the_owner_changes_or_removes_another_admin() {
     });
     c.until("Cy is a member", |c| c.role == Some(Role::Member));
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// An admin manages people, but the owner's own entry stays the owner's:
@@ -5903,7 +5825,7 @@ fn only_the_owner_changes_or_removes_another_admin() {
 /// them out of the list.
 #[test]
 fn an_admin_cant_change_or_remove_the_owners_entry() {
-    let home = temp_home("ownerentry");
+    let home = TempHome::new("ownerentry");
     let server = Server::start_at(&home, 0);
     let (mut a, mut b) = two_apps(server.port);
     a.change(|d| d["members"][0]["email"] = json!("ann@team.io"));
@@ -5945,7 +5867,6 @@ fn an_admin_cant_change_or_remove_the_owners_entry() {
     assert!(anns(&a.data), "{}", a.data["members"]);
     b.wait("Ann is back in Bo's list", anns);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------- several workspaces
@@ -5971,7 +5892,7 @@ fn stamped(mut d: Value) -> Value {
 /// only to another workspace there, can't make them.
 #[test]
 fn only_the_first_workspaces_owner_or_admins_make_workspaces() {
-    let home = temp_home("makews");
+    let home = TempHome::new("makews");
     let server = Server::start_at(&home, 0);
     let port = server.port;
     let addr = format!("127.0.0.1:{}", port);
@@ -6038,7 +5959,6 @@ fn only_the_first_workspaces_owner_or_admins_make_workspaces() {
         1
     );
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
@@ -6233,7 +6153,6 @@ fn one_server_keeps_several_workspaces_apart() {
     );
     drop(again);
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// The owner of a workspace other than the server's first deletes it: its
@@ -6241,7 +6160,7 @@ fn one_server_keeps_several_workspaces_apart() {
 /// deleted/ and `workboard-server undelete` brings it back.
 #[test]
 fn an_owner_deletes_a_workspace_and_it_can_come_back() {
-    let home = temp_home("deletews");
+    let home = TempHome::new("deletews");
     let server = Server::start_at(&home, 0);
     let port = server.port;
     let addr = format!("127.0.0.1:{}", port);
@@ -6371,14 +6290,13 @@ fn an_owner_deletes_a_workspace_and_it_can_come_back() {
     back.wait("the second copy is back", |d| d["workspace"] == "Second");
     drop((a, a2, b2, late, back));
     server.stop();
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 /// Deleted workspaces are removed for good after KEEP_DELETED_DAYS, and a
 /// deleted one isn't opened again when the server starts.
 #[test]
 fn deleted_workspaces_stay_deleted_after_a_restart() {
-    let home = temp_home("deletedkeep");
+    let home = TempHome::new("deletedkeep");
     let gone = home.join("deleted");
     std::fs::create_dir_all(gone.join("abc.100")).unwrap();
     let recent = std::time::SystemTime::now()
@@ -6404,7 +6322,6 @@ fn deleted_workspaces_stay_deleted_after_a_restart() {
     );
     assert!(!gone.join("abc.100").exists());
     assert!(gone.join(format!("def.{}", recent)).is_dir());
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ------------------------------------------------------------------ AI
@@ -6614,7 +6531,7 @@ fn ai_requests_without_an_ai_or_beyond_the_hour_are_turned_down() {
     );
 
     let fake = workboard_server::testing::FakeClaude::new("ok");
-    let home = temp_home("ai-hour");
+    let home = TempHome::new("ai-hour");
     let limited = Server::start_with(
         &home,
         0,
@@ -6642,5 +6559,4 @@ fn ai_requests_without_an_ai_or_beyond_the_hour_are_turned_down() {
     // a request turned down for what it asks doesn't use up the hour
     assert_eq!(fake.asked().len(), 3);
     drop(limited);
-    let _ = std::fs::remove_dir_all(&home);
 }

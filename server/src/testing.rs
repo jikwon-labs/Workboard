@@ -18,6 +18,42 @@ pub fn temp_home(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!("wb-{}-{:x}", tag, wb_sync::random_u64()))
 }
 
+/// A new temporary folder path like `temp_home`, removed with what is in it
+/// when this is dropped, so a test that fails doesn't leave its folder
+/// behind. Declare it before a server that uses it: the server stops first.
+pub struct TempHome(PathBuf);
+
+impl TempHome {
+    pub fn new(tag: &str) -> TempHome {
+        TempHome(temp_home(tag))
+    }
+}
+
+impl std::ops::Deref for TempHome {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempHome {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for TempHome {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for TempHome {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// Calls `f` every `step` until it returns true, for at most `timeout`;
 /// whether it did. Callers fail the test with what they were waiting for
 /// and the state they have then.

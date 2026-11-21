@@ -364,12 +364,14 @@ impl App {
                                     vec2(56.0, 26.0),
                                 );
                                 if self.inbox_tab != 2
-                                    && put_over(
-                                        ui,
-                                        lr,
-                                        egui::Button::new(tr("Later")).corner_radius(6),
+                                    && pressed_once(
+                                        &put_over(
+                                            ui,
+                                            lr,
+                                            egui::Button::new(tr("Later")).corner_radius(6),
+                                        ),
+                                        &mut handled,
                                     )
-                                    .clicked()
                                 {
                                     // a cleared row moves to Later, as it does on the iPhone
                                     let x = &mut self.data.extra;
@@ -382,13 +384,15 @@ impl App {
                                 }
                                 // Later items can go back to the inbox
                                 if self.inbox_tab == 2
-                                    && put_over(
-                                        ui,
-                                        lr,
-                                        egui::Button::new(tr("Primary")).corner_radius(6),
+                                    && pressed_once(
+                                        &put_over(
+                                            ui,
+                                            lr,
+                                            egui::Button::new(tr("Primary")).corner_radius(6),
+                                        )
+                                        .on_hover_text(tr("Back to the inbox")),
+                                        &mut handled,
                                     )
-                                    .on_hover_text(tr("Back to the inbox"))
-                                    .clicked()
                                 {
                                     self.data.extra.inbox_later.retain(|x| x != &key);
                                     self.dirty = true;
@@ -403,12 +407,14 @@ impl App {
                                 // Restore would do nothing
                                 let can_restore = !it.imported;
                                 if (self.inbox_tab != 3 || can_restore)
-                                    && put_over(
-                                        ui,
-                                        cr,
-                                        egui::Button::new(tr(ctext)).corner_radius(6),
+                                    && pressed_once(
+                                        &put_over(
+                                            ui,
+                                            cr,
+                                            egui::Button::new(tr(ctext)).corner_radius(6),
+                                        ),
+                                        &mut handled,
                                     )
-                                    .clicked()
                                 {
                                     if self.inbox_tab == 3 {
                                         self.data.extra.inbox_cleared.retain(|x| x != &key);
@@ -427,4 +433,16 @@ impl App {
                     });
             });
     }
+}
+
+/// A row button pressed once, not by the second (or third) click of a quick
+/// double click: the first click moves its row away and the next row comes
+/// up under the pointer, so the second click would land on that row's
+/// button. Any click on a button keeps the row itself from opening.
+fn pressed_once(r: &egui::Response, handled: &mut bool) -> bool {
+    if !r.clicked() {
+        return false;
+    }
+    *handled = true;
+    !r.double_clicked() && !r.triple_clicked()
 }

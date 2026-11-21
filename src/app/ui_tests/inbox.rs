@@ -135,3 +135,41 @@ fn an_imported_row_offers_no_restore_it_cannot_do() {
     h.click("Inbox Cleared");
     assert!(h.has("#general"));
 }
+
+/// Presses and releases the mouse button twice at `p` in quick succession.
+fn double_click_at(h: &mut Ui1, p: Pos2) {
+    h.frame(vec![egui::Event::PointerMoved(p)]);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            h.frame(vec![egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            }]);
+        }
+    }
+    h.settle();
+}
+
+#[test]
+fn a_double_click_on_clear_clears_that_row_only() {
+    let (mut first, mut second) = (String::new(), String::new());
+    let mut h = inbox(|d| {
+        first = comment_on(d, CASE, "First", 60);
+        second = comment_on(d, "Inbox case two", "Second", 120);
+    });
+    hover_row(&mut h, CASE);
+    let clear = h.find("Clear").expect("the row's Clear button");
+    // the first click clears the row and the next one moves up under the
+    // pointer: the second click of the double click must not clear it too
+    double_click_at(&mut h, clear);
+    assert_eq!(h.app.data.extra.inbox_cleared, vec![first]);
+    assert!(h.has("Inbox case two"), "the next row is still in Primary");
+    assert_eq!(h.app.open_task, None, "and no task opened");
+    // a separate click later clears the next row
+    h.hover(pos2(clear.x, clear.y + 200.0));
+    hover_row(&mut h, "Inbox case two");
+    h.click("Clear");
+    assert!(h.app.data.extra.inbox_cleared.contains(&second));
+}

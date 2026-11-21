@@ -32,21 +32,6 @@ fn with(data: Data, w: f32, h: f32) -> Ui1 {
     ui
 }
 
-impl Ui1 {
-    /// Clicks the lowest control with this name (a dialog's button, not
-    /// its title).
-    fn click_lowest(&mut self, name: &str) {
-        let r = self
-            .tree
-            .iter()
-            .filter(|(n, _)| n == name)
-            .map(|(_, r)| *r)
-            .max_by(|a, b| a.center().y.total_cmp(&b.center().y))
-            .unwrap_or_else(|| panic!("nothing named {:?}", name));
-        self.click_at(r.center());
-    }
-}
-
 #[test]
 fn docs_page_does_not_offer_the_task_csv_importer() {
     let mut h = Ui1::new();

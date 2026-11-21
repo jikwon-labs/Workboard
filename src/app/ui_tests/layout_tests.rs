@@ -4,50 +4,6 @@
 
 use super::*;
 
-impl Ui1 {
-    /// Painted texts inside `area` that their clip rect cuts on the left or
-    /// right (cut mid-glyph instead of shortened with an ellipsis).
-    pub(super) fn cut_texts(&self, area: Rect) -> Vec<String> {
-        let mut out = vec![];
-        each_text(&self.shapes, |ts, clip| {
-            let r = ts.visual_bounding_rect();
-            let text = ts.galley.text().trim();
-            // where it shows decides whether it is in the area
-            if text.is_empty() || !area.contains(r.intersect(clip).center()) {
-                return;
-            }
-            // scrolled out of view is fine; partly in view is cut
-            if r.center().y < clip.top()
-                || r.center().y > clip.bottom()
-                || r.right() <= clip.left()
-                || r.left() >= clip.right()
-            {
-                return;
-            }
-            if r.right() > clip.right() + 1.0 || r.left() < clip.left() - 1.0 {
-                out.push(text.to_string());
-            }
-        });
-        out
-    }
-
-    /// Controls on screen (vertically) that reach past the window's right
-    /// edge.
-    pub(super) fn past_right_edge(&self) -> Vec<String> {
-        let w = self.size.x;
-        let h = self.size.y;
-        let mut out: Vec<String> = self
-            .tree
-            .iter()
-            .filter(|(_, r)| r.top() >= 0.0 && r.bottom() <= h && r.right() > w + 1.0)
-            .map(|(n, _)| n.clone())
-            .collect();
-        out.sort();
-        out.dedup();
-        out
-    }
-}
-
 /// Pairs of painted texts in `area` whose visible rects overlap.
 pub(super) fn overlapping(texts: &[(String, Rect)]) -> Vec<(String, String)> {
     let mut out = vec![];

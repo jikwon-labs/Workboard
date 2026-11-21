@@ -1046,3 +1046,54 @@ fn a_goal_or_target_name_cant_be_left_empty() {
     assert_eq!(goal(&h, a).targets[0].name, "Beta testers");
     assert!(h.has("Target name Beta testers"), "the box shows it again");
 }
+
+/// Every text painted inside `area`: (what it says, where).
+fn texts_in(h: &Ui1, area: Rect) -> Vec<(String, Rect)> {
+    let mut out = vec![];
+    super::harness::each_text(&h.shapes, |ts, _| {
+        let r = ts.visual_bounding_rect();
+        if area.intersects(r) && !ts.galley.text().trim().is_empty() {
+            out.push((ts.galley.text().to_string(), r));
+        }
+    });
+    out
+}
+
+/// No two of these texts overlap, and all are inside `area`.
+fn assert_apart(texts: &[(String, Rect)], area: Rect, what: &str) {
+    for (i, (a, ra)) in texts.iter().enumerate() {
+        assert!(
+            area.expand(0.5).contains_rect(*ra),
+            "{what}: {a:?} {ra:?} runs out of {area:?}"
+        );
+        for (b, rb) in &texts[i + 1..] {
+            assert!(
+                !ra.shrink(0.5).intersects(rb.shrink(0.5)),
+                "{what}: {a:?} {ra:?} overlaps {b:?} {rb:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_long_owner_name_fits_in_a_card_and_a_row() {
+    // two cards to a row at their narrowest
+    let mut h = Ui1::sized(990.0, 900.0);
+    h.app.data = two_goals().0.app.data.clone();
+    let me = h.app.data.me;
+    for m in h.app.data.members.iter_mut().filter(|m| m.id == me) {
+        m.name = "김서연 (Seoyeon Kim, Product Design Lead)".into();
+        m.display_name.clear();
+    }
+    h.click("Rail More");
+    h.click("Goals");
+    h.settle();
+    let card = h.rect("Goal Beta launch");
+    assert!(card.width() < 500.0, "two to a row: {card:?}");
+    let band = Rect::from_min_max(pos2(card.left(), card.bottom() - 50.0), card.max);
+    assert_apart(&texts_in(&h, band), band.shrink2(vec2(19.0, 0.0)), "card footer");
+
+    h.click("Show as list");
+    let row = h.rect("Goal row Beta launch");
+    assert_apart(&texts_in(&h, row), row, "row");
+}

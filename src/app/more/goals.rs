@@ -1149,39 +1149,15 @@ impl App {
             }
         }
         // footer: owner and targets done, due date, in the middle of the
-        // band under the line
+        // band under the line. The due date goes in first, at the right; the
+        // owner's name and how many targets are done share what is left,
+        // shortened to fit, so a long name never runs over the date.
         let p = ui.painter();
         let line_y = rect.bottom() - CARD_FOOTER_H;
         let fy = line_y + CARD_FOOTER_H / 2.0;
         p.hline(inner.x_range(), line_y, Stroke::new(1.0, t.border));
-        let mut x = inner.left();
-        if let Some(m) = self.data.member(g.owner) {
-            paint_avatar(p, pos2(x + 11.0, fy), 11.0, m, t.card);
-            x += 30.0;
-            x += p
-                .text(
-                    pos2(x, fy),
-                    Align2::LEFT_CENTER,
-                    m.shown(),
-                    FontId::proportional(12.5),
-                    t.text,
-                )
-                .width()
-                + 8.0;
-        }
-        let done = r.targets.iter().filter(|s| s.done).count();
-        let summary = if g.targets.is_empty() {
-            String::new()
-        } else {
-            trf!("{} of {} targets done", done, g.targets.len())
-        };
-        p.text(
-            pos2(x, fy),
-            Align2::LEFT_CENTER,
-            summary,
-            FontId::proportional(12.5),
-            t.text2,
-        );
+        let font = FontId::proportional(12.5);
+        let mut right = inner.right();
         if let Some(due) = g.due {
             let (_, fg) = match r.pace {
                 Some(pc @ (Pace::Behind | Pace::AtRisk)) => pace_colors(pc, t),
@@ -1192,7 +1168,7 @@ impl App {
                     pos2(inner.right(), fy),
                     Align2::RIGHT_CENTER,
                     dday(due, day),
-                    FontId::proportional(12.5),
+                    font.clone(),
                     fg,
                 )
                 .width();
@@ -1201,15 +1177,47 @@ impl App {
                     pos2(inner.right() - dw - 8.0, fy),
                     Align2::RIGHT_CENTER,
                     due.text("%b %-d"),
-                    FontId::proportional(12.5),
+                    font.clone(),
                     t.text2,
                 )
                 .width();
             // the 16 pt icon, the usual gap before the date
-            icons::line_icon(
-                p,
-                "calendar",
-                pos2(inner.right() - dw - 8.0 - tw - icons::ICON_GAP - 8.0, fy),
+            let icon_x = inner.right() - dw - 8.0 - tw - icons::ICON_GAP - 8.0;
+            icons::line_icon(p, "calendar", pos2(icon_x, fy), t.text2);
+            right = icon_x - 8.0 - 12.0;
+        }
+        let done = r.targets.iter().filter(|s| s.done).count();
+        let summary = if g.targets.is_empty() {
+            String::new()
+        } else {
+            trf!("{} of {} targets done", done, g.targets.len())
+        };
+        let summary_w = if summary.is_empty() {
+            0.0
+        } else {
+            p.layout_no_wrap(summary.clone(), font.clone(), t.text2)
+                .size()
+                .x
+                + 8.0
+        };
+        let mut x = inner.left();
+        if let Some(m) = self.data.member(g.owner) {
+            paint_avatar(p, pos2(x + 11.0, fy), 11.0, m, t.card);
+            x += 30.0;
+            // the name gives way to the summary, down to a few letters
+            let room = (right - x - summary_w).max(60.0).min(right - x);
+            let name = crate::widgets::fit_text(p, m.shown(), &font, room);
+            x += p
+                .text(pos2(x, fy), Align2::LEFT_CENTER, name, font.clone(), t.text)
+                .width()
+                + 8.0;
+        }
+        if !summary.is_empty() && right - x > 24.0 {
+            p.text(
+                pos2(x, fy),
+                Align2::LEFT_CENTER,
+                crate::widgets::fit_text(p, &summary, &font, right - x),
+                font,
                 t.text2,
             );
         }
@@ -1365,11 +1373,14 @@ impl App {
                     }
                     if let Some(m) = self.data.member(g.owner) {
                         paint_avatar(p, pos2(rr.left() + cols[4] + 11.0, cy), 11.0, m, t.card);
+                        // shortened to end inside the row
+                        let nf = FontId::proportional(13.0);
+                        let room = rr.right() - 16.0 - (rr.left() + cols[4] + 28.0);
                         p.text(
                             pos2(rr.left() + cols[4] + 28.0, cy),
                             Align2::LEFT_CENTER,
-                            m.shown(),
-                            FontId::proportional(13.0),
+                            crate::widgets::fit_text(p, m.shown(), &nf, room),
+                            nf,
                             t.text,
                         );
                     }

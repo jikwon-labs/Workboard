@@ -1275,3 +1275,93 @@ fn picking_tasks_that_finish_a_goal_opens_goal_achieved() {
         .iter()
         .any(|e| e.what == GoalChange::Milestone(100) && e.who == me));
 }
+
+#[test]
+fn goal_history_and_daily_progress_keep_their_limits() {
+    let (mut h, a, _) = two_goals();
+    h.app.goal_watch(now_ts());
+    let gi = h.app.data.extra.goals.iter().position(|g| g.id == a).unwrap();
+    // 150 recordings: the newest 100 lines stay, oldest first
+    for n in 0..150 {
+        h.app.goal_apply(crate::app::more::GoalAct::SetNumber {
+            g: a,
+            i: 0,
+            to: (n % 2) as f64 + 1.0,
+        });
+    }
+    let log = &h.app.data.extra.goals[gi].log;
+    assert_eq!(log.len(), crate::model::GOAL_LOG_KEEP);
+    assert!(log.windows(2).all(|w| w[0].ts <= w[1].ts), "oldest first");
+    // a change on each of 80 days: the last 60 days stay
+    let start = now_ts() - 90 * 86_400;
+    for d in 0..80 {
+        let pct = (d % 2) as f64 * 10.0;
+        if let TargetKind::Number { current, .. } =
+            &mut h.app.data.extra.goals[gi].targets[0].kind
+        {
+            *current = pct;
+        }
+        h.app.goal_settle(gi, 0, start + d * 86_400);
+    }
+    let days = &h.app.data.extra.goals[gi].days;
+    assert_eq!(days.len(), crate::model::GOAL_DAYS_KEEP);
+    assert!(days.windows(2).all(|w| w[0].0 < w[1].0), "one entry a day");
+}
+
+#[test]
+fn passing_several_milestones_at_once_notes_the_highest() {
+    let (mut h, _, _) = two_goals();
+    let me = h.app.data.me;
+    let id = add_goal_with(&mut h, "Signups", vec![number("People", 0.0, 100.0, 0.0)]);
+    h.app.goal_watch(now_ts());
+    h.click("Goal Signups");
+    h.app.goal_apply(crate::app::more::GoalAct::SetNumber { g: id, i: 0, to: 80.0 });
+    h.settle();
+    let g = goal(&h, id).clone();
+    let ms: Vec<u8> = g
+        .log
+        .iter()
+        .filter_map(|e| match e.what {
+            GoalChange::Milestone(m) => Some(m),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ms, [75], "one line for the highest");
+    assert_eq!(g.reached, 75);
+    assert_eq!(h.app.goal_banner.map(|b| (b.0, b.1)), Some((id, 75)));
+    // the page shows the ones below as reached too, without a day
+    assert!(!h.painted_text("Reached").is_empty());
+    // back to 30%: 75 leaves, 25 stays; a later 100% opens Goal achieved
+    h.app.goal_apply(crate::app::more::GoalAct::SetNumber { g: id, i: 0, to: 30.0 });
+    assert_eq!(goal(&h, id).reached, 25);
+    assert!(goal(&h, id).log.iter().all(|e| !matches!(e.what, GoalChange::Milestone(_))));
+    h.app.goal_apply(crate::app::more::GoalAct::SetNumber { g: id, i: 0, to: 100.0 });
+    assert!(matches!(h.app.modal, Some(Modal::GoalAchieved { id: x }) if x == id));
+    let g = goal(&h, id).clone();
+    assert_eq!(g.done_on, Some(today()));
+    assert!(g.log.iter().any(|e| e.what == GoalChange::Milestone(100) && e.who == me));
+}
+
+#[test]
+fn a_goal_from_before_history_starts_it_quietly() {
+    let (mut h, _, b) = two_goals();
+    // achieved before this version kept history
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == b) {
+        g.targets[0].kind = TargetKind::TrueFalse { done: true };
+        g.log.clear();
+    }
+    h.app.goal_watch(now_ts());
+    let g = goal(&h, b).clone();
+    assert_eq!(g.log.len(), 1);
+    assert_eq!(g.log[0].what, GoalChange::Tracked);
+    assert_eq!(g.reached, 100, "taken as it is");
+    h.app.notify_clock(now_ts());
+    assert!(
+        h.app.notify_rt.sent.iter().all(|n| !n.title.contains("Office move")),
+        "not announced: {:?}",
+        h.app.notify_rt.sent
+    );
+    // the next look gives it an achieved day, so it counts this year
+    h.app.goal_watch(now_ts());
+    assert_eq!(goal(&h, b).done_on, Some(today()));
+}

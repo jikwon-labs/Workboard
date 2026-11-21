@@ -1186,3 +1186,28 @@ fn older_answers_to_same_named_forms_are_told_apart_by_list() {
         assert!(!h.has(&format!("Answer task {}", other)));
     }
 }
+
+/// A form from an older app (no maker, tile or edit time saved) is listed,
+/// opens on each tab and takes answers.
+#[test]
+fn an_older_form_opens_and_takes_answers() {
+    let mut h = Ui1::new();
+    let list = h.app.data.first_list().unwrap();
+    let old = format!(
+        r#"{{"id":4242,"name":"Old one","list_id":{},"description":"d","fields":[{{"label":"T","map":"name"}}]}}"#,
+        list
+    );
+    h.app.data.extra.forms.push(serde_json::from_str(&old).unwrap());
+    open_forms(&mut h);
+    assert!(h.has("Form Old one") && h.has("Open form Old one"));
+    h.click("My forms");
+    assert!(h.has("Form Old one"), "in My forms too (no maker saved)");
+    h.click("Form Old one");
+    h.click("Answers");
+    assert!(!h.painted_text("No answers yet").is_empty());
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("Still works");
+    h.click("Submit");
+    assert_eq!(task_named(&h, "Still works").form, Some(4242));
+}

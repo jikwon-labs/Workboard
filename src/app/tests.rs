@@ -1370,6 +1370,22 @@ fn form_answers_check_required_number_and_email() {
     assert!(form_answers(&f, &fill).unwrap_err().contains("Size"));
 }
 
+/// A form saved by an older app (no maker, tile, colour or edit time, and a
+/// question kind this app doesn't know) opens, and is written back as it
+/// was: nothing is added that older apps would then see change.
+#[test]
+fn an_older_form_loads_and_saves_back_as_it_was() {
+    let old = r#"{"id":4242,"name":"Old one","list_id":7,"description":"d","fields":[{"label":"T","map":"name"},{"label":"Link","map":"url"}]}"#;
+    let f: Form = serde_json::from_str(old).unwrap();
+    assert_eq!((f.owner, f.icon.as_str(), f.color.as_str(), f.updated), (0, "", "", 0));
+    assert_eq!(serde_json::to_string(&f).unwrap(), old);
+    // its answers: the unknown kind goes into the description like short text
+    let fill: HashMap<usize, String> =
+        [(0, "Hi".to_string()), (1, "http://x".to_string())].into();
+    let a = super::more::form_answers(&f, &fill).unwrap();
+    assert_eq!((a.name.as_str(), a.description.as_str()), ("Hi", "\nLink: http://x"));
+}
+
 /// An Email question takes an address (something before the @, a dot
 /// inside what follows, no spaces) and a Number question a number one can
 /// count with: "@." or "inf" are refused, as the server refuses such

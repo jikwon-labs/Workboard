@@ -172,11 +172,12 @@ fn a_pdf_goes_through_the_server_and_the_other_computer_saves_it() {
         .join("Quarterly plan.pdf");
     let _ = std::fs::remove_file(&saved);
     b.save_file(&att);
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while !saved.is_file() && std::time::Instant::now() < end {
-        b.files_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut b,
+        "the file in Downloads",
+        |b| b.files_tick(None),
+        |_| saved.is_file(),
+    );
     assert_eq!(std::fs::read(&saved).unwrap(), body, "saved to Downloads");
     assert!(b.file_saves.is_empty(), "nothing left waiting");
     let _ = std::fs::remove_file(&saved);
@@ -290,11 +291,12 @@ fn attachments_wait_with_their_channel_and_only_media_goes() {
     std::fs::create_dir_all(&folder).unwrap();
     a.chat.channel.files.clear();
     a.add_media(false, Some(folder), None);
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while a.chat.channel.files[0].error.is_none() && std::time::Instant::now() < end {
-        a.files_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the folder refused",
+        |a| a.files_tick(None),
+        |a| a.chat.channel.files[0].error.is_some(),
+    );
     assert_eq!(
         a.chat.channel.files[0].error.as_deref(),
         Some("Notes is a folder.")
@@ -598,11 +600,12 @@ fn without_a_sign_in_attachments_wait_and_the_token_is_kept() {
         crate::app::files::Remote::SignedOut("127.0.0.1:9".into())
     );
     a.add_media(false, Some(test_picture("wait.png", 20, 20)), None);
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while a.chat.channel.files[0].att.is_none() && std::time::Instant::now() < end {
-        a.files_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the picture checked",
+        |a| a.files_tick(None),
+        |a| a.chat.channel.files[0].att.is_some(),
+    );
     let att = a.chat.channel.files[0].att.clone().unwrap();
     assert_eq!(
         a.files.state(&att.file),
@@ -641,10 +644,11 @@ fn sharing_a_folder_brings_earlier_pictures_along() {
     let folder = temp_home("share-later");
     a.share_here(&folder.to_string_lossy()).unwrap();
     let dest = folder.join("files").join(&files[0].file);
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while !dest.is_file() && std::time::Instant::now() < end {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    wait_until(
+        std::time::Duration::from_secs(20),
+        std::time::Duration::from_millis(20),
+        || dest.is_file(),
+    );
     assert!(
         dest.is_file(),
         "the picture sent earlier is in the shared folder"
@@ -741,10 +745,11 @@ fn restoring_a_channel_puts_its_pictures_back_where_the_team_gets_them() {
     }]);
     let dest = folder.join("files").join(&files[0].file);
     let wait = |ok: &dyn Fn() -> bool| {
-        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while !ok() && std::time::Instant::now() < end {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+        wait_until(
+            std::time::Duration::from_secs(20),
+            std::time::Duration::from_millis(20),
+            ok,
+        );
     };
     wait(&|| dest.is_file());
     assert!(dest.is_file());
@@ -862,11 +867,12 @@ fn a_task_attachment_waiting_for_a_sign_in_goes_up_once_there_is_one() {
     });
     let tid = a.data.tasks[0].id;
     a.add_task_file(tid, test_picture("plan.png", 20, 20));
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while a.task_files[0].1.att.is_none() && std::time::Instant::now() < end {
-        a.files_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the picture checked",
+        |a| a.files_tick(None),
+        |a| a.task_files[0].1.att.is_some(),
+    );
     let att = a.task_files[0].1.att.clone().unwrap();
     assert_eq!(
         a.task_files[0].1.transfer(&a.files),
@@ -878,17 +884,12 @@ fn a_task_attachment_waiting_for_a_sign_in_goes_up_once_there_is_one() {
     crate::app::together::save_token("127.0.0.1:9", "dev-task-wait", "tok");
     // signed in: it is sent (the dead server refuses, so it fails and is
     // tried again later instead of waiting for a sign-in)
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        a.files_tick(None);
-        let t = a.task_files[0].1.transfer(&a.files);
-        if matches!(&t, Some(crate::app::files::Transfer::Failed(e)) if e != crate::app::files::NOT_SIGNED_IN)
-        {
-            break;
-        }
-        assert!(std::time::Instant::now() < end, "never sent: {:?}", t);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the picture sent",
+        |a| a.files_tick(None),
+        |a| matches!(a.task_files[0].1.transfer(&a.files), Some(crate::app::files::Transfer::Failed(e)) if e != crate::app::files::NOT_SIGNED_IN),
+    );
     crate::app::together::forget_token("127.0.0.1:9", "dev-task-wait");
     assert!(a.files.upload_tries(&att.file).is_some());
 }
@@ -1158,11 +1159,12 @@ fn a_task_attachment_still_going_up_at_quit_joins_its_task_after_a_restart() {
     });
     let tid = a.data.tasks[0].id;
     a.add_task_file(tid, test_picture("restart.png", 20, 22));
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while a.task_files[0].1.att.is_none() && std::time::Instant::now() < end {
-        a.files_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the picture checked",
+        |a| a.files_tick(None),
+        |a| a.task_files[0].1.att.is_some(),
+    );
     a.files_tick(None);
     let att = a.task_files[0].1.att.clone().unwrap();
     let dir = a.files.dir().to_path_buf();

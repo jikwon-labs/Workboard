@@ -1083,13 +1083,31 @@ pub(super) fn net_until_saved(a: &mut App, folder: &std::path::Path) {
 }
 
 /// Keeps taking in what the server sends until `cond` holds; fails the test
-/// after 15 seconds.
+/// after 20 seconds.
 pub(super) fn net_until(a: &mut App, what: &str, cond: impl Fn(&App) -> bool) {
+    tick_until(
+        a,
+        what,
+        |a| {
+            a.net_tick(None);
+        },
+        cond,
+    );
+}
+
+/// Runs `tick` on `a` every 20 ms until `cond` holds; fails the test after
+/// 20 seconds.
+pub(super) fn tick_until(
+    a: &mut App,
+    what: &str,
+    mut tick: impl FnMut(&mut App),
+    cond: impl Fn(&App) -> bool,
+) {
     let held = wait_until(
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(20),
         std::time::Duration::from_millis(20),
         || {
-            a.net_tick(None);
+            tick(a);
             cond(a)
         },
     );

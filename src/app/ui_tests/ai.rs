@@ -25,28 +25,10 @@ fn on_ai_server(answer: &str) -> (Ui1, TestServer, Arc<FakeClaude>) {
             },
         )
         .unwrap();
-    until(&mut h, "the server's AI", |h| {
+    h.net_until("the server's AI", |h| {
         h.app.connected() && h.app.ai_offered()
     });
     (h, server, fake)
-}
-
-/// Draws frames, taking in what the server says, until `cond` holds.
-fn until(h: &mut Ui1, what: &str, cond: impl Fn(&Ui1) -> bool) {
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while std::time::Instant::now() < end {
-        h.app.net_tick(None);
-        h.frame(vec![]);
-        if cond(h) {
-            h.settle();
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    panic!(
-        "timed out waiting for: {} (status {:?}, toast {:?})",
-        what, h.app.sync_rt.net_status, h.app.toast
-    );
 }
 
 /// Whether `n` requests are answered.
@@ -142,7 +124,7 @@ fn the_ai_page_answers_about_the_workspace_and_links_what_it_cites() {
         !h.painted_text("Who is on the launch?").is_empty(),
         "the question shows"
     );
-    until(&mut h, "the answer", |h| answered(h, 1));
+    h.net_until("the answer", |h| answered(h, 1));
     let sent = fake.last_text();
     assert!(sent.contains("Question: Who is on the launch?"), "{sent}");
     assert!(sent.contains(&tname), "what the asker may see goes along");
@@ -162,7 +144,7 @@ fn the_ai_page_answers_about_the_workspace_and_links_what_it_cites() {
     h.click("Ask AI");
     h.type_text("And when is it due?");
     h.click("Ask the AI");
-    until(&mut h, "the second answer", |h| answered(h, 2));
+    h.net_until("the second answer", |h| answered(h, 2));
     let asked = fake.asked();
     let msgs = asked.last().unwrap()["messages"]
         .as_array()
@@ -181,7 +163,7 @@ fn the_ai_page_answers_about_the_workspace_and_links_what_it_cites() {
     assert!(h.app.ai.chat.is_empty());
     assert!(!h.painted_text("What can I help with?").is_empty());
     h.click("Which tasks are overdue?");
-    until(&mut h, "the suggestion's answer", |h| answered(h, 1));
+    h.net_until("the suggestion's answer", |h| answered(h, 1));
     assert!(fake
         .last_text()
         .contains("Question: Which tasks are overdue?"));
@@ -196,7 +178,7 @@ fn a_failed_answer_can_be_asked_again() {
     h.click("Ask AI");
     h.type_text("Anything new?");
     h.key(egui::Key::Enter);
-    until(&mut h, "the failure", |h| {
+    h.net_until("the failure", |h| {
         h.app
             .ai
             .jobs
@@ -214,7 +196,7 @@ fn a_failed_answer_can_be_asked_again() {
     h.app.ai_ready_now("test-model".into());
     h.settle();
     h.click("Try again");
-    until(&mut h, "the answer", |h| answered(h, 1));
+    h.net_until("the answer", |h| answered(h, 1));
     assert_eq!(h.app.ai.chat.len(), 1, "asked again in its place");
     assert!(shown_containing(&h, "Fine now.").is_some());
 }
@@ -227,7 +209,7 @@ fn a_conversation_is_summed_up_and_a_closed_summary_stops() {
     h.click("general");
     h.click("Summarize conversation");
     assert!(matches!(h.app.modal, Some(Modal::Ai(_))));
-    until(&mut h, "the summary", |h| answered(h, 1));
+    h.net_until("the summary", |h| answered(h, 1));
     assert!(fake.last_text().contains("Conversation: #general"));
     assert!(
         shown_containing(&h, "Alex asked about the launch").is_some(),
@@ -243,12 +225,12 @@ fn a_conversation_is_summed_up_and_a_closed_summary_stops() {
     // closed in the middle: stopped
     fake.hold.store(true, Ordering::SeqCst);
     h.click("Summarize conversation");
-    until(&mut h, "the first piece", |h| {
+    h.net_until("the first piece", |h| {
         h.app.ai.jobs.values().any(|j| !j.text.is_empty())
     });
     h.click("Stop");
     assert!(h.app.modal.is_none());
-    until(&mut h, "the server to stop it", |_| {
+    h.net_until("the server to stop it", |_| {
         fake.stopped.load(Ordering::SeqCst) == 1
     });
     assert!(h.app.ai.jobs.is_empty());
@@ -274,7 +256,7 @@ fn a_thread_is_summed_up_from_its_header() {
     h.app.open_chat_at(cid, Some(mid));
     h.settle();
     h.click("Summarize thread");
-    until(&mut h, "the summary", |h| answered(h, 1));
+    h.net_until("the summary", |h| answered(h, 1));
     let sent = fake.last_text();
     assert!(
         sent.contains("Looks great, I'll review them after lunch."),
@@ -296,7 +278,7 @@ fn doc_writing_with_ai_replaces_the_selection_or_goes_below() {
     h.click("Doc AI");
     assert!(!h.painted_text("On the selected text").is_empty());
     h.click("AI Fix spelling and grammar");
-    until(&mut h, "the fixed text", |h| answered(h, 1));
+    h.net_until("the fixed text", |h| answered(h, 1));
     let sent = fake.last_text();
     assert!(sent.contains("Fix the spelling") && sent.contains("<text>\nhelo team\n</text>"));
     h.click("Replace");
@@ -308,7 +290,7 @@ fn doc_writing_with_ai_replaces_the_selection_or_goes_below() {
     h.click("Doc AI");
     assert!(!h.painted_text("On the whole page").is_empty());
     h.click("AI Summarize");
-    until(&mut h, "the summary", |h| answered(h, 1));
+    h.net_until("the summary", |h| answered(h, 1));
     h.click("Insert below");
     assert_eq!(h.doc_body(id), "Hello, team.\n\nTwo short points");
 
@@ -316,7 +298,7 @@ fn doc_writing_with_ai_replaces_the_selection_or_goes_below() {
     *fake.answer.lock().unwrap() = "Better words".into();
     h.click("Doc AI");
     h.click("AI Improve writing");
-    until(&mut h, "the new words", |h| answered(h, 1));
+    h.net_until("the new words", |h| answered(h, 1));
     let d = h.app.data.docs.iter_mut().find(|d| d.id == id).unwrap();
     d.body = "Someone else wrote this".into();
     h.click("Replace");
@@ -347,7 +329,7 @@ fn an_empty_page_offers_a_first_draft_from_its_title() {
     h.click("Doc AI");
     assert!(!h.has("AI Improve writing"), "nothing to improve yet");
     h.click("AI Write a first draft");
-    until(&mut h, "the draft", |h| answered(h, 1));
+    h.net_until("the draft", |h| answered(h, 1));
     assert!(fake.last_text().contains("Title: Team offsite"));
     h.click("Use this");
     assert_eq!(h.doc_body(id), "# Offsite\n- Pick a date");
@@ -374,7 +356,7 @@ fn a_task_gets_suggested_subtasks_and_a_drafted_description() {
     h.click("Suggest subtasks");
     // the half-written answer isn't shown, only that it's thinking
     assert!(!h.painted_text("Thinking…").is_empty());
-    until(&mut h, "the suggestions", |h| answered(h, 1));
+    h.net_until("the suggestions", |h| answered(h, 1));
     assert!(fake.last_text().contains(&format!("Task: {}", name)));
     assert_eq!(
         fake.asked().last().unwrap()["output_config"]["format"]["type"],
@@ -402,7 +384,7 @@ fn a_task_gets_suggested_subtasks_and_a_drafted_description() {
     h.settle();
     h.click("Description AI");
     h.click("AI Write a first draft");
-    until(&mut h, "the draft", |h| answered(h, 1));
+    h.net_until("the draft", |h| answered(h, 1));
     h.click("Use this");
     h.settle();
     assert_eq!(
@@ -427,11 +409,11 @@ fn an_answer_cut_off_by_the_connection_says_so() {
     h.click("Ask AI");
     h.type_text("Are you there?");
     h.key(egui::Key::Enter);
-    until(&mut h, "the first piece", |h| {
+    h.net_until("the first piece", |h| {
         h.app.ai.jobs.values().any(|j| !j.text.is_empty())
     });
     drop(server);
-    until(&mut h, "the answer to fail", |h| {
+    h.net_until("the answer to fail", |h| {
         h.app
             .ai
             .jobs
@@ -467,7 +449,7 @@ fn the_ai_reads_and_answers_in_korean() {
     h.click("Close AI");
     h.click("general");
     h.click("Summarize conversation");
-    until(&mut h, "the summary", |h| answered(h, 1));
+    h.net_until("the summary", |h| answered(h, 1));
     assert!(fake.last_text().contains("Write your answer in Korean."));
     assert!(!h
         .painted_text("AI의 답은 틀릴 수 있습니다. 쓰기 전에 확인하세요.")
@@ -501,7 +483,7 @@ fn a_cited_message_opens_in_its_conversation_and_thread() {
     h.click("Ask AI");
     h.type_text("Who answered?");
     h.key(egui::Key::Enter);
-    until(&mut h, "the answer", |h| answered(h, 1));
+    h.net_until("the answer", |h| answered(h, 1));
     let shown = shown_containing(&h, "Bora answered").expect("the answer");
     assert_eq!(shown, "Bora answered in a thread #general. Gone.");
     click_text(&mut h, "Bora answered", "#general");
@@ -521,7 +503,7 @@ fn another_workspace_never_sees_the_conversation() {
     h.click("Ask AI");
     h.type_text("What did the leads decide?");
     h.key(egui::Key::Enter);
-    until(&mut h, "the answer", |h| answered(h, 1));
+    h.net_until("the answer", |h| answered(h, 1));
     assert!(!h.painted_text("What did the leads decide?").is_empty());
     // the same app opens another workspace (another file, another server)
     h.app.ws_file = "other-team.json".into();

@@ -139,6 +139,39 @@ impl Ui1 {
         }
     }
 
+    /// Draws frames until `done` holds; fails the test after 20 seconds.
+    pub(super) fn until(&mut self, what: &str, done: impl Fn(&Ui1) -> bool) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !done(self) {
+            assert!(
+                std::time::Instant::now() < end,
+                "timed out waiting for: {}",
+                what
+            );
+            self.frame(vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// Draws frames, taking in what the server says, until `cond` holds,
+    /// then settles; fails the test after 20 seconds.
+    pub(super) fn net_until(&mut self, what: &str, cond: impl Fn(&Ui1) -> bool) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < end {
+            self.app.net_tick(None);
+            self.frame(vec![]);
+            if cond(self) {
+                self.settle();
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!(
+            "timed out waiting for: {} (status {:?}, toast {:?})",
+            what, self.app.sync_rt.net_status, self.app.toast
+        );
+    }
+
     /// Press the main window's close button (Alt+F4, Cmd+W): one frame.
     pub(super) fn close_window(&mut self) {
         self.commands.clear();
@@ -949,16 +982,10 @@ pub(super) fn server_down(h: &mut Ui1) {
         tag: 5,
         server: Some("127.0.0.1:1".into()),
     });
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !matches!(
-        h.app.sync_rt.net_status,
-        Some(wb_net::Status::Reconnecting(_))
-    ) && std::time::Instant::now() < until
-    {
-        // tests don't save, so the frame doesn't run the connection
-        h.app.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    // tests don't save, so the frame doesn't run the connection
+    crate::app::tests::net_until(&mut h.app, "the app trying again", |a| {
+        matches!(a.sync_rt.net_status, Some(wb_net::Status::Reconnecting(_)))
+    });
     h.settle();
 }
 

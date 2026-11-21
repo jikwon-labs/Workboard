@@ -4,16 +4,6 @@
 use super::*;
 use crate::app::tests::test_picture;
 
-/// Frames until `done` holds (or fail after 10 seconds).
-fn frames_until(h: &mut Ui1, what: &str, done: impl Fn(&Ui1) -> bool) {
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !done(h) {
-        assert!(std::time::Instant::now() < until, "never: {}", what);
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-}
-
 /// The name at the top of the profile menu opens it (there is no row for it).
 fn open_edit_profile(h: &mut Ui1) {
     h.click("Profile menu");
@@ -44,7 +34,7 @@ fn edit_profile_saves_the_names_title_and_a_square_photo() {
     h.type_text("Designer");
     crate::media::PICKED_PICTURE.with(|p| *p.borrow_mut() = Some(test_picture("me.png", 300, 200)));
     h.click("Upload photo");
-    frames_until(&mut h, "the photo is ready", |h| {
+    h.until("the photo is ready", |h| {
         h.app
             .profile_photo
             .as_ref()
@@ -71,7 +61,7 @@ fn edit_profile_saves_the_names_title_and_a_square_photo() {
     let img = image::load_from_memory(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!((img.width(), img.height()), (200, 200));
     // and the avatars draw it
-    frames_until(&mut h, "the photo is decoded for avatars", |h| {
+    h.until("the photo is decoded for avatars", |h| {
         crate::widgets::avatar_texture(&h.ctx, &photo.file).is_some()
     });
     h.settle();
@@ -196,7 +186,7 @@ fn choosing_a_photo_moves_nothing_in_the_dialog() {
         crate::media::PICKED_PICTURE
             .with(|p| *p.borrow_mut() = Some(test_picture("me.png", 60, 60)));
         h.click(upload);
-        frames_until(&mut h, "the photo is ready", |h| {
+        h.until("the photo is ready", |h| {
             h.app
                 .profile_photo
                 .as_ref()
@@ -231,7 +221,7 @@ fn a_photo_chosen_then_cancelled_changes_nothing() {
     crate::media::PICKED_PICTURE
         .with(|p| *p.borrow_mut() = Some(test_picture("other.png", 80, 120)));
     h.click("Upload photo");
-    frames_until(&mut h, "the photo is ready", |h| {
+    h.until("the photo is ready", |h| {
         h.app
             .profile_photo
             .as_ref()

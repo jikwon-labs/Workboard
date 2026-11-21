@@ -409,15 +409,9 @@ fn work_together_connects_to_a_server_and_shows_the_status() {
     assert!(h.has("127.0.0.1:1"));
     assert!(h.has("Status: Disconnected"));
     // nothing listens on port 1, so the app keeps trying
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !matches!(
-        h.app.sync_rt.net_status,
-        Some(wb_net::Status::Reconnecting(_))
-    ) && std::time::Instant::now() < until
-    {
-        h.app.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    crate::app::tests::net_until(&mut h.app, "the app trying again", |a| {
+        matches!(a.sync_rt.net_status, Some(wb_net::Status::Reconnecting(_)))
+    });
     h.settle();
     assert!(
         h.has("Status: Reconnecting\u{2026}"),

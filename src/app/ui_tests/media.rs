@@ -21,20 +21,17 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     }];
     h.frame(vec![]);
     // nothing listens on port 9: the upload fails, but the message may go
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while !matches!(
-        h.app
-            .chat
-            .channel
-            .files
-            .first()
-            .and_then(|p| p.transfer(&h.app.files)),
-        Some(crate::app::files::Transfer::Failed(_))
-    ) && std::time::Instant::now() < until
-    {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the upload to fail", |h| {
+        matches!(
+            h.app
+                .chat
+                .channel
+                .files
+                .first()
+                .and_then(|p| p.transfer(&h.app.files)),
+            Some(crate::app::files::Transfer::Failed(_))
+        )
+    });
     let Some(crate::app::files::Transfer::Failed(why)) =
         h.app.chat.channel.files[0].transfer(&h.app.files)
     else {
@@ -95,13 +92,9 @@ fn drop_a_picture_send_it_and_open_it_large() {
         ..Default::default()
     }];
     h.frame(vec![]);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !(h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty())
-        && std::time::Instant::now() < until
-    {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the picture ready in the message box", |h| {
+        h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty()
+    });
     h.settle();
     assert!(h.has("Attachment beach.png"), "a tile in the message box");
     // a picture alone can be sent: Enter in the empty box
@@ -126,17 +119,12 @@ fn drop_a_picture_send_it_and_open_it_large() {
     );
     assert!(!h.has("Attachment beach.png"));
     // it shows in the conversation; clicking opens it large, Esc closes
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while h
-        .app
-        .files
-        .texture(&m.attachments[0].file, crate::app::files::THUMB)
-        .is_none()
-        && std::time::Instant::now() < until
-    {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the picture decoded for the screen", |h| {
+        h.app
+            .files
+            .texture(&m.attachments[0].file, crate::app::files::THUMB)
+            .is_some()
+    });
     assert!(
         h.app
             .files
@@ -162,13 +150,9 @@ fn drop_a_picture_send_it_and_open_it_large() {
         ..Default::default()
     }];
     h.frame(vec![]);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !(h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty())
-        && std::time::Instant::now() < until
-    {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the file ready in the message box", |h| {
+        h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty()
+    });
     assert_eq!(h.app.chat.channel.files[0].error, None);
     h.settle();
     assert!(h.has("Attachment ui-notes.md"), "a tile in the message box");
@@ -225,11 +209,9 @@ fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
         h.app.chat.channel.files.is_empty(),
         "not taken by the chat box"
     );
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while h.app.task(id).unwrap().attachments.is_empty() && std::time::Instant::now() < until {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the picture on the task", |h| {
+        !h.app.task(id).unwrap().attachments.is_empty()
+    });
     let t = h.app.task(id).unwrap();
     assert_eq!(t.attachments.len(), 1);
     assert_eq!(
@@ -257,11 +239,9 @@ fn a_pdf_dropped_on_a_task_attaches_and_a_click_saves_it() {
         ..Default::default()
     }];
     h.frame(vec![]);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while h.app.task(id).unwrap().attachments.is_empty() && std::time::Instant::now() < until {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the PDF on the task", |h| {
+        !h.app.task(id).unwrap().attachments.is_empty()
+    });
     let a = h.app.task(id).unwrap().attachments[0].clone();
     assert_eq!((a.name.as_str(), a.kind), ("ui-brief.pdf", MediaKind::File));
     h.settle();
@@ -293,22 +273,14 @@ fn a_task_attachment_that_cannot_go_up_says_why_and_can_be_tried_again() {
     h.frame(vec![]);
     // the server can't be reached: not "Adding..." for ever, but why, and
     // a way to try again
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while !h.has("Try again refused.png") && std::time::Instant::now() < until {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("Try again", |h| h.has("Try again refused.png"));
     assert!(h.has("Try again refused.png"));
     assert!(h.app.task(id).unwrap().attachments.is_empty());
     let sha = h.app.task_files[0].1.att.clone().unwrap().file;
     assert!(h.app.files.is_waiting(&sha), "also tried again by itself");
     h.click("Try again refused.png");
     assert_eq!(h.app.task_files.len(), 1);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while !h.has("Dismiss refused.png") && std::time::Instant::now() < until {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("Dismiss", |h| h.has("Dismiss refused.png"));
     h.click("Dismiss refused.png");
     crate::app::together::forget_token("127.0.0.1:9", "dev-ui-task-fail");
     assert!(h.app.task_files.is_empty());
@@ -352,11 +324,7 @@ fn a_video_the_app_cannot_play_offers_another_app() {
     h.settle();
     h.click("Video clip.mp4");
     assert!(h.app.viewer.is_some());
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !h.has("Open in another app") && std::time::Instant::now() < until {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the offer of another app", |h| h.has("Open in another app"));
     assert!(
         h.has("Open in another app"),
         "the system's player is offered"
@@ -384,15 +352,11 @@ fn v_released(cmd: bool) -> egui::Event {
 }
 
 fn wait_for_tiles(h: &mut Ui1, n: usize) {
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !(h.app.chat.channel.files.len() >= n
-        && h.app.pending_ready(false).0
-        && h.app.chat.channel.files.iter().all(|p| !p.getting_ready()))
-        && std::time::Instant::now() < until
-    {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the tiles ready", |h| {
+        h.app.chat.channel.files.len() >= n
+            && h.app.pending_ready(false).0
+            && h.app.chat.channel.files.iter().all(|p| !p.getting_ready())
+    });
     h.settle();
 }
 
@@ -693,11 +657,9 @@ fn a_picture_still_getting_ready_follows_the_message_it_was_sent_with() {
     );
     // once it's ready it's on the message
     h.app.files.hold_prepared = false;
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while last_message(&h, cid).attachments.is_empty() && std::time::Instant::now() < until {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the picture on the message", |h| {
+        !last_message(h, cid).attachments.is_empty()
+    });
     let m = last_message(&h, cid);
     assert_eq!(m.text, "on its way");
     assert_eq!(m.attachments.len(), 1);
@@ -749,11 +711,7 @@ fn a_picture_alone_still_getting_ready_goes_once_it_is() {
     );
     assert_eq!(count(&h), n, "nothing to show yet");
     h.app.files.hold_prepared = false;
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while count(&h) == n && std::time::Instant::now() < until {
-        h.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    h.until("the message with the picture", |h| count(h) != n);
     for _ in 0..20 {
         h.frame(vec![]);
         std::thread::sleep(std::time::Duration::from_millis(20));

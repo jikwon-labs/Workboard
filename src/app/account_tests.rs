@@ -2,7 +2,7 @@
 // when setting up the server, signs in on a second computer with it, invites
 // someone (the code goes out by mail) who joins with the code and a password.
 
-use super::tests::{blank_as, channel_id, net_until, net_until_saved, wait_invite};
+use super::tests::{blank_as, channel_id, net_until, net_until_saved, tick_until, wait_invite};
 use super::together::How;
 use super::*;
 use workboard_server::testing::{temp_home, TestServer};
@@ -330,11 +330,12 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
         "Member",
         None,
     );
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while a.making_ws.is_some() && std::time::Instant::now() < end {
-        a.making_ws_tick();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the server making the workspace",
+        |a| a.making_ws_tick(),
+        |a| a.making_ws.is_none(),
+    );
     assert!(a.making_ws.is_none(), "the server answered: {:?}", a.toast);
     net_until(&mut a, "the second workspace is up", |a| {
         a.data.workspace == "Side project" && connected(a)
@@ -356,11 +357,9 @@ fn a_second_workspace_goes_on_the_same_server_and_opens_anywhere() {
     // the person invited gets their code by mail, with the second
     // workspace's address in the link
     let id = addr2.rsplit('/').next().unwrap().to_string();
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while server.mails_to("helper@team.io").is_empty() && std::time::Instant::now() < end {
-        a.net_tick(None);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    net_until(&mut a, "the invite mail", |_| {
+        !server.mails_to("helper@team.io").is_empty()
+    });
     let mail = server
         .mails_to("helper@team.io")
         .pop()
@@ -451,11 +450,12 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
         ))
     );
     a.make_workspace_on_server("Side project", &[], &[], "Member", None);
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while a.making_ws.is_some() && std::time::Instant::now() < end {
-        a.making_ws_tick();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the server making the workspace",
+        |a| a.making_ws_tick(),
+        |a| a.making_ws.is_none(),
+    );
     net_until(&mut a, "the second workspace is up", |a| {
         a.data.workspace == "Side project" && connected(a)
     });
@@ -494,11 +494,12 @@ fn the_owner_deletes_a_second_workspace_and_every_computer_loses_it() {
         Ok(super::delete_ws::DeleteHow::Server(addr2.clone()))
     );
     a.delete_on_server(&addr2, egui::Context::default());
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while a.deleting_ws.is_some() && std::time::Instant::now() < end {
-        a.deleting_ws_tick();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the server deleting the workspace",
+        |a| a.deleting_ws_tick(),
+        |a| a.deleting_ws.is_none(),
+    );
     assert!(a.deleting_ws.is_none());
     assert_eq!(
         a.toast.as_ref().map(|t| t.0.as_str()),
@@ -579,32 +580,28 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
 
     // the owner opens a second workspace on the server: the first is watched
     a.make_workspace_on_server("Side project", &[], &[], "Member", None);
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-    while a.making_ws.is_some() && std::time::Instant::now() < end {
-        a.making_ws_tick();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    tick_until(
+        &mut a,
+        "the server making the workspace",
+        |a| a.making_ws_tick(),
+        |a| a.making_ws.is_none(),
+    );
     net_until(&mut a, "the second workspace is up", |a| {
         a.data.workspace == "Side project" && connected(a)
     });
     let second = a.ws_file.clone();
-    let tick_until = |a: &mut App, what: &str, cond: &dyn Fn(&App) -> bool| {
-        let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        loop {
-            a.net_tick(None);
-            a.watch_tick(None);
-            if cond(a) {
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < end,
-                "timed out waiting for: {}",
-                what
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+    let watch_until = |a: &mut App, what: &str, cond: &dyn Fn(&App) -> bool| {
+        tick_until(
+            a,
+            what,
+            |a| {
+                a.net_tick(None);
+                a.watch_tick(None);
+            },
+            cond,
+        );
     };
-    tick_until(&mut a, "watching the first workspace", &|a| {
+    watch_until(&mut a, "watching the first workspace", &|a| {
         a.watch_rt.listening(&first)
     });
     assert_eq!(a.watch_rt.files(), vec![first.clone()], "not the open one");
@@ -642,7 +639,7 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
     });
     s.sync_note_change();
     s.write_shared();
-    tick_until(&mut a, "the notice from the first workspace", &|a| {
+    watch_until(&mut a, "the notice from the first workspace", &|a| {
         a.notify_rt
             .sent
             .iter()
@@ -657,11 +654,11 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
     // a click opens the first workspace and, once its copy has it, the conversation
     a.open_target(&note.target);
     assert_eq!(a.ws_file, first);
-    tick_until(&mut a, "the conversation open", &|a| {
+    watch_until(&mut a, "the conversation open", &|a| {
         a.section == Section::Chat && a.chat.open == Some(dm)
     });
     // now the second one is watched instead
-    tick_until(&mut a, "watching the second workspace", &|a| {
+    watch_until(&mut a, "watching the second workspace", &|a| {
         a.watch_rt.listening(&second)
     });
     assert_eq!(a.watch_rt.files(), vec![second.clone()]);

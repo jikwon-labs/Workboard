@@ -546,7 +546,14 @@ impl App {
                 } else {
                     RichText::new(&r.text)
                 };
-                if r.task.is_some() || r.message.is_some() {
+                // what `open_reminder` can still open: the task, or the
+                // message's conversation (a deleted one leaves plain text)
+                let opens = r
+                    .task
+                    .is_some_and(|id| self.data.tasks.iter().any(|t| t.id == id))
+                    || r.message
+                        .is_some_and(|(ch, _)| self.data.channels.iter().any(|c| c.id == ch));
+                if opens {
                     // opens the task or message it is about
                     if ui.link(text).clicked() {
                         self.open_reminder(&r);

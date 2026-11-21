@@ -349,3 +349,37 @@ fn rows_from_someone_who_left_say_someone_instead_of_nothing() {
         1
     );
 }
+
+#[test]
+fn a_reminder_about_a_deleted_task_is_not_a_link_that_does_nothing() {
+    let mut tid = 0;
+    let mut h = inbox(|d| {
+        let me = d.me;
+        tid = d.tasks[0].id;
+        for (id, text, task) in [
+            (9001, "About a deleted task", 987_654),
+            (9002, "About a task", tid),
+        ] {
+            d.extra.reminders.push(Reminder {
+                id,
+                text: text.into(),
+                due_ts: now_ts() + 3600,
+                owner: me,
+                task: Some(task),
+                ..Default::default()
+            });
+        }
+    });
+    let gone = h.find("About a deleted task").expect("listed");
+    h.hover(gone);
+    assert_ne!(
+        h.cursor,
+        egui::CursorIcon::PointingHand,
+        "nothing to open: not a link"
+    );
+    let there = h.find("About a task").expect("listed");
+    h.hover(there);
+    assert_eq!(h.cursor, egui::CursorIcon::PointingHand, "a link");
+    h.click("About a task");
+    assert_eq!(h.app.open_task, Some(tid), "and it opens its task");
+}

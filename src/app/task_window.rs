@@ -465,7 +465,7 @@ impl App {
                     if r.clicked() {
                         ui.data_mut(|d| d.insert_temp(win_id.with("dates").with("which"), 0u8));
                     }
-                    popup(ui, &r, win_id.with("sd"), 380.0, |ui| {
+                    popup(ui, &r, win_id.with("sd"), DATE_MENU_W, |ui| {
                         dates_menu(ui, &t, win_id.with("dates"), &mut task)
                     });
                     ui.label(RichText::new("\u{2192}").color(t.text3));
@@ -479,7 +479,7 @@ impl App {
                         None => (tr("Due").into(), t.text3),
                     };
                     let r = ui.add(ghost(egui::Button::new(RichText::new(d_txt).color(d_col))));
-                    popup(ui, &r, win_id.with("dd"), 380.0, |ui| {
+                    popup(ui, &r, win_id.with("dd"), DATE_MENU_W, |ui| {
                         dates_menu(ui, &t, win_id.with("dates2"), &mut task)
                     });
                     if task.recur.is_some() {
@@ -704,7 +704,7 @@ impl App {
                                         .color(if d.is_some() { t.text } else { t.text3 }),
                                     )));
                                 if let Some(true) =
-                                    popup(ui, &r, win_id.with(("cfd", f.id)), 380.0, |ui| {
+                                    popup(ui, &r, win_id.with(("cfd", f.id)), DATE_MENU_W, |ui| {
                                         date_menu(ui, &t, win_id.with(("cfdc", f.id)), &mut d)
                                     })
                                 {
@@ -852,7 +852,7 @@ impl App {
                 }
                 None => {}
             }
-            if let Some(true) = popup(ui, &d, win_id.with(("subduep", s.id)), 380.0, |ui| {
+            if let Some(true) = popup(ui, &d, win_id.with(("subduep", s.id)), DATE_MENU_W, |ui| {
                 date_time_menu(
                     ui,
                     &t,

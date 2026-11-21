@@ -220,7 +220,7 @@ impl App {
                 if let Some(day) = d {
                     p.text(at, Align2::LEFT_CENTER, fmt_date(day), font, t.text2);
                 }
-                if let Some(true) = popup(ui, &resp, id.with("pop"), 380.0, |ui| {
+                if let Some(true) = popup(ui, &resp, id.with("pop"), DATE_MENU_W, |ui| {
                     date_menu(ui, &t, id.with("cal"), &mut d)
                 }) {
                     set = Some(d.map(|d| d.to_string()).unwrap_or_default());

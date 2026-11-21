@@ -329,7 +329,7 @@ impl App {
                     ui,
                     &dr,
                     ui.id().with(("ov_date_p", lid, which)),
-                    300.0,
+                    DATE_MENU_W,
                     |ui| date_menu(ui, &tt, ui.id().with(("ov_cal", lid, which)), &mut val),
                 ) {
                     if which == 0 {

@@ -236,7 +236,7 @@ impl App {
                 if i == 3 {
                     let mut pick = d.due;
                     if let Some(true) =
-                        popup(ui, &resp, ui.id().with("new goal due"), 380.0, |ui| {
+                        popup(ui, &resp, ui.id().with("new goal due"), DATE_MENU_W, |ui| {
                             date_menu(ui, t, ui.id().with("new goal cal"), &mut pick)
                         })
                     {

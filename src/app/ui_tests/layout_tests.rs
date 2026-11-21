@@ -1097,3 +1097,80 @@ fn toast_keeps_its_text_on_one_line_after_a_short_one() {
         "the toast wrapped onto more lines: {r:?} for one line of {line:?}"
     );
 }
+
+/// The month in a date menu fills the menu beside the quick options: rows of
+/// one height on both sides, the arrows square over the last two columns,
+/// text inset inside a hovered row's fill, and Clear level with the last week.
+#[test]
+fn date_menu_fills_its_width_and_its_rows_line_up() {
+    let mut h = Ui1::new();
+    open_design_task(&mut h);
+    h.click("Subtask due Pick hero image");
+    let td = today();
+    let first = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
+    let start = first - Duration::days(first.weekday().num_days_from_sunday() as i64);
+    let day = |h: &Ui1, i: i64| h.rect(&format!("Day {}", start + Duration::days(i)));
+    let (today_row, tomorrow) = (h.rect("Today"), h.rect("Tomorrow"));
+    // the options and the month share the menu's width and their rows
+    assert!(
+        (day(&h, 6).right() - today_row.left() - DATE_MENU_W).abs() < 0.5,
+        "the month ends at the menu's right edge ({:?} .. {:?})",
+        today_row,
+        day(&h, 6)
+    );
+    assert!((tomorrow.top() - today_row.bottom()).abs() < 0.5);
+    assert!((today_row.height() - day(&h, 0).height()).abs() < 0.5);
+    assert!(
+        (h.rect("8 weeks").bottom() - day(&h, 35).top()).abs() < 0.5,
+        "the options end where the last week starts"
+    );
+    // a hovered option's fill reaches past its text on the left
+    h.hover(tomorrow.center());
+    let fill = crate::widgets::hover_fill_for(false);
+    let fill_rect = h
+        .shapes
+        .iter()
+        .find_map(|c| match &c.shape {
+            egui::Shape::Rect(r) if r.fill == fill && r.rect.contains(tomorrow.center()) => {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .expect("Tomorrow's hover fill");
+    let text = h.painted_text("Tomorrow")[0].0;
+    assert!(
+        text.left() - fill_rect.left() >= 8.0,
+        "room before the text inside the fill ({:?} in {:?})",
+        text,
+        fill_rect
+    );
+    // the arrows: squares over the last two columns, level with the month
+    let (prev, next) = (h.rect("Previous month"), h.rect("Next month"));
+    for r in [prev, next] {
+        assert!((r.width() - r.height()).abs() < 0.5, "a square: {:?}", r);
+    }
+    assert!((prev.center().x - day(&h, 5).center().x).abs() < 0.5);
+    assert!((next.center().x - day(&h, 6).center().x).abs() < 0.5);
+    let title = h.painted_text(&first.format("%B %Y").to_string())[0].0;
+    assert!(
+        (title.center().y - next.center().y).abs() < 1.5,
+        "the month's name {:?} and the arrows {:?} share a line",
+        title,
+        next
+    );
+    // with a date set, Clear takes the last row, level with the last week
+    h.click("Today");
+    h.app.apply_actions();
+    h.click("Subtask due Pick hero image");
+    let clear = h.rect("Clear");
+    assert!((clear.top() - day(&h, 35).top()).abs() < 0.5, "{:?}", clear);
+    assert!((clear.bottom() - day(&h, 41).bottom()).abs() < 0.5);
+    // the arrows turn the month and a day of it can be picked
+    h.click("Next month");
+    let next_first = crate::widgets::add_months(first, 1);
+    let pick = next_first + Duration::days(9);
+    h.click(&format!("Day {}", pick));
+    h.app.apply_actions();
+    let sub = task_named(&h, "Pick hero image");
+    assert_eq!(sub.due, Some(pick));
+}

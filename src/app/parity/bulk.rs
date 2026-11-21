@@ -124,7 +124,7 @@ impl App {
                             let r = ui.button(tr("Due date"));
                             let mut due: Option<NaiveDate> = None;
                             let mut due_set = false;
-                            popup(ui, &r, pid.with("bd"), 380.0, |ui| {
+                            popup(ui, &r, pid.with("bd"), DATE_MENU_W, |ui| {
                                 if date_menu(ui, &t, pid.with("bdc"), &mut due) {
                                     due_set = true;
                                 }
@@ -132,7 +132,7 @@ impl App {
                             let r = ui.button(tr("Start date"));
                             let mut start: Option<NaiveDate> = None;
                             let mut start_set = false;
-                            popup(ui, &r, pid.with("bsd"), 380.0, |ui| {
+                            popup(ui, &r, pid.with("bsd"), DATE_MENU_W, |ui| {
                                 if date_menu(ui, &t, pid.with("bsdc"), &mut start) {
                                     start_set = true;
                                 }

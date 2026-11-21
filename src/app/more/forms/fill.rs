@@ -236,11 +236,13 @@ impl App {
                         vec2(w, 38.0),
                         &name,
                     );
-                    if let Some(true) =
-                        popup(ui, &b, ui.id().with(("form_due", fid, i)), 380.0, |ui| {
-                            date_menu(ui, t, ui.id().with(("form_due_cal", fid, i)), &mut d)
-                        })
-                    {
+                    if let Some(true) = popup(
+                        ui,
+                        &b,
+                        ui.id().with(("form_due", fid, i)),
+                        DATE_MENU_W,
+                        |ui| date_menu(ui, t, ui.id().with(("form_due_cal", fid, i)), &mut d),
+                    ) {
                         *v = d
                             .map(|d| d.format("%Y-%m-%d").to_string())
                             .unwrap_or_default();

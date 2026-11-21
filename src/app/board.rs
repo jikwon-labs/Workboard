@@ -524,7 +524,7 @@ impl App {
                 let dr = ui.interact(d_rect, cid.with("du"), Sense::click());
                 hover_bg(ui, &dr, d_rect, 4.0);
                 name_it(&dr, &format!("Card due date {}", task.name));
-                if let Some(true) = popup(ui, &dr, cid.with("dup"), 380.0, |ui| {
+                if let Some(true) = popup(ui, &dr, cid.with("dup"), DATE_MENU_W, |ui| {
                     dates_menu(ui, &t, cid.with("dcal"), &mut edited)
                 }) {
                     changed = true;

@@ -896,7 +896,7 @@ impl App {
                     .unwrap_or_else(|| tr("Pick a date").into());
                 let r = icons::icon_button(c, t, "calendar", &txt, name, true);
                 let mut d = cur;
-                if let Some(true) = popup(c, &r, c.id().with((name, gid)), 380.0, |ui| {
+                if let Some(true) = popup(c, &r, c.id().with((name, gid)), DATE_MENU_W, |ui| {
                     date_menu(ui, t, ui.id().with((name, "cal", gid)), &mut d)
                 }) {
                     if which == 0 {

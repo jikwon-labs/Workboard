@@ -4096,15 +4096,17 @@ impl App {
                                         due_color(task, closed, &t),
                                     );
                                 }
-                                if let Some(true) = popup(ui, &dr, id.with("dp"), 380.0, |ui| {
-                                    date_time_menu(
-                                        ui,
-                                        &t,
-                                        id.with("dc"),
-                                        &mut edited.due,
-                                        &mut edited.due_time,
-                                    )
-                                }) {
+                                if let Some(true) =
+                                    popup(ui, &dr, id.with("dp"), DATE_MENU_W, |ui| {
+                                        date_time_menu(
+                                            ui,
+                                            &t,
+                                            id.with("dc"),
+                                            &mut edited.due,
+                                            &mut edited.due_time,
+                                        )
+                                    })
+                                {
                                     changed = true;
                                 }
                             }
@@ -5266,7 +5268,7 @@ impl App {
                             .map(fmt_date)
                             .unwrap_or_else(|| tr("Due date").into());
                         let r = icons::icon_button(ui, &t, "calendar", &d_txt, "Due date", true);
-                        popup(ui, &r, egui::Id::new("qa_due"), 380.0, |ui| {
+                        popup(ui, &r, egui::Id::new("qa_due"), DATE_MENU_W, |ui| {
                             date_menu(ui, &t, egui::Id::new("qa_cal"), &mut qa.due)
                         });
                         let p_txt = if qa.priority > 0 {

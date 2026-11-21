@@ -1714,7 +1714,7 @@ impl App {
                     name_it(&r, "Pick a week");
                     // a calendar: the week of the picked day opens
                     let mut d = Some(ws);
-                    if let Some(true) = popup(ui, &r, ui.id().with("sheet_week_pick"), 380.0, |ui| date_menu(ui, &t, ui.id().with("sheet_week_cal"), &mut d)) {
+                    if let Some(true) = popup(ui, &r, ui.id().with("sheet_week_pick"), DATE_MENU_W, |ui| date_menu(ui, &t, ui.id().with("sheet_week_cal"), &mut d)) {
                         let d = d.unwrap_or_else(today);
                         self.sheet_week = d - Duration::days(d.weekday().num_days_from_sunday() as i64);
                     }

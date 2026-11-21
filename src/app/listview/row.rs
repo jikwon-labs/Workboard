@@ -329,7 +329,7 @@ impl App {
                 0.7,
             );
         }
-        if let Some(true) = popup(ui, &dr, id.with("dup"), 380.0, |ui| {
+        if let Some(true) = popup(ui, &dr, id.with("dup"), DATE_MENU_W, |ui| {
             dates_menu(ui, &t, id.with("dcal"), &mut edited)
         }) {
             changed = true;

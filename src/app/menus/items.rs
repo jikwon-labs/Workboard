@@ -292,7 +292,7 @@ impl App {
         ui.horizontal(|ui| {
             let d_txt = date.map(fmt_date).unwrap_or_else(|| tr("Date").into());
             let r = icon_button(ui, t, "calendar", &d_txt, "Reminder date", true);
-            popup(ui, &r, ui.id().with("rem_date"), 380.0, |ui| {
+            popup(ui, &r, ui.id().with("rem_date"), DATE_MENU_W, |ui| {
                 date_menu(ui, t, ui.id().with("rem_cal"), date)
             });
             let r = ui.add(field(time).hint_text("09:00").desired_width(60.0));

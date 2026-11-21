@@ -324,7 +324,7 @@ impl App {
                 ui.horizontal(|ui| {
                     let mut d = Some(m.date);
                     let r = icon_button(ui, &t, "calendar", &fmt_date(m.date), "Meeting date", true);
-                    if let Some(true) = popup(ui, &r, ui.id().with("meet_date"), 380.0, |ui| date_menu(ui, &t, ui.id().with("meet_cal"), &mut d)) {
+                    if let Some(true) = popup(ui, &r, ui.id().with("meet_date"), DATE_MENU_W, |ui| date_menu(ui, &t, ui.id().with("meet_cal"), &mut d)) {
                         if let Some(d) = d {
                             m.date = d;
                             ch = true;
@@ -450,9 +450,13 @@ impl App {
                         "Reminder date",
                         true,
                     );
-                    popup(ui, &b, ui.id().with(("rem_edit_date", id)), 380.0, |ui| {
-                        date_menu(ui, &t, ui.id().with(("rem_edit_cal", id)), date)
-                    });
+                    popup(
+                        ui,
+                        &b,
+                        ui.id().with(("rem_edit_date", id)),
+                        DATE_MENU_W,
+                        |ui| date_menu(ui, &t, ui.id().with(("rem_edit_cal", id)), date),
+                    );
                     ui.add(field(time).hint_text("09:00").desired_width(54.0));
                     save = ui.button(tr("Save")).clicked()
                         || (te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));

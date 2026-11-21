@@ -424,7 +424,7 @@ impl App {
                 self.open_chat_at(cid, thread);
                 self.chat.jump_to = Some(thread.unwrap_or(mid));
                 self.channel_find = None;
-                self.channel_panel = 0;
+                self.channel_panel = super::chat::ChannelPanel::All;
             }
             Hit::Whiteboard(id) => {
                 self.sweep.wb.open = Some(id);

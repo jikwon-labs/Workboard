@@ -4,43 +4,102 @@
 
 use super::*;
 
-/// (group, label) in the order the left list shows them.
-pub const SETTINGS: [(&str, &str); 15] = [
-    ("Admin", "General"),
-    ("Admin", "People"),
-    ("Admin", "Spaces"),
-    ("Admin", "Trash"),
-    ("Features", "Apps"),
-    ("Features", "Custom fields"),
-    ("Features", "Tag manager"),
-    ("Features", "Templates"),
-    ("Features", "Automations"),
-    ("Features", "Work together"),
-    ("Personal", "My settings"),
-    ("Personal", "Notifications"),
-    ("Personal", "Themes"),
-    ("Personal", "Language"),
-    ("Personal", "Keyboard shortcuts"),
-];
+/// The sections of the Settings page, in the order the left list shows
+/// them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SettingsTab {
+    #[default]
+    General,
+    People,
+    Spaces,
+    Trash,
+    Apps,
+    CustomFields,
+    TagManager,
+    Templates,
+    Automations,
+    WorkTogether,
+    MySettings,
+    Notifications,
+    Themes,
+    Language,
+    KeyboardShortcuts,
+}
 
-/// Sections that change the whole workspace for everyone: on a team server
-/// only its owner and admins see them (the server keeps them too).
-const ADMIN_ONLY: [&str; 5] = [
-    "General",
-    "Apps",
-    "Custom fields",
-    "Tag manager",
-    "Automations",
-];
+impl SettingsTab {
+    pub const ALL: [SettingsTab; 15] = [
+        SettingsTab::General,
+        SettingsTab::People,
+        SettingsTab::Spaces,
+        SettingsTab::Trash,
+        SettingsTab::Apps,
+        SettingsTab::CustomFields,
+        SettingsTab::TagManager,
+        SettingsTab::Templates,
+        SettingsTab::Automations,
+        SettingsTab::WorkTogether,
+        SettingsTab::MySettings,
+        SettingsTab::Notifications,
+        SettingsTab::Themes,
+        SettingsTab::Language,
+        SettingsTab::KeyboardShortcuts,
+    ];
+
+    /// Its name in the list (English; shown translated, and the name tests
+    /// and screen readers use after "Settings ").
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsTab::General => "General",
+            SettingsTab::People => "People",
+            SettingsTab::Spaces => "Spaces",
+            SettingsTab::Trash => "Trash",
+            SettingsTab::Apps => "Apps",
+            SettingsTab::CustomFields => "Custom fields",
+            SettingsTab::TagManager => "Tag manager",
+            SettingsTab::Templates => "Templates",
+            SettingsTab::Automations => "Automations",
+            SettingsTab::WorkTogether => "Work together",
+            SettingsTab::MySettings => "My settings",
+            SettingsTab::Notifications => "Notifications",
+            SettingsTab::Themes => "Themes",
+            SettingsTab::Language => "Language",
+            SettingsTab::KeyboardShortcuts => "Keyboard shortcuts",
+        }
+    }
+
+    /// The heading it is listed under.
+    fn group(self) -> &'static str {
+        use SettingsTab::*;
+        match self {
+            General | People | Spaces | Trash => "Admin",
+            Apps | CustomFields | TagManager | Templates | Automations | WorkTogether => "Features",
+            MySettings | Notifications | Themes | Language | KeyboardShortcuts => "Personal",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<SettingsTab> {
+        Self::ALL.into_iter().find(|s| s.label() == label)
+    }
+
+    /// Changes the whole workspace for everyone: on a team server only its
+    /// owner and admins see it (the server keeps it too).
+    fn admin_only(self) -> bool {
+        use SettingsTab::*;
+        matches!(
+            self,
+            General | Apps | CustomFields | TagManager | Automations
+        )
+    }
+}
 
 impl App {
     pub(super) fn open_settings(&mut self, label: &str) {
-        let label = if ADMIN_ONLY.contains(&label) && !self.may_manage() {
-            "My settings"
+        let tab = SettingsTab::from_label(label).unwrap_or_default();
+        self.settings_tab = if tab.admin_only() && !self.may_manage() {
+            SettingsTab::MySettings
         } else {
-            label
+            tab
         };
-        self.settings_tab = SETTINGS.iter().position(|s| s.1 == label).unwrap_or(0) as u8;
         self.settings_state = None;
         // a photo picked last time and not saved doesn't come back
         self.profile_photo = None;
@@ -102,17 +161,18 @@ impl App {
             .show(&mut nui, |nui| {
                 let mut last_group = "";
                 let manages = self.may_manage();
-                for (i, (group, label)) in SETTINGS.iter().enumerate() {
+                for tab in SettingsTab::ALL {
+                    let (group, label) = (tab.group(), tab.label());
                     // sections that change the workspace for everyone are the owner's and admins'
-                    if ADMIN_ONLY.contains(label) && !manages {
+                    if tab.admin_only() && !manages {
                         continue;
                     }
-                    if *group != last_group {
+                    if group != last_group {
                         last_group = group;
                         nui.add_space(8.0);
                         nui.label(RichText::new(tr(group)).small().color(t.text3));
                     }
-                    let sel = self.settings_tab as usize == i;
+                    let sel = self.settings_tab == tab;
                     let w = nui.available_width();
                     let (r, resp) = nui.allocate_exact_size(vec2(w, 28.0), Sense::click());
                     name_it(&resp, &format!("Settings {}", label));
@@ -131,18 +191,17 @@ impl App {
                         w - 14.0,
                     );
                     if resp.clicked() && !sel {
-                        self.settings_tab = i as u8;
+                        self.settings_tab = tab;
                         self.settings_state = None;
                     }
                 }
             });
-        let mut label = SETTINGS[(self.settings_tab as usize).min(SETTINGS.len() - 1)].1;
-        if ADMIN_ONLY.contains(&label) && !self.may_manage() {
+        if self.settings_tab.admin_only() && !self.may_manage() {
             // a member lands on their own settings instead
-            label = "My settings";
-            self.settings_tab = SETTINGS.iter().position(|s| s.1 == label).unwrap_or(0) as u8;
+            self.settings_tab = SettingsTab::MySettings;
             self.settings_state = None;
         }
+        let label = self.settings_tab.label();
         let mut bui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(body.shrink2(vec2(32.0, 20.0)))

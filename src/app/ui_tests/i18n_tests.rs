@@ -190,12 +190,12 @@ pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             a.doc_open = doc;
         }),
     ));
-    for i in 0..settings::SETTINGS.len() {
+    for tab in settings::SettingsTab::ALL {
         v.push((
-            format!("settings {}", settings::SETTINGS[i].1),
+            format!("settings {}", tab.label()),
             Box::new(move |a: &mut App| {
                 a.section = Section::Settings;
-                a.settings_tab = i as u8;
+                a.settings_tab = tab;
                 a.settings_state = None;
             }),
         ));

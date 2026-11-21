@@ -599,7 +599,7 @@ impl App {
                                     self.open_chat_at(cid, None);
                                     self.chat.jump_to = Some(m.id);
                                     self.channel_find = None;
-                                    self.channel_panel = 0;
+                                    self.channel_panel = super::chat::ChannelPanel::All;
                                 }
                             });
                         });

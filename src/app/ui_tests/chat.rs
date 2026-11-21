@@ -3138,7 +3138,11 @@ fn a_post_shows_its_icon_in_the_box_and_then_goes_back_to_messages() {
     assert_eq!(last.text, "Office closed on Friday");
     assert!(last.post_title.is_some(), "it went out as a post");
     h.settle();
-    assert_eq!(h.app.composer_mode, 0, "the box is back to messages");
+    assert_eq!(
+        h.app.composer_mode,
+        crate::app::chat::ComposerMode::Message,
+        "the box is back to messages"
+    );
     assert!(!h.has("Post mode"));
     // the next thing typed is a plain message
     h.send_message("thanks");
@@ -3694,7 +3698,7 @@ fn files_shows_the_conversations_files_in_one_place() {
     assert!(shown(&h, "Lunch at noon"));
 
     panel_row(&mut h, "Files");
-    assert_eq!(h.app.channel_panel, 5);
+    assert_eq!(h.app.channel_panel, crate::app::chat::ChannelPanel::Files);
     assert!(
         h.has("Messages with files  \u{00D7}"),
         "named over the list"
@@ -3740,7 +3744,11 @@ fn files_shows_the_conversations_files_in_one_place() {
         .find(|p| notes.y_range().contains(p.y))
         .expect("beside the reply's file");
     h.click_at(go);
-    assert_eq!(h.app.channel_panel, 0, "every message again");
+    assert_eq!(
+        h.app.channel_panel,
+        crate::app::chat::ChannelPanel::All,
+        "every message again"
+    );
     assert_eq!(
         h.app.chat.thread_open,
         Some(plain),
@@ -3756,13 +3764,13 @@ fn links_shows_messages_with_web_addresses() {
     let mut h = Ui1::new();
     files_and_links_channel(&mut h);
     panel_row(&mut h, "Links");
-    assert_eq!(h.app.channel_panel, 6);
+    assert_eq!(h.app.channel_panel, crate::app::chat::ChannelPanel::Links);
     assert!(h.has("Messages with links  \u{00D7}"));
     assert!(shown(&h, "The spec is at https://example.com/spec"));
     assert!(shown(&h, "Lunch at noon"), "a link in its thread");
     assert!(!shown(&h, "Here is the plan") && !shown(&h, "From the beach"));
     panel_row(&mut h, "Links");
-    assert_eq!(h.app.channel_panel, 0);
+    assert_eq!(h.app.channel_panel, crate::app::chat::ChannelPanel::All);
     assert!(shown(&h, "Here is the plan"));
 }
 

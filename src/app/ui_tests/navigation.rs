@@ -263,7 +263,7 @@ fn the_profile_menu_leaves_out_rows_settings_already_has_and_tools_that_cannot_r
     for section in ["Notifications", "Themes", "Keyboard shortcuts"] {
         h.click(&format!("Settings {}", section));
         assert_eq!(
-            super::super::settings::SETTINGS[h.app.settings_tab as usize].1,
+            h.app.settings_tab.label(),
             section,
             "{} opens in Settings",
             section
@@ -1564,10 +1564,7 @@ fn header_automate_opens_for_the_current_list_and_manage_people_opens_settings()
     h.settle();
     h.click("Manage people");
     assert_eq!(h.app.section, Section::Settings);
-    assert_eq!(
-        crate::app::settings::SETTINGS[h.app.settings_tab as usize].1,
-        "People"
-    );
+    assert_eq!(h.app.settings_tab.label(), "People");
 }
 
 #[test]

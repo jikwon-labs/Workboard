@@ -568,7 +568,8 @@ pub struct App {
     force_menu: Option<String>,
     inbox_tab: nav::InboxTab,
     channel_find: Option<String>,
-    channel_panel: u8,
+    /// Which of the channel's messages show (the panel beside them).
+    channel_panel: chat::ChannelPanel,
     /// Each hub's sidebar filter (Docs, Dashboards, Teams, ...).
     hub: hubs::HubFilters,
     /// The doc whose open was last counted (Popular Wikis views).
@@ -576,7 +577,8 @@ pub struct App {
     temp_app: Option<Section>,
     team_open: Option<u64>,
     sheet_entries: bool,
-    composer_mode: u8,
+    /// What the channel's box writes: a message or a post.
+    composer_mode: chat::ComposerMode,
     my_tasks_open: bool,
     sheet_force: bool,
     inbox_filter: u8,
@@ -616,12 +618,12 @@ pub struct App {
     /// List (it shows Group: None and Date created, as in the original).
     personal_saved: Option<(GroupBy, bool)>,
     cal_week: bool,
-    /// Gantt scale: 0 days, 1 weeks, 2 months.
-    gantt_zoom: u8,
+    /// The Gantt's scale.
+    gantt_zoom: timebar::Zoom,
     gantt_jump: bool,
     timeline: timeline::TimelineState,
     doc_preview: bool,
-    settings_tab: u8,
+    settings_tab: settings::SettingsTab,
     settings_state: Option<Modal>,
     /// The List's view settings shown now: grouping, sorting, columns and
     /// filter (see listview.rs).
@@ -1111,13 +1113,13 @@ impl App {
             force_menu: arg("--menu"),
             inbox_tab: nav::InboxTab::Primary,
             channel_find: None,
-            channel_panel: 0,
+            channel_panel: Default::default(),
             hub: Default::default(),
             doc_viewed: None,
             temp_app: None,
             team_open: None,
             sheet_entries: false,
-            composer_mode: 0,
+            composer_mode: Default::default(),
             my_tasks_open: true,
             sheet_force: false,
             inbox_filter: 0,
@@ -1151,11 +1153,11 @@ impl App {
             filter_open: false,
             personal_saved: None,
             cal_week: false,
-            gantt_zoom: 0,
+            gantt_zoom: Default::default(),
             gantt_jump: true,
             timeline: Default::default(),
             doc_preview: false,
-            settings_tab: 0,
+            settings_tab: Default::default(),
             settings_state: None,
             view_prefs: if persist {
                 listview::load_prefs()

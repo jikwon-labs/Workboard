@@ -14,6 +14,37 @@ pub(super) const QUICK_REACTIONS: [&str; 4] = ["\u{1F44D}", "\u{2705}", "\u{1F44
 /// every frame, so a channel with years of history draws only its end.
 pub(super) const CHAT_PAGE: usize = 200;
 
+/// What the channel's message box writes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(super) enum ComposerMode {
+    #[default]
+    Message,
+    Post,
+}
+
+/// Which of a channel's messages show: all, or one kind picked in the panel
+/// beside them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(super) enum ChannelPanel {
+    #[default]
+    All,
+    Pinned,
+    Replies,
+    Tasks,
+    Saved,
+    Files,
+    Links,
+}
+
+/// A row of the panel beside a channel's messages.
+#[derive(Clone, Copy, PartialEq)]
+enum PanelRow {
+    Followers,
+    Find,
+    Show(ChannelPanel),
+    Settings,
+}
+
 /// The emoji grid behind "Add reaction" and the message box's emoji button.
 /// Each must be in egui's built-in emoji fonts, or it draws as an empty box.
 pub(super) const EMOJIS: [&str; 40] = [
@@ -738,7 +769,7 @@ impl App {
         self.open_chat_at(ch, thread);
         self.chat.jump_to = Some(parent.unwrap_or(msg));
         self.channel_find = None;
-        self.channel_panel = 0;
+        self.channel_panel = ChannelPanel::All;
     }
 
     /// Which copy of a conversation holds a message or reply: `ch`, or one of
@@ -1461,18 +1492,18 @@ impl App {
                 egui::ScrollArea::vertical().id_salt(("chan_panel_scroll", cid)).auto_shrink([false, true]).show(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let rows: [(&str, &str, u8); 9] = [("person", "Followers", 10), ("search", "Find in channel", 11), ("reply", "Replies", 2), ("pin", "Pinned messages", 1), ("bookmark", "Saved", 4), ("attach", "Files", 5), ("link", "Links", 6), ("task", "Turned into tasks", 3), ("settings", "Settings", 12)];
+                    let rows: [(&str, &str, PanelRow); 9] = [("person", "Followers", PanelRow::Followers), ("search", "Find in channel", PanelRow::Find), ("reply", "Replies", PanelRow::Show(ChannelPanel::Replies)), ("pin", "Pinned messages", PanelRow::Show(ChannelPanel::Pinned)), ("bookmark", "Saved", PanelRow::Show(ChannelPanel::Saved)), ("attach", "Files", PanelRow::Show(ChannelPanel::Files)), ("link", "Links", PanelRow::Show(ChannelPanel::Links)), ("task", "Turned into tasks", PanelRow::Show(ChannelPanel::Tasks)), ("settings", "Settings", PanelRow::Settings)];
                     for (icon, label, code) in rows {
                         let w = ui.available_width();
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                        let sel = code < 10 && self.channel_panel == code;
+                        let sel = code == PanelRow::Show(self.channel_panel);
                         if sel {
                             ui.painter().rect_filled(r, 6.0, t.row_selected);
                         } else if resp.hovered() {
                             ui.painter().rect_filled(r, 6.0, t.hover);
                         }
                         let at = if icons_only { r.center() - vec2(12.0, 0.0) } else { r.left_center() };
-                        if code == 10 {
+                        if code == PanelRow::Followers {
                             paint_avatars(ui.painter(), at + vec2(4.0, 0.0), 8.0, &channel.members.iter().take(1).copied().collect::<Vec<_>>(), &self.data, t.bg);
                         } else {
                             line_icon(ui.painter(), icon, at + vec2(12.0, 0.0), t.text2);
@@ -1481,18 +1512,18 @@ impl App {
                             name_it(&resp, label);
                             resp.on_hover_text(tr(label))
                         } else {
-                            let count_w = if code == 10 { 24.0 } else { 0.0 };
+                            let count_w = if code == PanelRow::Followers { 24.0 } else { 0.0 };
                             paint_fit(ui, r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text, w - 32.0 - count_w);
-                            if code == 10 {
+                            if code == PanelRow::Followers {
                                 ui.painter().text(r.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, channel.members.len().to_string(), FontId::proportional(12.0), t.text3);
                             }
                             resp
                         };
                         if resp.clicked() {
                             match code {
-                                10 | 12 => self.modal = Some(Modal::ChannelSettings(cid)),
-                                11 => self.channel_find = if self.channel_find.is_some() { None } else { Some(String::new()) },
-                                c => self.channel_panel = if self.channel_panel == c { 0 } else { c },
+                                PanelRow::Followers | PanelRow::Settings => self.modal = Some(Modal::ChannelSettings(cid)),
+                                PanelRow::Find => self.channel_find = if self.channel_find.is_some() { None } else { Some(String::new()) },
+                                PanelRow::Show(c) => self.channel_panel = if self.channel_panel == c { ChannelPanel::All } else { c },
                             }
                         }
                     }
@@ -1514,17 +1545,17 @@ impl App {
                         self.channel_find = Some(q);
                     }
                 }
-                if self.channel_panel != 0 {
+                if self.channel_panel != ChannelPanel::All {
                     let label = match self.channel_panel {
-                        1 => tr("Pinned messages"),
-                        2 => tr("Messages with replies"),
-                        4 => tr("Saved messages"),
-                        5 => tr("Messages with files"),
-                        6 => tr("Messages with links"),
-                        _ => tr("Messages turned into tasks"),
+                        ChannelPanel::Pinned => tr("Pinned messages"),
+                        ChannelPanel::Replies => tr("Messages with replies"),
+                        ChannelPanel::Saved => tr("Saved messages"),
+                        ChannelPanel::Files => tr("Messages with files"),
+                        ChannelPanel::Links => tr("Messages with links"),
+                        ChannelPanel::Tasks | ChannelPanel::All => tr("Messages turned into tasks"),
                     };
                     if ui.add(egui::Button::new(format!("{}  \u{00D7}", label)).corner_radius(14)).clicked() {
-                        self.channel_panel = 0;
+                        self.channel_panel = ChannelPanel::All;
                     }
                 }
             });
@@ -1545,13 +1576,13 @@ impl App {
                 .filter(|m| q.is_empty() || m.text.to_lowercase().contains(&q) || typed_post_title(m).is_some_and(|t| t.to_lowercase().contains(&q)))
                 .filter(|m| find.fits(m, &self.data))
                 .filter(|m| match panel {
-                    1 => m.pinned,
-                    2 => !m.replies.is_empty(),
-                    3 => m.task.is_some(),
-                    4 => m.saved || m.replies.iter().any(|r| r.saved),
-                    5 => in_thread(m, has_files),
-                    6 => in_thread(m, has_links),
-                    _ => true,
+                    ChannelPanel::Pinned => m.pinned,
+                    ChannelPanel::Replies => !m.replies.is_empty(),
+                    ChannelPanel::Tasks => m.task.is_some(),
+                    ChannelPanel::Saved => m.saved || m.replies.iter().any(|r| r.saved),
+                    ChannelPanel::Files => in_thread(m, has_files),
+                    ChannelPanel::Links => in_thread(m, has_links),
+                    ChannelPanel::All => true,
                 })
                 .collect();
             // the newest messages; earlier ones a page at a time on asking
@@ -1578,7 +1609,7 @@ impl App {
             }
             let going = self.chat.jump_to.is_some() || self.chat.flash.is_some_and(|(c, _, _)| c == cid);
             // Files: the files themselves in place of their messages
-            let gallery = (panel == 5).then(|| {
+            let gallery = (panel == ChannelPanel::Files).then(|| {
                 let ids: std::collections::HashSet<u64> = matching.iter().map(|m| m.id).collect();
                 let msgs = at.iter().filter_map(|&(c, m)| {
                     let ch = self.data.channels.get(c)?;
@@ -1586,7 +1617,7 @@ impl App {
                 });
                 self.sent_files(msgs, |m| has_files(m) && find.fits(m, &self.data))
             });
-            let links_none = panel == 6 && matching.is_empty();
+            let links_none = panel == ChannelPanel::Links && matching.is_empty();
             let earlier = if gallery.is_some() { 0 } else { matching.len().saturating_sub(limit) };
             let shown: Vec<Message> = if gallery.is_some() { vec![] } else { matching[earlier..].iter().map(|m| (*m).clone()).collect() };
             let list = egui::ScrollArea::vertical().id_salt(("chat_scroll", cid, gallery.is_some())).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(!going && gallery.is_none()).show(ui, |ui| {
@@ -2174,15 +2205,13 @@ impl App {
         let mut out = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            for (i, (icon, label)) in [
-                ("chat", "Message"),
-                ("megaphone", "Post"),
-                ("sparkle", "Ask"),
-            ]
-            .iter()
-            .enumerate()
-            {
-                let sel = self.composer_mode == i as u8;
+            // Ask opens the AI page instead of a mode of its own
+            for (mode, icon, label) in [
+                (Some(ComposerMode::Message), "chat", "Message"),
+                (Some(ComposerMode::Post), "megaphone", "Post"),
+                (None, "sparkle", "Ask"),
+            ] {
+                let sel = mode == Some(self.composer_mode);
                 // the chosen tab is outlined, the others plain
                 let b = icon_button_ex(
                     ui,
@@ -2196,10 +2225,9 @@ impl App {
                     t.text2,
                 );
                 if b.clicked() {
-                    if i == 2 {
-                        self.section = Section::Ai;
-                    } else {
-                        self.composer_mode = i as u8;
+                    match mode {
+                        Some(m) => self.composer_mode = m,
+                        None => self.section = Section::Ai,
                     }
                 }
             }
@@ -2224,7 +2252,7 @@ impl App {
                     }
                 }
                 self.pending_strip(ui, false);
-                if self.composer_mode == 1 {
+                if self.composer_mode == ComposerMode::Post {
                     // the megaphone in the box says this goes out as a post, not a message
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
@@ -2240,7 +2268,7 @@ impl App {
                         );
                     });
                 }
-                let hint = if self.composer_mode == 1 {
+                let hint = if self.composer_mode == ComposerMode::Post {
                     tr("Share an announcement...").to_string()
                 } else {
                     trf!(
@@ -2291,7 +2319,7 @@ impl App {
                 // Up in an empty box changes my last message here
                 if r.has_focus()
                     && self.chat.channel.text.is_empty()
-                    && self.composer_mode == 0
+                    && self.composer_mode == ComposerMode::Message
                     && ui.input(|i| i.key_pressed(egui::Key::ArrowUp))
                 {
                     let me = self.data.me;
@@ -2394,7 +2422,7 @@ impl App {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         // Post in words; a message sends with the paper plane drawn on it
-                        let label = if self.composer_mode == 1 {
+                        let label = if self.composer_mode == ComposerMode::Post {
                             tr("Post")
                         } else {
                             ""
@@ -2405,7 +2433,7 @@ impl App {
                         let ready = files_ok
                             && (!self.chat.channel.text.trim().is_empty()
                                 || !self.chat.channel.files.is_empty()
-                                || (self.composer_mode == 1
+                                || (self.composer_mode == ComposerMode::Post
                                     && !self.chat.post_title.trim().is_empty()));
                         let b = Tint(
                             egui::Button::new(RichText::new(label).color(if ready {
@@ -2424,7 +2452,9 @@ impl App {
                         );
                         let sent = ui.add(b);
                         // the clock: send it later (schedule.rs), plain messages only
-                        if self.composer_mode == 0 && !self.chat.channel.text.trim().is_empty() {
+                        if self.composer_mode == ComposerMode::Message
+                            && !self.chat.channel.text.trim().is_empty()
+                        {
                             let clock = icon_button(ui, &t, "clock", "", "Schedule message", false)
                                 .on_hover_text(tr("Schedule message"));
                             popup(ui, &clock, egui::Id::new("schedule_popup"), 220.0, |ui| {
@@ -2452,7 +2482,7 @@ impl App {
                         }
                         if (sent.clicked() || enter) && ready {
                             let text = self.chat.channel.text.trim().to_string();
-                            let title = if self.composer_mode == 1 {
+                            let title = if self.composer_mode == ComposerMode::Post {
                                 Some(if self.chat.post_title.trim().is_empty() {
                                     DEFAULT_POST_TITLE.to_string()
                                 } else {
@@ -2464,7 +2494,7 @@ impl App {
                             out = Some((text, title, files));
                             self.chat.channel.coming = self.pending_coming(false);
                             // after a post the box goes back to plain messages
-                            self.composer_mode = 0;
+                            self.composer_mode = ComposerMode::Message;
                             self.chat.channel.text.clear();
                             // the picks go with the message (see apply_chat)
                             self.chat.post_title.clear();

@@ -980,7 +980,7 @@ fn timeline_follows_the_filter_and_zoom() {
     assert!(!h.has("Bar Write copy for landing page"), "Me mode");
     h.app.me_mode = false;
     h.click("Month");
-    assert_eq!(h.app.timeline.zoom, 2);
+    assert_eq!(h.app.timeline.zoom, crate::app::timebar::Zoom::Month);
     h.click("Today");
     let r = h.rect("Bar Write copy for landing page");
     assert!(r.left() > 0.0 && r.right() < 1440.0, "today is in view");
@@ -1000,11 +1000,11 @@ fn timeline_zoom_buttons_are_square() {
         );
     }
     h.assert_plus_centered("Zoom in");
-    assert_eq!(h.app.timeline.zoom, 0);
+    assert_eq!(h.app.timeline.zoom, crate::app::timebar::Zoom::Day);
     h.click("Zoom out");
-    assert_eq!(h.app.timeline.zoom, 1);
+    assert_eq!(h.app.timeline.zoom, crate::app::timebar::Zoom::Week);
     h.click("Zoom in");
-    assert_eq!(h.app.timeline.zoom, 0);
+    assert_eq!(h.app.timeline.zoom, crate::app::timebar::Zoom::Day);
 }
 
 #[test]

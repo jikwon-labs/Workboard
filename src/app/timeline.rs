@@ -22,7 +22,7 @@ pub(super) const LANES: [GroupBy; 4] = [
 
 pub(super) struct TimelineState {
     pub by: GroupBy,
-    pub zoom: u8,
+    pub zoom: timebar::Zoom,
     /// Scroll back to today on the next frame.
     pub jump: bool,
     /// The tray of tasks without dates is open.
@@ -36,7 +36,7 @@ impl Default for TimelineState {
     fn default() -> Self {
         TimelineState {
             by: GroupBy::Assignee,
-            zoom: 0,
+            zoom: Default::default(),
             jump: true,
             tray: false,
             quiet_edge: Default::default(),
@@ -471,14 +471,14 @@ mod tests {
     #[test]
     fn a_name_beside_a_narrow_bar_counts_as_taken() {
         // Day scale: 30 points a day
-        let sc = DayScale::new(0, d(0));
+        let sc = DayScale::new(crate::app::timebar::Zoom::Day, d(0));
         // a three-day bar (88 points) holds its name: it reaches its due date
         assert_eq!(sc.reach((d(0), d(2)), 300.0), d(2));
         // a one-day bar writes a 100-point name to its right: 5 + 100 + 6
         // points cover 4 more day columns
         assert_eq!(sc.reach((d(0), d(0)), 100.0), d(4));
         // at the Month scale (4 points a day) the same name covers 28 days
-        let sc = DayScale::new(2, d(0));
+        let sc = DayScale::new(crate::app::timebar::Zoom::Month, d(0));
         assert_eq!(sc.reach((d(0), d(0)), 100.0), d(28));
     }
 
@@ -504,7 +504,7 @@ mod tests {
             .collect();
         assert_eq!(rows[0], rows[1]);
         // with the first bar's name written beside it, they don't
-        let sc = DayScale::new(0, d(0));
+        let sc = DayScale::new(crate::app::timebar::Zoom::Day, d(0));
         let lane =
             unassigned(a.timeline_lanes_with(&tasks, GroupBy::Assignee, |_, r| sc.reach(r, 100.0)));
         let rows: Vec<usize> = lane

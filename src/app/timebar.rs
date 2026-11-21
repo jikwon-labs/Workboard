@@ -5,10 +5,50 @@
 
 use super::*;
 
-/// Where each day sits on the axis at one zoom level (0 Day, 1 Week, 2 Month).
+/// The axis's scale: a column for each day at Day, narrower at Week and
+/// Month.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub(super) enum Zoom {
+    #[default]
+    Day,
+    Week,
+    Month,
+}
+
+impl Zoom {
+    const ALL: [Zoom; 3] = [Zoom::Day, Zoom::Week, Zoom::Month];
+
+    fn label(self) -> &'static str {
+        match self {
+            Zoom::Day => "Day",
+            Zoom::Week => "Week",
+            Zoom::Month => "Month",
+        }
+    }
+
+    /// One step out (Day to Week to Month), or None at Month.
+    fn step_out(self) -> Option<Zoom> {
+        match self {
+            Zoom::Day => Some(Zoom::Week),
+            Zoom::Week => Some(Zoom::Month),
+            Zoom::Month => None,
+        }
+    }
+
+    /// One step in, or None at Day.
+    fn step_in(self) -> Option<Zoom> {
+        match self {
+            Zoom::Day => None,
+            Zoom::Week => Some(Zoom::Day),
+            Zoom::Month => Some(Zoom::Week),
+        }
+    }
+}
+
+/// Where each day sits on the axis at one zoom level.
 #[derive(Clone, Copy)]
 pub(super) struct DayScale {
-    pub zoom: u8,
+    pub zoom: Zoom,
     /// The first day drawn.
     pub start: NaiveDate,
     /// How many days are drawn.
@@ -18,12 +58,12 @@ pub(super) struct DayScale {
 }
 
 impl DayScale {
-    pub fn new(zoom: u8, today: NaiveDate) -> Self {
+    pub fn new(zoom: Zoom, today: NaiveDate) -> Self {
         // day columns get narrower as you zoom out
         let (cw, days, back) = match zoom {
-            0 => (30.0, 70, 14),
-            1 => (12.0, 182, 35),
-            _ => (4.0, 548, 120),
+            Zoom::Day => (30.0, 70, 14),
+            Zoom::Week => (12.0, 182, 35),
+            Zoom::Month => (4.0, 548, 120),
         };
         let start = today - Duration::days(today.weekday().num_days_from_monday() as i64 + back);
         DayScale {
@@ -96,26 +136,26 @@ pub(super) fn bar_range(
 
 /// The Today button and the zoom buttons, drawn into the current row.
 /// Returns true when the view should scroll back to today.
-pub(super) fn zoom_buttons(ui: &mut Ui, zoom: &mut u8) -> bool {
+pub(super) fn zoom_buttons(ui: &mut Ui, zoom: &mut Zoom) -> bool {
     let mut jump = false;
     if ui.button(tr("Today")).clicked() {
         jump = true;
     }
     ui.separator();
-    for (z, label) in [(0u8, "Day"), (1, "Week"), (2, "Month")] {
-        if ui.selectable_label(*zoom == z, tr(label)).clicked() && *zoom != z {
+    for z in Zoom::ALL {
+        if ui.selectable_label(*zoom == z, tr(z.label())).clicked() && *zoom != z {
             *zoom = z;
             jump = true;
         }
     }
     let out = crate::app::icons::sign_button(ui, true, "Zoom out");
-    if out.clicked() && *zoom < 2 {
-        *zoom += 1;
+    if let Some(z) = zoom.step_out().filter(|_| out.clicked()) {
+        *zoom = z;
         jump = true;
     }
     let zin = crate::app::icons::sign_button(ui, false, "Zoom in");
-    if zin.clicked() && *zoom > 0 {
-        *zoom -= 1;
+    if let Some(z) = zoom.step_in().filter(|_| zin.clicked()) {
+        *zoom = z;
         jump = true;
     }
     jump
@@ -137,12 +177,12 @@ pub(super) fn paint_axis(
         let d = sc.start + Duration::days(i);
         let x = area.left() + cw * i as f32;
         let col_r = Rect::from_min_size(pos2(x, area.top() + head), vec2(cw, total_h - head));
-        if sc.zoom == 0 && d.weekday().num_days_from_monday() >= 5 {
+        if sc.zoom == Zoom::Day && d.weekday().num_days_from_monday() >= 5 {
             p.rect_filled(col_r, 0.0, t.column_bg);
         }
         let tick = match sc.zoom {
-            0 | 1 => d.weekday().num_days_from_monday() == 0,
-            _ => d.day() == 1,
+            Zoom::Day | Zoom::Week => d.weekday().num_days_from_monday() == 0,
+            Zoom::Month => d.day() == 1,
         };
         if tick {
             p.vline(
@@ -150,7 +190,7 @@ pub(super) fn paint_axis(
                 area.top()..=area.top() + total_h,
                 Stroke::new(0.5_f32, t.border),
             );
-            let label = if sc.zoom == 2 {
+            let label = if sc.zoom == Zoom::Month {
                 d.text("%b %Y")
             } else {
                 d.text("%b %-d")
@@ -163,7 +203,7 @@ pub(super) fn paint_axis(
                 t.text2,
             );
         }
-        if sc.zoom == 0 {
+        if sc.zoom == Zoom::Day {
             let dc = if d == td { Color32::WHITE } else { t.text3 };
             if d == td {
                 p.circle_filled(pos2(x + cw / 2.0, area.top() + 31.0), 9.0, t.danger);

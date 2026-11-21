@@ -27,10 +27,11 @@ fn small_window_settings_reach_every_section_and_its_controls() {
     let mut h = Ui1::sized(900.0, 560.0);
     h.app.open_settings("General");
     h.settle();
-    for (_, label) in super::settings::SETTINGS {
+    for tab in super::settings::SettingsTab::ALL {
+        let label = tab.label();
         h.click(&format!("Settings {}", label));
         assert_eq!(
-            super::settings::SETTINGS[h.app.settings_tab as usize].1,
+            h.app.settings_tab.label(),
             label,
             "the {} section opens",
             label
@@ -339,7 +340,7 @@ fn gantt_marks_bars_out_of_sight_and_shortens_names() {
     let mut h = Ui1::new();
     let td = today();
     let base = task_named(&h, "Write copy for landing page").clone();
-    let sc = super::timebar::DayScale::new(0, td);
+    let sc = super::timebar::DayScale::new(crate::app::timebar::Zoom::Day, td);
     // ended a week before the first day drawn
     let ended = sc.start - Duration::days(7);
     let mut x = base.clone();
@@ -1516,7 +1517,7 @@ fn small_window_thread_beside_a_channel_does_not_overlap() {
     let thumbs = h.rect("\u{1F44D}");
     assert!(thumbs.left() >= 320.0, "the first reaction at {:?}", thumbs);
     h.click("Pinned messages");
-    assert_eq!(h.app.channel_panel, 1);
+    assert_eq!(h.app.channel_panel, crate::app::chat::ChannelPanel::Pinned);
 }
 
 /// Inbox and Replies rows in the smallest window shorten long task names

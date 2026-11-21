@@ -75,6 +75,100 @@ fn click_search_and_open_result() {
     assert_eq!(h.app.task(id).unwrap().name, "Renew passport");
 }
 
+/// The colour of each glyph of the painted text `text` (the first one
+/// found), as the screen shows it: (letter, colour).
+fn glyph_colors(h: &Ui1, text: &str) -> Vec<(char, Color32)> {
+    let mut out = None;
+    each_text(&h.shapes, |ts, _| {
+        if out.is_some() || ts.galley.text() != text {
+            return;
+        }
+        let mut v = vec![];
+        for row in &ts.galley.rows {
+            let mut at = row.visuals.glyph_vertex_range.start;
+            for g in &row.glyphs {
+                if g.uv_rect.is_nothing() {
+                    continue;
+                }
+                let c = row.visuals.mesh.vertices[at].color;
+                let c = if let Some(o) = ts.override_text_color {
+                    o
+                } else if c == Color32::PLACEHOLDER {
+                    ts.fallback_color
+                } else {
+                    c
+                };
+                v.push((g.chr, c));
+                at += 4;
+            }
+        }
+        out = Some(v);
+    });
+    out.unwrap_or_else(|| panic!("no painted text {:?}", text))
+}
+
+#[test]
+fn an_opened_search_result_shows_the_searched_words_in_orange_for_two_seconds() {
+    let mut h = Ui1::new();
+    h.click("Search");
+    h.type_text("PASSport");
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(h.app.open_task.is_some());
+    assert_eq!(crate::find_flash::lit(&h.ctx).as_deref(), Some("passport"));
+    // the task window's name: the searched letters orange, whatever their case
+    let colors = glyph_colors(&h, "Renew passport");
+    let orange: String = colors
+        .iter()
+        .filter(|(_, c)| *c == WARN_ORANGE)
+        .map(|(ch, _)| *ch)
+        .collect();
+    assert_eq!(orange, "passport");
+    let own = colors[0].1;
+    assert_ne!(own, WARN_ORANGE, "the rest keeps its colour");
+    // two seconds later the words are back in the text's own colour
+    for _ in 0..42 {
+        h.frame(vec![]);
+    }
+    assert!(crate::find_flash::lit(&h.ctx).is_none());
+    assert!(glyph_colors(&h, "Renew passport")
+        .iter()
+        .all(|(_, c)| *c == own));
+}
+
+#[test]
+fn a_message_from_the_search_opens_the_chat_at_it_lit_up() {
+    let mut h = Ui1::new();
+    let text = "Reminder: newsletter draft is due Thursday.";
+    h.click("Search");
+    h.type_text("newsletter draft");
+    h.click(text);
+    h.settle();
+    assert_eq!(h.app.section, Section::Chat);
+    assert!(
+        h.app.chat.flash.is_some(),
+        "the message row is lit, as from a post"
+    );
+    let orange: String = glyph_colors(&h, text)
+        .iter()
+        .filter(|(_, c)| *c == WARN_ORANGE)
+        .map(|(ch, _)| *ch)
+        .collect();
+    assert_eq!(
+        orange, "newsletterdraft",
+        "the searched words, not the spaces"
+    );
+}
+
+#[test]
+fn a_search_result_opened_without_typing_lights_nothing() {
+    let mut h = Ui1::new();
+    h.click("Search");
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(crate::find_flash::lit(&h.ctx).is_none());
+}
+
 #[test]
 fn click_back_and_forward() {
     let mut h = Ui1::new();

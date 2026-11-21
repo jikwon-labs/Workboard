@@ -10,6 +10,8 @@ pub enum Hit {
     Task(u64),
     Doc(u64),
     Chat(u64),
+    /// A message: (its conversation, the message, the thread it is a reply in).
+    Message(u64, u64, Option<u64>),
     Whiteboard(u64),
     Form(u64),
     Dashboard(u64),
@@ -276,11 +278,13 @@ impl App {
                 } else {
                     format!("#{}", c.name)
                 };
-                for m in c
-                    .messages
-                    .iter()
-                    .chain(c.messages.iter().flat_map(|m| m.replies.iter()))
-                {
+                // the messages, then the replies with the thread they are in
+                let all = c.messages.iter().map(|m| (m, None)).chain(
+                    c.messages
+                        .iter()
+                        .flat_map(|m| m.replies.iter().map(move |r| (r, Some(m.id)))),
+                );
+                for (m, thread) in all {
                     // a post is found by its title too (its text may be
                     // empty), a title someone wrote, not the default
                     let title = super::chat::typed_post_title(m);
@@ -296,7 +300,7 @@ impl App {
                             "chat",
                             truncate(&one_line(&shown), 60),
                             place.clone(),
-                            Hit::Chat(c.id),
+                            Hit::Message(c.id, m.id, thread),
                         ));
                         n += 1;
                         if n >= many(5) {
@@ -398,6 +402,14 @@ impl App {
                 self.section = Section::Chat;
                 self.chat.open = Some(id);
                 self.leave_thread();
+            }
+            // at the message, as "Open in channel" on a post opens one: a
+            // reply in its thread, nothing filtered out of the list
+            Hit::Message(cid, mid, thread) => {
+                self.open_chat_at(cid, thread);
+                self.chat.jump_to = Some(thread.unwrap_or(mid));
+                self.channel_find = None;
+                self.channel_panel = 0;
             }
             Hit::Whiteboard(id) => {
                 self.wb_open = Some(id);
@@ -601,9 +613,16 @@ impl App {
                         let typed = q.trim().to_string();
                         if !typed.is_empty() && super::nav::parse_link(&typed).is_none() {
                             self.sweep.search_recent.retain(|x| x != &typed);
-                            self.sweep.search_recent.insert(0, typed);
+                            self.sweep.search_recent.insert(0, typed.clone());
                             self.sweep.search_recent.truncate(8);
                         }
+                        // where it leads, the searched words light up a moment
+                        let words = if super::nav::parse_link(&typed).is_none() {
+                            typed.as_str()
+                        } else {
+                            ""
+                        };
+                        crate::find_flash::start(ui.ctx(), words);
                         self.open_hit(hit);
                         open = false;
                     }

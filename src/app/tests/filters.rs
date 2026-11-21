@@ -557,11 +557,11 @@ fn search_reads_copied_links_and_finds_apps_and_people() {
         .search_rows("alex", 0)
         .iter()
         .any(|r| r.4 == Hit::Person(2)));
-    // a message found by its text opens the channel
+    // a message found by its text opens the channel at it
     assert!(a
         .search_rows("newsletter draft is due", 5)
         .iter()
-        .any(|r| matches!(r.4, Hit::Chat(_))));
+        .any(|r| matches!(r.4, Hit::Message(..))));
 }
 
 #[test]

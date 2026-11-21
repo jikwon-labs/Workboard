@@ -104,7 +104,7 @@ impl App {
             }];
             // the copy's assignees hear about it like a new assignment
             for &a in src.assignees.iter().filter(|a| **a != app.data.me) {
-                let line = app.about_line(app.data.me, "assigned to", a);
+                let line = app.data.about_line(app.data.me, "assigned to", a);
                 t.activity.push(line);
             }
             t.order = src.order;

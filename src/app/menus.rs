@@ -2180,8 +2180,7 @@ impl App {
                 .and_then(|k| sp.statuses.iter().find(|s| s.kind == k))
                 .unwrap_or(first);
             let old = std::mem::replace(&mut t.status, to.name.clone());
-            Self::log(
-                t,
+            t.log(
                 me,
                 format!(
                     "changed status from {} to {}",

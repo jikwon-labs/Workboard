@@ -851,7 +851,7 @@ impl App {
                 }
             }
         }
-        Self::log(t, me, text);
+        t.log(me, text);
         t.updated = now_ts();
         self.dirty = true;
     }
@@ -861,7 +861,7 @@ impl App {
         let me = self.data.me;
         if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == tid) {
             if t.parent.take().is_some() {
-                Self::log(t, me, "made this a top-level task".into());
+                t.log(me, "made this a top-level task".into());
                 t.updated = now_ts();
                 self.dirty = true;
             }
@@ -1152,7 +1152,7 @@ impl App {
         for (tid, a) in done {
             if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == tid) {
                 if !t.attachments.iter().any(|x| x.file == a.file) {
-                    Self::log(t, me, format!("attached {}", a.name));
+                    t.log(me, format!("attached {}", a.name));
                     t.attachments.push(a);
                     t.updated = now_ts();
                     self.dirty = true;

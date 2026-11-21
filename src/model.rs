@@ -2,7 +2,8 @@
 // Default statuses and priorities follow the values recorded in MECHANICS.md.
 //
 // Here: the workspace (`Data`) and the thread that writes it to disk. In
-// model/: the shapes (types.rs, task.rs, extra.rs), loading and saving
+// model/: the shapes (types.rs, task.rs, extra.rs), a task's history lines
+// (history.rs), loading and saving
 // (persist.rs), lookups (query.rs) and the example workspace (demo.rs). All of
 // it is reachable as `crate::model::*`.
 
@@ -12,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 mod demo;
 mod extra;
+mod history;
 mod persist;
 mod query;
 mod task;

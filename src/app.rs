@@ -1779,49 +1779,6 @@ impl App {
         }
     }
 
-    fn log(task: &mut Task, me: u64, text: String) {
-        task.activity.push(Activity {
-            ts: now_ts(),
-            author: me,
-            text,
-            comment: false,
-            ..Default::default()
-        });
-    }
-
-    /// A history line about one person ("assigned to <name>", "removed
-    /// assignee <name>") that keeps their id, so their Inbox finds it by id.
-    pub(super) fn about_line(&self, me: u64, what: &str, who: u64) -> Activity {
-        let name = self
-            .data
-            .member(who)
-            .map(|m| m.shown().to_string())
-            .unwrap_or_default();
-        Activity {
-            ts: now_ts(),
-            author: me,
-            text: format!("{} {}", what, name),
-            comment: false,
-            target: Some(who),
-            ..Default::default()
-        }
-    }
-
-    /// Logs a change, or updates my own line about the same change if I made
-    /// it in the last few minutes (`like` is part of that line).
-    fn log_edit(task: &mut Task, me: u64, like: &str, text: String) {
-        let now = now_ts();
-        if let Some(last) = task.activity.last_mut() {
-            if !last.comment && last.author == me && now - last.ts < 300 && last.text.contains(like)
-            {
-                last.text = text;
-                last.ts = now;
-                return;
-            }
-        }
-        Self::log(task, me, text);
-    }
-
     fn apply(&mut self, a: Action) {
         let me = self.data.me;
         // a space shared with me to view or comment only (the server would put it back)
@@ -1841,103 +1798,7 @@ impl App {
                 if let Some(idx) = self.data.tasks.iter().position(|t| t.id == new.id) {
                     let old = self.data.tasks[idx].clone();
                     new.tidy_times(&old);
-                    if old.status != new.status {
-                        let m = format!(
-                            "changed status from {} to {}",
-                            old.status.to_uppercase(),
-                            new.status.to_uppercase()
-                        );
-                        Self::log(&mut new, me, m);
-                        // Date done / Date closed: when it entered such a status
-                        let kind = |t: &Task| self.data.status_of(t).kind;
-                        let (was, now_k) = (kind(&old), kind(&new));
-                        let done =
-                            |k: StatusKind| matches!(k, StatusKind::Done | StatusKind::Closed);
-                        if done(now_k) && !done(was) {
-                            new.done_at = Some(now_ts());
-                        } else if !done(now_k) {
-                            new.done_at = None;
-                        }
-                        if now_k == StatusKind::Closed && was != StatusKind::Closed {
-                            new.closed_at = Some(now_ts());
-                        } else if now_k != StatusKind::Closed {
-                            new.closed_at = None;
-                        }
-                    }
-                    if old.priority != new.priority {
-                        let m = format!(
-                            "set priority to {}",
-                            PRIORITIES[new.priority as usize].label
-                        );
-                        Self::log(&mut new, me, m);
-                    }
-                    // the history is shared with teammates: keep it in English
-                    // with a time: "Nov 16 at 2:30 PM"
-                    let fmt_date = |d: NaiveDate, time: Option<chrono::NaiveTime>| {
-                        crate::i18n::in_english(|| match time {
-                            Some(time) => format!("{} at {}", fmt_date(d), fmt_time(time)),
-                            None => fmt_date(d),
-                        })
-                    };
-                    if (old.due, old.due_at()) != (new.due, new.due_at()) {
-                        let s = new
-                            .due
-                            .map(|d| fmt_date(d, new.due_at()))
-                            .unwrap_or_else(|| "none".into());
-                        Self::log(&mut new, me, format!("changed due date to {}", s));
-                    }
-                    if (old.start, old.start_at()) != (new.start, new.start_at()) {
-                        let s = new
-                            .start
-                            .map(|d| fmt_date(d, new.start_at()))
-                            .unwrap_or_else(|| "none".into());
-                        Self::log(&mut new, me, format!("changed start date to {}", s));
-                    }
-                    for aid in new.assignees.clone() {
-                        if !old.assignees.contains(&aid) {
-                            new.activity.push(self.about_line(me, "assigned to", aid));
-                        }
-                    }
-                    for &aid in &old.assignees {
-                        if !new.assignees.contains(&aid) {
-                            new.activity
-                                .push(self.about_line(me, "removed assignee", aid));
-                        }
-                    }
-                    // typed fields change on every key press: while I keep typing,
-                    // the line I logged a moment ago is updated instead of adding more
-                    if old.name != new.name && !new.name.trim().is_empty() {
-                        let m = format!("renamed this task to \"{}\"", new.name.trim());
-                        Self::log_edit(&mut new, me, "renamed this task to ", m);
-                    }
-                    if old.description != new.description {
-                        Self::log_edit(
-                            &mut new,
-                            me,
-                            "updated the description",
-                            "updated the description".into(),
-                        );
-                    }
-                    if old.estimate_min != new.estimate_min {
-                        let m = match new.estimate_min {
-                            Some(min) => format!(
-                                "set the time estimate to {}",
-                                crate::i18n::in_english(|| fmt_duration(min as i64 * 60))
-                            ),
-                            None => "removed the time estimate".into(),
-                        };
-                        Self::log_edit(&mut new, me, "time estimate", m);
-                    }
-                    for tag in new.tags.clone() {
-                        if !old.tags.contains(&tag) {
-                            Self::log(&mut new, me, format!("added tag {}", tag));
-                        }
-                    }
-                    for tag in &old.tags {
-                        if !new.tags.contains(tag) {
-                            Self::log(&mut new, me, format!("removed tag {}", tag));
-                        }
-                    }
+                    self.data.log_task_changes(&old, &mut new, me);
                     if new.name.trim().is_empty() {
                         new.name = old.name.clone();
                     }
@@ -1975,7 +1836,7 @@ impl App {
                                             new.assignees = vec![uid];
                                         } else if !new.assignees.contains(&uid) {
                                             new.assignees.push(uid);
-                                            new.activity.push(self.about_line(
+                                            new.activity.push(self.data.about_line(
                                                 me,
                                                 "assigned to",
                                                 uid,
@@ -2005,11 +1866,7 @@ impl App {
                                     ..Default::default()
                                 }),
                             }
-                            Self::log(
-                                &mut new,
-                                me,
-                                format!("Automation ran: {}", self.describe_action(&a)),
-                            );
+                            new.log(me, format!("Automation ran: {}", self.describe_action(&a)));
                         }
                     }
                     self.roll_recurring(&old, &mut new);
@@ -2049,7 +1906,7 @@ impl App {
                     assignees
                         .iter()
                         .filter(|a| **a != me)
-                        .map(|a| self.about_line(me, "assigned to", *a)),
+                        .map(|a| self.data.about_line(me, "assigned to", *a)),
                 );
                 self.data.tasks.push(Task {
                     id,
@@ -2117,7 +1974,7 @@ impl App {
                 }
                 if let Some(line) = self.pending.log.take() {
                     if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
-                        Self::log(t, me, line);
+                        t.log(me, line);
                     }
                 }
                 let tags = std::mem::take(&mut self.pending.tags);
@@ -2774,8 +2631,7 @@ impl App {
             .filter(|t| lists.contains(&t.list_id) && t.status == old)
         {
             t.status = to.clone();
-            Self::log(
-                t,
+            t.log(
                 me,
                 format!(
                     "changed status from {} to {}",

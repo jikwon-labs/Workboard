@@ -148,6 +148,7 @@ pub const T: &[(&str, &str)] = &[
     ("Onboarding guide ready", "온보딩 문서 준비"),
     ("Owner (goal)", "담당자"),
     ("Pace", "상태"),
+    ("Planned for today: {}%", "오늘 기준 예정 진행률: {}%"),
     ("People hired", "채용 인원"),
     ("People involved", "함께한 사람"),
     ("Pick the tasks; it goes up as they are closed", "작업을 선택하세요. 완료한 비율만큼 진행률이 오릅니다"),

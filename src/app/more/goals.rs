@@ -1108,7 +1108,8 @@ impl App {
                     );
                 }
                 p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-                for r in rows {
+                let legend = rows.iter().any(|r| plan_mark(r).is_some());
+                for (ri, r) in rows.iter().enumerate() {
                     let g = &r.g;
                     let open = self.goal_list_open == Some(g.id);
                     let (rr, _) = ui.allocate_exact_size(vec2(w, 58.0), Sense::hover());
@@ -1156,16 +1157,21 @@ impl App {
                     let bar =
                         Rect::from_min_size(pos2(rr.left() + cols[1], cy - 4.0), vec2(bar_w, 8.0));
                     paint_bar(p, bar, r.pct as f32 / 100.0, rgb(g.color), t.hover);
-                    if let Some(e) = r.expect {
+                    if let Some(e) = plan_mark(r) {
                         let x = bar.left() + bar.width() * e as f32 / 100.0;
-                        p.rect_filled(
-                            Rect::from_min_max(
-                                pos2(x - 1.0, bar.top() - 5.0),
-                                pos2(x + 1.0, bar.bottom() + 5.0),
-                            ),
-                            1.0,
-                            t.text,
+                        let m = Rect::from_min_max(
+                            pos2(x - 1.0, bar.top() - 5.0),
+                            pos2(x + 1.0, bar.bottom() + 5.0),
                         );
+                        p.rect_filled(m, 1.0, t.text);
+                        let hint = ui
+                            .interact(
+                                m.expand2(vec2(4.0, 2.0)),
+                                ui.id().with(("goal plan mark", g.id)),
+                                Sense::hover(),
+                            )
+                            .on_hover_text(trf!("Planned for today: {}%", e));
+                        name_it(&hint, &format!("Plan mark {}", g.name));
                     }
                     p.text(
                         pos2(bar.right() + 12.0, cy),
@@ -1280,10 +1286,19 @@ impl App {
                             );
                         }
                     }
-                    ui.painter()
-                        .hline(rr.x_range(), ui.cursor().top(), Stroke::new(1.0, t.border));
+                    // the last row ends on the card's own edge without a legend
+                    if legend || ri + 1 < rows.len() {
+                        ui.painter().hline(
+                            rr.x_range(),
+                            ui.cursor().top(),
+                            Stroke::new(1.0, t.border),
+                        );
+                    }
                 }
-                // what the mark on the bars means
+                // what the mark on the bars means, when a bar has one
+                if !legend {
+                    return;
+                }
                 let (lr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
                 let p = ui.painter();
                 let x = lr.left() + 20.0;
@@ -1442,6 +1457,12 @@ fn card_height(r: &GoalRow) -> f32 {
             .sum()
     };
     18.0 + 82.0 + targets + 8.0 + 24.0 + 30.0
+}
+
+/// Where a row's bar gets today's mark, 0-100: none before any time has
+/// gone (a mark at the very start reads as part of the bar) or once done.
+fn plan_mark(r: &GoalRow) -> Option<u8> {
+    r.expect.filter(|e| *e > 0 && r.pace != Some(Pace::Done))
 }
 
 /// "12 points ahead of plan" / "12 points behind plan" / "On plan".

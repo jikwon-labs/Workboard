@@ -106,6 +106,37 @@ fn goals_show_as_cards_or_rows_and_open_their_own_page() {
 }
 
 #[test]
+fn the_plan_mark_shows_once_some_time_has_gone() {
+    let legend = "Where it should be by today, from its start and due dates";
+    let (mut h, a, b) = two_goals();
+    // Office move starts today: nothing is due yet, so no mark at 0%
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == b) {
+        g.start = Some(today());
+    }
+    h.click("Show as list");
+    assert!(
+        h.has("Plan mark Beta launch"),
+        "two thirds of its time gone"
+    );
+    assert!(
+        !h.has("Plan mark Office move"),
+        "a mark at the very start reads as part of the bar"
+    );
+    assert!(
+        !h.painted_text(legend).is_empty(),
+        "the legend for the mark"
+    );
+
+    // no bar with a mark: no legend either
+    for g in h.app.data.extra.goals.iter_mut().filter(|g| g.id == a) {
+        g.start = Some(today());
+    }
+    h.settle();
+    assert!(!h.has("Plan mark Beta launch"));
+    assert!(h.painted_text(legend).is_empty(), "nothing to explain");
+}
+
+#[test]
 fn far_behind_goals_come_first_with_their_pace() {
     let (h, a, b) = two_goals();
     let day = today();

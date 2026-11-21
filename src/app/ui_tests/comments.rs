@@ -447,7 +447,11 @@ fn comment_menu_at_the_right_edge_hangs_from_its_button() {
         me,
         row
     );
-    assert!(me.left() >= 0.0, "the submenu stays in the window: {:?}", me);
+    assert!(
+        me.left() >= 0.0,
+        "the submenu stays in the window: {:?}",
+        me
+    );
     h.click("Me");
     assert!(h.has("Assigned to Me"), "the left submenu still works");
 }

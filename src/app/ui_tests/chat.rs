@@ -3824,6 +3824,22 @@ fn files_shows_the_conversations_files_in_one_place() {
     assert!(h.has("File plan.pdf"), "a message's file");
     assert!(h.has("File notes.md"), "and a thread reply's");
     assert!(!h.has("Picture beach.jpg"));
+    // nothing drawn over anything, nor cut off, in the smallest window too
+    for size in [h.size, vec2(900.0, 560.0)] {
+        h.size = size;
+        h.settle();
+        let page = Rect::from_min_max(pos2(320.0, 40.0), h.size.to_pos2());
+        let over = super::layout_tests::overlapping(&h.texts_in(page));
+        assert!(over.is_empty(), "{:?}: {:?}", size, over);
+        assert!(
+            h.cut_texts(page).is_empty(),
+            "{:?}: {:?}",
+            size,
+            h.cut_texts(page)
+        );
+    }
+    h.size = vec2(1440.0, 900.0);
+    h.settle();
     // newest first: the reply's file above the message's
     let notes = h.rect("File notes.md");
     assert!(notes.top() < h.rect("File plan.pdf").top());

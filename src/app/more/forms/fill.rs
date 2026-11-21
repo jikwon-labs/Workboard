@@ -71,10 +71,12 @@ impl App {
                 });
             });
         ui.add_space(14.0);
+        // the people on the team (not someone invited who hasn't joined)
         let members: Vec<(u64, String)> = self
             .data
             .members
             .iter()
+            .filter(|m| !m.invited)
             .map(|m| (m.id, m.shown().to_string()))
             .collect();
         egui::Frame::new()
@@ -279,6 +281,10 @@ impl App {
                     });
                 }
                 "assignee" => {
+                    // someone picked who is no longer offered (left the team)
+                    if !members.iter().any(|m| m.0.to_string() == *v) {
+                        v.clear();
+                    }
                     let cur = v
                         .parse::<u64>()
                         .ok()

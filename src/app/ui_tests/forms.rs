@@ -1380,3 +1380,23 @@ fn the_header_fits_beside_the_widest_sidebar() {
     h.click("Fill out");
     assert_eq!(h.app.form_tab, FormTab::Fill);
 }
+
+/// An Assignee question offers the people on the team, not someone only
+/// invited who hasn't joined yet (as watchers and checklist items don't).
+#[test]
+fn an_assignee_question_leaves_out_people_not_joined_yet() {
+    let mut h = Ui1::new();
+    h.app.data.members.push(Member {
+        id: 77,
+        name: "Invited Ivy".into(),
+        invited: true,
+        ..Default::default()
+    });
+    blank_form(&mut h);
+    h.click("Add question");
+    h.click("Kind Assignee");
+    h.click("Fill out");
+    h.click("Answer 3");
+    assert!(h.has("Pick Alex Kim"));
+    assert!(!h.has("Pick Invited Ivy"));
+}

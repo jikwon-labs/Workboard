@@ -3029,6 +3029,174 @@ impl App {
         self.message_row_c(ui, cid, m, top_level, false, acts)
     }
 
+    /// The buttons over a hovered message (`rect`): quick reactions, reply,
+    /// and the menu with the rest.
+    fn message_toolbar(
+        &mut self,
+        ui: &mut Ui,
+        cid: u64,
+        m: &Message,
+        top_level: bool,
+        rect: Rect,
+        acts: &mut Vec<ChatAction>,
+    ) {
+        let t = self.t();
+        let me = self.data.me;
+        let more_id = egui::Id::new(("msg_more", cid, m.id, top_level));
+        let emoji_id = egui::Id::new(("msg_emoji", cid, m.id, top_level));
+        let bar_key = egui::Id::new(("msg_bar", cid, m.id, top_level));
+        let bar_mem = egui::Id::new("chat_msg_bar");
+        let pass = ui.ctx().cumulative_pass_nr();
+        let n = QUICK_REACTIONS.len() + 2 + if top_level { 4 } else { 1 };
+        let bw = 30.0;
+        // it floats over the row's top edge so it hides little of the
+        // row; on a one-line row it used to sit right on the text
+        let bar_top = (rect.top() - 20.0).max(ui.clip_rect().top() + 2.0);
+        // at the row's right end, but inside the conversation that
+        // shows: not past its left edge (a narrow one cut off the first
+        // reactions) nor its right one
+        let right = rect.right().min(ui.clip_rect().right() - 4.0);
+        let bar_left = (right - bw * n as f32 - 8.0).max(ui.clip_rect().left() + 2.0);
+        let bar = Rect::from_min_size(pos2(bar_left, bar_top), vec2(bw * n as f32 + 4.0, 28.0));
+        ui.data_mut(|d| d.insert_temp(bar_mem, (bar_key, bar, pass)));
+        ui.painter().rect_filled(bar, 7.0, t.card);
+        ui.painter().rect_stroke(
+            bar,
+            7.0,
+            Stroke::new(1.0_f32, t.border),
+            egui::StrokeKind::Inside,
+        );
+        let mut x = bar.left() + 2.0;
+        // a reaction shows its emoji; the other buttons a line icon (`label` is its kind)
+        let mut button = |ui: &mut Ui, label: &str, tip: &str| -> egui::Response {
+            let r = Rect::from_min_size(pos2(x, bar.top() + 2.0), vec2(bw, 24.0));
+            x += bw;
+            let icon = Icon::named(label);
+            let b = put_over(
+                ui,
+                r,
+                ghost(egui::Button::new(if icon.is_some() { "" } else { label })),
+            );
+            if let Some(icon) = icon {
+                line_icon(ui.painter(), icon, r.center(), t.text2);
+            }
+            name_it(&b, tip);
+            b.on_hover_text(tr(tip))
+        };
+        for e in QUICK_REACTIONS {
+            let b = button(ui, e, "Add reaction");
+            // (named by its emoji, so a test can pick one)
+            name_it(&b, e);
+            if b.clicked() {
+                acts.push(ChatAction::React {
+                    ch: cid,
+                    msg: m.id,
+                    emoji: e.to_string(),
+                });
+            }
+        }
+        let eb = button(ui, "smile", "More reactions");
+        popup(ui, &eb, emoji_id, 248.0, |ui| {
+            if let Some(e) = emoji_grid(ui) {
+                acts.push(ChatAction::React {
+                    ch: cid,
+                    msg: m.id,
+                    emoji: e.to_string(),
+                });
+                close_popup(ui);
+            }
+        });
+        if top_level {
+            if button(ui, "reply", "Reply in thread").clicked() {
+                acts.push(ChatAction::Thread(m.id));
+            }
+            if button(ui, "task", "Create task from message").clicked() {
+                acts.push(ChatAction::Task { ch: cid, msg: m.id });
+            }
+        }
+        if top_level && button(ui, "pin", if m.pinned { "Unpin" } else { "Pin message" }).clicked()
+        {
+            acts.push(ChatAction::Pin { ch: cid, msg: m.id });
+        }
+        if button(
+            ui,
+            "bookmark",
+            if m.saved {
+                "Remove from saved"
+            } else {
+                "Save for later"
+            },
+        )
+        .clicked()
+        {
+            acts.push(ChatAction::Save { ch: cid, msg: m.id });
+        }
+        let mb = button(ui, "dots", "More actions");
+        if mb.clicked() {
+            self.chat.delete = None;
+        }
+        let now = now_ts();
+        let tomorrow = local_ts(today() + Duration::days(1), nine_am()).unwrap_or(now + 86400);
+        popup(ui, &mb, more_id, 220.0, |ui| {
+            let row = |ui: &mut Ui, label: &str| menu_row_plain(ui, &t, tr(label), false);
+            if !m.text.is_empty() && row(ui, "Copy text").clicked() {
+                ui.ctx().copy_text(m.text.clone());
+                acts.push(ChatAction::Copied);
+                close_popup(ui);
+            }
+            if m.call.is_none() && row(ui, "Forward message").clicked() {
+                acts.push(ChatAction::Forward { ch: cid, msg: m.id });
+                close_popup(ui);
+            }
+            if top_level && m.author != me && row(ui, "Mark unread").clicked() {
+                acts.push(ChatAction::MarkUnread { ch: cid, ts: m.ts });
+                close_popup(ui);
+            }
+            ui.separator();
+            for (label, at) in [
+                ("Remind me in 1 hour", Some(now + 3600)),
+                ("Remind me in 3 hours", Some(now + 3 * 3600)),
+                ("Remind me tomorrow", Some(tomorrow)),
+                ("Remind me at...", None),
+            ] {
+                if row(ui, label).clicked() {
+                    acts.push(ChatAction::Remind {
+                        ch: cid,
+                        msg: m.id,
+                        at,
+                    });
+                    close_popup(ui);
+                }
+            }
+            if m.author == me {
+                ui.separator();
+                if m.call.is_none() && row(ui, "Edit message").clicked() {
+                    acts.push(ChatAction::Edit { ch: cid, msg: m.id });
+                    close_popup(ui);
+                }
+                // a second click deletes, so one slip doesn't lose a message
+                let armed = self.chat.delete == Some(m.id);
+                if row(
+                    ui,
+                    if armed {
+                        "Click again to delete"
+                    } else {
+                        "Delete message"
+                    },
+                )
+                .clicked()
+                {
+                    if armed {
+                        acts.push(ChatAction::Delete { ch: cid, msg: m.id });
+                        close_popup(ui);
+                    } else {
+                        self.chat.delete = Some(m.id);
+                    }
+                }
+            }
+        });
+    }
+
     /// `compact`: a follow-up from the same person a moment later, shown
     /// without the avatar and name (as the original groups messages).
     fn message_row_c(
@@ -3441,155 +3609,7 @@ impl App {
                 bg,
                 egui::Shape::rect_filled(rect.expand2(vec2(6.0, 2.0)), 6.0, t.hover),
             );
-            let n = QUICK_REACTIONS.len() + 2 + if top_level { 4 } else { 1 };
-            let bw = 30.0;
-            // it floats over the row's top edge so it hides little of the
-            // row; on a one-line row it used to sit right on the text
-            let bar_top = (rect.top() - 20.0).max(ui.clip_rect().top() + 2.0);
-            // at the row's right end, but inside the conversation that
-            // shows: not past its left edge (a narrow one cut off the first
-            // reactions) nor its right one
-            let right = rect.right().min(ui.clip_rect().right() - 4.0);
-            let bar_left = (right - bw * n as f32 - 8.0).max(ui.clip_rect().left() + 2.0);
-            let bar = Rect::from_min_size(pos2(bar_left, bar_top), vec2(bw * n as f32 + 4.0, 28.0));
-            ui.data_mut(|d| d.insert_temp(bar_mem, (bar_key, bar, pass)));
-            ui.painter().rect_filled(bar, 7.0, t.card);
-            ui.painter().rect_stroke(
-                bar,
-                7.0,
-                Stroke::new(1.0_f32, t.border),
-                egui::StrokeKind::Inside,
-            );
-            let mut x = bar.left() + 2.0;
-            // a reaction shows its emoji; the other buttons a line icon (`label` is its kind)
-            let mut button = |ui: &mut Ui, label: &str, tip: &str| -> egui::Response {
-                let r = Rect::from_min_size(pos2(x, bar.top() + 2.0), vec2(bw, 24.0));
-                x += bw;
-                let icon = Icon::named(label);
-                let b = put_over(
-                    ui,
-                    r,
-                    ghost(egui::Button::new(if icon.is_some() { "" } else { label })),
-                );
-                if let Some(icon) = icon {
-                    line_icon(ui.painter(), icon, r.center(), t.text2);
-                }
-                name_it(&b, tip);
-                b.on_hover_text(tr(tip))
-            };
-            for e in QUICK_REACTIONS {
-                let b = button(ui, e, "Add reaction");
-                // (named by its emoji, so a test can pick one)
-                name_it(&b, e);
-                if b.clicked() {
-                    acts.push(ChatAction::React {
-                        ch: cid,
-                        msg: m.id,
-                        emoji: e.to_string(),
-                    });
-                }
-            }
-            let eb = button(ui, "smile", "More reactions");
-            popup(ui, &eb, emoji_id, 248.0, |ui| {
-                if let Some(e) = emoji_grid(ui) {
-                    acts.push(ChatAction::React {
-                        ch: cid,
-                        msg: m.id,
-                        emoji: e.to_string(),
-                    });
-                    close_popup(ui);
-                }
-            });
-            if top_level {
-                if button(ui, "reply", "Reply in thread").clicked() {
-                    acts.push(ChatAction::Thread(m.id));
-                }
-                if button(ui, "task", "Create task from message").clicked() {
-                    acts.push(ChatAction::Task { ch: cid, msg: m.id });
-                }
-            }
-            if top_level
-                && button(ui, "pin", if m.pinned { "Unpin" } else { "Pin message" }).clicked()
-            {
-                acts.push(ChatAction::Pin { ch: cid, msg: m.id });
-            }
-            if button(
-                ui,
-                "bookmark",
-                if m.saved {
-                    "Remove from saved"
-                } else {
-                    "Save for later"
-                },
-            )
-            .clicked()
-            {
-                acts.push(ChatAction::Save { ch: cid, msg: m.id });
-            }
-            let mb = button(ui, "dots", "More actions");
-            if mb.clicked() {
-                self.chat.delete = None;
-            }
-            let now = now_ts();
-            let tomorrow = local_ts(today() + Duration::days(1), nine_am()).unwrap_or(now + 86400);
-            popup(ui, &mb, more_id, 220.0, |ui| {
-                let row = |ui: &mut Ui, label: &str| menu_row_plain(ui, &t, tr(label), false);
-                if !m.text.is_empty() && row(ui, "Copy text").clicked() {
-                    ui.ctx().copy_text(m.text.clone());
-                    acts.push(ChatAction::Copied);
-                    close_popup(ui);
-                }
-                if m.call.is_none() && row(ui, "Forward message").clicked() {
-                    acts.push(ChatAction::Forward { ch: cid, msg: m.id });
-                    close_popup(ui);
-                }
-                if top_level && m.author != me && row(ui, "Mark unread").clicked() {
-                    acts.push(ChatAction::MarkUnread { ch: cid, ts: m.ts });
-                    close_popup(ui);
-                }
-                ui.separator();
-                for (label, at) in [
-                    ("Remind me in 1 hour", Some(now + 3600)),
-                    ("Remind me in 3 hours", Some(now + 3 * 3600)),
-                    ("Remind me tomorrow", Some(tomorrow)),
-                    ("Remind me at...", None),
-                ] {
-                    if row(ui, label).clicked() {
-                        acts.push(ChatAction::Remind {
-                            ch: cid,
-                            msg: m.id,
-                            at,
-                        });
-                        close_popup(ui);
-                    }
-                }
-                if m.author == me {
-                    ui.separator();
-                    if m.call.is_none() && row(ui, "Edit message").clicked() {
-                        acts.push(ChatAction::Edit { ch: cid, msg: m.id });
-                        close_popup(ui);
-                    }
-                    // a second click deletes, so one slip doesn't lose a message
-                    let armed = self.chat.delete == Some(m.id);
-                    if row(
-                        ui,
-                        if armed {
-                            "Click again to delete"
-                        } else {
-                            "Delete message"
-                        },
-                    )
-                    .clicked()
-                    {
-                        if armed {
-                            acts.push(ChatAction::Delete { ch: cid, msg: m.id });
-                            close_popup(ui);
-                        } else {
-                            self.chat.delete = Some(m.id);
-                        }
-                    }
-                }
-            });
+            self.message_toolbar(ui, cid, m, top_level, rect, acts);
         }
     }
 

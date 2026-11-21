@@ -243,6 +243,19 @@ impl App {
             self.go_forward();
             return;
         }
+        // Cmd+Left / Cmd+Right too, like Safari. In a text field these keys
+        // move to the start / end of the line, so only outside one (checked
+        // above); the picture viewer keeps its arrows for the next picture
+        if self.viewer.is_none() {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::ArrowLeft)) {
+                self.go_back();
+                return;
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::ArrowRight)) {
+                self.go_forward();
+                return;
+            }
+        }
         let plain = ctx.input(|i| !i.modifiers.command && !i.modifiers.alt && !i.modifiers.ctrl);
         if !plain {
             return;

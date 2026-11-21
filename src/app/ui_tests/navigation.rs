@@ -1103,6 +1103,28 @@ fn cmd_brackets_go_back_and_forward() {
 }
 
 #[test]
+fn cmd_arrows_go_back_and_forward_outside_text_fields() {
+    let mut h = Ui1::new();
+    let start = h.app.loc;
+    h.click("Inbox");
+    cmd_key(&mut h, egui::Key::ArrowLeft);
+    assert_eq!(h.app.loc, start, "Cmd+Left goes back");
+    cmd_key(&mut h, egui::Key::ArrowRight);
+    assert_eq!(h.app.loc, Location::Inbox, "Cmd+Right goes forward");
+
+    // in a text field they move the cursor and stay on the page
+    h.ctx.set_os(egui::os::OperatingSystem::Mac);
+    h.click("general");
+    h.click("Message composer");
+    let spot = h.app.nav_spot();
+    h.type_text("hello");
+    cmd_key(&mut h, egui::Key::ArrowLeft);
+    assert_eq!(h.app.nav_spot(), spot, "Cmd+Left in a text field stays");
+    h.type_text("X");
+    assert_eq!(h.app.chat.text, "Xhello", "and moves to the line start");
+}
+
+#[test]
 fn mouse_side_buttons_go_back_and_forward() {
     let mut h = Ui1::new();
     let start = h.app.loc;

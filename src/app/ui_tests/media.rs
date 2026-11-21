@@ -61,9 +61,7 @@ fn a_picture_can_be_sent_while_the_server_is_down_and_goes_up_later() {
     );
     let (ok, files) = h.app.pending_ready(false);
     assert!(ok && files.len() == 1, "the message can go");
-    h.click("Message composer");
-    h.type_text("from the train");
-    h.key(egui::Key::Enter);
+    h.send_message("from the train");
     let m = h
         .app
         .data
@@ -181,9 +179,7 @@ fn drop_a_picture_send_it_and_open_it_large() {
     assert_eq!(h.app.chat.files[0].error, None);
     h.settle();
     assert!(h.has("Attachment ui-notes.md"), "a tile in the message box");
-    h.click("Message composer");
-    h.type_text("the plan");
-    h.key(egui::Key::Enter);
+    h.send_message("the plan");
     let m = h
         .app
         .data
@@ -682,9 +678,7 @@ fn a_picture_still_getting_ready_follows_the_message_it_was_sent_with() {
     h.frame(vec![]);
     h.settle();
     assert!(h.app.chat.files[0].getting_ready());
-    h.click("Message composer");
-    h.type_text("on its way");
-    h.key(egui::Key::Enter);
+    h.send_message("on its way");
     // the message goes at once, the box is empty, the picture shows as coming
     let m = last_message(&h, cid);
     assert_eq!(m.text, "on its way");

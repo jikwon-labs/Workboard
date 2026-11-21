@@ -159,9 +159,7 @@ fn the_posts_page_and_the_channel_post_box_keep_their_own_titles() {
         h.painted_text("Draft on the page").is_empty(),
         "the channel's box starts without the page's title"
     );
-    h.click("Message composer");
-    h.type_text("Hello from the channel");
-    h.key(egui::Key::Enter);
+    h.send_message("Hello from the channel");
     let p = all_posts(&h).pop().unwrap();
     assert_eq!(p.post_title.as_deref(), Some("Update"), "its own title");
     assert_eq!(p.text, "Hello from the channel");
@@ -299,9 +297,7 @@ fn a_pasted_title_with_line_breaks_goes_out_on_one_line() {
     let at = h.painted_text("Title")[0].0.center();
     h.click_at(at);
     h.frame(vec![egui::Event::Paste("Lunch\nat noon".into())]);
-    h.click("Message composer");
-    h.type_text("Pizza");
-    h.key(egui::Key::Enter);
+    h.send_message("Pizza");
     let p = all_posts(&h).pop().unwrap();
     assert_eq!(p.post_title.as_deref(), Some("Lunch at noon"));
 }
@@ -771,9 +767,7 @@ fn a_post_starts_the_channels_workflows() {
     // from the channel's Post box
     h.click("general");
     h.click("Post");
-    h.click("Message composer");
-    h.type_text("Another outage");
-    h.key(egui::Key::Enter);
+    h.send_message("Another outage");
     assert_eq!(
         last_in_web(&h).unwrap().0,
         format!("{me} posted: Another outage")
@@ -858,9 +852,7 @@ fn the_default_post_title_starts_no_workflow() {
     // from the channel's Post box, without a title: saved as "Update"
     h.click("general");
     h.click("Post");
-    h.click("Message composer");
-    h.type_text("Lunch is here");
-    h.key(egui::Key::Enter);
+    h.send_message("Lunch is here");
     let p = all_posts(&h).pop().unwrap();
     assert_eq!(p.post_title.as_deref(), Some("Update"));
     assert_eq!(in_web(&h), before, "\"update\" isn't in what was written");

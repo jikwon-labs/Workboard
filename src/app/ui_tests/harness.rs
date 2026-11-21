@@ -546,6 +546,13 @@ impl Ui1 {
         })
     }
 
+    /// Clicks the open chat's message box, types `text` and presses Enter.
+    pub(super) fn send_message(&mut self, text: &str) {
+        self.click("Message composer");
+        self.type_text(text);
+        self.key(egui::Key::Enter);
+    }
+
     pub(super) fn cmd_enter(&mut self) {
         self.key_with(egui::Key::Enter, egui::Modifiers::COMMAND);
     }
@@ -960,9 +967,7 @@ pub(super) fn general_with_my_message(text: &str) -> (Ui1, u64) {
     let mut h = Ui1::new();
     h.click("general");
     let cid = h.app.chat.open.unwrap();
-    h.click("Message composer");
-    h.type_text(text);
-    h.key(egui::Key::Enter);
+    h.send_message(text);
     let p = h.find(text).unwrap();
     h.hover(p);
     (h, cid)

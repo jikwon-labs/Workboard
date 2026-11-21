@@ -30,9 +30,7 @@ fn click_channel_and_send_message() {
         .unwrap()
         .messages
         .len();
-    h.click("Message composer");
-    h.type_text("hello from a click test");
-    h.key(egui::Key::Enter);
+    h.send_message("hello from a click test");
     let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
     assert_eq!(ch.messages.len(), n + 1);
     assert_eq!(ch.messages.last().unwrap().text, "hello from a click test");
@@ -484,9 +482,7 @@ fn chat_drafts_stay_with_their_channel() {
     h.click_side(&b.name, false);
     assert_eq!(h.app.chat.open, Some(b.id));
     assert_eq!(h.app.chat.text, "", "the other channel starts empty");
-    h.click("Message composer");
-    h.type_text("first message");
-    h.key(egui::Key::Enter);
+    h.send_message("first message");
     let sent = h
         .app
         .data
@@ -1692,9 +1688,7 @@ fn hover_toolbar_floats_above_a_one_line_message() {
     // a follow-up message is one short row; the toolbar sits over its top
     // edge instead of on top of the row
     let (mut h, _) = general_with_my_message("first of two");
-    h.click("Message composer");
-    h.type_text("ok then");
-    h.key(egui::Key::Enter);
+    h.send_message("ok then");
     let p = h.find("ok then").unwrap();
     h.hover(p);
     h.settle();
@@ -1941,9 +1935,7 @@ fn sending_from_higher_up_goes_down_to_the_new_message() {
     up(&mut h, pos2(500.0, 400.0));
     let composer = h.rect("Message composer").top();
     assert!(!on_screen(&h, "Filler message 59", composer), "scrolled up");
-    h.click("Message composer");
-    h.type_text("sent from up the list");
-    h.key(egui::Key::Enter);
+    h.send_message("sent from up the list");
     for _ in 0..30 {
         h.frame(vec![]);
     }
@@ -2401,9 +2393,7 @@ fn a_web_address_gets_a_preview_its_writer_can_remove() {
     let mut h = Ui1::new();
     h.click("general");
     let cid = h.app.chat.open.unwrap();
-    h.click("Message composer");
-    h.type_text("plan at https://example.com/plan.");
-    h.key(egui::Key::Enter);
+    h.send_message("plan at https://example.com/plan.");
     let m = last_in(&h, cid);
     let p = m.preview.expect("a preview");
     assert_eq!(p.url, "https://example.com/plan");
@@ -2413,9 +2403,7 @@ fn a_web_address_gets_a_preview_its_writer_can_remove() {
     assert!(last_in(&h, cid).preview.is_none());
     assert!(!h.has("Example page"));
     // a message without an address gets none; someone else's has no remove button
-    h.click("Message composer");
-    h.type_text("no address here");
-    h.key(egui::Key::Enter);
+    h.send_message("no address here");
     assert!(last_in(&h, cid).preview.is_none());
     let c = h
         .app
@@ -2625,9 +2613,7 @@ fn slash_commands_work_in_the_message_box() {
     h.click("general");
     let cid = h.app.chat.open.unwrap();
     let send = |h: &mut Ui1, text: &str| {
-        h.click("Message composer");
-        h.type_text(text);
-        h.key(egui::Key::Enter);
+        h.send_message(text);
     };
     // the list: "/sh" offers /shrug
     h.click("Message composer");
@@ -2751,9 +2737,7 @@ fn workflows_run_when_a_message_is_posted() {
         .filter(|a| a.trigger == "message")
         .count();
     assert_eq!(wf, 3);
-    h.click("Message composer");
-    h.type_text("Big outage in the bug tracker");
-    h.key(egui::Key::Enter);
+    h.send_message("Big outage in the bug tracker");
     let me = h.app.who(h.app.data.me);
     let posted = last_in(&h, other.id);
     assert_eq!(
@@ -2782,9 +2766,7 @@ fn workflows_run_when_a_message_is_posted() {
         .iter()
         .any(|t| t.name == "Big outage in the bug tracker"));
     // a message without the words: only the reply
-    h.click("Message composer");
-    h.type_text("all good");
-    h.key(egui::Key::Enter);
+    h.send_message("all good");
     assert_eq!(last_in(&h, other.id).text, posted.text, "no second post");
     // shown under the workflow's name
     h.app.chat.open = Some(other.id);
@@ -3141,9 +3123,7 @@ fn a_post_shows_its_icon_in_the_box_and_then_goes_back_to_messages() {
     assert!(!h.has("Post mode"), "a plain message box has no megaphone");
     h.click("Post");
     assert!(h.has("Post mode"), "the post box shows the megaphone");
-    h.click("Message composer");
-    h.type_text("Office closed on Friday");
-    h.key(egui::Key::Enter);
+    h.send_message("Office closed on Friday");
     let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
     let last = ch.messages.last().unwrap();
     assert_eq!(last.text, "Office closed on Friday");
@@ -3152,9 +3132,7 @@ fn a_post_shows_its_icon_in_the_box_and_then_goes_back_to_messages() {
     assert_eq!(h.app.composer_mode, 0, "the box is back to messages");
     assert!(!h.has("Post mode"));
     // the next thing typed is a plain message
-    h.click("Message composer");
-    h.type_text("thanks");
-    h.key(egui::Key::Enter);
+    h.send_message("thanks");
     let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
     assert!(ch.messages.last().unwrap().post_title.is_none());
 }
@@ -3168,9 +3146,7 @@ fn a_post_card_stacks_its_title_and_text_and_names_where_it_went() {
     let mut h = Ui1::new();
     h.click("general");
     h.click("Post");
-    h.click("Message composer");
-    h.type_text("Office closed on Friday for the move");
-    h.key(egui::Key::Enter);
+    h.send_message("Office closed on Friday for the move");
     let me = h.app.data.me;
     let post = h
         .app
@@ -3240,9 +3216,7 @@ fn the_posts_sort_menu_lines_up_with_the_cards() {
         let mut h = Ui1::sized(w, 900.0);
         h.click("general");
         h.click("Post");
-        h.click("Message composer");
-        h.type_text("Office closed on Friday for the move");
-        h.key(egui::Key::Enter);
+        h.send_message("Office closed on Friday for the move");
         if long {
             let id = h.app.data.new_id();
             let me = h.app.data.me;
@@ -3312,9 +3286,7 @@ fn the_default_post_title_is_shown_in_the_readers_language() {
     h.click("general");
     let cid = h.app.chat.open.unwrap();
     h.click("Post");
-    h.click("Message composer");
-    h.type_text("Office closed on Friday");
-    h.key(egui::Key::Enter);
+    h.send_message("Office closed on Friday");
     let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
     let mut typed = ch.messages.last().unwrap().clone();
     assert_eq!(
@@ -3888,9 +3860,7 @@ fn cmd_f_finds_in_the_open_conversation() {
     let shown = |h: &Ui1, text: &str| !h.painted_text(text).is_empty();
     let mut h = Ui1::new();
     h.click("general");
-    h.click("Message composer");
-    h.type_text("apples for the team");
-    h.key(egui::Key::Enter);
+    h.send_message("apples for the team");
     h.type_text("bananas tomorrow");
     h.key(egui::Key::Enter);
     assert!(shown(&h, "apples for the team") && shown(&h, "bananas tomorrow"));

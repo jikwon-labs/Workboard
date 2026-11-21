@@ -22,6 +22,9 @@ const OPTIONS_H: f32 = 48.0;
 const BTN: f32 = 32.0;
 /// A button in the tool bar.
 const TOOL: f32 = 40.0;
+/// The zoom (percent) button in the zoom bar, and the whole bar.
+const PCT_W: f32 = 54.0;
+const ZOOM_W: f32 = 6.0 + BTN + PCT_W + BTN + 9.0 + BTN + 6.0;
 /// The tools, top to bottom: (`wb_tool`, icon, name).
 const TOOLS: [(u8, &str, &str); 6] = [
     (2, "move", "Select"),
@@ -180,8 +183,12 @@ impl App {
             )
             .size()
             .x;
-        let name_w = (text_w + 24.0).clamp(120.0, 300.0);
-        let w = 6.0 + name_w + 4.0 + BTN + 2.0 + BTN + 6.0;
+        // as wide as the name, but in a narrow window clear of the zoom bar
+        // (a long name ran under it)
+        let rest = 6.0 + 4.0 + BTN + 2.0 + BTN + 6.0;
+        let room = rect.width() - 2.0 * EDGE - ZOOM_W - 8.0 - rest;
+        let name_w = (text_w + 24.0).clamp(120.0, room.min(300.0).max(120.0));
+        let w = name_w + rest;
         let bar = Rect::from_min_size(rect.min + vec2(EDGE, EDGE), vec2(w, BAR_H));
         card(ui, t, bar, 12.0, ui.id().with(("wb_name_bar", wid)));
         self.sweep.wb_bars.push(bar);
@@ -396,8 +403,7 @@ impl App {
     /// Top right: zoom out, the zoom (100% when pressed), zoom in, and back
     /// to the starting view.
     fn wb_zoom_bar(&mut self, ui: &mut Ui, t: &Theme, rect: Rect, origin: Pos2, wid: u64) {
-        const PCT_W: f32 = 54.0;
-        let w = 6.0 + BTN + PCT_W + BTN + 9.0 + BTN + 6.0;
+        let w = ZOOM_W;
         let bar = Rect::from_min_size(
             pos2(rect.right() - EDGE - w, rect.top() + EDGE),
             vec2(w, BAR_H),

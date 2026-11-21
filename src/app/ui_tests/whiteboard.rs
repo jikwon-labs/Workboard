@@ -1859,3 +1859,27 @@ fn a_board_card_counts_its_notes_and_shapes() {
         "{texts:?}"
     );
 }
+
+/// In the smallest window with a long name, the name bar stops short of
+/// the zoom bar instead of running under it.
+#[test]
+fn the_name_bar_stays_clear_of_the_zoom_bar_in_a_small_window() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    let wid = template_board(&mut h, "Flow Chart");
+    h.app
+        .data
+        .extra
+        .whiteboards
+        .iter_mut()
+        .find(|w| w.id == wid)
+        .unwrap()
+        .name = "A very long whiteboard name that goes on and on and on".into();
+    h.settle();
+    let menu = h.rect("Board menu");
+    let zoom = h.rect("Zoom out");
+    // each bar's card reaches 6 past its last button
+    assert!(
+        menu.right() + 6.0 + 8.0 <= zoom.left() - 6.0,
+        "{menu:?} {zoom:?}"
+    );
+}

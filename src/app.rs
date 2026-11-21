@@ -445,15 +445,6 @@ pub struct App {
     /// A popup or menu was open when this pass began (egui closes them on
     /// Escape partway through the pass, so later checks see them gone).
     menu_was_open: bool,
-    /// Quit was confirmed: the next close request goes through
-    /// (`ask_before_quit`).
-    quit_ok: bool,
-    /// Someone tried to quit: the system's "Quit Workboard?" alert opens
-    /// on the next `update`, which has the window to attach it to.
-    quit_wanted: bool,
-    /// The open "Quit Workboard?" alert: true arrives on Quit, false on
-    /// Cancel.
-    quit_reply: Option<std::sync::mpsc::Receiver<bool>>,
     /// A text field had keyboard focus at the end of the previous pass.
     typing_was_on: bool,
     /// What had keyboard focus at the end of the previous pass.
@@ -657,6 +648,21 @@ pub struct App {
     reminder_about: (Option<u64>, Option<(u64, u64)>),
     /// A workboard:// link clicked in a message, opened after the pass.
     link_pending: Option<String>,
+    /// Quitting: whether it was confirmed, wanted, or being asked about.
+    quit: QuitState,
+}
+
+/// Quitting (`ask_before_quit`).
+#[derive(Default)]
+struct QuitState {
+    /// Quit was confirmed: the next close request goes through.
+    ok: bool,
+    /// Someone tried to quit: the system's "Quit Workboard?" alert opens
+    /// on the next `update`, which has the window to attach it to.
+    wanted: bool,
+    /// The open "Quit Workboard?" alert: true arrives on Quit, false on
+    /// Cancel.
+    reply: Option<std::sync::mpsc::Receiver<bool>>,
 }
 
 /// The open channel and thread: what is being written, edited or deleted.
@@ -1141,9 +1147,7 @@ impl App {
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,
-            quit_ok: false,
-            quit_wanted: false,
-            quit_reply: None,
+            quit: Default::default(),
             typing_was_on: false,
             focus_was: None,
             previews: Default::default(),
@@ -5603,8 +5607,8 @@ impl eframe::App for App {
         crate::os::route_quit_menu(ctx);
         crate::updater::tick(ctx);
         self.ui_frame(ctx);
-        if std::mem::take(&mut self.quit_wanted) && self.quit_reply.is_none() {
-            self.quit_reply = Some(crate::os::ask_quit(frame, ctx));
+        if std::mem::take(&mut self.quit.wanted) && self.quit.reply.is_none() {
+            self.quit.reply = Some(crate::os::ask_quit(frame, ctx));
         }
     }
 
@@ -5640,15 +5644,15 @@ impl App {
     /// on the sign-in screen, after Quit in the alert, and when the app
     /// closes itself (a screenshot run, a Windows update restarting).
     fn ask_before_quit(&mut self, ctx: &egui::Context, signing_in: bool) {
-        if let Some(reply) = &self.quit_reply {
+        if let Some(reply) = &self.quit.reply {
             match reply.try_recv() {
                 Ok(true) => {
-                    self.quit_reply = None;
-                    self.quit_ok = true;
+                    self.quit.reply = None;
+                    self.quit.ok = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 Ok(false) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.quit_reply = None;
+                    self.quit.reply = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
@@ -5658,7 +5662,7 @@ impl App {
         if !closing && !menu {
             return;
         }
-        if signing_in || self.quit_ok || self.screenshot.is_some() || crate::updater::own::closing()
+        if signing_in || self.quit.ok || self.screenshot.is_some() || crate::updater::own::closing()
         {
             if menu {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -5669,8 +5673,8 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         // the alert may already be open: asking again does nothing
-        if self.quit_reply.is_none() {
-            self.quit_wanted = true;
+        if self.quit.reply.is_none() {
+            self.quit.wanted = true;
         }
         ctx.request_repaint();
     }

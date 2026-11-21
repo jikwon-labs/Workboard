@@ -636,6 +636,18 @@ impl App {
                 ch = true;
             }
         }
+        if opts.is_empty() && !editing && !add_now {
+            ui.horizontal(|ui| {
+                ui.add_space(52.0);
+                ui.label(
+                    RichText::new(tr(
+                        "No choices yet. People filling the form out can't pick anything.",
+                    ))
+                    .size(12.0)
+                    .color(WARN_ORANGE),
+                );
+            });
+        }
         if let Some((_, _, problem)) = self.sweep.forms.choice.as_ref().filter(|c| c.0 == i) {
             ui.horizontal(|ui| {
                 ui.add_space(52.0);

@@ -266,6 +266,8 @@ pub const T: &[(&str, &str)] = &[
     ("Saved as an assignee", "담당자로 저장돼요"),
     ("Added to the task description as \"{}: answer\"", "작업 설명에 ‘{}: 답’처럼 저장돼요"),
     ("Add choice", "선택지 추가"),
+    ("No choices yet", "아직 선택지가 없어요"),
+    ("No choices yet. People filling the form out can't pick anything.", "아직 선택지가 없어요. 양식을 작성하는 사람이 고를 수 없어요."),
     ("Type a choice", "선택지 입력"),
     ("\"{}\" is already a choice.", "‘{}’ 선택지가 이미 있어요."),
     ("Press Enter to add. Separate with commas to add several at once.", "Enter로 추가돼요. 쉼표로 나누면 여러 개를 한 번에 넣을 수 있어요."),

@@ -151,7 +151,11 @@ fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (u
             v.clear();
         }
         if v.is_empty() {
-            if fld.required {
+            // a dropdown with no choices can't be answered, so it can't hold
+            // the form up
+            let answerable =
+                fld.map != "dropdown" || fld.options.iter().any(|o| !o.trim().is_empty());
+            if fld.required && answerable {
                 return Err((i, trf!("Please answer \"{}\".", fld.label)));
             }
             continue;

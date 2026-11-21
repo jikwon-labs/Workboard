@@ -260,6 +260,11 @@ impl App {
                     };
                     let b = select_button(ui, t, "", t.text2, &text, color, vec2(w, 38.0), &name);
                     popup(ui, &b, ui.id().with(("form_dd", fid, i)), w, |ui| {
+                        if !fld.options.iter().any(|o| !o.trim().is_empty()) {
+                            ui.label(
+                                RichText::new(tr("No choices yet")).size(13.0).color(t.text3),
+                            );
+                        }
                         for o in fld.options.iter().filter(|o| !o.trim().is_empty()) {
                             let on = v == o;
                             if menu_row_named(ui, t, &format!("Choice {}", o), o, on, |_, _| {})

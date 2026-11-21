@@ -519,3 +519,27 @@ fn one_form_and_one_answer_are_counted_in_the_singular() {
     assert!(!h.painted_text("1 form").is_empty());
     assert!(h.painted_text("1 forms").is_empty());
 }
+
+/// A dropdown question with no choices yet: the editor says so, its menu on
+/// Fill out says so instead of opening empty, and, as nobody can answer it,
+/// it doesn't stop Submit even when it is required.
+#[test]
+fn a_dropdown_without_choices_says_so_and_doesnt_block_submit() {
+    let mut h = Ui1::new();
+    blank_form(&mut h);
+    h.click("Question 2 kind");
+    h.click("Kind Dropdown");
+    h.click("Required 2");
+    assert!(!h
+        .painted_text("No choices yet. People filling the form out can't pick anything.")
+        .is_empty());
+    h.click("Fill out");
+    h.click("Answer 2");
+    assert!(!h.painted_text("No choices yet").is_empty());
+    h.key(egui::Key::Escape);
+    h.click("Answer 1");
+    h.type_text("Nothing to pick");
+    h.click("Submit");
+    assert_eq!(h.app.sweep.forms.error_at, None);
+    task_named(&h, "Nothing to pick");
+}

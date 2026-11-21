@@ -510,7 +510,8 @@ impl App {
                         DATE_MENU_W,
                         |ui| date_menu(ui, &t, ui.id().with(("rem_edit_cal", id)), date),
                     );
-                    ui.add(field(time).hint_text("09:00").desired_width(54.0));
+                    let tf = ui.add(field(time).hint_text("09:00").desired_width(54.0));
+                    name_field(&tf, "Reminder time");
                     save = ui.button(tr("Save")).clicked()
                         || (te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                     cancel = ui.button(tr("Cancel")).clicked();
@@ -520,9 +521,12 @@ impl App {
                     let text = text.trim().to_string();
                     if let Some(x) = self.data.extra.reminders.iter_mut().find(|x| x.id == id) {
                         x.text = text;
-                        x.due_ts = ts;
-                        // a new time alerts again
-                        x.alerted = false;
+                        // a new time alerts again; the same minute (the field
+                        // shows no seconds) keeps the time and its notice
+                        if ts / 60 != x.due_ts / 60 {
+                            x.due_ts = ts;
+                            x.alerted = false;
+                        }
                         self.dirty = true;
                     }
                     self.sweep.reminder_edit = None;

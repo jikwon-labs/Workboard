@@ -383,3 +383,55 @@ fn a_reminder_about_a_deleted_task_is_not_a_link_that_does_nothing() {
     h.click("About a task");
     assert_eq!(h.app.open_task, Some(tid), "and it opens its task");
 }
+
+#[test]
+fn editing_only_a_reminders_words_does_not_alert_it_again() {
+    // due an hour ago (at some second past the minute), already alerted
+    let due = now_ts() - 3600;
+    let mut h = inbox(|d| {
+        let me = d.me;
+        d.extra.reminders.push(Reminder {
+            id: 9101,
+            text: "Call the bank".into(),
+            due_ts: due,
+            owner: me,
+            alerted: true,
+            ..Default::default()
+        });
+    });
+    let rem = |h: &Ui1| {
+        h.app
+            .data
+            .extra
+            .reminders
+            .iter()
+            .find(|r| r.id == 9101)
+            .unwrap()
+            .clone()
+    };
+    h.click("Edit Call the bank");
+    h.click("Reminder text");
+    h.type_text(" back");
+    h.app.toast = None;
+    h.click("Save");
+    let r = rem(&h);
+    assert_eq!(r.text, "Call the bank back");
+    assert!(
+        !h.app
+            .toast
+            .as_ref()
+            .is_some_and(|(t, _)| t.contains("Call the bank")),
+        "the same time: no second notice, got {:?}",
+        h.app.toast
+    );
+    assert_eq!(r.due_ts, due, "and the time stays as it was");
+    // a new time alerts again
+    h.click("Edit Call the bank back");
+    h.click("Reminder time");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("23:59");
+    h.click("Save");
+    let r = rem(&h);
+    assert_ne!(r.due_ts, due);
+    assert!(!r.alerted, "a new time alerts again");
+}

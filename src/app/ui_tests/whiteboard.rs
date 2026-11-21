@@ -1715,3 +1715,26 @@ fn a_resized_note_keeps_its_corner_under_the_pointer() {
     );
     assert!((wh[1] - 120.0).abs() < 0.5, "{wh:?}");
 }
+
+/// Escape while typing in a shape ends the typing and keeps the shape
+/// picked; a second Escape lets it go.
+#[test]
+fn escape_ends_typing_in_a_shape_before_letting_it_go() {
+    let mut h = Ui1::new();
+    let wid = template_board(&mut h, "Flow Chart");
+    h.hover(h.rect("Whiteboard canvas").center());
+    h.click("Shape Step");
+    let id = shape(&board_of(&h, wid), "Step").id;
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(h.has("Shape text"), "typing in it");
+    h.key(egui::Key::Escape);
+    assert!(!h.has("Shape text"), "the typing ended");
+    assert_eq!(
+        h.app.sweep.wb_sel,
+        Some((wid, crate::app::more::WbSel::Shape(id))),
+        "still picked"
+    );
+    h.key(egui::Key::Escape);
+    assert_eq!(h.app.sweep.wb_sel, None);
+}

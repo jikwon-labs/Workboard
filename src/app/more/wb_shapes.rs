@@ -688,7 +688,10 @@ impl App {
         // the keys are for a dialog or menu open over the board (a Delete
         // there took the pick away out of sight)
         let over = self.modal.is_some() || ui.memory(|m| m.any_popup_open());
-        if !over && !ui.ctx().wants_keyboard_input() {
+        // nor for a key that just ended typing: the Escape that ends typing
+        // in a shape keeps it picked (the same key let it go too)
+        let typed = self.focus_was.is_some();
+        if !over && !typed && !ui.ctx().wants_keyboard_input() {
             let (del, esc, enter) = ui.input(|i| {
                 (
                     i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),

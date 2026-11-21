@@ -710,32 +710,50 @@ impl App {
                     ui.set_height(h - 34.0);
                     match i {
                         0 => {
+                            // "Up 12 points this week" beside the title when
+                            // it fits there, else beside the big number:
+                            // the box keeps its third of the row
+                            let delta_pill = delta.filter(|d| *d != 0).map(|d| {
+                                if d > 0 {
+                                    (trf!("Up {} points this week", d), Pace::OnTrack)
+                                } else {
+                                    (trf!("Down {} points this week", -d), Pace::AtRisk)
+                                }
+                            });
+                            let pill_font = FontId::proportional(11.5);
+                            let text_w = |s: &str, f: &FontId| {
+                                ui.painter()
+                                    .layout_no_wrap(s.to_string(), f.clone(), t.text)
+                                    .size()
+                                    .x
+                            };
+                            let room = ui.available_width();
+                            let title = tr("Average progress");
+                            let in_title = delta_pill.as_ref().is_some_and(|(txt, _)| {
+                                text_w(title, &FontId::proportional(13.0))
+                                    + 12.0
+                                    + text_w(txt, &pill_font)
+                                    + 16.0
+                                    <= room
+                            });
+                            let pill = |ui: &mut Ui, txt: &str, pace: Pace| {
+                                let (bg, fg) = pace_colors(pace, t);
+                                egui::Frame::new()
+                                    .fill(bg)
+                                    .corner_radius(10)
+                                    .inner_margin(egui::Margin::symmetric(8, 2))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            RichText::new(txt).size(11.5).color(fg).strong(),
+                                        );
+                                    });
+                            };
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(tr("Average progress"))
-                                        .size(13.0)
-                                        .color(t.text2),
-                                );
-                                if let Some(d) = delta.filter(|d| *d != 0) {
+                                ui.label(RichText::new(title).size(13.0).color(t.text2));
+                                if let Some((txt, pace)) = delta_pill.as_ref().filter(|_| in_title)
+                                {
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        let (txt, pace) = if d > 0 {
-                                            (trf!("Up {} points this week", d), Pace::OnTrack)
-                                        } else {
-                                            (trf!("Down {} points this week", -d), Pace::AtRisk)
-                                        };
-                                        let (bg, fg) = pace_colors(pace, t);
-                                        egui::Frame::new()
-                                            .fill(bg)
-                                            .corner_radius(10)
-                                            .inner_margin(egui::Margin::symmetric(8, 2))
-                                            .show(ui, |ui| {
-                                                ui.label(
-                                                    RichText::new(txt)
-                                                        .size(11.5)
-                                                        .color(fg)
-                                                        .strong(),
-                                                );
-                                            });
+                                        pill(ui, txt, *pace)
                                     });
                                 }
                             });
@@ -744,6 +762,19 @@ impl App {
                                 ui.spacing_mut().item_spacing.x = 2.0;
                                 ui.label(RichText::new(avg.to_string()).size(34.0).strong());
                                 ui.label(RichText::new("%").size(17.0).color(t.text2));
+                                if let Some((txt, pace)) = delta_pill.as_ref().filter(|_| !in_title)
+                                {
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        let fit = crate::widgets::fit_text(
+                                            ui.painter(),
+                                            txt,
+                                            &pill_font,
+                                            // (the pill's own margins)
+                                            ui.available_width() - 17.0,
+                                        );
+                                        pill(ui, &fit, *pace)
+                                    });
+                                }
                             });
                             ui.add_space(8.0);
                             let total = (on + behind + risk).max(1) as f32;
@@ -773,23 +804,7 @@ impl App {
                                 x += seg;
                             }
                             ui.add_space(8.0);
-                            ui.horizontal(|ui| {
-                                for (n, p) in parts {
-                                    let (dot, _) =
-                                        ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
-                                    ui.painter().circle_filled(
-                                        dot.center(),
-                                        4.0,
-                                        pace_colors(p, t).1,
-                                    );
-                                    ui.label(
-                                        RichText::new(format!("{} {}", tr(pace_label(p)), n))
-                                            .size(12.5)
-                                            .color(t.text2),
-                                    );
-                                    ui.add_space(6.0);
-                                }
-                            });
+                            pace_legend(ui, t, &parts);
                         }
                         1 => {
                             ui.label(RichText::new(tr("Coming up")).size(13.0).color(t.text2));
@@ -1646,6 +1661,51 @@ fn card_height(r: &GoalRow) -> f32 {
 /// gone (a mark at the very start reads as part of the bar) or once done.
 fn plan_mark(r: &GoalRow) -> Option<u8> {
     r.expect.filter(|e| *e > 0 && r.pace != Some(Pace::Done))
+}
+
+/// "● On track 2  ● Behind 0  ● At risk 1" across the width it has: the gaps
+/// close up, then the words get smaller, rather than the line running past
+/// its box (it widened the first summary box in a narrow window).
+fn pace_legend(ui: &mut Ui, t: &Theme, parts: &[(usize, Pace); 3]) {
+    let labels: Vec<String> = parts
+        .iter()
+        .map(|(n, p)| format!("{} {}", tr(pace_label(*p)), n))
+        .collect();
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 14.0), Sense::hover());
+    let p = ui.painter();
+    let width = |size: f32| -> f32 {
+        labels
+            .iter()
+            .map(|l| {
+                14.0 + p
+                    .layout_no_wrap(l.clone(), FontId::proportional(size), t.text2)
+                    .size()
+                    .x
+            })
+            .sum()
+    };
+    let mut size = 12.5;
+    while size > 10.5 && width(size) + 2.0 * 8.0 > r.width() {
+        size -= 0.5;
+    }
+    let gap = ((r.width() - width(size)) / 2.0).clamp(8.0, 20.0);
+    let font = FontId::proportional(size);
+    let mut x = r.left();
+    for ((_, pace), label) in parts.iter().zip(&labels) {
+        p.circle_filled(pos2(x + 4.0, r.center().y), 4.0, pace_colors(*pace, t).1);
+        // shortened only if even the smallest words don't fit
+        let text = crate::widgets::fit_text(p, label, &font, r.right() - x - 14.0);
+        let w = p
+            .text(
+                pos2(x + 14.0, r.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                font.clone(),
+                t.text2,
+            )
+            .width();
+        x += 14.0 + w + gap;
+    }
 }
 
 /// "12 points ahead of plan" / "12 points behind plan" / "On plan".

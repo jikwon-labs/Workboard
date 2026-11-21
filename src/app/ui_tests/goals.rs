@@ -1145,3 +1145,43 @@ fn a_goals_page_fits_the_narrowest_window_with_big_numbers() {
         .collect();
     assert!(past.is_empty(), "past the page's edge: {past:?}");
 }
+
+#[test]
+fn the_goals_page_fits_the_narrowest_window() {
+    let mut h = Ui1::sized(900.0, 900.0);
+    let mut data = two_goals().0.app.data.clone();
+    // a week of history: "Up 12 points this week" beside the title
+    let week = today() - Duration::days(8);
+    for g in &mut data.extra.goals {
+        g.days = vec![(week, 26)];
+    }
+    h.app.data = data;
+    h.hover(pos2(450.0, 450.0));
+    h.app.section = Section::Goals;
+    h.settle();
+    let edge = h.rect("New goal").right();
+    let boxes: Vec<Rect> = SUMMARY.iter().map(|n| h.rect(n)).collect();
+    for b in &boxes {
+        assert!(
+            (b.width() - boxes[0].width()).abs() < 1.0,
+            "one width: {boxes:?}"
+        );
+        assert!(b.right() <= edge + 0.5, "{b:?} past the page's edge {edge}");
+    }
+    let card = h.rect("Goal Beta launch");
+    assert!(card.right() <= edge + 0.5, "{card:?} past {edge}");
+    let window = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 900.0));
+    let past: Vec<_> = texts_in(&h, window.expand(2000.0))
+        .into_iter()
+        .filter(|(_, r)| r.top() > 60.0 && r.right() > edge + 0.5)
+        .collect();
+    assert!(past.is_empty(), "past the page's edge: {past:?}");
+    for b in &boxes {
+        assert_apart(&texts_in(&h, *b), b.shrink(1.0), "summary box");
+    }
+    // 38 - 26 and 0 - 26 points: down 7 on average, beside the big number
+    assert!(!h.painted_text("Down 7 points this week").is_empty());
+    for n in ["On track 0", "Behind 0", "At risk 2"] {
+        assert!(!h.painted_text(n).is_empty(), "{n} in full");
+    }
+}

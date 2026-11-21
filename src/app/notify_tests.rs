@@ -965,3 +965,48 @@ fn a_goal_due_today_is_announced_once_unless_turned_off_and_opens_the_goal() {
         a.notify_rt.sent
     );
 }
+
+/// Two forms can have the same name (two made from one template): an
+/// answer tells the owner of the form it was given to, which the task
+/// keeps, not everyone with a form of that name. An answer from an app
+/// that didn't keep the form is still found by the name.
+#[test]
+fn a_form_answer_tells_only_that_forms_owner() {
+    let mut a = app();
+    let list = a.data.first_list().unwrap();
+    let mine = a.data.new_id();
+    let theirs = a.data.new_id();
+    for (id, owner) in [(mine, 1), (theirs, 3)] {
+        a.data.extra.forms.push(Form {
+            id,
+            name: "Bug report".into(),
+            list_id: list,
+            owner,
+            ..Default::default()
+        });
+    }
+    let answer = |a: &mut App, name: &str, form: Option<u64>| {
+        a.pending.form = form;
+        a.apply(Action::Add {
+            list,
+            name: name.into(),
+            status: None,
+            priority: 0,
+            assignees: vec![],
+            due: None,
+            parent: None,
+            open: false,
+        });
+        let tid = a.data.tasks.iter().find(|t| t.name == name).unwrap().id;
+        teammate_line(a, tid, 2, "submitted the form Bug report", false);
+        a.notify_scan();
+    };
+    answer(&mut a, "Login fails", Some(theirs));
+    assert!(a.notify_rt.sent.is_empty(), "an answer to someone else's form");
+    answer(&mut a, "Crash on save", Some(mine));
+    assert_eq!(kinds(&a), vec![Kind::Form]);
+    assert_eq!(a.notify_rt.sent[0].body, "Alex Kim answered: Crash on save");
+    answer(&mut a, "Old app answer", None);
+    assert_eq!(a.notify_rt.sent.len(), 2);
+    assert_eq!(a.notify_rt.sent[1].body, "Alex Kim answered: Old app answer");
+}

@@ -435,7 +435,13 @@ impl App {
                         let Some(name) = a.text.strip_prefix("submitted the form ") else {
                             continue;
                         };
-                        if mine.iter().any(|f| f.name == name) {
+                        // the form the task says it answers; by its name for
+                        // answers from apps that didn't keep that
+                        let to_me = match t.form {
+                            Some(id) => mine.iter().any(|f| f.id == id),
+                            None => mine.iter().any(|f| f.name == name),
+                        };
+                        if to_me {
                             let title = trf!("New answer to {}", name);
                             let body = trf!("{} answered: {}", self.who(a.author), t.name);
                             add(

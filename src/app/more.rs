@@ -73,10 +73,6 @@ pub struct SweepUi {
     /// What each hub sidebar's search holds, by hub ("docs", "dash", "wb",
     /// "teams", "meetings"; Forms keeps its own in `forms`).
     pub side_find: HashMap<&'static str, String>,
-    /// The hub last shown and its filter then (`App::fit_hub_filter`).
-    pub hub_filter_was: Option<(Section, u8)>,
-    /// Each hub's filter when another hub came up, for when it comes back.
-    pub hub_filters: HashMap<Section, u8>,
     /// Dashboard card being renamed: (index, text).
     pub card_rename: Option<(usize, String)>,
     /// Time entry being changed.
@@ -1060,7 +1056,7 @@ impl App {
                 x.teams.retain(|tm| tm.id != id);
                 if self.team_open == Some(id) {
                     self.team_open = None;
-                    self.hub_filter = 0;
+                    self.hub.teams = hubs::TeamsPage::All;
                 }
             }
             // cancelling an invite takes the not-yet-joined person out the

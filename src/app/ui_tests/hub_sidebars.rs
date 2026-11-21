@@ -128,7 +128,11 @@ fn the_heading_plus_makes_a_new_item_in_each_hub() {
     let teams = h.app.data.extra.teams.len();
     h.click("Add a team");
     assert_eq!(h.app.data.extra.teams.len(), teams + 1);
-    assert_eq!(h.app.hub_filter, 9, "the new team's page is open");
+    assert_eq!(
+        h.app.hub.teams,
+        TeamsPage::Team,
+        "the new team's page is open"
+    );
     let name = h.app.data.extra.teams.last().unwrap().name.clone();
     assert!(h.has(&format!("Open team {}", name)));
 }
@@ -187,8 +191,8 @@ fn favorites_is_a_filter_on_docs_dashboards_and_whiteboards() {
     h.app.data.extra.starred.push(format!("doc:{}", brief));
     h.settle();
     h.click("Favorites");
-    assert_eq!(h.app.hub_filter, 7);
-    assert_eq!(h.app.docs_count(7), 1);
+    assert_eq!(h.app.hub.docs, DocFilter::Favorites);
+    assert_eq!(h.app.docs_count(DocFilter::Favorites), 1);
     assert!(h.has("Doc Project brief"));
     assert!(!h.has("Doc Roadmap"), "only the starred doc on the page");
 
@@ -199,7 +203,7 @@ fn favorites_is_a_filter_on_docs_dashboards_and_whiteboards() {
     h.app.dash_open = None;
     open_hub(&mut h, "Dashboards", Section::Dashboards);
     h.click("Favorites");
-    assert_eq!(h.app.hub_filter, 2);
+    assert_eq!(h.app.hub.dash, OwnFilter::Favorites);
     assert!(h.has("Sales") && !h.has("Costs"));
 
     h.app.new_whiteboard();
@@ -213,7 +217,7 @@ fn favorites_is_a_filter_on_docs_dashboards_and_whiteboards() {
     h.app.sweep.wb.new = None;
     open_hub(&mut h, "Whiteboards", Section::Whiteboards);
     h.click("Favorites");
-    assert_eq!(h.app.hub_filter, 2);
+    assert_eq!(h.app.hub.wb, OwnFilter::Favorites);
     let on_page = |h: &Ui1, id: u64| h.has(&format!("Star wb:{}", id));
     assert!(on_page(&h, a) && !on_page(&h, b), "only the starred board");
 }
@@ -238,7 +242,7 @@ fn a_starred_sub_page_is_in_docs_favorites() {
     h.open_docs_list();
     assert!(!h.has("Doc Launch notes"), "All Docs lists it with its doc");
     h.click("Favorites");
-    assert_eq!(h.app.docs_count(7), 1);
+    assert_eq!(h.app.docs_count(DocFilter::Favorites), 1);
     assert!(h.has("Doc Launch notes"));
     h.click("Doc Launch notes");
     assert_eq!(h.app.doc_open, Some(page));

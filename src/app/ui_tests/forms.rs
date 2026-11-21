@@ -304,19 +304,19 @@ fn forms_dont_take_another_hubs_filter() {
     h.click("Rail More");
     h.click("Docs");
     h.click("Archived");
-    let docs_archived = h.app.hub_filter;
+    let docs_archived = h.app.hub.docs;
     h.click("Search");
     h.type_text("Feedback");
     h.click("Feedback Form");
     assert_eq!(h.app.section, Section::Forms);
     h.click("Go back");
     assert_eq!(h.app.section, Section::Docs);
-    assert_eq!(h.app.hub_filter, docs_archived, "Docs is on Archived again");
+    assert_eq!(h.app.hub.docs, docs_archived, "Docs is on Archived again");
     h.click("Rail More");
     h.click("Forms");
     h.click("Rail More");
     h.click("Docs");
-    assert_eq!(h.app.hub_filter, 0, "opened afresh from More");
+    assert_eq!(h.app.hub.docs, DocFilter::All, "opened afresh from More");
 }
 
 /// A blank form (Title, Details) open on its Edit tab, the pointer on the

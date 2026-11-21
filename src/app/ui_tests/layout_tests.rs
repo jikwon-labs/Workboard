@@ -675,7 +675,7 @@ fn team_page_counts_open_tasks_it_does_not_list() {
 fn org_chart_cards_in_a_row_line_up() {
     let mut h = Ui1::new();
     h.app.section = Section::Teams;
-    h.app.hub_filter = 2;
+    h.app.hub.teams = TeamsPage::OrgChart;
     h.settle();
     let sam = h.painted_text("Sam Lee");
     let jordan = h.painted_text("Jordan Park");
@@ -1301,7 +1301,7 @@ fn org_chart_cards_wrap_inside_the_window() {
             });
         }
         h.app.section = Section::Teams;
-        h.app.hub_filter = 2;
+        h.app.hub.teams = TeamsPage::OrgChart;
         h.settle();
         let mut right = 0.0f32;
         each_text(&h.shapes, |ts, _| {

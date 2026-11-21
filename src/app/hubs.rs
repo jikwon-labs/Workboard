@@ -4,10 +4,12 @@
 // (Forms has its own, in more/forms); Goals has a start page; Timesheets has
 // tabs (My timesheet, All timesheets) and editable hours.
 
+pub(crate) mod filter;
 pub(crate) mod side;
 
 use super::icons::{icon_button, icon_button_ex, line_icon, line_icon_scaled};
 use super::*;
+pub(crate) use filter::{DocFilter, HubFilters, OwnFilter, SheetsTab, TeamsPage};
 use side::{side_empty, side_heading, side_row, side_row_text, side_rule, side_search, SideFilter};
 
 /// `dash_open` for the built-in Workspace overview (not a saved dashboard).
@@ -31,17 +33,16 @@ struct HubSide<'a> {
     add: Option<(&'a str, &'a str)>,
 }
 
-/// The Docs filters in the sidebar's order: (value of `hub_filter`, icon,
-/// name). Favorites came last, so it keeps the last value.
-const DOC_FILTERS: [(u8, &str, &str); 8] = [
-    (0, "docs", "All Docs"),
-    (1, "@me", "My Docs"),
-    (7, "star", "Favorites"),
-    (2, "teams", "Shared with me"),
-    (3, "lock", "Private"),
-    (4, "edit", "Meeting Notes"),
-    (5, "notebook", "Wikis"),
-    (6, "archive", "Archived"),
+/// The Docs filters in the sidebar's order: (filter, icon, name).
+const DOC_FILTERS: [(DocFilter, &str, &str); 8] = [
+    (DocFilter::All, "docs", "All Docs"),
+    (DocFilter::Mine, "@me", "My Docs"),
+    (DocFilter::Favorites, "star", "Favorites"),
+    (DocFilter::Shared, "teams", "Shared with me"),
+    (DocFilter::Private, "lock", "Private"),
+    (DocFilter::Meetings, "edit", "Meeting Notes"),
+    (DocFilter::Wikis, "notebook", "Wikis"),
+    (DocFilter::Archived, "archive", "Archived"),
 ];
 
 /// A template card as in the galleries: round coloured icon (`glyph` is a
@@ -113,43 +114,6 @@ pub(super) fn wiki_badge(p: &egui::Painter, t: &Theme, left_center: egui::Pos2) 
 }
 
 impl App {
-    /// The hubs share `hub_filter`, but each reads it its own way (Docs'
-    /// Archived is 6, a team's page 9, which Forms would show as Favorites).
-    /// A hub that comes up after another without its filter being set (a
-    /// search result, Back, a form made from a + menu) takes the filter it
-    /// had when it was last left, else its first, instead of the other
-    /// hub's. Pages without filters (Home) in between don't count. Opening
-    /// an app from the bar starts it afresh (`open_app`). Run at the start
-    /// of each frame.
-    pub(super) fn fit_hub_filter(&mut self) {
-        let hub = matches!(
-            self.section,
-            Section::Docs
-                | Section::Dashboards
-                | Section::Whiteboards
-                | Section::Forms
-                | Section::Teams
-                | Section::Timesheets
-        );
-        if !hub {
-            return;
-        }
-        if let Some((owner, filter)) = self.sweep.hub_filter_was {
-            if owner != self.section {
-                self.sweep.hub_filters.insert(owner, filter);
-                if filter == self.hub_filter {
-                    self.hub_filter = self
-                        .sweep
-                        .hub_filters
-                        .get(&self.section)
-                        .copied()
-                        .unwrap_or(0);
-                }
-            }
-        }
-        self.sweep.hub_filter_was = Some((self.section, self.hub_filter));
-    }
-
     /// The Wikis I can see, most popular first: views in the last 30 days,
     /// then the latest edit. (id, title, views)
     pub(super) fn popular_wikis(&self, now: i64) -> Vec<(u64, String, usize)> {
@@ -360,7 +324,7 @@ impl App {
             );
         }
         for tm in teams {
-            let sel = self.hub_filter == 9 && self.team_open == Some(tm.id);
+            let sel = self.hub.teams == TeamsPage::Team && self.team_open == Some(tm.id);
             let (r, resp) = side_row(ui, t, &format!("Open team {}", tm.name), sel, 30.0);
             ui.painter().rect_filled(
                 Rect::from_center_size(r.left_center() + vec2(16.0, 0.0), vec2(14.0, 14.0)),
@@ -370,7 +334,7 @@ impl App {
             side_row_text(ui, t, r, &tm.name, sel, r.right() - 8.0);
             if resp.clicked() {
                 self.team_open = Some(tm.id);
-                self.hub_filter = 9;
+                self.hub.teams = TeamsPage::Team;
             }
         }
     }
@@ -403,20 +367,22 @@ impl App {
 
     // ---------------------------------------------------------------- docs
 
-    /// Whether a doc is under a Docs filter (`hub_filter`): someone's
+    /// Whether a doc is under a Docs filter: someone's
     /// Private docs are for them alone, and docs in archived spaces or other
     /// people's Personal spaces stay out, as in the sidebar.
-    pub(super) fn doc_in_filter(&self, d: &Doc, filter: u8) -> bool {
+    pub(super) fn doc_in_filter(&self, d: &Doc, filter: DocFilter) -> bool {
         let me = self.data.me;
         let fits = match filter {
-            1 => d.owner == me && !d.archived,
-            2 => d.owner != me && !d.private && !d.archived,
-            3 => d.private && !d.archived,
-            4 => d.meeting_note && !d.archived,
-            5 => d.is_wiki() && !d.archived,
-            6 => d.archived,
-            7 => !d.archived && self.data.extra.starred.contains(&format!("doc:{}", d.id)),
-            _ => !d.archived,
+            DocFilter::Mine => d.owner == me && !d.archived,
+            DocFilter::Shared => d.owner != me && !d.private && !d.archived,
+            DocFilter::Private => d.private && !d.archived,
+            DocFilter::Meetings => d.meeting_note && !d.archived,
+            DocFilter::Wikis => d.is_wiki() && !d.archived,
+            DocFilter::Archived => d.archived,
+            DocFilter::Favorites => {
+                !d.archived && self.data.extra.starred.contains(&format!("doc:{}", d.id))
+            }
+            DocFilter::All => !d.archived,
         };
         fits && self.doc_reachable(d)
     }
@@ -425,12 +391,12 @@ impl App {
     /// level docs, their sub pages being counted with them, except in
     /// Favorites, where a starred sub page is listed by itself (it can be
     /// starred from its own page and would be found nowhere else).
-    pub(super) fn doc_listed(&self, d: &Doc, filter: u8) -> bool {
-        (d.parent.is_none() || filter == 7) && self.doc_in_filter(d, filter)
+    pub(super) fn doc_listed(&self, d: &Doc, filter: DocFilter) -> bool {
+        (d.parent.is_none() || filter == DocFilter::Favorites) && self.doc_in_filter(d, filter)
     }
 
     /// A Docs filter's count: the docs its list shows.
-    pub(super) fn docs_count(&self, filter: u8) -> usize {
+    pub(super) fn docs_count(&self, filter: DocFilter) -> usize {
         self.data
             .docs
             .iter()
@@ -443,14 +409,14 @@ impl App {
         let me = self.data.me;
         let filters: Vec<SideFilter> = DOC_FILTERS
             .iter()
-            .map(|&(key, icon, label)| SideFilter {
-                key,
+            .map(|&(f, icon, label)| SideFilter {
+                key: f.key(),
                 icon,
                 label,
-                count: Some(self.docs_count(key)),
+                count: Some(self.docs_count(f)),
             })
             .collect();
-        let sel = self.doc_open.is_none().then_some(self.hub_filter);
+        let sel = self.doc_open.is_none().then_some(self.hub.docs.key());
         if self.doc_open != self.doc_viewed {
             self.doc_viewed = self.doc_open;
             if let Some(id) = self.doc_open {
@@ -470,7 +436,7 @@ impl App {
             },
         );
         if let Some(i) = clicked {
-            self.hub_filter = i;
+            self.hub.docs = DocFilter::from_key(i);
             self.doc_open = None;
         }
         if plus {
@@ -485,7 +451,7 @@ impl App {
                 }
                 let title = DOC_FILTERS
                     .iter()
-                    .find(|f| f.0 == self.hub_filter)
+                    .find(|f| f.0 == self.hub.docs)
                     .map_or("All Docs", |f| f.2);
                 self.page_bar(ui, title, |s, ui| {
                     let tt = s.t();
@@ -689,7 +655,7 @@ impl App {
                                 );
                                 let q = self.docs.search.to_lowercase();
                                 let tag = self.docs.tag.clone();
-                                let filter = self.hub_filter;
+                                let filter = self.hub.docs;
                                 let mine_only = self.docs.mine;
                                 let sort = self.docs.sort;
                                 let mut docs: Vec<Doc> = self
@@ -1049,12 +1015,12 @@ impl App {
 
     /// Whether a dashboard I can see is under a Dashboards filter: 1 the ones
     /// I made (older ones without a maker show in both), 2 the starred ones.
-    fn dash_in_filter(&self, d: &Dashboard, filter: u8) -> bool {
+    fn dash_in_filter(&self, d: &Dashboard, filter: OwnFilter) -> bool {
         self.dash_shown(d)
             && match filter {
-                1 => d.owner == self.data.me || d.owner == 0,
-                2 => self.data.extra.starred.contains(&format!("dash:{}", d.id)),
-                _ => true,
+                OwnFilter::Mine => d.owner == self.data.me || d.owner == 0,
+                OwnFilter::Favorites => self.data.extra.starred.contains(&format!("dash:{}", d.id)),
+                OwnFilter::All => true,
             }
     }
 
@@ -1062,6 +1028,7 @@ impl App {
         let t = self.t();
         let n = |f: u8| {
             let dashes = &self.data.extra.dashboards;
+            let f = OwnFilter::from_key(f);
             Some(dashes.iter().filter(|d| self.dash_in_filter(d, f)).count())
         };
         let filters = [
@@ -1084,7 +1051,7 @@ impl App {
                 count: n(2),
             },
         ];
-        let sel = self.dash_open.is_none().then_some(self.hub_filter.min(2));
+        let sel = self.dash_open.is_none().then_some(self.hub.dash.key());
         let (clicked, plus) = self.hub_sidebar(
             ui,
             HubSide {
@@ -1098,7 +1065,7 @@ impl App {
             },
         );
         if let Some(i) = clicked {
-            self.hub_filter = i;
+            self.hub.dash = OwnFilter::from_key(i);
             self.dash_open = None;
         }
         if plus {
@@ -1107,7 +1074,7 @@ impl App {
             });
         }
         let me = self.data.me;
-        let filter = self.hub_filter.min(2);
+        let filter = self.hub.dash;
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
             if self.dash_open.is_some() {
                 self.dashboard_content(ui);
@@ -1232,11 +1199,11 @@ impl App {
 
     /// Whether a whiteboard is under a Whiteboards filter: 1 the ones I made
     /// (older ones without a maker count as mine too), 2 the starred ones.
-    pub(super) fn wb_in_filter(&self, w: &Whiteboard, filter: u8) -> bool {
+    pub(super) fn wb_in_filter(&self, w: &Whiteboard, filter: OwnFilter) -> bool {
         match filter {
-            1 => w.owner == self.data.me || w.owner == 0,
-            2 => self.data.extra.starred.contains(&format!("wb:{}", w.id)),
-            _ => true,
+            OwnFilter::Mine => w.owner == self.data.me || w.owner == 0,
+            OwnFilter::Favorites => self.data.extra.starred.contains(&format!("wb:{}", w.id)),
+            OwnFilter::All => true,
         }
     }
 
@@ -1255,6 +1222,7 @@ impl App {
         }
         let n = |f: u8| {
             let boards = &self.data.extra.whiteboards;
+            let f = OwnFilter::from_key(f);
             Some(boards.iter().filter(|w| self.wb_in_filter(w, f)).count())
         };
         let filters = [
@@ -1277,12 +1245,7 @@ impl App {
                 count: n(2),
             },
         ];
-        let sel = self
-            .sweep
-            .wb
-            .open
-            .is_none()
-            .then_some(self.hub_filter.min(2));
+        let sel = self.sweep.wb.open.is_none().then_some(self.hub.wb.key());
         let (clicked, plus) = self.hub_sidebar(
             ui,
             HubSide {
@@ -1296,7 +1259,7 @@ impl App {
             },
         );
         if let Some(i) = clicked {
-            self.hub_filter = i;
+            self.hub.wb = OwnFilter::from_key(i);
             self.sweep.wb.open = None;
         }
         if plus {
@@ -1367,7 +1330,7 @@ impl App {
                 count: Some(mine),
             },
         ];
-        let sel = (self.hub_filter != 9).then_some(self.hub_filter.min(4));
+        let sel = self.hub.teams.key();
         // teams are made and changed by the owner and admins on a server,
         // so the + is theirs alone
         let may = self.may_manage();
@@ -1384,7 +1347,7 @@ impl App {
             },
         );
         if let Some(i) = clicked {
-            self.hub_filter = i;
+            self.hub.teams = TeamsPage::from_key(i);
             self.team_open = None;
         }
         if plus && may {
@@ -1392,13 +1355,13 @@ impl App {
         }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
-            .show_inside(ui, |ui| match self.hub_filter {
-                1 => self.people_page(ui),
-                2 => self.org_chart(ui),
-                3 => self.teams_workload(ui),
-                4 => self.all_teams(ui, true),
-                9 => self.team_detail(ui),
-                _ => self.all_teams(ui, false),
+            .show_inside(ui, |ui| match self.hub.teams {
+                TeamsPage::People => self.people_page(ui),
+                TeamsPage::OrgChart => self.org_chart(ui),
+                TeamsPage::Analytics => self.teams_workload(ui),
+                TeamsPage::Mine => self.all_teams(ui, true),
+                TeamsPage::Team => self.team_detail(ui),
+                TeamsPage::All => self.all_teams(ui, false),
             });
     }
 
@@ -1412,7 +1375,7 @@ impl App {
             color: STATUS_PALETTE[1 + (n * 3) % 13],
         });
         self.team_open = Some(id);
-        self.hub_filter = 9;
+        self.hub.teams = TeamsPage::Team;
         self.dirty = true;
     }
 
@@ -1469,7 +1432,7 @@ impl App {
                     hover_bg(ui, &card, card.rect, 8.0);
                     if card.clicked() {
                         self.team_open = Some(tm.id);
-                        self.hub_filter = 9;
+                        self.hub.teams = TeamsPage::Team;
                     }
                     ui.add_space(8.0);
                 }
@@ -1483,7 +1446,7 @@ impl App {
             .team_open
             .and_then(|id| self.data.extra.teams.iter().position(|x| x.id == id))
         else {
-            self.hub_filter = 0;
+            self.hub.teams = TeamsPage::All;
             return;
         };
         let members = self.data.members.clone();
@@ -1739,8 +1702,11 @@ impl App {
                     ui.label(RichText::new(tr("Timesheets")).size(15.5));
                     ui.separator();
                     // no Approvals tab: submitting a week for approval isn't built
-                    for (i, label) in ["My timesheet", "All timesheets"].iter().enumerate() {
-                        let sel = self.hub_filter.min(1) == i as u8;
+                    for (tab, label) in [
+                        (SheetsTab::Mine, "My timesheet"),
+                        (SheetsTab::All, "All timesheets"),
+                    ] {
+                        let sel = self.hub.sheets == tab;
                         let g = ui.painter().layout_no_wrap(
                             tr(label).to_string(),
                             FontId::proportional(15.0),
@@ -1763,7 +1729,7 @@ impl App {
                             );
                         }
                         if resp.clicked() {
-                            self.hub_filter = i as u8;
+                            self.hub.sheets = tab;
                         }
                     }
                 });
@@ -1801,7 +1767,7 @@ impl App {
                         let d = d.unwrap_or_else(today);
                         self.sheet_week = sunday_week_start(d);
                     }
-                    if self.hub_filter == 0 {
+                    if self.hub.sheets == SheetsTab::Mine {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             // the view shown is outlined, like the composer's tabs
                             for (on, kind, label, hint) in [
@@ -1817,8 +1783,8 @@ impl App {
                     }
                 });
                 ui.add_space(14.0);
-                match self.hub_filter.min(1) {
-                    1 => self.all_timesheets(ui, ws),
+                match self.hub.sheets {
+                    SheetsTab::All => self.all_timesheets(ui, ws),
                     _ => {
                         self.close_gone_entry_edit();
                         let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (local_date(e.start) - ws).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) }) || self.data.is_my_timer(x)) || !self.my_sheet_rows(ws).is_empty() || self.sheet_force;

@@ -3,6 +3,7 @@
 // on-screen position of each control (found by its name), then the result
 // is checked. This is the same input path a mouse click takes.
 
+use super::hubs::{DocFilter, OwnFilter, SheetsTab, TeamsPage};
 use super::*;
 use egui::Pos2;
 use workboard_server::testing::temp_home;

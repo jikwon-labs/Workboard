@@ -420,7 +420,7 @@ impl App {
     /// templates, and a card for each board with a small picture of it.
     pub(crate) fn wb_library(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let filter = self.hub_filter.min(2);
+        let filter = self.hub.wb;
         // the sidebar's filter: All, My or Favorites
         let shown: Vec<usize> = (0..self.data.extra.whiteboards.len())
             .filter(|&i| self.wb_in_filter(&self.data.extra.whiteboards[i], filter))
@@ -446,9 +446,9 @@ impl App {
                     head.left_center(),
                     Align2::LEFT_CENTER,
                     tr(match filter {
-                        1 => "My Whiteboards",
-                        2 => "Favorites",
-                        _ => "All Whiteboards",
+                        crate::app::hubs::OwnFilter::Mine => "My Whiteboards",
+                        crate::app::hubs::OwnFilter::Favorites => "Favorites",
+                        crate::app::hubs::OwnFilter::All => "All Whiteboards",
                     }),
                     crate::app::bold_font(ui.ctx(), 22.0),
                     t.text,

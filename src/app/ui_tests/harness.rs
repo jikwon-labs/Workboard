@@ -602,7 +602,7 @@ impl Ui1 {
     pub(super) fn open_docs_list(&mut self) {
         self.app.section = Section::Docs;
         self.app.doc_open = None;
-        self.app.hub_filter = 0;
+        self.app.hub.docs = DocFilter::All;
         self.settle();
     }
 

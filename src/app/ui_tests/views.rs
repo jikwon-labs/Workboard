@@ -1257,7 +1257,7 @@ fn timesheet_drawing_a_long_day_keeps_its_entries() {
     }];
     h.app.data.tasks[i].time_entries = long.clone();
     h.app.section = Section::Timesheets;
-    h.app.hub_filter = 0;
+    h.app.hub.sheets = SheetsTab::Mine;
     h.app.sheet_week = ws;
     h.app.sheet_entries = false;
     h.app.dirty = false;
@@ -1283,7 +1283,7 @@ fn timesheet_rows_added_by_hand_stay_in_their_week() {
         t.time_entries.clear();
     }
     h.app.section = Section::Timesheets;
-    h.app.hub_filter = 0;
+    h.app.hub.sheets = SheetsTab::Mine;
     h.app.sheet_week = ws;
     h.app.sheet_entries = false;
     h.app.sheet_force = true;

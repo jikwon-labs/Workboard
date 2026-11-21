@@ -1571,7 +1571,7 @@ fn header_automate_opens_for_the_current_list_and_manage_people_opens_settings()
     );
     h.app.modal = None;
     h.app.section = Section::Teams;
-    h.app.hub_filter = 3;
+    h.app.hub.teams = TeamsPage::Analytics;
     h.settle();
     h.click("Manage people");
     assert_eq!(h.app.section, Section::Settings);

@@ -3,6 +3,7 @@
 // under it.
 
 use super::*;
+use crate::app::hubs::OwnFilter;
 
 /// The table's fixed columns after the name: (heading, width).
 const COLS: [(&str, f32); 6] = [
@@ -51,12 +52,12 @@ impl App {
     }
 
     /// Whether a form passes the sidebar filter (0 all, 1 mine, 2 favorites).
-    fn form_in_filter(&self, f: &Form, filter: u8) -> bool {
+    fn form_in_filter(&self, f: &Form, filter: OwnFilter) -> bool {
         match filter {
             // mine: the ones I made (older ones without a maker show in both)
-            1 => f.owner == self.data.me || f.owner == 0,
-            2 => self.data.extra.starred.contains(&format!("form:{}", f.id)),
-            _ => true,
+            OwnFilter::Mine => f.owner == self.data.me || f.owner == 0,
+            OwnFilter::Favorites => self.data.extra.starred.contains(&format!("form:{}", f.id)),
+            OwnFilter::All => true,
         }
     }
 
@@ -100,14 +101,14 @@ impl App {
                 count: Some(
                     shown
                         .iter()
-                        .filter(|f| app.form_in_filter(f, i as u8))
+                        .filter(|f| app.form_in_filter(f, OwnFilter::from_key(i as u8)))
                         .count(),
                 ),
             })
             .collect();
-            let sel = app.form_open.is_none().then_some(app.hub_filter.min(2));
+            let sel = app.form_open.is_none().then_some(app.hub.forms.key());
             if let Some(i) = app.side_filters(ui, &filters, sel) {
-                app.hub_filter = i;
+                app.hub.forms = OwnFilter::from_key(i);
                 app.form_open = None;
             }
             side_rule(ui, &t);
@@ -199,7 +200,7 @@ impl App {
     /// the templates under it.
     pub(super) fn forms_home(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let filter = self.hub_filter.min(2);
+        let filter = self.hub.forms;
         let forms: Vec<Form> = self
             .forms_listed()
             .into_iter()
@@ -260,9 +261,9 @@ impl App {
                                 tr("No form has that name")
                             } else {
                                 match filter {
-                                    1 => tr("You haven't made a form yet."),
-                                    2 => tr("Star a Form to see it here"),
-                                    _ => tr(
+                                    OwnFilter::Mine => tr("You haven't made a form yet."),
+                                    OwnFilter::Favorites => tr("Star a Form to see it here"),
+                                    OwnFilter::All => tr(
                                         "No forms yet. Make one, or start from a template below.",
                                     ),
                                 }

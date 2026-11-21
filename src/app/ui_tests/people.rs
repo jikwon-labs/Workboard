@@ -78,7 +78,7 @@ fn a_member_on_a_server_sees_no_invite_or_workspace_settings() {
     h.settle();
     assert!(!h.has("Create team"));
     h.app.team_open = Some(777);
-    h.app.hub_filter = 9;
+    h.app.hub.teams = TeamsPage::Team;
     h.settle();
     assert!(!h.has("Delete team"));
     h.app.section = Section::Home;
@@ -935,7 +935,7 @@ fn team_color_and_my_teams() {
         color: [1, 1, 1],
     });
     h.click("My Teams");
-    assert_eq!(h.app.hub_filter, 4);
+    assert_eq!(h.app.hub.teams, TeamsPage::Mine);
     assert!(h.has("Team 1") && !h.has("Not mine"));
 }
 

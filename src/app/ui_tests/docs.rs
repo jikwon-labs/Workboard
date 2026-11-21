@@ -32,9 +32,9 @@ fn click_docs_template_and_timesheet_options() {
     h.click("Timesheets");
     assert_eq!(h.app.section, Section::Timesheets);
     h.click("All timesheets");
-    assert_eq!(h.app.hub_filter, 1);
+    assert_eq!(h.app.hub.sheets, SheetsTab::All);
     h.click("My timesheet");
-    assert_eq!(h.app.hub_filter, 0);
+    assert_eq!(h.app.hub.sheets, SheetsTab::Mine);
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn doc_slash_command_and_sub_page() {
 #[test]
 fn my_docs_badge_counts_docs_not_sub_pages() {
     let mut h = Ui1::new();
-    let before = h.app.docs_count(1);
+    let before = h.app.docs_count(DocFilter::Mine);
     h.app.new_doc(None);
     h.settle();
     let id = h.app.doc_open.unwrap();
@@ -72,7 +72,7 @@ fn my_docs_badge_counts_docs_not_sub_pages() {
         "a sub page was made"
     );
     assert_eq!(
-        h.app.docs_count(1),
+        h.app.docs_count(DocFilter::Mine),
         before + 1,
         "the sub page is not counted"
     );

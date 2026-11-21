@@ -100,7 +100,7 @@ fn open_tasks_per_person_agree_on_dashboard_and_teams() {
     dash.sort();
     assert_eq!(dash, expected, "dashboard workload");
     h.app.section = Section::Teams;
-    h.app.hub_filter = 3;
+    h.app.hub.teams = TeamsPage::Analytics;
     h.settle();
     let mut teams: Vec<usize> = h
         .texts()
@@ -116,7 +116,7 @@ fn workload_bars_say_what_they_compare_and_go_away_when_alone() {
     let caption = "Bars compare open tasks with the busiest person.";
     let mut h = Ui1::sized(1440.0, 1400.0);
     h.app.section = Section::Teams;
-    h.app.hub_filter = 3;
+    h.app.hub.teams = TeamsPage::Analytics;
     h.settle();
     assert!(h.has(caption), "a team sees what the bars mean");
     // alone, with one open task: no full bar beside "done 0"
@@ -134,7 +134,7 @@ fn workload_bars_say_what_they_compare_and_go_away_when_alone() {
         open: false,
     });
     h.app.section = Section::Teams;
-    h.app.hub_filter = 3;
+    h.app.hub.teams = TeamsPage::Analytics;
     h.settle();
     assert!(!h.has(caption));
     assert!(h.texts().iter().any(|x| x.starts_with("1 open  \u{2022}")));
@@ -162,7 +162,7 @@ fn settings_spaces_with_none_says_so_and_offers_new_space() {
 fn teams_page_alone_leads_with_inviting_people() {
     let mut h = with(solo(), 1440.0, 900.0);
     h.app.section = Section::Teams;
-    h.app.hub_filter = 0;
+    h.app.hub.teams = TeamsPage::All;
     h.settle();
     assert!(h.has("Invite people to make teams"));
     assert_eq!(h.count_named("Create team"), 1, "one create button");
@@ -172,7 +172,7 @@ fn teams_page_alone_leads_with_inviting_people() {
     let mut h = Ui1::new();
     h.app.data.extra.teams.clear();
     h.app.section = Section::Teams;
-    h.app.hub_filter = 0;
+    h.app.hub.teams = TeamsPage::All;
     h.settle();
     assert!(h.has("Manage teams and see their work"));
 }
@@ -448,7 +448,7 @@ fn timesheet_says_what_it_is_for_and_how_to_fill_it() {
         t.time_entries.clear();
     }
     h.app.section = Section::Timesheets;
-    h.app.hub_filter = 0;
+    h.app.hub.sheets = SheetsTab::Mine;
     h.app.sheet_week = ws;
     h.app.sheet_entries = false;
     h.settle();

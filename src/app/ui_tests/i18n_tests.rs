@@ -483,7 +483,7 @@ pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             Box::new(move |a: &mut App| {
                 a.section = Section::Teams;
                 a.team_open = None;
-                a.hub_filter = f;
+                a.hub.teams = TeamsPage::from_key(f);
             }),
         ));
     }

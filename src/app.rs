@@ -557,7 +557,8 @@ pub struct App {
     inbox_tab: u8,
     channel_find: Option<String>,
     channel_panel: u8,
-    hub_filter: u8,
+    /// Each hub's sidebar filter (Docs, Dashboards, Teams, ...).
+    hub: hubs::HubFilters,
     /// The doc whose open was last counted (Popular Wikis views).
     doc_viewed: Option<u64>,
     temp_app: Option<Section>,
@@ -1085,7 +1086,7 @@ impl App {
             inbox_tab: 0,
             channel_find: None,
             channel_panel: 0,
-            hub_filter: 0,
+            hub: Default::default(),
             doc_viewed: None,
             temp_app: None,
             team_open: None,
@@ -5306,7 +5307,6 @@ impl App {
 
     fn ui_frame_inner(&mut self, ctx: &egui::Context) {
         self.menu_was_open = any_menu_was_open(ctx);
-        self.fit_hub_filter();
         self.bring_back_drafts();
         self.drafts.chat.swap(self.chat.open, &mut self.chat.text);
         self.drafts

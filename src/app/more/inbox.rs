@@ -187,7 +187,8 @@ impl App {
                                         x.assignees.contains(&me)
                                             && x.due.is_some_and(|d| d <= today())
                                             && !self.data.is_closed(x)
-                                            && self.data.task_live(x)
+                                            // as the sidebar's Today & Overdue counts
+                                            && self.task_visible(x)
                                     })
                                     .count();
                                 let point_to_due =

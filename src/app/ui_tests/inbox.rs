@@ -465,3 +465,45 @@ fn switching_the_language_renames_someone_in_the_kept_rows() {
     crate::i18n::set_lang(crate::i18n::Lang::En);
     assert!(ko, "the row is named in the language now shown");
 }
+
+#[test]
+fn alone_the_due_count_leaves_out_tasks_i_cannot_see_like_the_sidebar() {
+    let mut d = Data::blank(
+        "Solo",
+        Member {
+            id: 1,
+            name: "Me".into(),
+            role: "Owner".into(),
+            ..Default::default()
+        },
+    );
+    // a teammate who left kept a Personal space; a task in it is mine and due
+    let (sid, lid) = (d.new_id(), d.new_id());
+    let mut space = d.spaces[0].clone();
+    space.id = sid;
+    space.name = "Their personal space".into();
+    space.private_owner = Some(7);
+    space.lists[0].id = lid;
+    d.spaces.push(space);
+    let mut h = Ui1::new();
+    h.app = App::build(None, Some(d));
+    h.app.apply(Action::Add {
+        list: lid,
+        name: "Hidden due task".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![1],
+        due: Some(today() - Duration::days(1)),
+        parent: None,
+        open: false,
+    });
+    h.settle();
+    // the pointer is on the window, as it is for a person
+    h.hover(pos2(700.0, 400.0));
+    h.click("Inbox");
+    assert!(
+        !h.has("Tasks due today or overdue: 1"),
+        "Today & Overdue doesn't list a task in someone else's Personal space"
+    );
+    assert!(h.has("Looking to collaborate?"));
+}

@@ -2873,10 +2873,10 @@ impl App {
             // it floats over the row's top edge so it hides little of the
             // row; on a one-line row it used to sit right on the text
             let bar_top = (rect.top() - 20.0).max(ui.clip_rect().top() + 2.0);
-            let bar = Rect::from_min_size(
-                pos2(rect.right() - bw * n as f32 - 8.0, bar_top),
-                vec2(bw * n as f32 + 4.0, 28.0),
-            );
+            // at the row's right end, but not past the conversation's left
+            // edge (a narrow one cut off the first reactions)
+            let bar_left = (rect.right() - bw * n as f32 - 8.0).max(ui.clip_rect().left() + 2.0);
+            let bar = Rect::from_min_size(pos2(bar_left, bar_top), vec2(bw * n as f32 + 4.0, 28.0));
             ui.data_mut(|d| d.insert_temp(bar_mem, (bar_key, bar, pass)));
             ui.painter().rect_filled(bar, 7.0, t.card);
             ui.painter().rect_stroke(

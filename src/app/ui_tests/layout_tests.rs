@@ -1479,6 +1479,19 @@ fn small_window_thread_beside_a_channel_does_not_overlap() {
     let texts = h.texts_in(Rect::from_min_max(pos2(320.0, 40.0), pos2(900.0, 560.0)));
     let over = overlapping(&texts);
     assert!(over.is_empty(), "{:?}", over);
+    // the hover toolbar over a message starts inside the conversation
+    let msg = h
+        .painted_text("Hello team, please check")
+        .first()
+        .map(|x| x.0.center())
+        .or_else(|| {
+            h.find("Morning everyone! The new homepage mockups are in the Website Redesign list.")
+        })
+        .expect("a message on screen");
+    h.hover(msg);
+    h.settle();
+    let thumbs = h.rect("\u{1F44D}");
+    assert!(thumbs.left() >= 320.0, "the first reaction at {:?}", thumbs);
     h.click("Pinned messages");
     assert_eq!(h.app.channel_panel, 1);
 }

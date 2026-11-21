@@ -916,3 +916,39 @@ fn every_new_goal_button_starts_in_the_next_colour() {
     };
     assert_eq!(d.color, next, "Set the next goal on an achieved goal's page");
 }
+
+#[test]
+fn the_controls_on_a_card_work_without_opening_it() {
+    let (mut h, a, _) = two_goals();
+    h.click("Done Store review");
+    assert_eq!(h.app.goal_open, None, "ticking doesn't open the goal");
+    assert!(matches!(
+        goal(&h, a).targets[1].kind,
+        TargetKind::TrueFalse { done: true }
+    ));
+    h.click("Record Beta testers");
+    assert_eq!(h.app.goal_open, None, "+ Record doesn't open the goal");
+    assert!(h.has("Save value"), "its popup does");
+    // the popup lies over the card: pressing in it stays in it
+    h.click("Value now");
+    h.type_text("40");
+    h.click("Save value");
+    assert_eq!(h.app.goal_open, None);
+    assert_eq!(current_of(&h, a, 0), 40.0);
+    // the rest of the card opens it
+    h.click("Goal Beta launch");
+    assert_eq!(h.app.goal_open, Some(a));
+}
+
+#[test]
+fn a_rows_arrow_shows_its_targets_without_opening_it() {
+    let (mut h, a, _) = two_goals();
+    h.click("Show as list");
+    h.click("Show targets of Beta launch");
+    assert_eq!(h.app.goal_open, None);
+    assert_eq!(h.app.goal_list_open, Some(a));
+    assert!(!h.painted_text("38 / 50 people").is_empty(), "its targets");
+    h.click("Show targets of Beta launch");
+    assert_eq!(h.app.goal_list_open, None, "the arrow folds them again");
+    assert!(h.painted_text("38 / 50 people").is_empty());
+}

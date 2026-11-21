@@ -1468,6 +1468,15 @@ fn a_teammates_earlier_entry_merging_in_mid_edit_does_not_move_my_change() {
 fn an_entry_taken_away_elsewhere_mid_edit_closes_the_editor_with_a_note() {
     let mut h = Ui1::new();
     let (i, _) = shared_timesheet(&mut h);
+    // the week's only entry: once it's gone the page shows no list (it
+    // stayed open then, on Sundays, when the sample's other entries fall in
+    // the week before)
+    for (k, x) in h.app.data.tasks.iter_mut().enumerate() {
+        if k != i {
+            x.time_entries.clear();
+        }
+    }
+    h.settle();
     let before = h.app.data.clone();
     h.click("Edit entry Renew passport");
     assert!(h.has("Entry hours"));
@@ -1514,11 +1523,13 @@ fn planner_drag_schedules_and_unschedules_a_task() {
     let due = |h: &Ui1| h.app.data.tasks.iter().find(|t| t.id == id).unwrap().due;
     assert_eq!(due(&h), Some(day), "dropped on the day");
     // and back onto To schedule, under its heading
-    // the day's narrow column may shorten the name
+    // the day's narrow column may shorten the name; another task starting
+    // "Plan" may be on another day of the week
     let mut from = None;
     each_text(&h.shapes, |ts, clip| {
-        if ts.galley.text().starts_with("Plan") {
-            from = Some(ts.visual_bounding_rect().intersect(clip).center());
+        let at = ts.visual_bounding_rect().intersect(clip).center();
+        if ts.galley.text().starts_with("Plan") && add.x_range().contains(at.x) {
+            from = Some(at);
         }
     });
     let from = from.expect("the task on its day");

@@ -1813,6 +1813,7 @@ impl App {
                 match self.hub_filter.min(1) {
                     1 => self.all_timesheets(ui, ws),
                     _ => {
+                        self.close_gone_entry_edit();
                         let has_any = self.data.tasks.iter().any(|x| x.time_entries.iter().any(|e| { let i = (local_date(e.start) - ws).num_days(); (0..7).contains(&i) && self.data.is_my_entry(x, e) }) || self.data.is_my_timer(x)) || !self.my_sheet_rows(ws).is_empty() || self.sheet_force;
                         if !has_any {
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(30, 40)).show(ui, |ui| {
@@ -2294,11 +2295,11 @@ impl App {
         self.dirty = true;
     }
 
-    fn time_entries_list(&mut self, ui: &mut Ui, ws: NaiveDate) {
-        let t = self.t();
-        // the entry being changed is found again by whose it is and when it
-        // starts: a merge since the last frame may have moved it in the list,
-        // changed it or taken it away
+    /// The entry being changed is found again by whose it is and when it
+    /// starts: a merge since the last frame may have moved it in the list,
+    /// changed it or taken it away. Checked before the page is drawn: with
+    /// the week's last entry gone the page shows no list to close it in.
+    fn close_gone_entry_edit(&mut self) {
         if let Some(ed) = &self.sweep.entry_edit {
             let there = self
                 .data
@@ -2315,6 +2316,10 @@ impl App {
                 self.toast(tr("The time entry you were changing was changed somewhere else, so it was closed without saving."));
             }
         }
+    }
+
+    fn time_entries_list(&mut self, ui: &mut Ui, ws: NaiveDate) {
+        let t = self.t();
         // (start, end, task name, task, whose as saved)
         let mut rows: Vec<(i64, i64, String, u64, u64)> = vec![];
         for x in &self.data.tasks {

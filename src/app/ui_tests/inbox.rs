@@ -396,8 +396,16 @@ fn a_reminder_about_a_deleted_task_is_not_a_link_that_does_nothing() {
 
 #[test]
 fn editing_only_a_reminders_words_does_not_alert_it_again() {
-    // due an hour ago (at some second past the minute), already alerted
-    let due = now_ts() - 3600;
+    // due earlier today (at some second past the minute), already alerted;
+    // today, so the new time typed below (23:59) is still to come: an hour
+    // ago was yesterday just after midnight, and 23:59 yesterday is past and
+    // alerts at once
+    let due = today()
+        .and_hms_opt(0, 0, 30)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .unwrap()
+        .timestamp();
     let mut h = inbox(|d| {
         let me = d.me;
         d.extra.reminders.push(Reminder {

@@ -287,7 +287,8 @@ fn timesheet_cells_and_totals_use_hours_and_minutes() {
     set_lang(Lang::En);
     let mut h = Ui1::new();
     let me = h.app.data.me;
-    let ws = today() - Duration::days(today().weekday().num_days_from_monday() as i64);
+    // the page's week starts on Sunday
+    let ws = today() - Duration::days(today().weekday().num_days_from_sunday() as i64);
     let start = ws
         .and_hms_opt(10, 0, 0)
         .unwrap()

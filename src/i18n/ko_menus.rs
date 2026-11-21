@@ -180,7 +180,7 @@ pub const T: &[(&str, &str)] = &[
     ("Compact list rows", "목록 행을 좁게"),
     ("Start the week on Monday in the Planner", "플래너에서 한 주를 월요일부터 시작"),
     ("Celebrate when a task is completed", "작업을 완료하면 축하 효과 표시"),
-    ("Turn features on or off for this Workspace.", "이 워크스페이스에서 쓸 기능을 켜거나 끕니다."),
+    ("Turn features on or off for this Workspace.", "워크스페이스에서 쓸 기능을 고르세요."),
     ("Priorities", "우선순위"),
     ("Time Estimates", "예상 시간"),
     ("Multiple Assignees", "여러 담당자"),

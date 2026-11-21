@@ -39,6 +39,8 @@ objc = "0.2"
 # blocks for UNUserNotificationCenter callbacks (src/notifier.rs); the version objc 0.2 pairs with
 block = "0.1"
 raw-window-handle = "0.6"
+# the "Quit Workboard?" alert (src/os.rs)
+rfd = { version = "0.15", default-features = false }
 
 # Windows: toasts, the taskbar button and the pipe that keeps the app to one
 # copy (src/notifier.rs, src/single.rs); the version eframe already pulls in
@@ -69,7 +71,8 @@ eframe = { version = "0.31", features = ["wgpu"] }
 # Vulkan and OpenGL: Direct3D 12 (with the WARP software fallback) is added
 # here. The version eframe uses.
 wgpu = { version = "24", default-features = false, features = ["dx12"] }
-# the file picker (src/media.rs); its default features are for Linux only
+# the file picker (src/media.rs) and the "Quit Workboard?" alert
+# (src/os.rs); its default features are for Linux only
 rfd = { version = "0.15", default-features = false }
 
 # the icon inside workboard.exe (build.rs)

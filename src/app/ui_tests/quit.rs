@@ -1,6 +1,17 @@
-// Click-through tests for asking before the app quits.
+// Click-through tests for asking before the app quits. The question itself
+// is the system's own alert (`os::ask_quit`), which a test can't draw; its
+// answer is handed in here as the alert would.
 
 use super::*;
+
+/// What the open alert answers.
+fn answer(h: &mut Ui1, quit: bool) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    tx.send(quit).unwrap();
+    h.app.quit_wanted = false;
+    h.app.quit_reply = Some(rx);
+    h.settle();
+}
 
 #[test]
 fn closing_the_window_asks_before_quitting() {
@@ -9,41 +20,37 @@ fn closing_the_window_asks_before_quitting() {
     // the close button: the window stays and the app asks
     h.close_window();
     assert!(h.commands.contains(&CancelClose), "{:?}", h.commands);
-    h.settle();
-    assert!(matches!(h.app.modal, Some(Modal::Quit)));
-    assert!(h.has("Quit Workboard? Messages and notifications stop coming to this computer until you open it again."));
+    assert!(h.app.quit_wanted);
 
     // Cancel keeps the app open
-    h.click("Cancel");
-    assert!(h.app.modal.is_none());
+    answer(&mut h, false);
+    assert!(h.app.quit_reply.is_none());
     assert!(!h.commands.contains(&Close));
-
-    // Escape too
-    h.close_window();
-    h.settle();
-    assert!(matches!(h.app.modal, Some(Modal::Quit)));
-    h.key(egui::Key::Escape);
-    assert!(h.app.modal.is_none());
 
     // Quit closes the window, and that close is let through
     h.close_window();
-    h.settle();
-    h.click("Quit");
+    assert!(h.app.quit_wanted);
+    answer(&mut h, true);
     assert!(h.commands.contains(&Close), "{:?}", h.commands);
     h.close_window();
     assert!(!h.commands.contains(&CancelClose), "{:?}", h.commands);
-    assert!(h.app.modal.is_none());
+    assert!(!h.app.quit_wanted);
 }
 
 #[test]
-fn enter_in_the_quit_dialog_quits() {
+fn closing_again_while_the_alert_is_open_asks_once() {
     let mut h = Ui1::new();
     h.close_window();
-    h.settle();
-    h.key(egui::Key::Enter);
+    // the alert is open, no answer yet
+    let (_tx, rx) = std::sync::mpsc::channel();
+    h.app.quit_wanted = false;
+    h.app.quit_reply = Some(rx);
+    h.close_window();
     assert!(
-        h.commands.contains(&egui::ViewportCommand::Close),
+        h.commands.contains(&egui::ViewportCommand::CancelClose),
         "{:?}",
         h.commands
     );
+    assert!(!h.app.quit_wanted);
+    assert!(h.app.quit_reply.is_some());
 }

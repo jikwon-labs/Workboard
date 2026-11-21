@@ -191,9 +191,6 @@ pub(super) enum Modal {
     },
     /// Asking before logging out of the team server (login.rs).
     LogOut,
-    /// Asking before quitting: the window's close button, Alt+F4 or Cmd+Q
-    /// (`ask_before_quit`).
-    Quit,
     /// Asking before deleting the open workspace, its name typed in
     /// (delete_ws.rs).
     DeleteWorkspace {
@@ -1379,7 +1376,6 @@ impl App {
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
             Modal::JoinTeam { .. } => tr("Join a team").into(),
             Modal::LogOut => tr("Log out").into(),
-            Modal::Quit => tr("Quit Workboard").into(),
             Modal::DeleteWorkspace { .. } => tr("Delete workspace").into(),
             Modal::Call { .. } => tr("Start a call").into(),
             Modal::NewList { .. } => tr("Create List").into(),
@@ -1480,7 +1476,6 @@ impl App {
             Modal::WhoAmI { name, email } => close = self.who_am_i_body(ui, t, name, email),
             Modal::JoinTeam { addr } => close = self.join_team_body(ui, t, addr),
             Modal::LogOut => close = self.log_out_body(ui, t),
-            Modal::Quit => close = self.quit_body(ui, t),
             Modal::DeleteWorkspace { typed } => close = self.delete_workspace_body(ui, t, typed),
             Modal::Call { ch, link } => close = self.call_body(ui, t, ch, link),
             Modal::NewList {

@@ -247,6 +247,63 @@ pub fn take_quit_request() -> bool {
     QUIT_ASKED.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Asks "Quit Workboard?" in the system's own alert: on macOS a sheet that
+/// slides down from the window, on Windows a message box over it. The app
+/// keeps drawing meanwhile; true arrives on Quit, false on Cancel.
+#[cfg(any(target_os = "macos", windows))]
+pub fn ask_quit(frame: &eframe::Frame, ctx: &egui::Context) -> std::sync::mpsc::Receiver<bool> {
+    use crate::i18n::tr;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let quit = tr("Quit").to_string();
+    let answer = rfd::AsyncMessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title(tr("Quit Workboard?"))
+        .set_description(tr(
+            "You won't get new messages or notifications once you quit.",
+        ))
+        .set_buttons(rfd::MessageButtons::OkCancelCustom(
+            quit.clone(),
+            tr("Cancel").to_string(),
+        ))
+        .set_parent(frame)
+        .show();
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let ok = matches!(block_on(answer), rfd::MessageDialogResult::Custom(b) if b == quit);
+        let _ = tx.send(ok);
+        ctx.request_repaint();
+    });
+    rx
+}
+
+/// Elsewhere there is no alert, and the app quits.
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn ask_quit(_: &eframe::Frame, _: &egui::Context) -> std::sync::mpsc::Receiver<bool> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = tx.send(true);
+    rx
+}
+
+/// Waits on this thread for a future to finish.
+#[cfg(any(target_os = "macos", windows))]
+fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::sync::Arc::new(Unpark(std::thread::current())).into();
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut fut = std::pin::pin!(fut);
+    loop {
+        if let std::task::Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+            return v;
+        }
+        std::thread::park();
+    }
+}
+
 /// Point the Mac's Quit menu item (Cmd+Q) at the app, so it can ask first;
 /// it quits at once otherwise, without a window close the app could stop.
 /// Called every frame; done once, after winit has made the menu. A quit from

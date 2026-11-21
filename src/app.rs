@@ -429,6 +429,12 @@ pub struct App {
     /// Quit was confirmed: the next close request goes through
     /// (`ask_before_quit`).
     quit_ok: bool,
+    /// Someone tried to quit: the system's "Quit Workboard?" alert opens
+    /// on the next `update`, which has the window to attach it to.
+    quit_wanted: bool,
+    /// The open "Quit Workboard?" alert: true arrives on Quit, false on
+    /// Cancel.
+    quit_reply: Option<std::sync::mpsc::Receiver<bool>>,
     /// A text field had keyboard focus at the end of the previous pass.
     typing_was_on: bool,
     /// What had keyboard focus at the end of the previous pass.
@@ -1095,6 +1101,8 @@ impl App {
             selected: HashSet::new(),
             menu_was_open: false,
             quit_ok: false,
+            quit_wanted: false,
+            quit_reply: None,
             typing_was_on: false,
             focus_was: None,
             previews: Default::default(),
@@ -5708,10 +5716,11 @@ impl eframe::App for App {
         #[cfg(target_os = "macos")]
         place_traffic_lights(frame);
         crate::os::route_quit_menu(ctx);
-        #[cfg(not(target_os = "macos"))]
-        let _ = frame;
         crate::updater::tick(ctx);
         self.ui_frame(ctx);
+        if std::mem::take(&mut self.quit_wanted) && self.quit_reply.is_none() {
+            self.quit_reply = Some(crate::os::ask_quit(frame, ctx));
+        }
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
@@ -5730,10 +5739,23 @@ impl eframe::App for App {
 
 impl App {
     /// Closing the main window (its close button, Alt+F4) or Cmd+Q asks
-    /// first. It closes at once on the sign-in screen, after Quit in the
-    /// dialog, and when the app closes itself (a screenshot run, a Windows
-    /// update restarting).
+    /// first, in the system's own alert (`os::ask_quit`). It closes at once
+    /// on the sign-in screen, after Quit in the alert, and when the app
+    /// closes itself (a screenshot run, a Windows update restarting).
     fn ask_before_quit(&mut self, ctx: &egui::Context, signing_in: bool) {
+        if let Some(reply) = &self.quit_reply {
+            match reply.try_recv() {
+                Ok(true) => {
+                    self.quit_reply = None;
+                    self.quit_ok = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                Ok(false) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.quit_reply = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
         let closing = ctx.input(|i| i.viewport().close_requested());
         let menu = crate::os::take_quit_request();
         if !closing && !menu {
@@ -5749,32 +5771,11 @@ impl App {
         if closing {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
-        self.modal = Some(Modal::Quit);
+        // the alert may already be open: asking again does nothing
+        if self.quit_reply.is_none() {
+            self.quit_wanted = true;
+        }
         ctx.request_repaint();
-    }
-
-    /// The Quit dialog. Returns true when it should close.
-    pub(super) fn quit_body(&mut self, ui: &mut Ui, t: &Theme) -> bool {
-        let mut close = false;
-        ui.label(
-            RichText::new(tr(
-                "Quit Workboard? Messages and notifications stop coming to this computer until you open it again.",
-            ))
-            .color(t.text),
-        );
-        ui.add_space(10.0);
-        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-        ui.horizontal(|ui| {
-            if primary_button(ui, t, tr("Quit")).clicked() || enter {
-                self.quit_ok = true;
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                close = true;
-            }
-            if secondary_button(ui, tr("Cancel")).clicked() {
-                close = true;
-            }
-        });
-        close
     }
 }
 

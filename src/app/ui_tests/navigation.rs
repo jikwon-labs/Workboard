@@ -1598,17 +1598,17 @@ fn rail_hint(h: &Ui1, name: &str) -> Option<String> {
 }
 
 #[test]
-fn holding_cmd_numbers_the_rail_and_cmd_number_opens_that_item() {
+fn holding_ctrl_numbers_the_rail_and_ctrl_number_opens_that_item() {
     let mut h = Ui1::new();
     // the bar by default: Home, Planner, AI, Teams
     assert_eq!(h.app.data.extra.rail_items, ["Planner", "AI", "Teams"]);
     assert_eq!(
         rail_hint(&h, "Rail Planner"),
         None,
-        "no numbers without Cmd"
+        "no numbers without Ctrl"
     );
 
-    h.frame_held(vec![], egui::Modifiers::COMMAND);
+    h.frame_held(vec![], egui::Modifiers::CTRL);
     assert_eq!(rail_hint(&h, "Rail Home"), Some("1".into()));
     assert_eq!(rail_hint(&h, "Rail Planner"), Some("2".into()));
     assert_eq!(rail_hint(&h, "Rail Teams"), Some("4".into()));
@@ -1617,34 +1617,41 @@ fn holding_cmd_numbers_the_rail_and_cmd_number_opens_that_item() {
     assert_eq!(
         rail_hint(&h, "Rail Planner"),
         None,
-        "gone when Cmd is let go"
+        "gone when Ctrl is let go"
     );
 
-    h.key_with(egui::Key::Num2, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::Num2, egui::Modifiers::CTRL);
     assert_eq!(h.app.section, Section::Planner);
-    h.key_with(egui::Key::Num4, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::Num4, egui::Modifiers::CTRL);
     assert_eq!(h.app.section, Section::Teams);
-    h.key_with(egui::Key::Num1, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::Num1, egui::Modifiers::CTRL);
     assert_eq!(h.app.section, Section::Home);
     // a number past the last item does nothing
-    h.key_with(egui::Key::Num9, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::Num9, egui::Modifiers::CTRL);
+    assert_eq!(h.app.section, Section::Home);
+    // the Mac's Cmd key neither numbers the bar nor moves along it
+    let cmd = egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND;
+    h.frame_held(vec![], cmd);
+    assert_eq!(rail_hint(&h, "Rail Planner"), None, "no numbers with Cmd");
+    h.settle();
+    h.key_with(egui::Key::Num2, cmd);
     assert_eq!(h.app.section, Section::Home);
 
     // an app opened from More sits in the bar and takes the next number
     h.app.open_app("Docs");
-    h.key_with(egui::Key::Num1, egui::Modifiers::COMMAND);
-    h.frame_held(vec![], egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::Num1, egui::Modifiers::CTRL);
+    h.frame_held(vec![], egui::Modifiers::CTRL);
     assert_eq!(rail_hint(&h, "Rail Docs"), Some("5".into()));
     h.settle();
-    h.key_with(egui::Key::Num5, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::Num5, egui::Modifiers::CTRL);
     assert_eq!(h.app.section, Section::Docs);
 
-    // with a task open, Cmd+2 is its priority, not the Planner
-    h.key_with(egui::Key::Num1, egui::Modifiers::COMMAND);
+    // not while a task is open: off the Mac Ctrl+2 is its priority there
+    h.key_with(egui::Key::Num1, egui::Modifiers::CTRL);
     let id = h.app.data.tasks[0].id;
     h.app.open_task = Some(id);
     h.settle();
-    h.key_with(egui::Key::Num2, egui::Modifiers::COMMAND);
+    h.key_with(egui::Key::Num2, egui::Modifiers::CTRL);
     assert_eq!(h.app.section, Section::Home);
 }
 

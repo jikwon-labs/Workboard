@@ -86,8 +86,8 @@ const RAIL_KEYS: [egui::Key; 9] = [
     egui::Key::Num9,
 ];
 
-/// The small number at the bottom right of a rail icon while Cmd is held:
-/// Cmd plus that number opens the item.
+/// The small number at the bottom right of a rail icon while Ctrl is held:
+/// Ctrl plus that number opens the item.
 fn paint_key_hint(p: &egui::Painter, ibox: Rect, n: usize) {
     let r = Rect::from_center_size(ibox.center() + vec2(8.0, 7.0), vec2(13.0, 13.0));
     p.rect_filled(r, 4.0, Color32::WHITE);
@@ -626,9 +626,9 @@ impl App {
         self.dirty = true;
     }
 
-    /// Whether Cmd+1..9 go to the rail's items now. Not while a dialog, the
+    /// Whether Ctrl+1..9 go to the rail's items now. Not while a dialog, the
     /// command palette or quick add is up, nor while a task is open: there
-    /// Cmd+1..4 set its priority.
+    /// Cmd+1..4 set its priority, and off the Mac Cmd is the Ctrl key.
     pub(super) fn rail_keys_on(&self) -> bool {
         self.modal.is_none()
             && self.palette.is_none()
@@ -801,10 +801,11 @@ impl App {
                 // Chat counts on Home while it isn't in the bar of its own,
                 // and on More while it's pinned but hidden there
                 let (home_n, chat_n) = self.rail_unread(pinned_sections.contains(&Section::Chat));
-                // Cmd+1..9 open the bar's items from the top; holding Cmd
-                // shows each item's number at the corner of its icon
+                // Ctrl+1..9 open the bar's items from the top (Control on
+                // the Mac, not Cmd); holding Ctrl shows each item's number at
+                // the corner of its icon
                 let keys_on = self.rail_keys_on();
-                let hints = keys_on && ctx.input(|i| i.modifiers.command);
+                let hints = keys_on && ctx.input(|i| i.modifiers.ctrl);
                 let mut slot = 0usize;
                 let mut next_key = |p: &egui::Painter, ibox: Rect| -> bool {
                     if !keys_on || slot >= RAIL_KEYS.len() {
@@ -815,7 +816,7 @@ impl App {
                     if hints {
                         paint_key_hint(p, ibox, slot);
                     }
-                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key))
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, key))
                 };
                 for (slot, &ix) in drawn.iter().enumerate() {
                     let (label, temp) = &rows[ix];

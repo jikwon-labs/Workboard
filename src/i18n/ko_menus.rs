@@ -161,6 +161,7 @@ pub const T: &[(&str, &str)] = &[
     ("Open or close the notepad", "메모장 열기/닫기"),
     ("Show or hide the sidebar", "사이드바 표시/숨기기"),
     ("Set or clear priority (open task)", "우선순위 설정/지우기 (열린 작업)"),
+    ("Go to a left bar item", "왼쪽 막대 항목으로 이동"),
     ("\u{2318}/\u{21E7} click", "\u{2318}/\u{21E7} 클릭"),
     ("Select several tasks", "여러 작업 선택"),
     ("Commands in a Doc", "문서에서 명령어"),

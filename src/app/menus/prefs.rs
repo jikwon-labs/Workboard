@@ -146,6 +146,7 @@ impl App {
                         "\u{2318}1 \u{2013} \u{2318}4  /  \u{2318}0",
                         "Set or clear priority (open task)",
                     ),
+                    ("\u{2303}1 \u{2013} \u{2303}9", "Go to a left bar item"),
                     ("\u{2318}/\u{21E7} click", "Select several tasks"),
                     ("/", "Commands in a Doc"),
                     ("\u{2318}[  /  \u{2318}]", "Back / forward"),

@@ -56,6 +56,7 @@ fn keys_for(s: &str, mac: bool) -> String {
     }
     s.replace("\u{2318}+", "Ctrl+")
         .replace('\u{2318}', "Ctrl+")
+        .replace('\u{2303}', "Ctrl+")
         .replace('\u{2325}', "Alt+")
         .replace('\u{21E7}', "Shift+")
         // "Ctrl+/Shift+ click" reads better as "Ctrl/Shift click"
@@ -507,6 +508,10 @@ mod tests {
         assert_eq!(keys_for("\u{2318}J", true), "\u{2318}J");
         assert_eq!(keys_for("\u{2318}J", false), "Ctrl+J");
         assert_eq!(keys_for("\u{2325}T", false), "Alt+T");
+        assert_eq!(
+            keys_for("\u{2303}1 \u{2013} \u{2303}9", false),
+            "Ctrl+1 \u{2013} Ctrl+9"
+        );
         assert_eq!(
             keys_for("\u{2318}N  /  \u{2325}T  /  T", false),
             "Ctrl+N  /  Alt+T  /  T"

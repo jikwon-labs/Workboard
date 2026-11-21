@@ -108,15 +108,13 @@ pub(super) fn zoom_buttons(ui: &mut Ui, zoom: &mut u8) -> bool {
             jump = true;
         }
     }
-    let out = ui.add(egui::Button::new(crate::app::icons::sign_text(true)).small());
-    crate::app::icons::paint_sign(ui, &out, true, None);
-    if out.on_hover_text(tr("Zoom out")).clicked() && *zoom < 2 {
+    let out = crate::app::icons::sign_button(ui, true, "Zoom out");
+    if out.clicked() && *zoom < 2 {
         *zoom += 1;
         jump = true;
     }
-    let zin = ui.add(egui::Button::new(crate::app::icons::sign_text(false)).small());
-    crate::app::icons::paint_sign(ui, &zin, false, None);
-    if zin.on_hover_text(tr("Zoom in")).clicked() && *zoom > 0 {
+    let zin = crate::app::icons::sign_button(ui, false, "Zoom in");
+    if zin.clicked() && *zoom > 0 {
         *zoom -= 1;
         jump = true;
     }

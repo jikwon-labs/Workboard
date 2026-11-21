@@ -988,6 +988,26 @@ fn timeline_follows_the_filter_and_zoom() {
 }
 
 #[test]
+fn timeline_zoom_buttons_are_square() {
+    let mut h = Ui1::new();
+    h.click("View Timeline");
+    for name in ["Zoom out", "Zoom in"] {
+        let r = h.rect(name);
+        assert!(
+            (r.width() - r.height()).abs() < 0.5,
+            "{name}: {:?}",
+            r.size()
+        );
+    }
+    h.assert_plus_centered("Zoom in");
+    assert_eq!(h.app.timeline.zoom, 0);
+    h.click("Zoom out");
+    assert_eq!(h.app.timeline.zoom, 1);
+    h.click("Zoom in");
+    assert_eq!(h.app.timeline.zoom, 0);
+}
+
+#[test]
 fn table_sorts_renames_and_chooses_columns() {
     // wide enough for every column and the "+" after them
     let mut h = Ui1::sized(1900.0, 900.0);

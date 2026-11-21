@@ -210,9 +210,8 @@ impl App {
         pui.horizontal(|ui| {
             ui.label(RichText::new(tr("Pages")).strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let add = ui.add(egui::Button::new(crate::app::icons::sign_text(false)).small());
-                crate::app::icons::paint_sign(ui, &add, false, None);
-                if add.on_hover_text(tr("Add page")).clicked() {
+                let add = crate::app::icons::sign_button(ui, false, "Add page");
+                if add.clicked() {
                     self.add_page(root);
                 }
             });

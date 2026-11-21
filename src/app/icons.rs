@@ -304,6 +304,26 @@ pub(super) fn sign_text(minus: bool) -> egui::RichText {
     egui::RichText::new(if minus { "\u{2212}" } else { "+" }).color(Color32::TRANSPARENT)
 }
 
+/// A small framed "+" (or "-") button that is as wide as it is tall. A
+/// button is as wide as its text plus the side padding, so with one sign in
+/// it it came out wider than tall. `tip` is its tooltip and its name.
+pub(super) fn sign_button(ui: &mut Ui, minus: bool, tip: &str) -> Response {
+    let side = ui.text_style_height(&egui::TextStyle::Body);
+    let resp = ui
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+            ui.add(
+                egui::Button::new(sign_text(minus))
+                    .small()
+                    .min_size(egui::Vec2::splat(side)),
+            )
+        })
+        .inner;
+    paint_sign(ui, &resp, minus, None);
+    crate::widgets::name_it(&resp, tip);
+    resp.on_hover_text(crate::i18n::tr(tip))
+}
+
 /// Draws the sign of a `sign_text` button in its middle, in `color` or the
 /// colour the button's text would have.
 pub(super) fn paint_sign(ui: &Ui, resp: &Response, minus: bool, color: Option<Color32>) {

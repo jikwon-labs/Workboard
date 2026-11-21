@@ -960,6 +960,13 @@ impl App {
                 link: String::new(),
             }),
             Some("reminder") => Some(Modal::reminder(String::new(), today())),
+            Some("bookmark") => Some(Modal::Bookmark {
+                title: String::new(),
+                url: String::new(),
+            }),
+            Some("status") => Some(Modal::SetStatus {
+                text: String::new(),
+            }),
             Some("channel") => data
                 .channels
                 .iter()

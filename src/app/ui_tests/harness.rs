@@ -13,6 +13,9 @@ pub(super) struct Ui1 {
     pub(super) app: App,
     pub(super) time: f64,
     pub(super) tree: Vec<(String, egui::Rect)>,
+    /// the accessibility node of each name in `tree`, for actions a screen
+    /// reader or keyboard activation sends (`accessibility_click`)
+    pub(super) nodes: Vec<(String, egui::accesskit::NodeId)>,
     pub(super) size: egui::Vec2,
     pub(super) shapes: Vec<egui::epaint::ClippedShape>,
     /// files dropped on the window in the next frame
@@ -44,6 +47,7 @@ impl Ui1 {
             app: App::build(None, Some(Data::seed())),
             time: 0.0,
             tree: vec![],
+            nodes: vec![],
             size: vec2(w, h),
             shapes: vec![],
             dropped: vec![],
@@ -98,7 +102,8 @@ impl Ui1 {
         }
         if let Some(update) = out.platform_output.accesskit_update {
             self.tree.clear();
-            for (_, node) in update.nodes {
+            self.nodes.clear();
+            for (id, node) in update.nodes {
                 let Some(b) = node.bounds() else { continue };
                 let rect = Rect::from_min_max(
                     pos2(b.x0 as f32, b.y0 as f32),
@@ -109,6 +114,7 @@ impl Ui1 {
                     .flatten()
                 {
                     self.tree.push((name.to_string(), rect));
+                    self.nodes.push((name.to_string(), id));
                 }
             }
         }
@@ -187,6 +193,27 @@ impl Ui1 {
             )
         });
         self.click_at(pos);
+    }
+
+    /// Activates the control named `name` the way a screen reader or the
+    /// keyboard does (an accessibility Click action), wherever it is, also
+    /// scrolled out of sight.
+    pub(super) fn accessibility_click(&mut self, name: &str) {
+        let target = self
+            .nodes
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, id)| *id)
+            .unwrap_or_else(|| panic!("no accessibility node named {:?}", name));
+        self.frame(vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target,
+                data: None,
+            },
+        )]);
+        self.settle();
     }
 
     pub(super) fn click_at(&mut self, pos: Pos2) {

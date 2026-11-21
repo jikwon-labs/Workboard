@@ -593,6 +593,21 @@ fn a_double_click_on_restore_does_not_open_the_row_that_moves_up() {
 }
 
 #[test]
+fn a_row_out_of_sight_still_opens_from_the_keyboard_or_a_screen_reader() {
+    let mut far = 0;
+    let mut h = inbox(|d| {
+        for i in 0..60 {
+            comment_on(d, CASE, &format!("Comment {i}"), 60 + i * 60);
+        }
+        comment_on(d, "Far down", "The oldest", 100 * 60);
+        far = d.tasks.iter().find(|t| t.name == "Far down").unwrap().id;
+    });
+    assert!(h.painted_text("Far down").is_empty(), "out of sight");
+    h.accessibility_click("Far down");
+    assert_eq!(h.app.open_task, Some(far));
+}
+
+#[test]
 fn a_quick_click_on_clear_after_another_control_still_clears() {
     let mut key = String::new();
     let mut h = inbox(|d| {

@@ -318,6 +318,10 @@ impl App {
                             // a row scrolled out of sight keeps its place but isn't
                             // drawn: thousands of rows would be on every frame
                             if !ui.is_rect_visible(r) {
+                                // (still opened from the keyboard or a screen reader)
+                                if row_press(&resp) {
+                                    self.open_inbox_src(it.src);
+                                }
                                 continue;
                             }
                             if resp.hovered() {

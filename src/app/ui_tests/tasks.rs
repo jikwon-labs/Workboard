@@ -1809,3 +1809,17 @@ fn joining_a_team_finishes_the_status_edits_and_leaves_the_teams_statuses_alone(
     assert_eq!(names, team_names, "the team's statuses as they were");
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Deleting selected tasks asks with Delete first, then Cancel, as every
+/// other confirm dialog does.
+#[test]
+fn delete_tasks_dialog_puts_delete_before_cancel() {
+    let mut h = Ui1::new();
+    h.hover(h.find("Task Write copy for landing page").unwrap());
+    h.click("Select Write copy for landing page");
+    h.key(egui::Key::Backspace);
+    assert!(h.app.confirm_bulk_delete);
+    let del = h.rect("Confirm delete");
+    let cancel = h.rect("Cancel");
+    assert!(del.right() <= cancel.left(), "{:?} then {:?}", del, cancel);
+}

@@ -386,16 +386,18 @@ impl App {
             };
             ui.label(RichText::new(note).color(t.text2));
             ui.add_space(10.0);
+            // Delete then Cancel, as the other confirm dialogs (Delete a
+            // dashboard, Log out, Delete workspace)
             ui.horizontal(|ui| {
-                if ui.button(tr("Cancel")).clicked() {
-                    close = true;
-                }
                 let del = ui.add(Tint(egui::Button::new(RichText::new(tr("Delete")).color(Color32::WHITE)).fill(t.danger)));
                 name_it(&del, "Confirm delete");
                 if del.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     for id in self.selected.drain() {
                         self.actions.push(Action::DeleteTask(id));
                     }
+                    close = true;
+                }
+                if ui.button(tr("Cancel")).clicked() {
                     close = true;
                 }
             });

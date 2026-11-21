@@ -650,6 +650,9 @@ struct ChatUi {
     also_channel: bool,
     /// The message being written in the open channel (`open`).
     text: String,
+    /// The title in the Post tab of the channel's box (the Posts page keeps
+    /// its own, `PostsUi::title`).
+    post_title: String,
     /// The message being changed in place: (channel, message, new text).
     edit: Option<(u64, u64, String)>,
     /// A message waiting for a second click on "Delete message".

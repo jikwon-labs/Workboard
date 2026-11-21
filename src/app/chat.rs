@@ -1955,7 +1955,7 @@ impl App {
                         line_icon(ui.painter(), "megaphone", r.center(), t.primary);
                         name_it(&icon, "Post mode");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.post.title)
+                            egui::TextEdit::singleline(&mut self.chat.post_title)
                                 .hint_text(tr("Title"))
                                 .font(FontId::proportional(15.0))
                                 .frame(false)
@@ -2112,7 +2112,8 @@ impl App {
                         let ready = files_ok
                             && (!self.chat.text.trim().is_empty()
                                 || !self.chat.files.is_empty()
-                                || (self.composer_mode == 1 && !self.post.title.trim().is_empty()));
+                                || (self.composer_mode == 1
+                                    && !self.chat.post_title.trim().is_empty()));
                         let b = Tint(
                             egui::Button::new(RichText::new(label).color(if ready {
                                 t.on_primary
@@ -2159,10 +2160,10 @@ impl App {
                         if (sent.clicked() || enter) && ready {
                             let text = self.chat.text.trim().to_string();
                             let title = if self.composer_mode == 1 {
-                                Some(if self.post.title.trim().is_empty() {
+                                Some(if self.chat.post_title.trim().is_empty() {
                                     DEFAULT_POST_TITLE.to_string()
                                 } else {
-                                    self.post.title.trim().to_string()
+                                    self.chat.post_title.trim().to_string()
                                 })
                             } else {
                                 None
@@ -2173,7 +2174,7 @@ impl App {
                             self.composer_mode = 0;
                             self.chat.text.clear();
                             // the picks go with the message (see apply_chat)
-                            self.post.title.clear();
+                            self.chat.post_title.clear();
                             self.chat.files.clear();
                         } else if enter && files_ok && self.chat.files.is_empty() {
                             self.chat.text.clear();

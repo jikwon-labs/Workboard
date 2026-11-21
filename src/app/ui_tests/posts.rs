@@ -143,3 +143,32 @@ fn a_post_being_written_stays_when_its_channel_goes_away() {
     assert_eq!(all_posts(&h).len(), 1);
     assert!(h.app.post.title.is_empty());
 }
+
+/// The channel's Post box and the Posts page each keep their own title: a
+/// title being written on the page doesn't turn up in the channel's box
+/// (and go out with its post), and sending there doesn't clear it here.
+#[test]
+fn the_posts_page_and_the_channel_post_box_keep_their_own_titles() {
+    let mut h = posts_page();
+    h.click("Post title");
+    h.type_text("Draft on the page");
+    h.click("general");
+    h.click("Post");
+    assert!(
+        h.painted_text("Draft on the page").is_empty(),
+        "the channel's box starts without the page's title"
+    );
+    h.click("Message composer");
+    h.type_text("Hello from the channel");
+    h.key(egui::Key::Enter);
+    let p = all_posts(&h).pop().unwrap();
+    assert_eq!(p.post_title.as_deref(), Some("Update"), "its own title");
+    assert_eq!(p.text, "Hello from the channel");
+    h.app.section = Section::Posts;
+    h.settle();
+    assert_eq!(
+        h.app.post.title, "Draft on the page",
+        "the page's title stays"
+    );
+    assert!(!h.painted_text("Draft on the page").is_empty());
+}

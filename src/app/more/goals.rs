@@ -2125,6 +2125,39 @@ mod tests {
     }
 
     #[test]
+    fn a_goal_due_the_day_it_starts_uses_no_time_before_that_day() {
+        let d = |m, day| NaiveDate::from_ymd_opt(2026, m, day).unwrap();
+        let g = Goal {
+            start: Some(d(12, 1)),
+            due: Some(d(12, 1)),
+            ..Default::default()
+        };
+        assert_eq!(g.time_used(d(11, 21)), Some(0.0), "ten days left");
+        assert_eq!(g.pace(0.0, d(11, 21)), Some(Pace::OnTrack));
+        assert_eq!(g.time_used(d(12, 1)), Some(1.0), "due today");
+        assert_eq!(g.pace(0.0, d(12, 1)), Some(Pace::AtRisk));
+        assert_eq!(g.time_used(d(12, 2)), Some(1.0));
+        // due before it starts: its time is up once the due day comes
+        let g = Goal {
+            start: Some(d(12, 10)),
+            due: Some(d(12, 1)),
+            ..Default::default()
+        };
+        assert_eq!(g.time_used(d(11, 21)), Some(0.0));
+        assert_eq!(g.time_used(d(12, 5)), Some(1.0));
+        // the usual: a share of the days, none before it starts
+        let g = Goal {
+            start: Some(d(11, 1)),
+            due: Some(d(11, 11)),
+            ..Default::default()
+        };
+        assert_eq!(g.time_used(d(10, 20)), Some(0.0));
+        assert_eq!(g.time_used(d(11, 6)), Some(0.5));
+        assert_eq!(g.time_used(d(11, 30)), Some(1.0));
+        assert_eq!(Goal::default().time_used(d(11, 6)), None);
+    }
+
+    #[test]
     fn a_percent_reads_100_only_when_all_done() {
         assert_eq!(pct_of(0.995), 99);
         assert_eq!(pct_of(0.9999), 99);

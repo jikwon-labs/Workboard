@@ -149,7 +149,9 @@ impl Goal {
         let (s, d) = (self.start?, self.due?);
         let total = (d - s).num_days();
         if total <= 0 {
-            return Some(1.0);
+            // due the day it starts (or before): no time to share out, all
+            // of it used once the due day comes and none before
+            return Some(if day >= d { 1.0 } else { 0.0 });
         }
         Some(((day - s).num_days() as f32 / total as f32).clamp(0.0, 1.0))
     }

@@ -770,3 +770,14 @@ fn the_new_goal_dialog_keeps_its_numbers_finite() {
     assert!(start.is_finite() && target.is_finite(), "{start} {target}");
     assert!(reads_back(&h).is_ok(), "{:?}", reads_back(&h).err());
 }
+
+#[test]
+fn a_number_typed_with_commas_is_recorded() {
+    let (mut h, a, _) = two_goals();
+    h.click("Record Beta testers");
+    h.click("Value now");
+    // the way the card itself writes numbers: "7,200 / 10,000"
+    h.type_text("1,500");
+    h.click("Save value");
+    assert_eq!(current_of(&h, a, 0), 1500.0);
+}

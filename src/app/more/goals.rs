@@ -41,11 +41,12 @@ pub(crate) fn number_box(v: &mut f64) -> egui::DragValue<'_> {
         .custom_parser(parse_number)
 }
 
-/// A typed number, None unless it is a finite one.
+/// A typed number, None unless it is a finite one. Thousands may be
+/// grouped with commas, the way `fmt_num` shows them ("7,200").
 pub(crate) fn parse_number(s: &str) -> Option<f64> {
     let s: String = s
         .chars()
-        .filter(|c| !c.is_whitespace())
+        .filter(|c| !c.is_whitespace() && *c != ',')
         .map(|c| if c == '\u{2212}' { '-' } else { c })
         .collect();
     s.parse::<f64>().ok().filter(|v| v.is_finite())
@@ -2095,6 +2096,7 @@ mod tests {
     fn goal_numbers_stay_finite_and_read_back() {
         assert_eq!(parse_number("12.5"), Some(12.5));
         assert_eq!(parse_number(" \u{2212}3 "), Some(-3.0));
+        assert_eq!(parse_number("1,234,567.5"), Some(1_234_567.5));
         for s in ["inf", "-inf", "NaN", "1e999", "", "abc"] {
             assert_eq!(parse_number(s), None, "{s:?}");
         }

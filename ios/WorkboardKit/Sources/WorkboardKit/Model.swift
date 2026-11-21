@@ -265,6 +265,46 @@ public struct CustomFieldView: Identifiable, Hashable, Sendable {
     }
 }
 
+/// A status automation ("When status changes to X, then ...") or a
+/// channel's workflow (`trigger` "message"), as Automation in
+/// src/model/extra.rs.
+public struct AutomationView: Identifiable, Hashable, Sendable {
+    public let id: UInt64
+    public let enabled: Bool
+    /// The status that starts a status automation (empty for a workflow).
+    public let triggerStatus: String
+    /// assign, priority, comment or move; for a workflow post, reply or task.
+    public let action: String
+    /// A member id, priority, comment text or List id for a status
+    /// automation; the message text, or the List id for "task", for a workflow.
+    public let value: String
+    /// The List or Space it runs in; nil: everywhere.
+    public let list: UInt64?
+    /// "" for a status automation, "message" for a workflow.
+    public let trigger: String
+    /// The conversation whose messages start a workflow.
+    public let channel: UInt64?
+    /// A workflow runs only for messages with this in them, when set.
+    public let keyword: String
+    /// Where a workflow's "post" goes.
+    public let target: UInt64?
+
+    public var isWorkflow: Bool { trigger == "message" }
+
+    init(_ j: JSON) {
+        id = j["id"]?.uint ?? 0
+        enabled = j["enabled"]?.bool ?? false
+        triggerStatus = j["trigger_status"]?.string ?? ""
+        action = j["action"]?.string ?? ""
+        value = j["value"]?.string ?? ""
+        list = j["list"]?.uint
+        trigger = j["trigger"]?.string ?? ""
+        channel = j["channel"]?.uint
+        keyword = j["keyword"]?.string ?? ""
+        target = j["target"]?.uint
+    }
+}
+
 /// Workspace > ClickApps (ClickApps in src/model.rs): every one is on
 /// unless turned off.
 public struct AppsView: Hashable, Sendable {
@@ -522,6 +562,8 @@ public struct WorkspaceView: Sendable {
     public let channels: [ChannelView]
     public let fields: [CustomFieldView]
     public let apps: AppsView
+    /// Status automations and workflows (extra.automations).
+    public let automations: [AutomationView]
     /// Every task by id, archived ones too, and whether it is closed in its
     /// list's statuses (archived spaces and lists too): what a goal's tasks
     /// target counts, as goal_progress does on the Mac.
@@ -530,6 +572,7 @@ public struct WorkspaceView: Sendable {
     public init(_ data: JSON) {
         fields = (data.at("extra.fields")?.array ?? []).map(CustomFieldView.init)
         apps = AppsView(data.at("extra.apps"))
+        automations = (data.at("extra.automations")?.array ?? []).map(AutomationView.init)
         name = data["workspace"]?.string ?? ""
         members = (data["members"]?.array ?? []).map(MemberView.init)
         spaces = (data["spaces"]?.array ?? []).map(SpaceView.init).filter { !$0.archived }
@@ -565,6 +608,11 @@ public struct WorkspaceView: Sendable {
     }
 
     public func member(_ id: UInt64) -> MemberView? { members.first { $0.id == id } }
+
+    /// The workflows that start from messages in `channel`.
+    public func workflows(in channel: UInt64) -> [AutomationView] {
+        automations.filter { $0.isWorkflow && $0.channel == channel }
+    }
 
     /// The people who have joined (not those still invited).
     public var activeMembers: [MemberView] { members.filter { !$0.invited } }

@@ -5,29 +5,11 @@ import WorkboardKit
 // assign / set priority / comment / move", everywhere or in one space or
 // list. They run on every device when a task's status changes.
 
-struct AutomationRow: Identifiable, Hashable {
-    let id: UInt64
-    let enabled: Bool
-    let trigger: String
-    let action: String
-    let value: String
-    let list: UInt64?
-
-    init(_ j: JSON) {
-        id = j["id"]?.uint ?? 0
-        enabled = j["enabled"]?.bool ?? false
-        trigger = j["trigger_status"]?.string ?? ""
-        action = j["action"]?.string ?? ""
-        value = j["value"]?.string ?? ""
-        list = j["list"]?.uint
-    }
-}
-
 struct AutomationsView: View {
     @Environment(SyncClient.self) private var client
     @State private var adding = false
 
-    var rules: [AutomationRow] { (client.data?.at("extra.automations")?.array ?? []).map(AutomationRow.init) }
+    var rules: [AutomationView] { client.view.automations }
 
     var body: some View {
         List {
@@ -39,7 +21,7 @@ struct AutomationsView: View {
                     client.edit { d, _ in Edits.setAutomationEnabled(&d, automation: r.id, on) }
                 })) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("When status is \(r.trigger.uppercased())").font(.subheadline.weight(.semibold))
+                        Text("When status is \(r.triggerStatus.uppercased())").font(.subheadline.weight(.semibold))
                         Text(describe(r)).font(.subheadline)
                         Text(scope(r.list)).font(.caption).foregroundStyle(.secondary)
                     }
@@ -61,7 +43,7 @@ struct AutomationsView: View {
     }
 
     /// describe_action in src/app.rs.
-    func describe(_ r: AutomationRow) -> String {
+    func describe(_ r: AutomationView) -> String {
         let v = client.view
         switch r.action {
         case "assign": return "Assign to \(UInt64(r.value).flatMap { v.member($0)?.name } ?? "")"

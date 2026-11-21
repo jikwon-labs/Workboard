@@ -1669,23 +1669,23 @@ struct WorkflowsView: View {
 
     var body: some View {
         let v = client.view, me = client.me ?? 0
-        let rules = (client.data?.at("extra.automations")?.array ?? []).filter { $0["trigger"]?.string == "message" && $0["channel"]?.uint == channelId }
+        let rules = v.workflows(in: channelId)
         let channels = v.visibleChannels(me: me).filter { $0.kind == .channel }
         Form {
             Section {
                 if rules.isEmpty { Text("No workflows yet.").foregroundStyle(.secondary) }
                 ForEach(rules.indices, id: \.self) { i in
                     let r = rules[i]
-                    let id = r["id"]?.uint ?? 0
+                    let id = r.id
                     VStack(alignment: .leading, spacing: 2) {
-                        let k = r["keyword"]?.string ?? ""
+                        let k = r.keyword
                         Text(k.isEmpty ? String(localized: "Any message") : String(localized: "Messages with \"\(k)\"")).font(.caption).foregroundStyle(.secondary)
-                        switch r["action"]?.string {
-                        case "reply": Text("Reply in its thread: \(r["value"]?.string ?? "")")
-                        case "task": Text("Make a task in \(v.list(UInt64(r["value"]?.string ?? "") ?? 0)?.name ?? "")")
+                        switch r.action {
+                        case "reply": Text("Reply in its thread: \(r.value)")
+                        case "task": Text("Make a task in \(v.list(UInt64(r.value) ?? 0)?.name ?? "")")
                         default:
-                            let to = channels.first { $0.id == r["target"]?.uint }?.name ?? ""
-                            Text("Post in #\(to): \(r["value"]?.string ?? "")")
+                            let to = channels.first { $0.id == r.target }?.name ?? ""
+                            Text("Post in #\(to): \(r.value)")
                         }
                     }
                     .swipeActions {

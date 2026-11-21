@@ -50,6 +50,40 @@ final class ChannelAndRuleTests: XCTestCase {
         XCTAssertTrue(Edits.deleteAutomation(&d, automation: 50))
         XCTAssertEqual(d.at("extra.automations"), [])
     }
+
+    /// The screens read automations and workflows through AutomationView.
+    func testAutomationsAndWorkflowsReadIntoTheirFields() {
+        var d = SampleWorkspace.make()
+        XCTAssertTrue(Edits.addAutomation(&d, trigger: "review", action: "assign", value: "2", list: 112, id: 50))
+        XCTAssertTrue(Edits.addWorkflow(&d, channel: 301, keyword: " deploy ", action: "post", text: "{user} said {text}", target: 302, list: nil, id: 51))
+        XCTAssertTrue(Edits.addWorkflow(&d, channel: 301, keyword: "", action: "task", text: "", target: nil, list: 111, id: 52))
+        XCTAssertTrue(Edits.addWorkflow(&d, channel: 302, keyword: "", action: "reply", text: "Thanks!", target: nil, list: nil, id: 53))
+        let v = WorkspaceView(d)
+        XCTAssertEqual(v.automations.map(\.id), [50, 51, 52, 53])
+        let rule = v.automations[0]
+        XCTAssertFalse(rule.isWorkflow)
+        XCTAssertTrue(rule.enabled)
+        XCTAssertEqual([rule.triggerStatus, rule.action, rule.value], ["review", "assign", "2"])
+        XCTAssertEqual(rule.list, 112)
+        XCTAssertNil(rule.channel)
+
+        XCTAssertEqual(v.workflows(in: 301).map(\.id), [51, 52])
+        XCTAssertEqual(v.workflows(in: 302).map(\.id), [53])
+        XCTAssertEqual(v.workflows(in: 303), [])
+        let post = v.automations[1]
+        XCTAssertTrue(post.isWorkflow)
+        XCTAssertEqual([post.action, post.keyword, post.value, post.triggerStatus], ["post", "deploy", "{user} said {text}", ""])
+        XCTAssertEqual(post.target, 302)
+        XCTAssertNil(post.list)
+        XCTAssertEqual(v.automations[2].value, "111")
+        XCTAssertEqual(v.automations[2].keyword, "")
+        XCTAssertNil(v.automations[2].target)
+
+        // fields left out read as their defaults (an older file)
+        let bare = AutomationView(["id": 9])
+        XCTAssertFalse(bare.enabled)
+        XCTAssertEqual([bare.action, bare.value, bare.trigger, bare.keyword], ["", "", "", ""])
+    }
 }
 
 final class DocPageTests: XCTestCase {

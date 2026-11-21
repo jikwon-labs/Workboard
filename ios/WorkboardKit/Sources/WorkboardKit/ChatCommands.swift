@@ -226,11 +226,15 @@ extension Edits {
         guard let c = (data["channels"]?.array ?? []).first(where: { $0["id"]?.uint == channel }),
               let m = (c["messages"]?.array ?? []).first(where: { $0["id"]?.uint == message }),
               m["bot"]?.string == nil else { return }
-        let text = m["text"]?.string ?? ""
+        // a post: the keyword may be in its title, and without text its
+        // title is the {text} (as on the Mac, workflows.rs)
+        let title = m["post_title"]?.string
+        let typed = m["text"]?.string ?? ""
+        let text = typed.trimmed.isEmpty ? (title ?? typed) : typed
         let rules = (data.at("extra.automations")?.array ?? []).filter { a in
             guard a["enabled"]?.bool == true, a["trigger"]?.string == "message", a["channel"]?.uint == channel else { return false }
-            let k = (a["keyword"]?.string ?? "").trimmed
-            return k.isEmpty || text.lowercased().contains(k.lowercased())
+            let k = (a["keyword"]?.string ?? "").trimmed.lowercased()
+            return k.isEmpty || typed.lowercased().contains(k) || (title?.lowercased().contains(k) ?? false)
         }
         guard !rules.isEmpty else { return }
         let members = data["members"]?.array ?? []

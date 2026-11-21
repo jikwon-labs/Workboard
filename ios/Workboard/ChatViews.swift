@@ -1261,7 +1261,11 @@ struct NewPostSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Post") {
                         let id = client.newId()
-                        client.edit { d, me in Edits.sendPost(&d, channel: channelId, title: title, text: text, me: me, id: id, ts: nowTs()) }
+                        client.edit { d, me in
+                            Edits.sendPost(&d, channel: channelId, title: title, text: text, me: me, id: id, ts: nowTs())
+                            // a post starts the channel's workflows too (ChatCommands.swift)
+                            Edits.runWorkflows(&d, channel: channelId, message: id, me: me, ts: nowTs()) { client.newId() }
+                        }
                         dismiss()
                     }
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty && text.trimmingCharacters(in: .whitespaces).isEmpty)

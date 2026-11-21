@@ -718,3 +718,72 @@ fn the_post_box_buttons_work_as_in_a_channels_box() {
     m.sort();
     assert_eq!(m, vec![2, 3], "the people picked are mentioned");
 }
+
+/// A channel's workflows ("When a message is posted ...") start from a
+/// post too, from the Posts page and from the channel's Post box: the
+/// keyword may be in the title or the text, and {text} is the post's text
+/// (its title when it has none).
+#[test]
+fn a_post_starts_the_channels_workflows() {
+    let mut h = posts_page();
+    let gen = channel_id(&h, "general");
+    let web = channel_id(&h, "website-redesign");
+    h.app.data.extra.automations.push(Automation {
+        id: 77_001,
+        enabled: true,
+        trigger: "message".into(),
+        channel: Some(gen),
+        keyword: "outage".into(),
+        action: "post".into(),
+        target: Some(web),
+        value: "{user} posted: {text}".into(),
+        ..Default::default()
+    });
+    let me = h.app.who(h.app.data.me);
+    let last_in_web = |h: &Ui1| {
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == web)
+            .unwrap()
+            .messages
+            .last()
+            .map(|m| (m.text.clone(), m.bot.clone()))
+    };
+    write_post(&mut h, "general", "Outage tonight", "DB maintenance at 10");
+    h.click("Post");
+    assert_eq!(
+        last_in_web(&h),
+        Some((
+            format!("{me} posted: DB maintenance at 10"),
+            Some("Workflow".into())
+        )),
+        "the keyword in the title starts it"
+    );
+    write_post(&mut h, "general", "Outage over", "");
+    h.click("Post");
+    assert_eq!(
+        last_in_web(&h).unwrap().0,
+        format!("{me} posted: Outage over"),
+        "no text: the title"
+    );
+    write_post(&mut h, "general", "Lunch", "Pizza");
+    h.click("Post");
+    assert_eq!(
+        last_in_web(&h).unwrap().0,
+        format!("{me} posted: Outage over"),
+        "no keyword"
+    );
+
+    // from the channel's Post box
+    h.click("general");
+    h.click("Post");
+    h.click("Message composer");
+    h.type_text("Another outage");
+    h.key(egui::Key::Enter);
+    assert_eq!(
+        last_in_web(&h).unwrap().0,
+        format!("{me} posted: Another outage")
+    );
+}

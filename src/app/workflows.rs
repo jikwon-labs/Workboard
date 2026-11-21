@@ -6,9 +6,10 @@
 //
 // The app of whoever posts the message runs them, once, right after
 // sending (the iPhone app too: Edits.runWorkflows), so no two computers
-// run the same one. What a workflow posts is marked as its own (`bot`
-// "Workflow") and starts no workflow itself. Its text may say {user},
-// {text} and {channel}.
+// run the same one. A post is such a message too: its keyword may be in
+// the title, and its {text} is the title when it has no text. What a
+// workflow posts is marked as its own (`bot` "Workflow") and starts no
+// workflow itself. Its text may say {user}, {text} and {channel}.
 
 use super::*;
 
@@ -114,8 +115,12 @@ impl App {
             .iter()
             .filter(|a| a.enabled && a.trigger == "message" && a.channel == Some(ch))
             .filter(|a| {
-                let k = a.keyword.trim();
-                k.is_empty() || m.text.to_lowercase().contains(&k.to_lowercase())
+                let k = a.keyword.trim().to_lowercase();
+                k.is_empty()
+                    || m.text.to_lowercase().contains(&k)
+                    || m.post_title
+                        .as_ref()
+                        .is_some_and(|t| t.to_lowercase().contains(&k))
             })
             .cloned()
             .collect();
@@ -125,7 +130,11 @@ impl App {
         let me = self.data.me;
         let user = self.who(me);
         let place = self.channel_hash(ch);
-        let said = super::chatfmt::plain(&m.text);
+        // a post without text: its title
+        let said = match &m.post_title {
+            Some(t) if m.text.trim().is_empty() => t.clone(),
+            _ => super::chatfmt::plain(&m.text),
+        };
         for a in rules {
             let text = fill(&a.value, &user, &said, &place);
             let post = |app: &mut App, to: u64, parent: Option<u64>, text: String| {

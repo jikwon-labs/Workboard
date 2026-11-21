@@ -60,4 +60,18 @@ final class ChatCommandsTests: XCTestCase {
         Edits.runWorkflows(&d, channel: 302, message: posted.id, me: 1, ts: 11) { next += 1; return next }
         XCTAssertEqual(d, before)
     }
+
+    func testAPostStartsWorkflowsByItsTitleAsOnTheMac() {
+        var d = SampleWorkspace.make()
+        XCTAssertTrue(Edits.addWorkflow(&d, channel: 301, keyword: "outage", action: "post", text: "{user} posted: {text}", target: 302, list: nil, id: 980))
+        var next: UInt64 = 5000
+        // the keyword in the title; {text} is the post's text
+        XCTAssertTrue(Edits.sendPost(&d, channel: 301, title: "Outage tonight", text: "DB at 10", me: 1, id: 990, ts: 10))
+        Edits.runWorkflows(&d, channel: 301, message: 990, me: 1, ts: 10) { next += 1; return next }
+        XCTAssertEqual(WorkspaceView(d).channels.first { $0.id == 302 }!.messages.last!.text, "Jamie Park posted: DB at 10")
+        // no text: the title
+        XCTAssertTrue(Edits.sendPost(&d, channel: 301, title: "Outage over", text: "", me: 1, id: 991, ts: 11))
+        Edits.runWorkflows(&d, channel: 301, message: 991, me: 1, ts: 11) { next += 1; return next }
+        XCTAssertEqual(WorkspaceView(d).channels.first { $0.id == 302 }!.messages.last!.text, "Jamie Park posted: Outage over")
+    }
 }

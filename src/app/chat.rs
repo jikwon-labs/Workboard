@@ -541,6 +541,8 @@ impl App {
             c.last_read = c.last_read.max(now_ts());
         }
         self.dirty = true;
+        // the channel's workflows start from a post as from a message
+        self.run_workflows(ch, id);
         id
     }
 

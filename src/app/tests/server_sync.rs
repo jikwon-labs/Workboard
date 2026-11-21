@@ -688,6 +688,7 @@ fn fields_added_later_read_the_same_to_sync_when_left_unset() {
         strokes: vec![],
         notes: vec![],
         owner: 0,
+        ..Default::default()
     };
     let new = fp(serde_json::json!({"dashboards": [dash], "forms": [form], "whiteboards": [wb]}));
     // as an app from before these fields wrote them
@@ -894,8 +895,10 @@ fn whiteboard_strokes_and_notes_get_the_ids_every_app_works_out() {
             pos: [1.0, 2.0],
             text: "old".into(),
             color: [1, 2, 3],
+            ..Default::default()
         }],
         owner: 0,
+        ..Default::default()
     }];
     // what a copy from before ids looks like to wb-sync
     let mut v = serde_json::to_value(&d).unwrap();

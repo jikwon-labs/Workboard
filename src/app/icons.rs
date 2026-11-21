@@ -1212,6 +1212,19 @@ pub(super) fn line_icon(p: &egui::Painter, kind: &str, c: Pos2, color: Color32) 
             line(vec2(-4.5, -3.5), vec2(3.5, 4.5));
             line(vec2(1.5, 7.5), vec2(7.5, 7.5));
         }
+        "connector" => {
+            // two boxes joined by a line that turns a corner
+            for k in [vec2(-4.5, -4.5), vec2(4.5, 4.5)] {
+                p.rect_stroke(
+                    Rect::from_center_size(c + k, vec2(6.0, 6.0)),
+                    1.0,
+                    s,
+                    egui::StrokeKind::Middle,
+                );
+            }
+            line(vec2(-1.5, -4.5), vec2(4.5, -4.5));
+            line(vec2(4.5, -4.5), vec2(4.5, 1.5));
+        }
         "move" => {
             line(vec2(0.0, -7.5), vec2(0.0, 7.5));
             line(vec2(-7.5, 0.0), vec2(7.5, 0.0));

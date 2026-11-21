@@ -1391,6 +1391,7 @@ fn whiteboard_undo_brings_back_a_deleted_note() {
         pos: [0.0, 0.0],
         text: "Idea".into(),
         color: [1, 1, 1],
+        ..Default::default()
     };
     a.sweep.wb_undo.push((wid, WbUndo::NoteGone(0, n)));
     a.wb_undo(wid);

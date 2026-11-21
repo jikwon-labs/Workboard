@@ -724,9 +724,9 @@ fn korean_screens_have_no_english_left() {
 }
 
 /// A Whiteboard made from a template on a Korean screen gets its name and
-/// sticky notes in Korean, like the other things the app names.
+/// the words in its boxes in Korean, like the other things the app names.
 #[test]
-fn whiteboard_template_notes_are_made_in_korean() {
+fn whiteboard_template_shapes_are_made_in_korean() {
     let mut h = Ui1::new();
     set_lang(Lang::Ko);
     h.click("Rail More");
@@ -735,9 +735,9 @@ fn whiteboard_template_notes_are_made_in_korean() {
     set_lang(Lang::En);
     let w = h.app.data.extra.whiteboards.last().expect("a whiteboard");
     assert_eq!(w.name, "실행 계획");
-    let notes: Vec<&str> = w.notes.iter().map(|n| n.text.as_str()).collect();
+    let words: Vec<&str> = w.shapes.iter().map(|s| s.text.as_str()).collect();
     assert_eq!(
-        notes,
+        words,
         ["목표", "1단계", "2단계", "3단계", "담당자 / 마감일"]
     );
 }

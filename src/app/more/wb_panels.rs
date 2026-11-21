@@ -6,6 +6,7 @@
 // Before, all of it was one wrapped row of text buttons above a grey box,
 // with Clear and Delete next to the zoom buttons.
 
+use super::wb_shapes::{paint_kind_icon, paint_style_icon, SHAPE_KINDS, STYLE_TOGGLES};
 use super::whiteboard::{note_fill, WB_COLORS};
 use super::*;
 use crate::app::icons::{paint_minus, paint_plus};
@@ -22,11 +23,13 @@ const BTN: f32 = 32.0;
 /// A button in the tool bar.
 const TOOL: f32 = 40.0;
 /// The tools, top to bottom: (`wb_tool`, icon, name).
-const TOOLS: [(u8, &str, &str); 4] = [
-    (2, "move", "Move notes"),
+const TOOLS: [(u8, &str, &str); 6] = [
+    (2, "move", "Select"),
     (0, "pen", "Pen"),
     (3, "eraser", "Eraser"),
     (1, "sticky", "Sticky note"),
+    (4, "shapes", "Shape"),
+    (5, "connector", "Line"),
 ];
 /// The note a black pen colour makes (black paper would hide the text).
 const STICKY_FOR_BLACK: [u8; 3] = [0xf8, 0xae, 0x00];
@@ -42,7 +45,7 @@ pub(crate) fn sticky_color(pen: [u8; 3]) -> [u8; 3] {
 
 /// A floating bar's card. Presses on it stay off the board beneath: the
 /// board's drag area covers the whole page, and this is laid over it later.
-fn card(ui: &Ui, t: &Theme, r: Rect, radius: f32, id: egui::Id) {
+pub(super) fn card(ui: &Ui, t: &Theme, r: Rect, radius: f32, id: egui::Id) {
     ui.interact(r, id, Sense::click_and_drag());
     let p = ui.painter();
     let shadow = egui::epaint::Shadow {
@@ -106,7 +109,7 @@ fn bar_button(
 }
 
 /// A thin upright line between groups on a bar.
-fn bar_sep(p: &egui::Painter, t: &Theme, x: f32, cy: f32) {
+pub(super) fn bar_sep(p: &egui::Painter, t: &Theme, x: f32, cy: f32) {
     p.vline(x, cy - 11.0..=cy + 11.0, Stroke::new(1.0_f32, t.border));
 }
 
@@ -315,7 +318,7 @@ impl App {
                             .color(t.text),
                     );
                     ui.label(
-                        RichText::new(tr("Every stroke and note on it is removed."))
+                        RichText::new(tr("Everything on it is removed."))
                             .size(12.5)
                             .color(t.text2),
                     );
@@ -341,7 +344,11 @@ impl App {
                                 {
                                     wb.strokes.clear();
                                     wb.notes.clear();
+                                    wb.shapes.clear();
+                                    wb.lines.clear();
                                 }
+                                self.sweep.wb_sel = None;
+                                self.sweep.wb_edit = None;
                                 self.sweep.wb_undo.retain(|u| u.0 != wid);
                                 self.sweep.confirm = None;
                                 self.dirty = true;
@@ -496,9 +503,9 @@ impl App {
         }
     }
 
-    /// Down the left: the four tools and Undo. Returns the bar's place.
+    /// Down the left: the tools and Undo. Returns the bar's place.
     fn wb_tool_bar(&mut self, ui: &mut Ui, t: &Theme, rect: Rect, wid: u64) -> Rect {
-        let h = 6.0 + 4.0 * (TOOL + 4.0) + 9.0 + TOOL + 6.0;
+        let h = 6.0 + TOOLS.len() as f32 * (TOOL + 4.0) + 9.0 + TOOL + 6.0;
         // in a short window it stays under the name bar
         let top = (rect.center().y - h / 2.0).max(rect.top() + EDGE + BAR_H + 12.0);
         let bar = Rect::from_min_size(pos2(rect.left() + EDGE, top), vec2(TOOL + 12.0, h));
@@ -523,6 +530,8 @@ impl App {
             .clicked()
             {
                 self.wb_tool = tool;
+                self.sweep.wb_sel = None;
+                self.sweep.wb_edit = None;
                 self.close_wb_start(wid);
             }
             y += TOOL + 4.0;
@@ -557,8 +566,9 @@ impl App {
     }
 
     /// Along the bottom: what the chosen tool can be set to. The pen has
-    /// its colours and width, a sticky note its paper colours, the others a
-    /// line on how they are used. (Before, every setting showed whatever the
+    /// its colours and width, a sticky note its paper colours, a shape its
+    /// kinds and colours, a line its colours and style, the others a line
+    /// on how they are used. (Before, every setting showed whatever the
     /// tool, so it was not clear which one a colour went with.)
     fn wb_tool_options(&mut self, ui: &mut Ui, t: &Theme, rect: Rect, tools: Rect) {
         const SW: f32 = 30.0;
@@ -573,14 +583,20 @@ impl App {
             t.text,
         );
         let swatches: &[[u8; 3]] = match tool {
-            0 => &WB_COLORS,
+            0 | 4 | 5 => &WB_COLORS,
             1 => &WB_COLORS[1..],
             _ => &[],
         };
+        let kinds = if tool == 4 { SHAPE_KINDS.len() } else { 0 };
+        let toggles = if tool == 5 { STYLE_TOGGLES.len() } else { 0 };
         let hint = match tool {
             1 => Some(tr("Click the board to add a note")),
-            2 => Some(tr("Drag a note to move it, click it to type")),
+            2 => Some(tr(
+                "Click a shape to change it, drag notes and shapes to move them",
+            )),
             3 => Some(tr("Click or drag over a stroke to erase it")),
+            4 => Some(tr("Click the board to put it there")),
+            5 => Some(tr("Drag from one shape to another")),
             _ => None,
         }
         .map(|h| p.layout_no_wrap(h.to_string(), FontId::proportional(13.0), t.text2));
@@ -589,11 +605,17 @@ impl App {
         });
 
         let mut w = 16.0 + label.size().x + SEP + swatches.len() as f32 * SW;
+        if kinds > 0 {
+            w += kinds as f32 * SW + SEP;
+        }
+        if toggles > 0 {
+            w += SEP + toggles as f32 * SW;
+        }
         if let Some(g) = &width_label {
             w += SEP + g.size().x + 8.0 + SLIDER + 8.0 + 30.0 + 26.0;
         }
         if let Some(g) = &hint {
-            w += if swatches.is_empty() { 0.0 } else { 10.0 } + g.size().x + 4.0;
+            w += if swatches.is_empty() { 0.0 } else { SEP } + g.size().x + 4.0;
         }
         w += 12.0;
         // centred under the board, but clear of the tool bar
@@ -609,6 +631,35 @@ impl App {
         x += label.size().x;
         bar_sep(&p, t, x + SEP / 2.0, cy);
         x += SEP;
+
+        // a square button with a picture, lit when `on`
+        let pic_button = |x: f32, id: egui::Id, name: &str, on: bool| {
+            let r = Rect::from_min_size(pos2(x, cy - SW / 2.0), vec2(SW, SW));
+            let resp = ui.interact(r, id, Sense::click());
+            name_it(&resp, name);
+            if on {
+                p.rect_filled(r, 7.0, t.primary.gamma_multiply(0.16));
+            } else if resp.hovered() {
+                p.rect_filled(r, 7.0, t.hover);
+            }
+            if resp.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            (r.center(), resp)
+        };
+        if kinds > 0 {
+            for (i, (kind, name, _)) in SHAPE_KINDS.iter().enumerate() {
+                let on = self.sweep.wb_kind == i;
+                let (c, resp) = pic_button(x, ui.id().with(("wb_kind", i)), name, on);
+                paint_kind_icon(&p, kind, c, if on { t.primary } else { t.text2 });
+                if resp.on_hover_text(tr(name)).clicked() {
+                    self.sweep.wb_kind = i;
+                }
+                x += SW;
+            }
+            bar_sep(&p, t, x + SEP / 2.0, cy);
+            x += SEP;
+        }
 
         let chosen = if tool == 1 {
             sticky_color(self.wb_color)
@@ -639,6 +690,26 @@ impl App {
                 self.wb_color = *c;
             }
             x += SW;
+        }
+
+        if toggles > 0 {
+            bar_sep(&p, t, x + SEP / 2.0, cy);
+            x += SEP;
+            for (k, (name, tip)) in STYLE_TOGGLES.iter().enumerate() {
+                let st = self.sweep.wb_line_style;
+                let on = [st.elbow, st.dashed, st.arrow][k];
+                let (c, resp) = pic_button(x, ui.id().with(("wb_line_style", k)), name, on);
+                paint_style_icon(&p, k, c, if on { t.primary } else { t.text2 });
+                if resp.on_hover_text(tr(tip)).clicked() {
+                    let st = &mut self.sweep.wb_line_style;
+                    match k {
+                        0 => st.elbow = !st.elbow,
+                        1 => st.dashed = !st.dashed,
+                        _ => st.arrow = !st.arrow,
+                    }
+                }
+                x += SW;
+            }
         }
 
         if let Some(g) = width_label {
@@ -686,7 +757,8 @@ impl App {
         }
         if let Some(g) = hint {
             if !swatches.is_empty() {
-                x += 10.0;
+                bar_sep(&p, t, x + SEP / 2.0, cy);
+                x += SEP;
             }
             p.galley(pos2(x, cy - g.size().y / 2.0), g.clone(), t.text2);
         }
@@ -700,8 +772,12 @@ impl App {
         let Some(new) = self.sweep.wb_new.clone().filter(|n| n.id == wid && n.start) else {
             return;
         };
-        // a stroke or a note means it has started
-        if !w.strokes.is_empty() || !w.notes.is_empty() {
+        // anything on it means it has started
+        if !w.strokes.is_empty()
+            || !w.notes.is_empty()
+            || !w.shapes.is_empty()
+            || !w.lines.is_empty()
+        {
             self.close_wb_start(wid);
             return;
         }

@@ -240,7 +240,7 @@ pub struct WbStroke {
     pub points: Vec<[f32; 2]>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Sticky {
     /// As `WbStroke::id`.
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -248,9 +248,90 @@ pub struct Sticky {
     pub pos: [f32; 2],
     pub text: String,
     pub color: [u8; 3],
+    /// Width and height on the board, set by dragging its corner; 0,0 on
+    /// notes never resized (and from older apps), which are `Sticky::SIZE`.
+    #[serde(default, skip_serializing_if = "is_no_size")]
+    pub size: [f32; 2],
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+impl Sticky {
+    /// A note's size until it is resized.
+    pub const SIZE: [f32; 2] = [160.0, 120.0];
+
+    /// Its width and height on the board.
+    pub fn wh(&self) -> [f32; 2] {
+        if is_no_size(&self.size) {
+            Self::SIZE
+        } else {
+            self.size
+        }
+    }
+}
+
+fn is_no_size(s: &[f32; 2]) -> bool {
+    s[0] <= 0.0 || s[1] <= 0.0
+}
+
+/// A box, diamond, circle or label on a whiteboard: what the templates lay
+/// out and the Shape tool puts down. Lines (`WbLine`) can be tied to it.
+///
+/// Shapes and lines merge one by one like strokes and notes, by id. An app
+/// from before them reads the board without the two lists, but it
+/// fingerprints the copy it writes, so it doesn't note them as deleted;
+/// apps older than that are refused by the server (`wb_net::OLDEST_SYNC`).
+/// The server test `whiteboard_shapes_survive_an_app_that_does_not_know_them`
+/// checks it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct WbShape {
+    /// As `WbStroke::id`; every shape is made with one, and lines name the
+    /// shapes they are tied to by it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub id: u64,
+    /// "rect", "pill", "diamond", "ellipse" or "text" (a label with no
+    /// outline). Anything else is drawn as "rect".
+    pub kind: String,
+    /// Top left corner on the board.
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
+    #[serde(default)]
+    pub text: String,
+    /// The outline's colour.
+    pub color: [u8; 3],
+    /// Tinted inside with its colour (else the page colour).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub filled: bool,
+}
+
+/// A line on a whiteboard. Each end is tied to a shape (`from`, `to`: it
+/// follows the shape when it moves) or, with 0, sits at `a` / `b`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct WbLine {
+    /// As `WbStroke::id`; every line is made with one.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub id: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub from: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub to: u64,
+    /// Where each end is when it is not tied to a shape (or the shape is gone).
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    pub color: [u8; 3],
+    /// Goes across and down in right angles (an org chart) instead of straight.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub elbow: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub dashed: bool,
+    /// An arrow head at the `b` end.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub arrow: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Whiteboard {
     pub id: u64,
     pub name: String,
@@ -259,6 +340,12 @@ pub struct Whiteboard {
     /// Who made it; 0 for whiteboards from before this was recorded.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub owner: u64,
+    /// Boxes, diamonds, circles and labels; older boards have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shapes: Vec<WbShape>,
+    /// Lines between shapes (or loose); older boards have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<WbLine>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -17,6 +17,7 @@ mod posts;
 mod search;
 mod wb_library;
 mod wb_panels;
+mod wb_shapes;
 mod whiteboard;
 
 // for tests that name them `more::form_answers` and `more::Hit`
@@ -26,6 +27,9 @@ pub use forms::FormTab;
 pub(crate) use goal_dialogs::GoalDraft;
 #[cfg(test)]
 pub use search::Hit;
+#[cfg(test)]
+pub(crate) use wb_shapes::line_path;
+pub use wb_shapes::{WbLineStyle, WbLink, WbSel};
 pub use whiteboard::{WbNew, WbUndo, WbView};
 // for tests that place the pointer on the board
 #[cfg(test)]
@@ -63,6 +67,16 @@ pub struct SweepUi {
     pub wb_view: HashMap<u64, WbView>,
     /// The whiteboard just made here, shown as new for a moment.
     pub wb_new: Option<WbNew>,
+    /// The shape or line the Select tool has picked: (whiteboard, pick).
+    pub wb_sel: Option<(u64, WbSel)>,
+    /// The shape being typed in: (whiteboard, shape, still to take the focus).
+    pub wb_edit: Option<(u64, u64, bool)>,
+    /// The Shape tool's shape (in `SHAPE_KINDS`).
+    pub wb_kind: usize,
+    /// How the Line tool draws.
+    pub wb_line_style: WbLineStyle,
+    /// The line being dragged out with the Line tool.
+    pub wb_link: Option<WbLink>,
     /// The form `form_fill` holds answers for.
     pub form_for: Option<u64>,
     pub form_error: Option<String>,

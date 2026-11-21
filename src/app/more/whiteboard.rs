@@ -1,6 +1,6 @@
-// Whiteboards: the canvas with its pen, shapes, sticky notes, pan and zoom,
-// and Undo. The bars floating over it are in wb_panels.rs, the list of
-// boards and the templates in wb_library.rs.
+// Whiteboards: the canvas with its pen, sticky notes, pan and zoom, and
+// Undo. The bars floating over it are in wb_panels.rs, the list of boards
+// and the templates in wb_library.rs, shapes and lines in wb_shapes.rs.
 
 use super::*;
 
@@ -57,6 +57,17 @@ pub enum WbUndo {
     StrokeGone(usize, WbStroke),
     /// I dragged this note away from this spot.
     NoteMoved(u64, [f32; 2]),
+    /// I resized this note from this size.
+    NoteResized(u64, [f32; 2]),
+    /// I added these shapes and lines (by id).
+    Added(Vec<u64>, Vec<u64>),
+    /// I deleted these shapes and lines; each sat at this place in its
+    /// list when it was taken out.
+    Removed(Vec<(usize, WbShape)>, Vec<(usize, WbLine)>),
+    /// I moved, resized or restyled this shape; this is how it was.
+    ShapeWas(WbShape),
+    /// I moved an end of or restyled this line; this is how it was.
+    LineWas(WbLine),
 }
 
 /// How a whiteboard is shown: board coordinates (where strokes and notes
@@ -98,8 +109,6 @@ impl WbView {
     }
 }
 
-/// A sticky note's size on the board.
-pub const NOTE_SIZE: egui::Vec2 = egui::Vec2::new(160.0, 120.0);
 /// Height of a note's top strip (its colour dot and x sit on it): taken
 /// there, a note moves whatever the tool.
 const NOTE_GRIP: f32 = 18.0;
@@ -120,26 +129,25 @@ pub(crate) struct NoteGuide {
     pub to: f32,
 }
 
-/// Where a note dragged to `at` settles among `others` (their top-left
-/// corners, in board units), and the lines it lines up on. On each axis,
-/// within `reach` of another note's middle it takes that middle, and within
-/// reach of an edge it takes that edge (flush with it, or just touching
-/// it); the nearest wins.
+/// Where a note `size` big dragged to `at` settles among `others` (their
+/// top-left corners and sizes, in board units), and the lines it lines up
+/// on. On each axis, within `reach` of another note's middle it takes that
+/// middle, and within reach of an edge it takes that edge (flush with it,
+/// or just touching it); the nearest wins.
 pub(crate) fn snap_note(
     at: [f32; 2],
-    others: &[[f32; 2]],
+    size: [f32; 2],
+    others: &[([f32; 2], [f32; 2])],
     reach: f32,
 ) -> ([f32; 2], Vec<NoteGuide>) {
-    let size = [NOTE_SIZE.x, NOTE_SIZE.y];
+    // a note's lines on an axis: (offset from its corner, the middle?)
+    let lines = |s: f32| [(0.0, false), (s / 2.0, true), (s, false)];
     let mut pos = at;
     for axis in 0..2 {
-        let s = size[axis];
-        // a note's lines on this axis: (offset from its corner, the middle?)
-        let lines = [(0.0, false), (s / 2.0, true), (s, false)];
         let mut best: Option<f32> = None;
-        for o in others {
-            for (a, am) in lines {
-                for (b, bm) in lines {
+        for (o, os) in others {
+            for (a, am) in lines(size[axis]) {
+                for (b, bm) in lines(os[axis]) {
                     let d = o[axis] + b - (at[axis] + a);
                     if am == bm && d.abs() <= reach && best.is_none_or(|x| d.abs() < x.abs()) {
                         best = Some(d);
@@ -152,27 +160,31 @@ pub(crate) fn snap_note(
     let on = |x: f32, y: f32| (x - y).abs() < 0.01;
     let mut guides = vec![];
     for axis in 0..2 {
-        let (s, os, k) = (size[axis], size[1 - axis], 1 - axis);
-        let mut add = |at: f32, with: Vec<&[f32; 2]>| {
+        let (s, k) = (size[axis], 1 - axis);
+        let mut add = |at: f32, with: Vec<&([f32; 2], [f32; 2])>| {
             if with.is_empty() {
                 return;
             }
-            let from = with.iter().map(|o| o[k]).fold(pos[k], f32::min);
-            let to = with.iter().map(|o| o[k] + os).fold(pos[k] + os, f32::max);
+            let from = with.iter().map(|(o, _)| o[k]).fold(pos[k], f32::min);
+            let to = with
+                .iter()
+                .map(|(o, os)| o[k] + os[k])
+                .fold(pos[k] + size[k], f32::max);
             guides.push(NoteGuide { axis, at, from, to });
         };
-        // middles in line: one line through them (their edges are in line
-        // too, every note being the same size)
+        // middles in line: one line through them
         let mid = pos[axis] + s / 2.0;
-        let in_line = |o: &&[f32; 2]| on(o[axis] + s / 2.0, mid);
+        let in_line = |o: &&([f32; 2], [f32; 2])| on(o.0[axis] + o.1[axis] / 2.0, mid);
         add(mid, others.iter().filter(in_line).collect());
-        // a note touching it edge to edge
+        // a note edge to edge with it
         for edge in [pos[axis], pos[axis] + s] {
             add(
                 edge,
                 others
                     .iter()
-                    .filter(|o| !in_line(o) && (on(o[axis], edge) || on(o[axis] + s, edge)))
+                    .filter(|o| {
+                        !in_line(o) && (on(o.0[axis], edge) || on(o.0[axis] + o.1[axis], edge))
+                    })
                     .collect(),
             );
         }
@@ -322,7 +334,7 @@ impl App {
                 // strokes and notes put in without an id (an older copy)
                 // get theirs before anything goes by id
                 self.data.fix_board_ids();
-                let wb = &mut self.data.extra.whiteboards[wi];
+                let wb = &self.data.extra.whiteboards[wi];
                 for s in &wb.strokes {
                     let pts: Vec<egui::Pos2> = s
                         .points
@@ -334,6 +346,9 @@ impl App {
                         Stroke::new(s.width * z, rgb(s.color)),
                     ));
                 }
+                // shapes and their lines, under the notes
+                self.wb_shapes_layer(ui, &t, rect, origin, view, wi, space, resp.hovered());
+                let wb = &mut self.data.extra.whiteboards[wi];
                 // a note being dragged follows the pointer from where it was
                 // taken, lining up with the notes in view as it nears them
                 let mut guides = vec![];
@@ -348,21 +363,22 @@ impl App {
                     });
                     match (ni, moved) {
                         (Some(ni), Some(d)) => {
-                            let in_view: Vec<[f32; 2]> = wb
+                            let in_view: Vec<([f32; 2], [f32; 2])> = wb
                                 .notes
                                 .iter()
                                 .filter(|n| n.id != nid)
-                                .filter(|n| {
+                                .map(|n| (n.pos, n.wh()))
+                                .filter(|(pos, wh)| {
                                     Rect::from_min_size(
-                                        view.to_screen(origin, n.pos),
-                                        NOTE_SIZE * z,
+                                        view.to_screen(origin, *pos),
+                                        vec2(wh[0], wh[1]) * z,
                                     )
                                     .intersects(rect)
                                 })
-                                .map(|n| n.pos)
                                 .collect();
                             let (at, lines) = snap_note(
                                 [start[0] + d.x, start[1] + d.y],
+                                wb.notes[ni].wh(),
                                 &in_view,
                                 SNAP_REACH / z,
                             );
@@ -387,6 +403,8 @@ impl App {
                     }
                 }
                 let mut move_from = None;
+                let mut size_from = None;
+                let mut size_note = None;
                 let mut drop_note = None;
                 let mut recolor = None;
                 let mut type_in = None;
@@ -400,7 +418,9 @@ impl App {
                     } else {
                         (1 << 63) | i as u64
                     };
-                    let r = Rect::from_min_size(view.to_screen(origin, n.pos), NOTE_SIZE * z);
+                    let wh = n.wh();
+                    let r =
+                        Rect::from_min_size(view.to_screen(origin, n.pos), vec2(wh[0], wh[1]) * z);
                     // notes off the visible part of the board are not drawn
                     if !r.intersects(rect) {
                         continue;
@@ -442,8 +462,8 @@ impl App {
                                     .id(text_id)
                                     .frame(false)
                                     .font(FontId::proportional(13.0 * z))
-                                    .desired_width(144.0 * z)
-                                    .desired_rows(4),
+                                    .desired_width((wh[0] - 16.0) * z)
+                                    .desired_rows((((wh[1] - 26.0) / 18.0) as usize).max(1)),
                             )
                             .changed()
                     {
@@ -587,6 +607,48 @@ impl App {
                             drop_note = Some(i);
                         }
                     }
+                    // the bottom right corner resizes it, whatever the tool
+                    let gr =
+                        Rect::from_min_max(r.right_bottom() - vec2(16.0, 16.0), r.right_bottom());
+                    if typable && !space && rect.contains_rect(gr) {
+                        let g =
+                            ui.interact(gr, ui.id().with(("note_size", wid, key)), Sense::drag());
+                        name_it(&g, &format!("Resize note {}", i));
+                        let on = g.hovered() || g.dragged();
+                        if on {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNwSe);
+                        }
+                        if on || pointed || editing {
+                            let k = gr.right_bottom() - vec2(4.0, 4.0);
+                            for d in [5.0, 9.0] {
+                                p.line_segment(
+                                    [k - vec2(d, 0.0), k - vec2(0.0, d)],
+                                    Stroke::new(
+                                        1.2_f32,
+                                        Color32::from_black_alpha(if on { 150 } else { 80 }),
+                                    ),
+                                );
+                            }
+                        }
+                        if g.drag_started() {
+                            size_from = Some((n.id, n.size));
+                        }
+                        if g.dragged() {
+                            size_note = Some((i, g.drag_delta() / z));
+                        }
+                    }
+                }
+                if let Some((id, was)) = size_from {
+                    self.sweep.wb_undo.push((wid, WbUndo::NoteResized(id, was)));
+                }
+                if let Some((i, d)) = size_note {
+                    let n = &mut wb.notes[i];
+                    let wh = n.wh();
+                    n.size = [
+                        (wh[0] + d.x).clamp(100.0, 800.0),
+                        (wh[1] + d.y).clamp(70.0, 800.0),
+                    ];
+                    self.dirty = true;
                 }
                 if let Some((i, c)) = recolor {
                     wb.notes[i].color = c;
@@ -635,6 +697,8 @@ impl App {
                     || resp.drag_started_by(egui::PointerButton::Primary)
                     || resp.drag_stopped_by(egui::PointerButton::Primary)
                     || resp.clicked();
+                // over the notes: the pick's handles and bar
+                self.wb_pick_layer(ui, &t, rect, origin, view, wi);
                 if let Some(pos) = resp.interact_pointer_pos().filter(|_| primary && !space) {
                     let b = view.to_board(origin, pos);
                     let local = vec2(b[0], b[1]);
@@ -687,6 +751,7 @@ impl App {
                                     pos: [local.x - 80.0, local.y - 60.0],
                                     text: String::new(),
                                     color: super::wb_panels::sticky_color(self.wb_color),
+                                    ..Default::default()
                                 });
                                 self.sweep.wb_undo.push((wid, WbUndo::Note(id)));
                                 self.dirty = true;
@@ -709,8 +774,28 @@ impl App {
                                 }
                             }
                         }
+                        2 => {
+                            if resp.clicked() {
+                                self.wb_click_board(wid, wi, origin, view, pos);
+                            }
+                        }
+                        4 => {
+                            if resp.clicked() {
+                                self.wb_place_shape(wid, wi, b);
+                            }
+                        }
+                        5 => {
+                            let press = ui
+                                .input(|i| i.pointer.press_origin())
+                                .map(|o| view.to_board(origin, o));
+                            self.wb_link_drag(&resp, wid, wi, b, press);
+                        }
                         _ => {}
                     }
+                }
+                if !resp.dragged() {
+                    // a Line tool drag that ended off the board
+                    self.sweep.wb_link = None;
                 }
                 // the pen's pointer is a pencil on the board (on a note's text
                 // it stays the I-beam, on its top strip the hand)
@@ -738,7 +823,8 @@ impl App {
         }
     }
 
-    /// Takes back the last pen stroke, note, note removal, note move or erasing on a board.
+    /// Takes back my last step on a board: a stroke, note, shape or line
+    /// added, deleted, moved, resized or restyled, or an erasing.
     pub(crate) fn wb_undo(&mut self, wid: u64) {
         let Some(k) = self.sweep.wb_undo.iter().rposition(|u| u.0 == wid) else {
             return;
@@ -785,6 +871,7 @@ impl App {
                 }
                 None => false,
             },
+            op => super::wb_shapes::undo_shapes(wb, op),
         };
         if done {
             self.dirty = true;
@@ -798,9 +885,10 @@ mod tests {
 
     #[test]
     fn a_dragged_note_lines_up_with_a_note_near_it() {
-        let a = [0.0, 0.0];
+        let a = ([0.0, 0.0], Sticky::SIZE);
+        let sz = Sticky::SIZE;
         // 4 under the other's middle line: it takes the line, on both axes
-        let (at, lines) = snap_note([300.0, 4.0], &[a], 6.0);
+        let (at, lines) = snap_note([300.0, 4.0], sz, &[a], 6.0);
         assert_eq!(at, [300.0, 0.0]);
         assert_eq!(
             lines,
@@ -813,20 +901,27 @@ mod tests {
             "one level line through both middles, from one note's far side to the other's"
         );
         // under it, 5 off its middle: an upright line
-        let (at, lines) = snap_note([5.0, 300.0], &[a], 6.0);
+        let (at, lines) = snap_note([5.0, 300.0], sz, &[a], 6.0);
         assert_eq!(at, [0.0, 300.0]);
         assert_eq!(lines.len(), 1);
         assert_eq!((lines[0].axis, lines[0].at), (0, 80.0));
         // just right of it, 3 apart: the edges meet
-        let (at, lines) = snap_note([163.0, 200.0], &[a], 6.0);
+        let (at, lines) = snap_note([163.0, 200.0], sz, &[a], 6.0);
         assert_eq!(at, [160.0, 200.0]);
         assert_eq!((lines[0].axis, lines[0].at), (0, 160.0));
         // too far off: it stays where it is put, with no lines
-        let (at, lines) = snap_note([310.0, 9.0], &[a], 6.0);
+        let (at, lines) = snap_note([310.0, 9.0], sz, &[a], 6.0);
         assert_eq!(at, [310.0, 9.0]);
         assert!(lines.is_empty());
         // the nearer of two wins
-        let (at, _) = snap_note([300.0, 4.0], &[a, [600.0, 2.0]], 6.0);
+        let (at, _) = snap_note([300.0, 4.0], sz, &[a, ([600.0, 2.0], sz)], 6.0);
         assert_eq!(at, [300.0, 2.0]);
+        // a note made bigger lines up by its own middle and edges
+        let big = ([0.0, 0.0], [320.0, 200.0]);
+        let (at, lines) = snap_note([400.0, 43.0], sz, &[big], 6.0);
+        assert_eq!(at, [400.0, 40.0], "middles in line: 100 = 40 + 120 / 2");
+        assert_eq!((lines[0].axis, lines[0].at, lines[0].to), (1, 100.0, 560.0));
+        let (at, _) = snap_note([323.0, 300.0], sz, &[big], 6.0);
+        assert_eq!(at[0], 320.0, "touching its right edge");
     }
 }

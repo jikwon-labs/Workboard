@@ -2,6 +2,7 @@
 // a card for each board with a small picture of it), the boards in the
 // hub's sidebar, and filling a board from a template.
 
+use super::wb_shapes::{line_path, paint_line, paint_shape_body, shape_rect, GAP};
 use super::whiteboard::note_fill;
 use super::*;
 use egui::Pos2;
@@ -35,49 +36,108 @@ pub(super) const TEMPLATES: [(&str, &str, [u8; 3]); 5] = [
     ),
 ];
 
-/// The sticky notes a template starts a board with, in English: they are
-/// made in the language of whoever makes the board.
-fn template_notes(name: &str) -> Vec<(&'static str, [f32; 2])> {
+/// A shape a template lays out: (kind, text in English, top left, size,
+/// filled). The text is made in the language of whoever makes the board.
+type TplShape = (&'static str, &'static str, [f32; 2], [f32; 2], bool);
+
+/// A line a template lays out: (from shape, to shape, where a loose end
+/// sits, elbow, dashed, arrow). A shape is its place in the template's
+/// list; `None` leaves that end loose at the point given.
+type TplLine = (Option<usize>, Option<usize>, [f32; 2], bool, bool, bool);
+
+/// What a template starts a board with: the picture on its card, as shapes
+/// and lines that can be typed in, moved and added to. Shapes are a `GAP`
+/// apart, so the + on a shape puts the next one in line with the others.
+fn template_items(name: &str) -> (Vec<TplShape>, Vec<TplLine>) {
+    const ORG: [f32; 2] = [160.0, 64.0];
+    const STEP: [f32; 2] = [180.0, 110.0];
+    const DOT: [f32; 2] = [130.0, 130.0];
+    const LABEL: [f32; 2] = [150.0, 36.0];
+    let free = [0.0, 0.0];
     match name {
-        "Organizational Chart" => vec![
-            ("CEO", [360.0, 40.0]),
-            ("CTO", [160.0, 230.0]),
-            ("COO", [360.0, 230.0]),
-            ("CMO", [560.0, 230.0]),
-        ],
-        "Action Plan" => vec![
-            ("Goal", [40.0, 40.0]),
-            ("Step 1", [240.0, 40.0]),
-            ("Step 2", [440.0, 40.0]),
-            ("Step 3", [640.0, 40.0]),
-            ("Owner / due date", [40.0, 220.0]),
-        ],
-        "Customer Journey Map" => vec![
-            ("Awareness", [40.0, 40.0]),
-            ("Consideration", [220.0, 40.0]),
-            ("Purchase", [400.0, 40.0]),
-            ("Retention", [580.0, 40.0]),
-            ("Advocacy", [760.0, 40.0]),
-        ],
-        "Flow Chart" => vec![
-            ("Start", [40.0, 120.0]),
-            ("Step", [240.0, 120.0]),
-            ("Decision?", [440.0, 120.0]),
-            ("End", [640.0, 120.0]),
-        ],
-        "Root Cause Analysis" => vec![
-            ("Problem", [680.0, 160.0]),
-            ("People", [60.0, 40.0]),
-            ("Process", [300.0, 40.0]),
-            ("Tools", [60.0, 300.0]),
-            ("Environment", [300.0, 300.0]),
-        ],
-        _ => vec![],
+        "Organizational Chart" => (
+            vec![
+                ("rect", "CEO", [260.0, 40.0], ORG, true),
+                ("rect", "CTO", [40.0, 164.0], ORG, false),
+                ("rect", "COO", [260.0, 164.0], ORG, false),
+                ("rect", "CMO", [480.0, 164.0], ORG, false),
+            ],
+            (1..4)
+                .map(|k| (Some(0), Some(k), free, true, false, false))
+                .collect(),
+        ),
+        "Action Plan" => (
+            vec![
+                ("rect", "Goal", [40.0, 40.0], STEP, true),
+                ("rect", "Step 1", [280.0, 40.0], STEP, false),
+                ("rect", "Step 2", [520.0, 40.0], STEP, false),
+                ("rect", "Step 3", [760.0, 40.0], STEP, false),
+                (
+                    "rect",
+                    "Owner / due date",
+                    [40.0, 210.0],
+                    [420.0, 90.0],
+                    false,
+                ),
+            ],
+            vec![],
+        ),
+        "Customer Journey Map" => (
+            // up and down like the ups and downs of the journey
+            [
+                "Awareness",
+                "Consideration",
+                "Purchase",
+                "Retention",
+                "Advocacy",
+            ]
+            .iter()
+            .zip([240.0, 100.0, 268.0, 114.0, 142.0])
+            .enumerate()
+            .map(|(k, (txt, cy))| {
+                let x = 40.0 + k as f32 * (DOT[0] + GAP);
+                ("ellipse", *txt, [x, cy - DOT[1] / 2.0], DOT, k == 0)
+            })
+            .collect(),
+            (0..4)
+                .map(|k| (Some(k), Some(k + 1), free, false, true, false))
+                .collect(),
+        ),
+        "Flow Chart" => (
+            vec![
+                ("pill", "Start", [40.0, 120.0], [150.0, 64.0], true),
+                ("diamond", "Decision?", [250.0, 92.0], [150.0, 120.0], false),
+                ("rect", "Step", [460.0, 120.0], [150.0, 64.0], false),
+            ],
+            vec![
+                (Some(0), Some(1), free, false, false, true),
+                (Some(1), Some(2), free, false, false, true),
+            ],
+        ),
+        "Root Cause Analysis" => (
+            // the problem at the fish's head, the causes along its bones
+            vec![
+                ("rect", "Problem", [640.0, 160.0], [170.0, 80.0], true),
+                ("text", "People", [55.0, 34.0], LABEL, false),
+                ("text", "Process", [295.0, 34.0], LABEL, false),
+                ("text", "Tools", [55.0, 330.0], LABEL, false),
+                ("text", "Environment", [295.0, 330.0], LABEL, false),
+            ],
+            vec![
+                // the spine, from its tail to the head
+                (None, Some(0), [20.0, 200.0], false, false, false),
+                (Some(1), None, [250.0, 200.0], false, false, false),
+                (Some(2), None, [490.0, 200.0], false, false, false),
+                (Some(3), None, [250.0, 200.0], false, false, false),
+                (Some(4), None, [490.0, 200.0], false, false, false),
+            ],
+        ),
+        _ => (vec![], vec![]),
     }
 }
 
 /// `a` moved toward `b` by `k` (0 = a, 1 = b), both taken as opaque.
-fn mix(a: Color32, b: Color32, k: f32) -> Color32 {
+pub(super) fn mix(a: Color32, b: Color32, k: f32) -> Color32 {
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
     Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
 }
@@ -178,14 +238,24 @@ fn paint_template(p: &egui::Painter, t: &Theme, name: &str, c: Pos2, col: Color3
     }
 }
 
-/// A small picture of a board in `area`: its notes and strokes, scaled to fit.
+/// A small picture of a board in `area`: its shapes, lines, notes and
+/// strokes, scaled to fit.
 fn paint_thumbnail(p: &egui::Painter, t: &Theme, w: &Whiteboard, area: Rect) {
     let mut bb = Rect::NOTHING;
     for n in &w.notes {
+        let wh = n.wh();
         bb = bb.union(Rect::from_min_size(
             pos2(n.pos[0], n.pos[1]),
-            vec2(160.0, 120.0),
+            vec2(wh[0], wh[1]),
         ));
+    }
+    for s in &w.shapes {
+        bb = bb.union(shape_rect(s));
+    }
+    for l in &w.lines {
+        for q in line_path(l, &w.shapes) {
+            bb.extend_with(q);
+        }
     }
     for s in &w.strokes {
         for q in &s.points {
@@ -208,8 +278,28 @@ fn paint_thumbnail(p: &egui::Painter, t: &Theme, w: &Whiteboard, area: Rect) {
             Stroke::new((s.width * scale).max(1.0), rgb(s.color)),
         ));
     }
+    for l in &w.lines {
+        let pts: Vec<Pos2> = line_path(l, &w.shapes)
+            .iter()
+            .map(|q| to([q.x, q.y]))
+            .collect();
+        paint_line(p, l, &pts, 1.2, rgb(l.color));
+    }
+    for s in &w.shapes {
+        let r = Rect::from_min_size(to(s.pos), vec2(s.size[0], s.size[1]) * scale);
+        paint_shape_body(p, t, s, r, 1.2);
+        if s.kind == "text" {
+            // a label: a short bar where its words are
+            p.hline(
+                r.center().x - r.width() * 0.3..=r.center().x + r.width() * 0.3,
+                r.center().y,
+                Stroke::new(2.0_f32, t.text3),
+            );
+        }
+    }
     for n in &w.notes {
-        let r = Rect::from_min_size(to(n.pos), vec2(160.0, 120.0) * scale);
+        let wh = n.wh();
+        let r = Rect::from_min_size(to(n.pos), vec2(wh[0], wh[1]) * scale);
         p.rect_filled(
             r.translate(vec2(0.0, 1.0)),
             2.0,
@@ -263,11 +353,16 @@ fn card_top(p: &egui::Painter, t: &Theme, r: Rect, fill: Color32) {
 }
 
 impl App {
-    /// Puts a template's notes on a board, and names the board after the
-    /// template if its name is still the one it was made with.
+    /// Lays a template's picture out on a board, and names the board after
+    /// the template if its name is still the one it was made with.
     pub(crate) fn wb_fill_template(&mut self, wid: u64, name: &str) {
-        let notes = template_notes(name);
-        let ids: Vec<u64> = notes.iter().map(|_| self.data.new_id()).collect();
+        let colour = TEMPLATES
+            .iter()
+            .find(|x| x.0 == name)
+            .map_or(super::whiteboard::WB_COLORS[0], |x| x.2);
+        let (shapes, lines) = template_items(name);
+        let sids: Vec<u64> = shapes.iter().map(|_| self.data.new_id()).collect();
+        let lids: Vec<u64> = lines.iter().map(|_| self.data.new_id()).collect();
         let Some(w) = self.data.extra.whiteboards.iter_mut().find(|w| w.id == wid) else {
             return;
         };
@@ -278,14 +373,39 @@ impl App {
                 n.name = w.name.clone();
             }
         }
-        for (i, ((txt, pos), id)) in notes.into_iter().zip(ids).enumerate() {
-            w.notes.push(Sticky {
-                id,
+        let made: Vec<WbShape> = shapes
+            .into_iter()
+            .zip(&sids)
+            .map(|((kind, txt, pos, size, filled), id)| WbShape {
+                id: *id,
+                kind: kind.to_string(),
                 pos,
+                size,
                 text: tr(txt).to_string(),
-                color: STATUS_PALETTE[1 + (i * 2) % 13],
+                color: colour,
+                filled,
+            })
+            .collect();
+        let centre = |k: Option<usize>, at: [f32; 2]| {
+            k.map_or(at, |k| {
+                let c = shape_rect(&made[k]).center();
+                [c.x, c.y]
+            })
+        };
+        for ((from, to, at, elbow, dashed, arrow), id) in lines.into_iter().zip(lids) {
+            w.lines.push(WbLine {
+                id,
+                from: from.map_or(0, |k| sids[k]),
+                to: to.map_or(0, |k| sids[k]),
+                a: centre(from, at),
+                b: centre(to, at),
+                color: colour,
+                elbow,
+                dashed,
+                arrow,
             });
         }
+        w.shapes.extend(made);
         self.dirty = true;
     }
 

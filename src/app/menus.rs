@@ -974,6 +974,7 @@ impl App {
             strokes: vec![],
             notes: vec![],
             owner: self.data.me,
+            ..Default::default()
         });
         // shown as just made: lit in the sidebar, the name ready to type
         // over, and a card in the middle of the empty board

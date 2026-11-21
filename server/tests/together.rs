@@ -2207,6 +2207,57 @@ fn attachments_survive_an_app_that_does_not_know_them() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// A whiteboard's shapes and lines must survive a teammate on an app from
+/// before them: that app reads the board without the two lists and writes
+/// it back without them. It fingerprints what it writes (every app the
+/// server takes changes from does), so it doesn't note them as deleted, and
+/// the server keeps them from its own copy.
+#[test]
+fn whiteboard_shapes_survive_an_app_that_does_not_know_them() {
+    let home = temp_home("shapes-old-app");
+    let server = Server::start_at(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let shapes = json!([
+        {"id": 501, "kind": "rect", "pos": [0.0, 0.0], "size": [160.0, 64.0], "text": "CEO", "color": [182, 96, 224], "filled": true},
+        {"id": 502, "kind": "rect", "pos": [0.0, 124.0], "size": [160.0, 64.0], "text": "CTO", "color": [182, 96, 224]}
+    ]);
+    let lines = json!([{"id": 503, "from": 501, "to": 502, "a": [0.0, 0.0], "b": [0.0, 0.0], "color": [182, 96, 224], "elbow": true}]);
+    let (s2, l2) = (shapes.clone(), lines.clone());
+    a.change(move |d| {
+        d["extra"]["whiteboards"] = json!([{"id": 500, "name": "Org", "strokes": [],
+            "notes": [{"id": 504, "pos": [400.0, 0.0], "text": "note", "color": [248, 174, 0]}],
+            "shapes": s2, "lines": l2}]);
+    });
+    b.wait("the board at B", |d| {
+        d["extra"]["whiteboards"][0]["shapes"]
+            .as_array()
+            .is_some_and(|s| s.len() == 2)
+    });
+    // B is the old app: it reads the board without shapes and lines, and
+    // fingerprints the copy it writes, as the app does after taking one in
+    for w in b.data["extra"]["whiteboards"].as_array_mut().unwrap() {
+        let o = w.as_object_mut().unwrap();
+        o.remove("shapes");
+        o.remove("lines");
+    }
+    let mut meta = b.meta();
+    meta.hashes = wb_sync::fingerprints(&b.data);
+    meta.field_hashes = wb_sync::part_hashes(&b.data);
+    b.data["extra"]["sync"] = serde_json::to_value(&meta).unwrap();
+    // then edits the note on the board
+    b.change(|d| {
+        d["extra"]["whiteboards"][0]["notes"][0]["text"] = json!("edited by B");
+    });
+    a.wait("B's note at A", |d| {
+        d["extra"]["whiteboards"][0]["notes"][0]["text"] == "edited by B"
+    });
+    let w = &a.data["extra"]["whiteboards"][0];
+    assert_eq!(w["shapes"], shapes, "the shapes are still there");
+    assert_eq!(w["lines"], lines, "and the line");
+    server.stop();
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 // ---------------------------------------------------------------- accounts
 
 /// A workspace whose people have emails, and a server that writes its mails

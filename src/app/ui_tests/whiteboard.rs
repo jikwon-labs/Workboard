@@ -42,6 +42,7 @@ fn shared_board(h: &mut Ui1) -> u64 {
             pos: [300.0 + k as f32 * 200.0, 600.0],
             text: format!("Known {}", k),
             color: [0xf8, 0xae, 0x00],
+            ..Default::default()
         });
     }
     h.app.dirty = true;
@@ -76,7 +77,11 @@ fn click_whiteboard_template() {
         .last()
         .expect("a whiteboard was made");
     assert_eq!(w.name, "Action Plan");
-    assert!(w.notes.len() >= 4, "the template's sticky notes are there");
+    assert_eq!(w.shapes.len(), 5, "the template's boxes are there");
+    assert!(
+        w.notes.is_empty(),
+        "boxes, not sticky notes standing in for them"
+    );
 }
 
 #[test]
@@ -98,6 +103,7 @@ fn whiteboard_notes_delete_undo_and_clear_asks() {
         pos: [40.0, 40.0],
         text: "One".into(),
         color: [0xf8, 0xae, 0x00],
+        ..Default::default()
     });
     wb.strokes.push(WbStroke {
         id: 0,
@@ -187,6 +193,7 @@ fn whiteboard_undo_puts_a_moved_note_back() {
         pos: [60.0, 60.0],
         text: "One".into(),
         color: [0xf8, 0xae, 0x00],
+        ..Default::default()
     });
     h.app.wb_tool = 2;
     h.settle();
@@ -258,6 +265,7 @@ fn whiteboard_pans_and_zooms_and_draws_in_board_coordinates() {
             pos: [2400.0, 1600.0],
             text: "Far".into(),
             color: [0xf8, 0xae, 0x00],
+            ..Default::default()
         });
     h.settle();
     assert!(!h.has("Delete note 0"), "the far note is off screen");
@@ -396,6 +404,7 @@ fn a_teammate_change_arriving_while_i_draw_keeps_every_stroke() {
             pos: [600.0, 40.0],
             text: "Theirs".into(),
             color: [8, 128, 234],
+            ..Default::default()
         });
     });
     h.app.merge_in(&[team], &[]);
@@ -486,6 +495,7 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
             pos: [700.0, 40.0],
             text: "Theirs".into(),
             color: [8, 128, 234],
+            ..Default::default()
         });
     });
     h.app.merge_in(&[team], &[]);
@@ -543,6 +553,7 @@ fn whiteboard_undo_takes_back_my_own_last_action_not_a_teammates() {
                 pos: [900.0, 900.0],
                 text: "Front".into(),
                 color: [8, 128, 234],
+                ..Default::default()
             },
         );
     });
@@ -622,6 +633,7 @@ fn typing_in_a_note_keeps_going_to_it_after_scrolling_the_board() {
             pos,
             text: text.into(),
             color: [0xf8, 0xae, 0x00],
+            ..Default::default()
         });
     }
     h.settle();
@@ -740,7 +752,7 @@ fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
     // a template fills it, keeping the name typed
     h.click("Action Plan");
     let b = board_of(&h, wid);
-    assert_eq!(b.notes.len(), 5);
+    assert_eq!(b.shapes.len(), 5);
     assert_eq!(b.name, "Roadmap", "a name already typed stays");
     assert!(!h.has("Draw with the pen"), "the card has gone");
 
@@ -751,7 +763,7 @@ fn a_new_whiteboard_shows_it_was_made_and_offers_ways_to_start() {
     h.click("Flow Chart");
     let b = board_of(&h, wid2);
     assert_eq!(b.name, "Flow Chart");
-    assert_eq!(b.notes.len(), 4);
+    assert_eq!((b.shapes.len(), b.lines.len()), (3, 2));
 
     // picking a way to draw puts the card away and chooses the tool
     h.click("Add a whiteboard");
@@ -784,7 +796,7 @@ fn each_whiteboard_tool_shows_its_own_settings() {
     h.click("Eraser");
     assert_eq!(h.app.wb_tool, 3);
     assert!(!h.has("Colour 1"));
-    h.click("Move notes");
+    h.click("Select");
     assert_eq!(h.app.wb_tool, 2);
 }
 
@@ -906,7 +918,7 @@ fn more_templates_fill_the_board_just_made() {
     assert_eq!(h.app.wb_open, Some(wid));
     let b = board_of(&h, wid);
     assert_eq!(b.name, "Root Cause Analysis");
-    assert_eq!(b.notes.len(), 5);
+    assert_eq!((b.shapes.len(), b.lines.len()), (5, 5));
     assert!(!h.has("Draw with the pen"), "the card has gone");
 }
 
@@ -925,7 +937,7 @@ fn clear_board_question_has_even_room_around_it() {
     h.click("Clear board");
     h.settle();
     let title = h.painted_text("Clear the whole board?")[0].0;
-    let body = h.painted_text("Every stroke and note on it is removed.")[0].0;
+    let body = h.painted_text("Everything on it is removed.")[0].0;
     let clear = h.rect("Clear");
     let cancel = h.rect("Cancel");
     let menu = h
@@ -976,6 +988,7 @@ fn board_with_notes(h: &mut Ui1, at: &[[f32; 2]]) -> u64 {
             pos: *pos,
             text: char::from(b'A' + k as u8).to_string(),
             color: [0xf8, 0xae, 0x00],
+            ..Default::default()
         });
     }
     h.settle();
@@ -1174,4 +1187,306 @@ fn cmd_z_takes_back_on_the_board_but_not_while_typing() {
             .any(|t| t.contains("\u{2318}Z")),
         "the tip shows the keys"
     );
+}
+
+// ------------------------------------------------------------ shapes, lines
+
+/// A board open on screen at the starting view, filled from a template,
+/// with the Select tool and no "how to start" card.
+fn template_board(h: &mut Ui1, name: &str) -> u64 {
+    h.app.new_whiteboard();
+    h.app.section = Section::Whiteboards;
+    let wid = h.app.wb_open.unwrap();
+    h.app.wb_fill_template(wid, name);
+    h.app.sweep.wb_new = None;
+    h.app.wb_tool = 2;
+    h.settle();
+    wid
+}
+
+fn shape<'a>(b: &'a Whiteboard, text: &str) -> &'a WbShape {
+    b.shapes
+        .iter()
+        .find(|s| s.text == text)
+        .unwrap_or_else(|| panic!("no shape {:?}", text))
+}
+
+fn overlap(a: &WbShape, b: &WbShape) -> bool {
+    let r = |s: &WbShape| Rect::from_min_size(pos2(s.pos[0], s.pos[1]), vec2(s.size[0], s.size[1]));
+    r(a).intersects(r(b))
+}
+
+/// Each template lays out the picture on its card: boxes joined by lines
+/// that bend at right angles (org chart), circles joined by dashes
+/// (customer journey), a start, a decision and a step joined by arrows
+/// (flow chart), a fishbone with the problem at its head. None of it
+/// overlaps, and it all shows at the starting view.
+#[test]
+fn templates_lay_out_their_picture_as_shapes_and_lines() {
+    let mut h = Ui1::new();
+    let canvas = |h: &Ui1| h.rect("Whiteboard canvas");
+
+    let wid = template_board(&mut h, "Organizational Chart");
+    let b = board_of(&h, wid);
+    let ceo = shape(&b, "CEO");
+    assert!(ceo.filled, "the top box is tinted like on the card");
+    assert_eq!(b.lines.len(), 3);
+    for (l, name) in b.lines.iter().zip(["CTO", "COO", "CMO"]) {
+        let to = shape(&b, name);
+        assert_eq!((l.from, l.to), (ceo.id, to.id));
+        assert!(l.elbow && !l.arrow && !l.dashed);
+        // down from the CEO's bottom, across, down into the box's top
+        let path = crate::app::more::line_path(l, &b.shapes);
+        let (first, last) = (path[0], path[path.len() - 1]);
+        assert_eq!(first.y, ceo.pos[1] + ceo.size[1], "{name}: {path:?}");
+        assert_eq!(first.x, ceo.pos[0] + ceo.size[0] / 2.0, "{name}: {path:?}");
+        assert_eq!(last.y, to.pos[1], "{name}: {path:?}");
+        assert_eq!(last.x, to.pos[0] + to.size[0] / 2.0, "{name}: {path:?}");
+    }
+    for name in ["CEO", "CTO", "COO", "CMO"] {
+        assert!(h.has(&format!("Shape {}", name)), "{name} is drawn");
+    }
+
+    let wid = template_board(&mut h, "Customer Journey Map");
+    let b = board_of(&h, wid);
+    assert_eq!(b.shapes.len(), 5);
+    assert!(b.shapes.iter().all(|s| s.kind == "ellipse"));
+    assert_eq!(b.lines.len(), 4);
+    assert!(b.lines.iter().all(|l| l.dashed && !l.arrow));
+
+    let wid = template_board(&mut h, "Flow Chart");
+    let b = board_of(&h, wid);
+    let kinds: Vec<&str> = b.shapes.iter().map(|s| s.kind.as_str()).collect();
+    assert_eq!(kinds, ["pill", "diamond", "rect"]);
+    assert!(b.lines.iter().all(|l| l.arrow && !l.dashed));
+
+    let wid = template_board(&mut h, "Root Cause Analysis");
+    let b = board_of(&h, wid);
+    let problem = shape(&b, "Problem");
+    let spine = &b.lines[0];
+    assert_eq!(
+        (spine.from, spine.to),
+        (0, problem.id),
+        "the spine runs to the head"
+    );
+    let labels = b.shapes.iter().filter(|s| s.kind == "text").count();
+    assert_eq!(labels, 4, "a label at the end of each bone");
+
+    for name in [
+        "Organizational Chart",
+        "Action Plan",
+        "Customer Journey Map",
+        "Flow Chart",
+        "Root Cause Analysis",
+    ] {
+        let wid = template_board(&mut h, name);
+        let b = board_of(&h, wid);
+        assert!(b.notes.is_empty());
+        for (i, a) in b.shapes.iter().enumerate() {
+            for c in &b.shapes[i + 1..] {
+                assert!(
+                    !overlap(a, c),
+                    "{name}: {:?} and {:?} overlap",
+                    a.text,
+                    c.text
+                );
+            }
+            let far = on_screen(&h, [a.pos[0] + a.size[0], a.pos[1] + a.size[1]]);
+            assert!(canvas(&h).contains(far), "{name}: {:?} off screen", a.text);
+        }
+    }
+}
+
+/// With the Select tool a click picks a shape; the + under the CEO adds a
+/// box in the row with the others, past the last one, joined by a line
+/// like theirs, ready to type in. Undo takes it away with its line.
+#[test]
+fn the_plus_on_a_shape_adds_one_joined_to_it() {
+    let mut h = Ui1::new();
+    open_whiteboards(&mut h);
+    h.click("Organizational Chart");
+    let wid = h.app.wb_open.unwrap();
+    h.click("Select");
+    h.click("Shape CEO");
+    let ceo = shape(&board_of(&h, wid), "CEO").id;
+    assert_eq!(
+        h.app.sweep.wb_sel,
+        Some((wid, crate::app::more::WbSel::Shape(ceo)))
+    );
+    assert!(h.has("Add shape below") && h.has("Resize shape 3"));
+    h.click("Add shape below");
+    let b = board_of(&h, wid);
+    assert_eq!(b.shapes.len(), 5);
+    let new = b.shapes.last().unwrap().clone();
+    let line = b.lines.last().unwrap();
+    assert_eq!((line.from, line.to), (ceo, new.id));
+    assert!(line.elbow, "joined like the other boxes");
+    let cmo = shape(&b, "CMO");
+    assert_eq!(new.pos[1], cmo.pos[1], "in the row");
+    assert!(new.pos[0] > cmo.pos[0], "after the last one");
+    assert!(b.shapes[..4].iter().all(|s| !overlap(s, &new)));
+    // it is picked and takes the typing
+    assert_eq!(
+        h.app.sweep.wb_sel,
+        Some((wid, crate::app::more::WbSel::Shape(new.id)))
+    );
+    h.type_text("CFO");
+    assert_eq!(board_of(&h, wid).shapes.last().unwrap().text, "CFO");
+    assert!(h.has("Shape text"));
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert!(!h.has("Shape text"), "Escape ends the typing");
+    assert!(h.has("Shape CFO"));
+    h.click("Undo");
+    let b = board_of(&h, wid);
+    assert_eq!(
+        (b.shapes.len(), b.lines.len()),
+        (4, 3),
+        "Undo takes both away"
+    );
+}
+
+/// A picked shape moves with a drag (its line follows), resizes by a
+/// corner, takes a colour and a fill from the bar above it, and Delete
+/// takes it away with its lines. Undo takes each step back.
+#[test]
+fn a_shape_moves_resizes_recolours_and_deletes() {
+    let mut h = Ui1::new();
+    let wid = template_board(&mut h, "Flow Chart");
+    let step = shape(&board_of(&h, wid), "Step").clone();
+    let path = |h: &Ui1| {
+        let b = board_of(h, wid);
+        crate::app::more::line_path(&b.lines[1], &b.shapes)
+    };
+    let end = *path(&h).last().unwrap();
+    let at = h.rect("Shape Step").center();
+    h.drag_by(at, at + vec2(100.0, 50.0));
+    let moved = shape(&board_of(&h, wid), "Step").pos;
+    assert_eq!(moved, [step.pos[0] + 100.0, step.pos[1] + 50.0]);
+    assert_ne!(*path(&h).last().unwrap(), end, "its line follows it");
+    h.click("Undo");
+    assert_eq!(shape(&board_of(&h, wid), "Step").pos, step.pos);
+
+    h.click("Shape Step");
+    let c = h.rect("Resize shape 3").center();
+    h.drag_by(c, c + vec2(40.0, 20.0));
+    let s = shape(&board_of(&h, wid), "Step").clone();
+    assert_eq!(s.pos, step.pos, "the opposite corner stays");
+    assert!((s.size[0] - (step.size[0] + 40.0)).abs() < 0.5);
+    assert!((s.size[1] - (step.size[1] + 20.0)).abs() < 0.5);
+    h.click("Pick colour 3");
+    assert_eq!(
+        shape(&board_of(&h, wid), "Step").color,
+        crate::app::more::WB_COLORS[2]
+    );
+    h.click("Fill shape");
+    assert!(shape(&board_of(&h, wid), "Step").filled);
+    h.click("Undo");
+    assert!(!shape(&board_of(&h, wid), "Step").filled);
+
+    h.key(egui::Key::Delete);
+    let b = board_of(&h, wid);
+    assert_eq!((b.shapes.len(), b.lines.len()), (2, 1), "with its line");
+    assert_eq!(h.app.sweep.wb_sel, None);
+    h.click("Undo");
+    let b = board_of(&h, wid);
+    assert_eq!((b.shapes.len(), b.lines.len()), (3, 2), "both back");
+    assert_eq!(b.lines[1].to, step.id);
+}
+
+/// A click on a line picks it; its bar bends it at right angles, dashes it
+/// and deletes it.
+#[test]
+fn a_line_is_picked_restyled_and_deleted() {
+    let mut h = Ui1::new();
+    let wid = template_board(&mut h, "Flow Chart");
+    // between the start and the decision
+    let mid = on_screen(&h, [220.0, 152.0]);
+    h.click_at(mid);
+    let first = board_of(&h, wid).lines[0].id;
+    assert_eq!(
+        h.app.sweep.wb_sel,
+        Some((wid, crate::app::more::WbSel::Line(first)))
+    );
+    h.click("Dashed line");
+    h.click("Elbow line");
+    let l = board_of(&h, wid).lines[0].clone();
+    assert!(l.dashed && l.elbow && l.arrow);
+    h.click("Delete line");
+    assert_eq!(board_of(&h, wid).lines.len(), 1);
+    // a click on the empty board lets the pick go
+    h.click_at(mid);
+    assert_eq!(h.app.sweep.wb_sel, None);
+}
+
+/// The Shape tool puts the chosen shape where the board is clicked, ready
+/// to type in; the Line tool joins two shapes with a drag, in the style set
+/// on its bar.
+#[test]
+fn shape_tool_puts_shapes_down_and_the_line_tool_joins_them() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[]);
+    // the pointer is on the window before the first click, as it is for
+    // anyone clicking
+    h.hover(h.rect("Whiteboard canvas").center());
+    h.click("Shape");
+    assert_eq!(h.app.wb_tool, 4);
+    assert!(h.has("Circle") && h.has("Colour 6"));
+    h.click("Diamond");
+    h.click_at(on_screen(&h, [100.0, 100.0]));
+    let b = board_of(&h, wid);
+    assert_eq!(b.shapes.len(), 1);
+    let d = b.shapes[0].clone();
+    assert_eq!(d.kind, "diamond");
+    assert_eq!(
+        [d.pos[0] + d.size[0] / 2.0, d.pos[1] + d.size[1] / 2.0],
+        [100.0, 100.0],
+        "centred where clicked"
+    );
+    assert_eq!(h.app.wb_tool, 2, "back to Select");
+    h.type_text("Ship?");
+    assert_eq!(board_of(&h, wid).shapes[0].text, "Ship?");
+    h.key(egui::Key::Escape);
+
+    h.click("Shape");
+    h.click("Rectangle");
+    h.click_at(on_screen(&h, [400.0, 100.0]));
+    h.key(egui::Key::Escape);
+    assert_eq!(board_of(&h, wid).shapes[1].kind, "rect");
+
+    h.click("Line");
+    h.click("Dashed line");
+    h.drag_by(on_screen(&h, [100.0, 100.0]), on_screen(&h, [400.0, 100.0]));
+    let b = board_of(&h, wid);
+    assert_eq!(b.lines.len(), 1);
+    let l = &b.lines[0];
+    assert_eq!((l.from, l.to), (b.shapes[0].id, b.shapes[1].id));
+    assert!(l.arrow && l.dashed);
+    // a short drag on the empty board draws nothing
+    h.drag_by(on_screen(&h, [600.0, 300.0]), on_screen(&h, [604.0, 302.0]));
+    assert_eq!(board_of(&h, wid).lines.len(), 1);
+}
+
+/// A sticky note's bottom right corner resizes it, with any tool; Undo
+/// puts its size back.
+#[test]
+fn a_note_is_resized_by_its_corner() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[[100.0, 100.0]]);
+    h.app.wb_tool = 0;
+    h.settle();
+    let c = h.rect("Resize note 0").center();
+    h.drag_by(c, c + vec2(80.0, 40.0));
+    let b = board_of(&h, wid);
+    assert!(b.strokes.is_empty(), "the pen did not draw");
+    let wh = b.notes[0].wh();
+    assert!(
+        (wh[0] - 240.0).abs() < 0.5 && (wh[1] - 160.0).abs() < 0.5,
+        "{wh:?}"
+    );
+    // its text box is as wide as the note
+    let r = h.rect("Resize note 0");
+    assert!((r.right() - on_screen(&h, [340.0, 0.0]).x).abs() < 1.0);
+    h.click("Undo");
+    assert_eq!(board_of(&h, wid).notes[0].wh(), Sticky::SIZE);
 }

@@ -826,7 +826,7 @@ impl App {
                 } else {
                     trf!("Goal due tomorrow: {}", g.name)
                 };
-                let body = trf!("{}% done", (self.goal_progress(&g) * 100.0).round() as i64);
+                let body = trf!("{}% done", super::more::pct_of(self.goal_progress(&g)));
                 self.deliver(Note {
                     key,
                     kind: Kind::Goal,
@@ -849,7 +849,7 @@ impl App {
                 .collect();
             for g in goals {
                 let p = self.goal_progress(&g);
-                let pct = (p * 100.0).round() as i64;
+                let pct = super::more::pct_of(p);
                 if n.goal_milestones {
                     for e in &g.log {
                         let GoalChange::Milestone(m) = e.what else {

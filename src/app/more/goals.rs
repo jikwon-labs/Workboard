@@ -13,9 +13,17 @@
 use super::*;
 use egui::{Pos2, Response};
 
-/// A goal's progress as a whole percent.
+/// A goal's progress as a whole percent, rounded, but 100 only once it is
+/// all done: 99.5% reads 99, since everything that goes by "100%" (the
+/// Achieved shelf, the achieved day, Goal achieved, the 100% milestone)
+/// means every target met, as `Goal::pace` and a target's `done` do.
 pub(crate) fn pct_of(p: f32) -> u8 {
-    (p * 100.0).round().clamp(0.0, 100.0) as u8
+    let n = (p * 100.0).round().clamp(0.0, 100.0) as u8;
+    if p < 1.0 {
+        n.min(99)
+    } else {
+        n
+    }
 }
 
 /// Milestones announced on the way to 100%.
@@ -2036,6 +2044,16 @@ mod tests {
         assert_eq!(fmt_num(1234567.5), "1,234,567.5");
         assert_eq!(fmt_num(-3.0), "-3");
         assert_eq!(fmt_num(2.999), "3");
+    }
+
+    #[test]
+    fn a_percent_reads_100_only_when_all_done() {
+        assert_eq!(pct_of(0.995), 99);
+        assert_eq!(pct_of(0.9999), 99);
+        assert_eq!(pct_of(1.0), 100);
+        assert_eq!(pct_of(0.5), 50);
+        assert_eq!(pct_of(0.745), 75, "other milestones keep the rounding");
+        assert_eq!(pct_of(f32::NAN), 0);
     }
 
     #[test]

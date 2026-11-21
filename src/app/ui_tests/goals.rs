@@ -626,3 +626,73 @@ fn share_and_set_the_next_goal_are_one_height() {
         "on the goal's page"
     );
 }
+
+/// Adds a goal of mine due in 30 days that started 10 days ago with these
+/// targets, and returns its id. The window stays where it is.
+fn add_goal_with(h: &mut Ui1, name: &str, targets: Vec<GoalTarget>) -> u64 {
+    let id = h.app.data.new_id();
+    let day = today();
+    h.app.data.extra.goals.push(Goal {
+        id,
+        name: name.into(),
+        color: [0x44, 0x66, 0xff],
+        due: Some(day + Duration::days(30)),
+        owner: h.app.data.me,
+        start: Some(day - Duration::days(10)),
+        targets,
+        ..Default::default()
+    });
+    h.settle();
+    id
+}
+
+fn number(name: &str, start: f64, target: f64, current: f64) -> GoalTarget {
+    GoalTarget {
+        name: name.into(),
+        kind: TargetKind::Number {
+            start,
+            target,
+            current,
+            unit: String::new(),
+        },
+    }
+}
+
+fn current_of(h: &Ui1, id: u64, i: usize) -> f64 {
+    match goal(h, id).targets[i].kind {
+        TargetKind::Number { current, .. } => current,
+        _ => panic!("a number target"),
+    }
+}
+
+#[test]
+fn a_goal_just_short_of_100_is_not_achieved() {
+    let (mut h, _, _) = two_goals();
+    // 994 of 1,000: one more is 99.5%, which rounds to 100 but isn't done
+    let id = add_goal_with(
+        &mut h,
+        "Signups",
+        vec![number("People", 0.0, 1000.0, 994.0)],
+    );
+    h.click("Goal Signups");
+    h.click("Plus 1 People");
+    assert_eq!(current_of(&h, id, 0), 995.0);
+    assert!(
+        h.app.modal.is_none(),
+        "Goal achieved doesn't open before every target is met"
+    );
+    let g = goal(&h, id).clone();
+    assert_eq!(g.done_on, None, "no achieved day");
+    assert!(
+        !g.log.iter().any(|e| e.what == GoalChange::Milestone(100)),
+        "no 100% milestone: {:?}",
+        g.log
+    );
+    assert!(
+        h.painted_text("100%").is_empty() && !h.painted_text("99%").is_empty(),
+        "the ring says 99%"
+    );
+    h.click("Back to goals");
+    assert!(h.has("Goal Signups"), "still in progress");
+    assert!(!h.has("Achieved Signups"));
+}

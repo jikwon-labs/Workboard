@@ -25,6 +25,7 @@ mod whiteboard;
 pub use forms::form_answers;
 pub use forms::FormTab;
 pub(crate) use goal_dialogs::GoalDraft;
+pub(crate) use goals::pct_of;
 #[cfg(test)]
 pub use search::Hit;
 #[cfg(test)]

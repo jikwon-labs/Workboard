@@ -395,7 +395,9 @@ impl App {
                 self.section = Section::Whiteboards;
             }
             Hit::Form(id) => {
+                // on Edit, as the Forms sidebar and table open one
                 self.form_open = Some(id);
+                self.form_tab = super::FormTab::Edit;
                 self.section = Section::Forms;
             }
             Hit::Dashboard(id) => {

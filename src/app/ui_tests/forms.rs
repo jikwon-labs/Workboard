@@ -755,3 +755,20 @@ fn another_forms_answers_start_on_all() {
     assert_eq!(h.app.sweep.forms.answers_filter, 0);
     assert!(h.has("Answer task Loved it"));
 }
+
+/// A form opened from the search opens on Edit, as from the sidebar or the
+/// table, not on whichever tab the last form was left on.
+#[test]
+fn a_form_from_the_search_opens_on_edit() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    h.click("Feedback Form");
+    h.click("Back to all forms");
+    h.click("IT Requests");
+    h.click("Answers");
+    h.click("Search");
+    h.type_text("Feedback");
+    h.click("Feedback Form");
+    assert_eq!(h.app.form_open, Some(form_named(&h, "Feedback Form")));
+    assert_eq!(h.app.form_tab, FormTab::Edit);
+}

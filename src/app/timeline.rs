@@ -138,26 +138,28 @@ impl App {
 
     pub(super) fn timeline_view(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let td = today();
         let sc = DayScale::new(self.timeline.zoom, td);
         let font = FontId::proportional(timebar::BAR_NAME_SIZE);
-        let lanes = self.timeline_lanes_with(
-            &tasks.iter().collect::<Vec<_>>(),
-            self.timeline.by,
-            |x, r| {
+        // the lanes and the tray hold ids: each bar looks its task up when
+        // it's drawn, so the tasks aren't copied on every frame
+        let (lanes, undated) = {
+            let tasks = self.filtered();
+            let lanes = self.timeline_lanes_with(&tasks, self.timeline.by, |x, r| {
                 let w = ui.fonts(|f| {
                     f.layout_no_wrap(x.name.clone(), font.clone(), Color32::WHITE)
                         .size()
                         .x
                 });
                 sc.reach(r, w.min(timebar::BESIDE_NAME_MAX))
-            },
-        );
-        let undated: Vec<&Task> = tasks
-            .iter()
-            .filter(|x| bar_range(x.start, x.due).is_none())
-            .collect();
+            });
+            let undated: Vec<u64> = tasks
+                .iter()
+                .filter(|x| bar_range(x.start, x.due).is_none())
+                .map(|x| x.id)
+                .collect();
+            (lanes, undated)
+        };
         // wraps in a small window: "without dates" ran over the lane choices
         ui.horizontal_wrapped(|ui| {
             if timebar::zoom_buttons(ui, &mut self.timeline.zoom) {
@@ -204,16 +206,21 @@ impl App {
         if self.timeline.tray && !undated.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                for task in &undated {
-                    let st = self.data.status_of(task);
+                for &tid in &undated {
+                    let Some((name, st)) = self
+                        .task(tid)
+                        .map(|x| (x.name.clone(), self.data.status_of(x)))
+                    else {
+                        continue;
+                    };
                     let g = ui.painter().layout_no_wrap(
-                        task.name.clone(),
+                        name.clone(),
                         FontId::proportional(12.5),
                         t.text,
                     );
                     let (r, resp) =
                         ui.allocate_exact_size(vec2(g.size().x + 34.0, 26.0), Sense::click());
-                    name_it(&resp, &format!("Undated {}", task.name));
+                    name_it(&resp, &format!("Undated {}", name));
                     let fill = if resp.hovered() { t.hover } else { t.column_bg };
                     ui.painter().rect_filled(r, 6.0, fill);
                     ui.painter().rect_stroke(
@@ -233,7 +240,6 @@ impl App {
                         g,
                         t.text,
                     );
-                    let tid = task.id;
                     resp.context_menu(|ui| self.task_menu(ui, tid));
                     if resp.clicked() {
                         self.actions.push(Action::Open(tid));
@@ -386,9 +392,10 @@ impl App {
                         let mut y = area.top() + head;
                         for lane in &lanes {
                             for (tid, range, row) in &lane.bars {
-                                let Some(task) = tasks.iter().find(|x| x.id == *tid) else {
+                                let Some(task) = self.task(*tid).cloned() else {
                                     continue;
                                 };
+                                let task = &task;
                                 let resp = self.date_bar(
                                     ui,
                                     &p,

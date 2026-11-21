@@ -2914,7 +2914,6 @@ impl App {
 
     fn calendar_view(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let td = today();
         // the week view keeps its own anchor (any day inside the shown week)
         let week_anchor: NaiveDate = ui
@@ -3014,6 +3013,22 @@ impl App {
             Some(at) if x.start == Some(s) => Some(at),
             _ if s == e => x.due_at(),
             _ => None,
+        };
+        // the tasks the grid and the side panel can show (unscheduled,
+        // overdue), copied since they're drawn while the app changes; the
+        // view's other tasks aren't copied
+        let grid_end = start + Duration::days(rows as i64 * 7 - 1);
+        let tasks: Vec<Task> = {
+            let now = now_local();
+            self.filtered()
+                .into_iter()
+                .filter(|x| {
+                    x.due.is_none()
+                        || span(x).is_some_and(|(s, e)| s <= grid_end && e >= start)
+                        || (x.is_overdue_at(now) && !self.data.is_closed(x))
+                })
+                .cloned()
+                .collect()
         };
         // each week row gives every bar one line for all its days, so a bar
         // that runs over several days stays in one piece: earlier starts and
@@ -3375,7 +3390,29 @@ impl App {
 
     fn gantt_view(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
+        // each task's subtasks follow it once it is expanded; the rows are
+        // copied once (they're drawn while the app changes), the view's
+        // other tasks not at all
+        let (rows, undated) = {
+            let tasks = self.filtered();
+            let undated = tasks
+                .iter()
+                .filter(|x| x.start.is_none() && x.due.is_none())
+                .count();
+            let mut rows: Vec<(Task, usize, usize)> = vec![];
+            for task in tasks {
+                let subs: Vec<&Task> = self
+                    .subtasks(task.id)
+                    .into_iter()
+                    .filter(|x| !x.archived)
+                    .collect();
+                rows.push((task.clone(), 0, subs.len()));
+                if self.expanded_tasks.contains(&task.id) {
+                    rows.extend(subs.into_iter().map(|x| (x.clone(), 1, 0)));
+                }
+            }
+            (rows, undated)
+        };
         let td = today();
         let sc = timebar::DayScale::new(self.gantt_zoom, td);
         let (start, cw) = (sc.start, sc.cw);
@@ -3394,10 +3431,6 @@ impl App {
                 {
                     self.toast(self.export_csv());
                 }
-                let undated = tasks
-                    .iter()
-                    .filter(|x| x.start.is_none() && x.due.is_none())
-                    .count();
                 if undated > 0 {
                     ui.label(
                         RichText::new(trf!("{} without dates", undated))
@@ -3408,20 +3441,6 @@ impl App {
             });
         });
         ui.add_space(4.0);
-        // each task's subtasks follow it once it is expanded
-        let mut rows: Vec<(Task, usize, usize)> = vec![];
-        for task in &tasks {
-            let subs: Vec<Task> = self
-                .subtasks(task.id)
-                .into_iter()
-                .filter(|x| !x.archived)
-                .cloned()
-                .collect();
-            rows.push((task.clone(), 0, subs.len()));
-            if self.expanded_tasks.contains(&task.id) {
-                rows.extend(subs.into_iter().map(|x| (x, 1, 0)));
-            }
-        }
         // fill the view so the horizontal scrollbar sits at the bottom, not under the last row
         let rows_h = (head + rh * (rows.len() + 1) as f32).max(ui.available_height() - 24.0);
         egui::ScrollArea::vertical()

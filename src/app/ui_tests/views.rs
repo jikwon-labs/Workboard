@@ -1467,3 +1467,43 @@ fn an_entry_taken_away_elsewhere_mid_edit_closes_the_editor_with_a_note() {
     assert!(note.contains("closed without saving"), "{}", note);
     assert!(h.app.data.tasks[i].time_entries.is_empty(), "nothing saved");
 }
+
+/// A task of mine without a date dragged from "To schedule" onto a day takes
+/// that day; dragged from the day back onto "To schedule" it loses it again.
+#[test]
+fn planner_drag_schedules_and_unschedules_a_task() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let id = h.app.data.new_id();
+    let mut x = task_named(&h, "Write copy for landing page").clone();
+    x.id = id;
+    x.name = "Plan me".into();
+    x.assignees = vec![me];
+    x.due = None;
+    x.start = None;
+    x.parent = None;
+    h.app.data.tasks.push(x);
+    h.app.section = Section::Planner;
+    h.settle();
+    let day = h.app.planner_week + Duration::days(3);
+    let from = h.painted_text("Plan me")[0].0.center();
+    let add = h.rect(&format!("Add task on {}", day.format("%a %-d")));
+    let to = add.center() + vec2(0.0, 80.0);
+    h.drag_by(from, to);
+    h.settle();
+    let due = |h: &Ui1| h.app.data.tasks.iter().find(|t| t.id == id).unwrap().due;
+    assert_eq!(due(&h), Some(day), "dropped on the day");
+    // and back onto To schedule, under its heading
+    // the day's narrow column may shorten the name
+    let mut from = None;
+    each_text(&h.shapes, |ts, clip| {
+        if ts.galley.text().starts_with("Plan") {
+            from = Some(ts.visual_bounding_rect().intersect(clip).center());
+        }
+    });
+    let from = from.expect("the task on its day");
+    let sched = h.painted_text(tr("To schedule"))[0].0;
+    h.drag_by(from, sched.center() + vec2(40.0, 120.0));
+    h.settle();
+    assert_eq!(due(&h), None, "its date taken off");
+}

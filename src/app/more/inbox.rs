@@ -371,7 +371,12 @@ impl App {
                                     )
                                     .clicked()
                                 {
-                                    self.data.extra.inbox_later.push(key.clone());
+                                    // a cleared row moves to Later, as it does on the iPhone
+                                    let x = &mut self.data.extra;
+                                    x.inbox_cleared.retain(|x| x != &key);
+                                    if !x.inbox_later.contains(&key) {
+                                        x.inbox_later.push(key.clone());
+                                    }
                                     self.dirty = true;
                                     handled = true;
                                 }

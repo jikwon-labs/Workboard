@@ -18,6 +18,7 @@ mod harness;
 mod hub_sidebars;
 mod huddle;
 mod i18n_tests;
+mod inbox;
 mod layout_tests;
 mod look;
 mod media;

@@ -33,6 +33,8 @@ pub use wb_shapes::{WbLineStyle, WbLink, WbSel};
 pub use whiteboard::{WbNew, WbUndo, WbView};
 // for tests that place the pointer on the board
 #[cfg(test)]
+pub(crate) use whiteboard::note_fill;
+#[cfg(test)]
 pub(crate) use whiteboard::GUIDE as WB_GUIDE;
 #[cfg(test)]
 pub use whiteboard::{WB_COLORS, WB_ORIGIN};

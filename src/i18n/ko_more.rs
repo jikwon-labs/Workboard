@@ -327,6 +327,9 @@ pub const T: &[(&str, &str)] = &[
     ("A blank board", "빈 보드"),
     ("Boards", "보드"),
     ("{} notes", "메모 {}개"),
+    ("1 note", "메모 1개"),
+    ("{} shapes", "도형 {}개"),
+    ("1 shape", "도형 1개"),
     ("Drawing only", "그림만 있음"),
     // reminders, AI
     ("Reminders", "리마인더"),

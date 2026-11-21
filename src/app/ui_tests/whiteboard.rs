@@ -1825,3 +1825,37 @@ fn a_line_dragged_within_one_shape_is_not_drawn() {
         (w, crate::app::more::WbUndo::Added(s, l)) if *w == wid && s.is_empty() && !l.is_empty()
     )));
 }
+
+/// A board's card says how many notes and shapes it has: a board made from
+/// a template, all shapes, said "Empty". Its row in the sidebar takes the
+/// colour of its shapes when it has no notes.
+#[test]
+fn a_board_card_counts_its_notes_and_shapes() {
+    let mut h = Ui1::new();
+    open_whiteboards(&mut h);
+    h.click("Flow Chart");
+    let wid = h.app.wb_open.unwrap();
+    // the sidebar row's swatch, in the template's colour
+    let colour = board_of(&h, wid).shapes[0].color;
+    let row = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Flow Chart" && r.left() < 300.0)
+        .map(|x| x.1)
+        .next()
+        .expect("the sidebar row");
+    let fill = crate::app::more::note_fill(&h.app.t(), colour);
+    let swatch = h.shapes.iter().any(|c| match &c.shape {
+        egui::Shape::Rect(r) => r.fill == fill && row.contains_rect(r.rect),
+        _ => false,
+    });
+    assert!(swatch, "the row's swatch has the shapes' colour");
+    push_note(&mut h, wid, [100.0, 400.0], "Mine");
+    h.click("All Whiteboards");
+    let texts = drawn_texts(&h.shapes);
+    assert!(!texts.iter().any(|t| t == "Empty"), "{texts:?}");
+    assert!(
+        texts.iter().any(|t| t == "1 note \u{b7} 3 shapes"),
+        "{texts:?}"
+    );
+}

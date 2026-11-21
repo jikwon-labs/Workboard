@@ -638,9 +638,22 @@ impl App {
                             paint_avatar(p, pos2(x + 8.0, meta_y), 8.0, m, t.bg);
                             x += 22.0;
                         }
-                        let meta = if !board.notes.is_empty() {
-                            crate::trf!("{} notes", board.notes.len())
-                        } else if !board.strokes.is_empty() {
+                        // its notes and shapes (a board made from a
+                        // template, all shapes, said "Empty")
+                        let mut parts = vec![];
+                        match board.notes.len() {
+                            0 => {}
+                            1 => parts.push(tr("1 note").to_string()),
+                            n => parts.push(crate::trf!("{} notes", n)),
+                        }
+                        match board.shapes.len() {
+                            0 => {}
+                            1 => parts.push(tr("1 shape").to_string()),
+                            n => parts.push(crate::trf!("{} shapes", n)),
+                        }
+                        let meta = if !parts.is_empty() {
+                            parts.join(" \u{b7} ")
+                        } else if !board.strokes.is_empty() || !board.lines.is_empty() {
                             tr("Drawing only").to_string()
                         } else {
                             tr("Empty").to_string()
@@ -726,7 +739,15 @@ impl App {
             .whiteboards
             .iter()
             .filter(|w| q.is_empty() || w.name.to_lowercase().contains(q))
-            .map(|w| (w.id, w.name.clone(), w.notes.first().map(|n| n.color)))
+            .map(|w| {
+                // the colour of its first note, or of its first shape
+                let colour = w.notes.first().map(|n| n.color);
+                (
+                    w.id,
+                    w.name.clone(),
+                    colour.or(w.shapes.first().map(|s| s.color)),
+                )
+            })
             .collect();
         if rows.is_empty() {
             crate::app::hubs::side::side_empty(

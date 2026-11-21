@@ -79,10 +79,16 @@ impl App {
             ui,
             ("goal_page", gid),
             |ui| {
-                // ---- back to the Goals page
-                let b =
-                    icons::icon_button(ui, &t, "chevron_left", tr("Goals"), "Back to goals", false);
-                if b.clicked() {
+                // ---- back to the Goals page: laid out as a form's header (the
+                // arrow, the hub's name, "/" right after it)
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let b = icons::icon_button(ui, &t, "chevron_left", "", "Back to goals", false)
+                    .on_hover_text(tr("Goals"));
+                let crumb = ui.add(ghost(egui::Button::new(
+                    RichText::new(tr("Goals")).size(13.0).color(t.text2),
+                )));
+                name_it(&crumb, "Goals crumb");
+                if b.clicked() || crumb.clicked() {
                     act = Some(GoalAct::Back);
                 }
                 ui.label(RichText::new("/").color(t.text3));

@@ -1514,3 +1514,32 @@ fn long_target_chips_wrap_inside_the_dialog() {
         assert_eq!(d.more.len(), 2);
     }
 }
+
+/// A goal's header reads "< Goals / name" with "/" right after "Goals", as
+/// a form's header does (a wide gap used to sit before the "/").
+#[test]
+fn goal_header_slash_follows_the_hub_name() {
+    let (mut h, a, _) = two_goals();
+    h.app.goal_open = Some(a);
+    h.settle();
+    let crumb = h.rect("Goals crumb");
+    let hub = h
+        .painted_text("Goals")
+        .into_iter()
+        .find(|(r, _)| crumb.contains(r.center()))
+        .expect("\"Goals\" in its crumb")
+        .0;
+    let slash = h
+        .painted_text("/")
+        .into_iter()
+        .find(|(r, _)| (r.center().y - hub.center().y).abs() < 10.0 && r.left() > hub.right())
+        .expect("a / after it")
+        .0;
+    assert!(
+        slash.left() - hub.right() <= 8.0,
+        "{} between \"Goals\" and \"/\"",
+        slash.left() - hub.right()
+    );
+    h.click("Goals crumb");
+    assert!(h.app.goal_open.is_none());
+}

@@ -15,9 +15,10 @@ pub fn home_dir() -> PathBuf {
 
 /// The folder the app keeps its own data in (data.json and the rest):
 /// ~/Library/Application Support/Workboard on macOS, %APPDATA%\Workboard on
-/// Windows, ~/.workboard elsewhere.
+/// Windows, ~/.workboard elsewhere. On iPad $HOME is the app's own container,
+/// where only Library and Documents can be written, so it goes in Library too.
 pub fn app_data_dir() -> PathBuf {
-    if cfg!(target_os = "macos") {
+    if cfg!(any(target_os = "macos", target_os = "ios")) {
         return home_dir().join("Library/Application Support/Workboard");
     }
     if cfg!(windows) {

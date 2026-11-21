@@ -1,0 +1,29 @@
+#!/bin/sh
+# Build the desktop (egui) app for the iPad simulator and run it there.
+# Experimental: see docs/ipad.md.
+#   scripts/ipad-sim                 build, install, launch on "iPad mini (A17 Pro)"
+#   WB_IPAD="iPad Air 11-inch (M4)" scripts/ipad-sim
+set -eu
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.cargo/bin:$PATH"
+device="${WB_IPAD:-iPad mini (A17 Pro)}"
+target=aarch64-apple-ios-sim
+rustup target list --installed | grep -qx "$target" || rustup target add "$target"
+cargo build --target "$target"
+app="target/$target/debug/Workboard Desk.app"
+rm -rf "$app"
+mkdir -p "$app"
+cp ios/ipad-egui/Info.plist "$app/"
+cp "target/$target/debug/workboard" "$app/workboard"
+cp Resources/AppIcon-256.png "$app/AppIcon.png" 2>/dev/null || true
+codesign --force --sign - "$app" >/dev/null
+udid=$(xcrun simctl list devices available | grep -F "$device (" | head -1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')
+[ -n "$udid" ] || { echo "ipad-sim: no simulator named $device" >&2; exit 1; }
+xcrun simctl boot "$udid" 2>/dev/null || true
+# the Simulator window, when Xcode has it (this runs headless without it;
+# `xcrun simctl io <udid> screenshot x.png` shows the screen)
+open -a Simulator --args -CurrentDeviceUDID "$udid" 2>/dev/null || true
+xcrun simctl bootstatus "$udid" >/dev/null
+xcrun simctl install "$udid" "$app"
+xcrun simctl launch --terminate-running-process "$udid" com.seojigwon.workboard.desk
+echo "ipad-sim: running on $device ($udid)"

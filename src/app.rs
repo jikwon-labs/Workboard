@@ -5736,7 +5736,19 @@ impl eframe::App for App {
         self.fix_input(ctx, raw_input);
     }
 
+    // eframe drops the OpenGL argument where glow isn't built in (iPad)
+    #[cfg(not(target_os = "ios"))]
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.exit();
+    }
+    #[cfg(target_os = "ios")]
+    fn on_exit(&mut self) {
+        self.exit();
+    }
+}
+
+impl App {
+    fn exit(&mut self) {
         if self.persist {
             self.finish_before_quit();
             self.save_now();

@@ -463,7 +463,7 @@ pub fn choice_from_key(s: &str) -> Choice {
 
 /// The first preferred language of the system, such as "ko-KR" or "en-US".
 fn system_language() -> String {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         use objc::runtime::Object;
         use objc::{class, msg_send, sel, sel_impl};

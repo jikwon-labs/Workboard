@@ -11,7 +11,17 @@ edition = "2021"
 wb-sync = { path = "crates/wb-sync" }
 wb-net = { path = "crates/wb-net" }
 wb-voice = { path = "crates/wb-voice" }
-eframe = "0.31"
+# eframe's default features, less glow: iOS has no OpenGL for it, so glow is
+# turned on below for every other system
+eframe = { version = "0.31", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "wayland",
+    "web_screen_reader",
+    "x11",
+] }
+# with its default features, which eframe's defaults turn on
+winit = "0.30"
 egui = "0.31"
 # font metrics, to line up the Korean font with the system font (setup_fonts)
 ab_glyph = "0.2"
@@ -67,7 +77,7 @@ raw-window-handle = "0.6"
 # OpenGL, and the app then couldn't open its window. With no graphics card
 # Direct3D uses Windows' own software renderer (WARP). --opengl for the old
 # way (src/main.rs).
-eframe = { version = "0.31", features = ["wgpu"] }
+eframe = { version = "0.31", default-features = false, features = ["wgpu"] }
 # eframe takes wgpu without its default backends, which leaves Windows only
 # Vulkan and OpenGL: Direct3D 12 (with the WARP software fallback) is added
 # here. The version eframe uses.
@@ -75,6 +85,17 @@ wgpu = { version = "24", default-features = false, features = ["dx12"] }
 # the file picker (src/media.rs) and the "Quit Workboard?" alert
 # (src/os.rs); its default features are for Linux only
 rfd = { version = "0.15", default-features = false }
+
+# iPad: the same egui app, drawn with wgpu on Metal (iOS has no OpenGL that
+# eframe can use). Experimental: see docs/ipad.md
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+eframe = { version = "0.31", default-features = false, features = ["glow"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+eframe = { version = "0.31", default-features = false, features = ["wgpu"] }
+wgpu = { version = "24", default-features = false, features = ["metal"] }
+# the system language (src/i18n.rs), as on macOS
+objc = "0.2"
 
 # the icon inside workboard.exe (build.rs)
 [target.'cfg(windows)'.build-dependencies]

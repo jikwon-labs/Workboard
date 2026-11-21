@@ -270,6 +270,7 @@ fn pump(
     Ok(())
 }
 
+#[cfg(not(target_os = "ios"))]
 /// libwebrtc's capturer, started on `share`: on macOS CGDisplayStream for
 /// displays (where ScreenCaptureKit isn't there) and CGWindowList for
 /// windows; on Windows Windows Graphics Capture (or DXGI, or GDI). Frames
@@ -325,6 +326,7 @@ fn open_webrtc(
 }
 
 /// Share through libwebrtc's capturer until stopped.
+#[cfg(not(target_os = "ios"))]
 fn run_webrtc(
     share: Share,
     source: &NativeVideoSource,
@@ -335,8 +337,35 @@ fn run_webrtc(
     pump(source, limits, stop, &shared, || cap.capture_frame())
 }
 
+/// iPad: libwebrtc has no screen capturer there (iOS shares the screen
+/// through a broadcast extension, not built yet), so there is nothing to share.
+#[cfg(target_os = "ios")]
+mod imp {
+    use super::*;
+
+    pub fn allowed() -> bool {
+        true
+    }
+    pub fn ask() -> bool {
+        true
+    }
+    pub fn sources() -> Result<Vec<Source>, ScreenTrouble> {
+        Ok(Vec::new())
+    }
+    pub fn capture(
+        _share: Share,
+        _source: &NativeVideoSource,
+        _limits: &Limits,
+        _stop: &AtomicBool,
+    ) -> Result<(), ScreenTrouble> {
+        Err(ScreenTrouble::Failed(
+            "Screen sharing isn't available on iPad yet.".into(),
+        ))
+    }
+}
+
 /// Windows and other systems: everything through libwebrtc's capturer.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 mod imp {
     use super::*;
     use livekit::webrtc::desktop_capturer::{

@@ -23,6 +23,7 @@ mod whiteboard;
 // for tests that name them `more::form_answers` and `more::Hit`
 #[cfg(test)]
 pub use forms::form_answers;
+pub(crate) use forms::old_answer_form;
 pub use forms::FormTab;
 pub(crate) use goal_dialogs::GoalDraft;
 pub(crate) use goals::pct_of;

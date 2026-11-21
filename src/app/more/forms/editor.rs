@@ -174,6 +174,7 @@ impl App {
                     }
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
+                        let old = self.data.extra.forms[fi].name.clone();
                         let f = &mut self.data.extra.forms[fi];
                         let r = ui.add(
                             egui::TextEdit::singleline(&mut f.name)
@@ -183,7 +184,18 @@ impl App {
                                 .desired_width(f32::INFINITY),
                         );
                         name_field(&r, "Form name");
-                        ch |= r.changed();
+                        if r.changed() {
+                            // answers older apps sent, found by name, stay with
+                            // their form: this one's under its old name, and
+                            // another form's that has the new name
+                            let new = std::mem::replace(&mut self.data.extra.forms[fi].name, old);
+                            let old = self.data.extra.forms[fi].name.clone();
+                            self.tie_old_answers(&old);
+                            self.tie_old_answers(&new);
+                            self.data.extra.forms[fi].name = new;
+                            ch = true;
+                        }
+                        let f = &mut self.data.extra.forms[fi];
                         let r = ui.add(
                             egui::TextEdit::multiline(&mut f.description)
                                 .frame(false)

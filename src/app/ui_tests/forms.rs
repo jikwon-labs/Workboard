@@ -1094,3 +1094,95 @@ fn the_forms_search_takes_korean_case_and_spaces() {
     h.settle();
     assert_eq!(h.painted_text("No form has that name").len(), 2, "sidebar and table");
 }
+
+/// An answer from an app that doesn't record its form (0.1.21 and older):
+/// the history line "submitted the form <name>" on a task in `list`.
+fn old_app_answer(h: &mut Ui1, list: u64, form_name: &str, task: &str) {
+    h.app.pending.log = Some(format!("submitted the form {}", form_name));
+    h.app.apply(Action::Add {
+        list,
+        name: task.into(),
+        status: None,
+        priority: 0,
+        assignees: vec![],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    assert_eq!(task_named(h, task).form, None);
+    h.settle();
+}
+
+/// Renaming a form keeps the answers older apps sent it, which are found
+/// by the form's name: they are tied to the form before the name changes.
+/// So does making a second form of the same name from the template.
+#[test]
+fn older_answers_stay_with_a_renamed_form() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    h.click("IT Requests");
+    let fid = h.app.form_open.unwrap();
+    let list = form(&h, fid).list_id;
+    old_app_answer(&mut h, list, "IT Requests", "Printer offline");
+    h.click("Answers");
+    assert!(h.has("Answer task Printer offline"));
+    h.click("Edit");
+    h.click("Form name");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("Help desk");
+    assert_eq!(form(&h, fid).name, "Help desk");
+    h.click("Answers");
+    assert!(h.has("Answer task Printer offline"), "still its answer");
+    assert_eq!(task_named(&h, "Printer offline").form, Some(fid));
+    // a second "Help desk"... from the IT Requests template, renamed alike
+    old_app_answer(&mut h, list, "Help desk", "Scanner jam");
+    h.click("Back to all forms");
+    h.click("IT Requests");
+    let twin = h.app.form_open.unwrap();
+    assert_ne!(twin, fid);
+    h.click("Form name");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("Help desk");
+    h.click("Answers");
+    assert!(!h.has("Answer task Scanner jam"), "the twin didn't take it");
+    h.app.form_open = Some(fid);
+    h.settle();
+    assert!(h.has("Answer task Scanner jam"));
+    assert!(h.has("Answer task Printer offline"));
+}
+
+/// Two forms already sharing a name (two made from one template) each get
+/// the older answers that went to their own List.
+#[test]
+fn older_answers_to_same_named_forms_are_told_apart_by_list() {
+    let mut h = Ui1::new();
+    h.hover(pos2(700.0, 450.0));
+    let ideas = list_id(&h, "Ideas");
+    let main = h.app.data.first_list().unwrap();
+    assert_ne!(ideas, main);
+    let mut ids = vec![];
+    for list in [main, ideas] {
+        let id = h.app.data.new_id();
+        h.app.data.extra.forms.push(Form {
+            id,
+            name: "Feedback Form".into(),
+            list_id: list,
+            owner: h.app.data.me,
+            ..Default::default()
+        });
+        ids.push(id);
+    }
+    old_app_answer(&mut h, main, "Feedback Form", "Loved the demo");
+    old_app_answer(&mut h, ideas, "Feedback Form", "More dark mode");
+    h.app.section = Section::Forms;
+    for (id, mine, other) in [
+        (ids[0], "Loved the demo", "More dark mode"),
+        (ids[1], "More dark mode", "Loved the demo"),
+    ] {
+        h.app.form_open = Some(id);
+        h.app.form_tab = FormTab::Answers;
+        h.settle();
+        assert!(h.has(&format!("Answer task {}", mine)));
+        assert!(!h.has(&format!("Answer task {}", other)));
+    }
+}

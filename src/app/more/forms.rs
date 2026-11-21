@@ -137,6 +137,26 @@ fn email_ok(e: &str) -> bool {
     })
 }
 
+/// The form name in a task's history line "submitted the form <name>": how
+/// apps that don't record `Task::form` (0.1.21 and older) mark an answer.
+fn old_answer_name(t: &Task) -> Option<&str> {
+    t.activity
+        .iter()
+        .filter(|a| !a.comment)
+        .find_map(|a| a.text.strip_prefix("submitted the form "))
+}
+
+/// The form such an answer went to: the one form named so, or, when
+/// several are, the one whose List the task is in.
+pub(crate) fn old_answer_form(forms: &[Form], name: &str, list: u64) -> Option<u64> {
+    let named: Vec<&Form> = forms.iter().filter(|f| f.name == name).collect();
+    let one = |v: Vec<&Form>| match v.as_slice() {
+        [f] => Some(f.id),
+        _ => None,
+    };
+    one(named.clone()).or_else(|| one(named.into_iter().filter(|f| f.list_id == list).collect()))
+}
+
 /// Checks the answers (required, number, email) and turns them into task
 /// fields; a problem comes with the question it is about.
 fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (usize, String)> {
@@ -333,6 +353,8 @@ impl App {
                 ],
             ),
         };
+        // answers older apps sent a form of this name stay with it
+        self.tie_old_answers(&name);
         self.data.extra.forms.push(Form {
             id,
             name: name.clone(),
@@ -427,6 +449,26 @@ impl App {
         }
     }
 
+    /// Ties the answers older apps sent to a form named `name` to that form
+    /// (`Task::form`), before something makes the name stop finding them:
+    /// the form being renamed, or another form taking the same name.
+    pub(crate) fn tie_old_answers(&mut self, name: &str) {
+        let forms = &self.data.extra.forms;
+        let mut tied = false;
+        for t in self.data.tasks.iter_mut().filter(|t| t.form.is_none()) {
+            let form = old_answer_name(t)
+                .filter(|n| *n == name)
+                .and_then(|n| old_answer_form(forms, n, t.list_id));
+            if form.is_some() {
+                t.form = form;
+                tied = true;
+            }
+        }
+        if tied {
+            self.dirty = true;
+        }
+    }
+
     /// Opens a form on one of its tabs.
     fn open_form(&mut self, id: u64, tab: FormTab) {
         self.form_open = Some(id);
@@ -434,9 +476,9 @@ impl App {
     }
 
     /// The tasks each form's answers made, newest first: those that say so
-    /// (`Task::form`), and for answers from before that was kept, tasks whose
-    /// history says "submitted the form <name>" (when only one form has that
-    /// name). Counted again when the workspace changes.
+    /// (`Task::form`), and for answers from apps that don't keep that, tasks
+    /// whose history says "submitted the form <name>" (`old_answer_form`).
+    /// Counted again when the workspace changes.
     fn form_answer_ids(&mut self) -> HashMap<u64, Vec<u64>> {
         let key = (
             self.data_gen.get(),
@@ -448,24 +490,14 @@ impl App {
         if !self.dirty && (c.0, c.1, c.2) == key {
             return c.3.clone();
         }
-        let mut by_name: HashMap<&str, Option<u64>> = HashMap::new();
-        for f in &self.data.extra.forms {
-            by_name
-                .entry(f.name.as_str())
-                .and_modify(|v| *v = None)
-                .or_insert(Some(f.id));
-        }
+        let forms = &self.data.extra.forms;
         let mut tasks: Vec<&Task> = self.data.tasks.iter().filter(|t| !t.archived).collect();
         tasks.sort_by(|a, b| b.created.cmp(&a.created));
         let mut out: HashMap<u64, Vec<u64>> = HashMap::new();
         for t in tasks {
-            let form = t.form.or_else(|| {
-                t.activity
-                    .iter()
-                    .filter(|a| !a.comment)
-                    .find_map(|a| a.text.strip_prefix("submitted the form "))
-                    .and_then(|n| by_name.get(n).copied().flatten())
-            });
+            let form = t
+                .form
+                .or_else(|| old_answer_name(t).and_then(|n| old_answer_form(forms, n, t.list_id)));
             if let Some(f) = form {
                 out.entry(f).or_default().push(t.id);
             }

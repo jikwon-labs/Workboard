@@ -1009,6 +1009,32 @@ fn a_form_answer_tells_only_that_forms_owner() {
     answer(&mut a, "Old app answer", None);
     assert_eq!(a.notify_rt.sent.len(), 2);
     assert_eq!(a.notify_rt.sent[1].body, "Alex Kim answered: Old app answer");
+    // with the two forms in different Lists, an older app's answer is told
+    // to the owner of the form whose List it went to
+    let other = a
+        .data
+        .spaces
+        .iter()
+        .flat_map(|s| s.lists.iter().chain(s.folders.iter().flat_map(|f| f.lists.iter())))
+        .map(|l| l.id)
+        .find(|l| *l != list)
+        .unwrap();
+    a.data.extra.forms.iter_mut().find(|f| f.id == theirs).unwrap().list_id = other;
+    a.pending.log = None;
+    a.apply(Action::Add {
+        list: other,
+        name: "To their List".into(),
+        status: None,
+        priority: 0,
+        assignees: vec![],
+        due: None,
+        parent: None,
+        open: false,
+    });
+    let tid = a.data.tasks.iter().find(|t| t.name == "To their List").unwrap().id;
+    teammate_line(&mut a, tid, 2, "submitted the form Bug report", false);
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 2, "not told about theirs");
 }
 
 /// An answer to a form whose name was cleared says "Untitled form", as the

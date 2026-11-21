@@ -131,10 +131,8 @@ impl App {
                                 self.form_questions(ui, &t, fi);
                                 if !beside {
                                     ui.add_space(24.0);
-                                    egui::Frame::new()
+                                    card_frame(&t)
                                         .fill(t.card)
-                                        .stroke(Stroke::new(1.0_f32, t.border))
-                                        .corner_radius(12)
                                         .inner_margin(egui::Margin::same(20))
                                         .show(ui, |ui| {
                                             ui.set_width(ui.available_width());
@@ -153,10 +151,8 @@ impl App {
         let fid = self.data.extra.forms[fi].id;
         let mut ch = false;
         // the form's tile, name and description
-        egui::Frame::new()
+        card_frame(&t)
             .fill(t.card)
-            .stroke(Stroke::new(1.0_f32, t.border))
-            .corner_radius(12)
             .inner_margin(egui::Margin::symmetric(20, 18))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());

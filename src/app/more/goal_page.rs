@@ -579,9 +579,7 @@ impl App {
                     ui.label(RichText::new(tr("Add a target to measure this goal: a number, done or not, or a set of tasks.")).color(t.text2));
                 }
                 for (i, v) in views.iter().enumerate() {
-                    egui::Frame::new()
-                        .stroke(Stroke::new(1.0, t.border))
-                        .corner_radius(12)
+                    card_frame(&t)
                         .inner_margin(egui::Margin::symmetric(16, 14))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());

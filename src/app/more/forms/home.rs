@@ -268,9 +268,7 @@ impl App {
                                     ),
                                 }
                             };
-                            egui::Frame::new()
-                                .stroke(Stroke::new(1.0_f32, t.border))
-                                .corner_radius(12)
+                            card_frame(&t)
                                 .inner_margin(egui::Margin::symmetric(16, 28))
                                 .show(ui, |ui| {
                                     ui.set_width(ui.available_width());

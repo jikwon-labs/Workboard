@@ -143,9 +143,7 @@ impl App {
                 let (r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
                 paint_avatar(ui.painter(), r.center(), 15.0, &m, t.bg);
             }
-            egui::Frame::new()
-                .stroke(Stroke::new(1.0_f32, t.border))
-                .corner_radius(12)
+            card_frame(&t)
                 .inner_margin(egui::Margin::symmetric(16, 10))
                 .show(ui, |ui| {
                     ui.set_width(cw - 34.0);

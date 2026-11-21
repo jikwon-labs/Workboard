@@ -100,9 +100,7 @@ impl App {
 
     /// The Answers tab before anyone has answered.
     fn form_no_answers(&mut self, ui: &mut Ui, t: &Theme) {
-        egui::Frame::new()
-            .stroke(Stroke::new(1.0_f32, t.border))
-            .corner_radius(12)
+        card_frame(&t)
             .inner_margin(egui::Margin::symmetric(16, 32))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());

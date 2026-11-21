@@ -540,10 +540,8 @@ impl App {
             .order(egui::Order::Middle)
             .anchor(Align2::CENTER_BOTTOM, [0.0, -210.0])
             .show(ctx, |ui| {
-                egui::Frame::new()
+                card_frame(&t)
                     .fill(t.card)
-                    .stroke(Stroke::new(1.0_f32, t.border))
-                    .corner_radius(12)
                     .inner_margin(egui::Margin::same(8))
                     .show(ui, |ui| {
                         ui.vertical_centered(|ui| {
@@ -663,10 +661,8 @@ impl App {
             .order(egui::Order::Foreground)
             .anchor(Align2::CENTER_BOTTOM, [0.0, -200.0])
             .show(ctx, |ui| {
-                egui::Frame::new()
+                card_frame(&t)
                     .fill(t.card)
-                    .stroke(Stroke::new(1.0_f32, t.border))
-                    .corner_radius(12)
                     .inner_margin(egui::Margin::same(14))
                     .shadow(egui::epaint::Shadow {
                         offset: [0, 4],
@@ -843,10 +839,8 @@ impl App {
             .order(egui::Order::Middle)
             .anchor(Align2::CENTER_BOTTOM, [0.0, -132.0])
             .show(ctx, |ui| {
-                egui::Frame::new()
+                card_frame(&t)
                     .fill(t.card)
-                    .stroke(Stroke::new(1.0_f32, t.border))
-                    .corner_radius(12)
                     .inner_margin(egui::Margin::symmetric(14, 10))
                     .shadow(egui::epaint::Shadow {
                         offset: [0, 4],

@@ -500,11 +500,6 @@ pub struct App {
     inbox_cache: std::cell::RefCell<nav::InboxCache>,
     /// Tasks by id and by parent (`task_index`).
     task_index: std::cell::RefCell<TaskIndex>,
-    screenshot: Option<PathBuf>,
-    frames: u32,
-    shot_sent: bool,
-    /// Ctrl+Option+Cmd+S: save a picture of the window next to the data file.
-    snap_pending: bool,
     actions: Vec<Action>,
     home_collapsed: HashSet<&'static str>,
     /// Home "My Work" sections showing every task instead of the first few.
@@ -643,6 +638,8 @@ pub struct App {
     quit: QuitState,
     /// Pasting into a message box: what came in and the keys around it.
     paste: PasteState,
+    /// Pictures of the window: a screenshot run and Ctrl+Option+Cmd+S.
+    shots: Screenshots,
 }
 
 /// Quitting (`ask_before_quit`).
@@ -670,6 +667,20 @@ struct PasteState {
     cmd: bool,
     /// V went down as typing (egui swallows the V of a Cmd+V).
     v_typed: bool,
+}
+
+/// Pictures of the window.
+#[derive(Default)]
+struct Screenshots {
+    /// A screenshot run (`--screenshot`): where the picture goes; the app
+    /// closes once it is taken.
+    path: Option<PathBuf>,
+    /// Frames drawn in the screenshot run so far.
+    frames: u32,
+    /// The screenshot was asked for.
+    sent: bool,
+    /// Ctrl+Option+Cmd+S: save a picture of the window next to the data file.
+    snap_pending: bool,
 }
 
 /// The open channel and thread: what is being written, edited or deleted.
@@ -1063,10 +1074,6 @@ impl App {
             data_gen: std::cell::Cell::new(0),
             inbox_cache: Default::default(),
             task_index: Default::default(),
-            screenshot,
-            frames: 0,
-            shot_sent: false,
-            snap_pending: false,
             actions: vec![],
             home_collapsed: ["Done"].into_iter().collect(),
             home_all: HashSet::new(),
@@ -1150,6 +1157,10 @@ impl App {
             new_channel: None,
             selected: HashSet::new(),
             menu_was_open: false,
+            shots: Screenshots {
+                path: screenshot,
+                ..Default::default()
+            },
             paste: Default::default(),
             quit: Default::default(),
             typing_was_on: false,
@@ -5525,12 +5536,12 @@ impl App {
                 pressed = true;
             }
         }
-        if pressed && !self.snap_pending {
-            self.snap_pending = true;
+        if pressed && !self.shots.snap_pending {
+            self.shots.snap_pending = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             return;
         }
-        if !self.snap_pending {
+        if !self.shots.snap_pending {
             return;
         }
         ctx.request_repaint();
@@ -5544,7 +5555,7 @@ impl App {
             })
         });
         if let Some(img) = img {
-            self.snap_pending = false;
+            self.shots.snap_pending = false;
             let [w, h] = img.size;
             let mut buf = Vec::with_capacity(w * h * 4);
             for p in &img.pixels {
@@ -5559,17 +5570,17 @@ impl App {
     }
 
     fn handle_screenshot(&mut self, ctx: &egui::Context) {
-        if self.screenshot.is_none() {
+        if self.shots.path.is_none() {
             self.handle_snapshot(ctx);
         }
-        let Some(path) = self.screenshot.clone() else {
+        let Some(path) = self.shots.path.clone() else {
             return;
         };
-        self.frames += 1;
+        self.shots.frames += 1;
         ctx.request_repaint();
-        if self.frames >= 120 && !self.shot_sent {
+        if self.shots.frames >= 120 && !self.shots.sent {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
-            self.shot_sent = true;
+            self.shots.sent = true;
         }
         let images: Vec<std::sync::Arc<egui::ColorImage>> = ctx.input(|i| {
             i.raw
@@ -5598,7 +5609,7 @@ impl App {
             }
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if self.frames > 600 {
+        if self.shots.frames > 600 {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -5666,7 +5677,7 @@ impl App {
         if !closing && !menu {
             return;
         }
-        if signing_in || self.quit.ok || self.screenshot.is_some() || crate::updater::own::closing()
+        if signing_in || self.quit.ok || self.shots.path.is_some() || crate::updater::own::closing()
         {
             if menu {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);

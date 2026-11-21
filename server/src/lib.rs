@@ -122,6 +122,7 @@ mod auth;
 mod canon;
 mod curl;
 pub mod hooks;
+mod jobs;
 mod livekit;
 mod mine;
 mod notify;

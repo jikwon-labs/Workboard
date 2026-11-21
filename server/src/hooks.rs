@@ -290,7 +290,7 @@ impl Hub {
     }
 
     /// After a merge: send the new messages of channels with outgoing
-    /// webhooks to them (on threads of their own).
+    /// webhooks to them (on the job threads, in order for each webhook).
     pub(crate) fn hooks_out(self: &Arc<Self>, new: Vec<(u64, Value)>) {
         let (hooks, canon) = {
             let g = self.state();
@@ -325,7 +325,8 @@ impl Hub {
                 let hub = self.clone();
                 let h = h.clone();
                 let poster = self.poster.clone();
-                std::thread::spawn(move || match poster.post(&h.url, &body) {
+                let key = format!("hook:{}", h.token);
+                jobs::run(&key, move || match poster.post(&h.url, &body) {
                     Ok(answer) => {
                         if let Some((t, who)) = answer_text(&answer) {
                             hub.post_as_bot(
@@ -381,7 +382,8 @@ impl Hub {
         });
         let hub = self.clone();
         let poster = self.poster.clone();
-        std::thread::spawn(move || match poster.post(&cmd.info.url, &body) {
+        let key = format!("command:{}", cmd.info.name);
+        jobs::run(&key, move || match poster.post(&cmd.info.url, &body) {
             Ok(answer) => {
                 if let Some((t, who)) = answer_text(&answer) {
                     let name = who.unwrap_or(format!("/{}", cmd.info.name));

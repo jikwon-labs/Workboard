@@ -92,7 +92,7 @@ impl Hub {
                     let new = push::new_messages(canon, before, Some(&chans));
                     let hub = self.clone();
                     // (not under the lock: posting an answer merges again)
-                    std::thread::spawn(move || hub.hooks_out(new));
+                    jobs::run("hooks-out", move || hub.hooks_out(new));
                 }
             }
             self.broadcast_canon(&mut g, false);
@@ -106,7 +106,7 @@ impl Hub {
     }
 
     /// Send `notes` to the devices of their members that have a push token
-    /// and aren't connected, MAX_PER_DEVICE each at most, on another thread.
+    /// and aren't connected, MAX_PER_DEVICE each at most, on the job threads.
     pub(crate) fn notify(self: &Arc<Self>, saved: &Saved, notes: Vec<push::Note>) {
         let Some(sender) = self.pusher.clone() else {
             return;
@@ -115,7 +115,8 @@ impl Hub {
             return;
         }
         let online = self.online.locked().clone();
-        let mut jobs: Vec<(String, push::PushToken, Value)> = vec![];
+        // each device's notifications, sent in order
+        let mut per_device: BTreeMap<String, Vec<(push::PushToken, Value)>> = BTreeMap::new();
         for (device, tok) in &saved.push {
             let Some(d) = saved.devices.get(device) else {
                 continue;
@@ -134,35 +135,37 @@ impl Hub {
                 if let Some(ws) = &tok.workspace {
                     p["ws"] = json!(ws);
                 }
-                jobs.push((device.clone(), tok.clone(), p));
+                per_device
+                    .entry(device.clone())
+                    .or_default()
+                    .push((tok.clone(), p));
             }
         }
-        if jobs.is_empty() {
-            return;
-        }
-        let hub = self.clone();
-        std::thread::spawn(move || {
-            for (device, tok, payload) in jobs {
-                match sender.send(&tok.env, &tok.token, &payload) {
-                    push::Outcome::Sent => {}
-                    push::Outcome::Gone => {
-                        // the app was removed (or the token was never good): forget it
-                        let mut g = hub.state();
-                        if g.saved
-                            .push
-                            .get(&device)
-                            .is_some_and(|t| t.token == tok.token)
-                        {
-                            g.saved.push.remove(&device);
-                            g.dirty = true;
+        for (device, list) in per_device {
+            let (hub, sender) = (self.clone(), sender.clone());
+            jobs::run(&format!("push:{}", device), move || {
+                for (tok, payload) in list {
+                    match sender.send(&tok.env, &tok.token, &payload) {
+                        push::Outcome::Sent => {}
+                        push::Outcome::Gone => {
+                            // the app was removed (or the token was never good): forget it
+                            let mut g = hub.state();
+                            if g.saved
+                                .push
+                                .get(&device)
+                                .is_some_and(|t| t.token == tok.token)
+                            {
+                                g.saved.push.remove(&device);
+                                g.dirty = true;
+                            }
+                        }
+                        push::Outcome::Failed(why) => {
+                            eprintln!("couldn't send a notification to device {}: {}", device, why)
                         }
                     }
-                    push::Outcome::Failed(why) => {
-                        eprintln!("couldn't send a notification to device {}: {}", device, why)
-                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     /// An iPhone's push token (`push_token`), and its name for this workspace.

@@ -487,7 +487,7 @@ impl Hub {
             }
         };
         if let Some((to, code)) = target {
-            std::thread::spawn(move || {
+            jobs::run("mail", move || {
                 if let Err(e) = mail::send(
                     &mail_home,
                     &cfg,

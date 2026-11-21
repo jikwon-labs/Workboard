@@ -157,6 +157,62 @@ pub fn today() -> NaiveDate {
     Local::now().date_naive()
 }
 
+/// The Sunday that starts the week of `d`, whatever the Labs option says:
+/// the Calendar grid, the date picker and Timesheets (whose saved rows are
+/// keyed by this day) always begin on Sunday. See `Data::week_start`.
+pub fn sunday_week_start(d: NaiveDate) -> NaiveDate {
+    d - Duration::days(d.weekday().num_days_from_sunday() as i64)
+}
+
+/// A Labs option. They are saved as their `key` strings in `Extra::labs`,
+/// which can also hold options from newer apps.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lab {
+    /// Compact list rows.
+    Compact,
+    /// Weeks start on Monday ("this week" in the Planner, filters and
+    /// dashboard cards).
+    WeekMonday,
+    /// Confetti when a task is completed.
+    Confetti,
+}
+
+impl Lab {
+    pub fn key(self) -> &'static str {
+        match self {
+            Lab::Compact => "compact",
+            Lab::WeekMonday => "week_monday",
+            Lab::Confetti => "confetti",
+        }
+    }
+}
+
+impl Data {
+    /// Whether a Labs option is on.
+    pub fn lab(&self, lab: Lab) -> bool {
+        self.extra.labs.iter().any(|l| l == lab.key())
+    }
+
+    /// Turns a Labs option on or off, keeping any options this app doesn't know.
+    pub fn set_lab(&mut self, lab: Lab, on: bool) {
+        self.extra.labs.retain(|l| l != lab.key());
+        if on {
+            self.extra.labs.push(lab.key().to_string());
+        }
+    }
+
+    /// The first day of the week of `d` as the workspace counts weeks:
+    /// Sunday, or Monday with the Labs option. "This week" is
+    /// `week_start(today())`.
+    pub fn week_start(&self, d: NaiveDate) -> NaiveDate {
+        if self.lab(Lab::WeekMonday) {
+            d - Duration::days(d.weekday().num_days_from_monday() as i64)
+        } else {
+            sunday_week_start(d)
+        }
+    }
+}
+
 impl Data {
     pub fn new_id(&mut self) -> u64 {
         if let Some(tag) = self.extra.shared.as_ref().map(|s| s.tag as u64 % 1024) {

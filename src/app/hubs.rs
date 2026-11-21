@@ -1792,7 +1792,7 @@ impl App {
                     let mut d = Some(ws);
                     if let Some(true) = popup(ui, &r, ui.id().with("sheet_week_pick"), DATE_MENU_W, |ui| date_menu(ui, &t, ui.id().with("sheet_week_cal"), &mut d)) {
                         let d = d.unwrap_or_else(today);
-                        self.sheet_week = d - Duration::days(d.weekday().num_days_from_sunday() as i64);
+                        self.sheet_week = sunday_week_start(d);
                     }
                     if self.hub_filter == 0 {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

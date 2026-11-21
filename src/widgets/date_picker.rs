@@ -150,7 +150,7 @@ fn date_menu_inner(
             t.text3,
         );
     }
-    let start = month - Duration::days(month.weekday().num_days_from_sunday() as i64);
+    let start = crate::model::sunday_week_start(month);
     for i in 0..42usize {
         let d = start + Duration::days(i as i64);
         let c = pos2(col(i % 7), row(2 + i / 7));

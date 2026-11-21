@@ -23,10 +23,6 @@ pub enum Section {
     Settings,
 }
 
-fn week_start(d: NaiveDate) -> NaiveDate {
-    d - Duration::days(d.weekday().num_days_from_sunday() as i64)
-}
-
 fn bar_row(
     ui: &mut Ui,
     t: &Theme,
@@ -171,7 +167,7 @@ impl App {
         let t = self.t();
         let me = self.data.me;
         // Labs: start the week on Monday
-        let monday = self.data.extra.labs.iter().any(|l| l == "week_monday");
+        let monday = self.data.lab(Lab::WeekMonday);
         let wd = self.planner_week.weekday().num_days_from_sunday();
         if monday && wd == 0 {
             self.planner_week += Duration::days(1);
@@ -187,7 +183,7 @@ impl App {
                     ui.add_space(16.0);
                     if ui.button(tr("Today")).clicked() {
                         self.planner_week =
-                            week_start(today()) + Duration::days(if monday { 1 } else { 0 });
+                            sunday_week_start(today()) + Duration::days(if monday { 1 } else { 0 });
                     }
                     let (back, fwd) = super::icons::period_arrows(ui, &t);
                     if back {
@@ -1033,7 +1029,7 @@ impl App {
                 }
             }
             "time_people" => {
-                let ws = week_start(td);
+                let ws = sunday_week_start(td);
                 let solo = self.data.solo();
                 let me = self.data.me;
                 let mut per: HashMap<u64, i64> = HashMap::new();
@@ -1074,7 +1070,7 @@ impl App {
                 }
             }
             "time" => {
-                let ws = week_start(td);
+                let ws = sunday_week_start(td);
                 let mut per_day = [0i64; 7];
                 for task in scope {
                     for e in &task.time_entries {

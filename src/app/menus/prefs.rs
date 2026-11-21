@@ -200,18 +200,14 @@ impl App {
     pub(super) fn labs_body(&mut self, ui: &mut Ui, _t: &Theme) -> bool {
         ui.label(tr("Try features early. Turn them on or off at any time."));
         ui.add_space(6.0);
-        for (id, label) in [
-            ("compact", "Compact list rows"),
-            ("week_monday", "Start the week on Monday in the Planner"),
-            ("confetti", "Celebrate when a task is completed"),
+        for (lab, label) in [
+            (Lab::Compact, "Compact list rows"),
+            (Lab::WeekMonday, "Start the week on Monday in the Planner"),
+            (Lab::Confetti, "Celebrate when a task is completed"),
         ] {
-            let mut on = self.data.extra.labs.iter().any(|l| l == id);
+            let mut on = self.data.lab(lab);
             if check(ui, &mut on, tr(label)).changed() {
-                if on {
-                    self.data.extra.labs.push(id.to_string());
-                } else {
-                    self.data.extra.labs.retain(|l| l != id);
-                }
+                self.data.set_lab(lab, on);
                 self.dirty = true;
             }
         }

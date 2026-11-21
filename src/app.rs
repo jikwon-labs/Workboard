@@ -1047,7 +1047,7 @@ impl App {
             recent: vec![],
             doc_open: None,
             planner_week: t - Duration::days(t.weekday().num_days_from_sunday() as i64),
-            sheet_week: t - Duration::days(t.weekday().num_days_from_sunday() as i64),
+            sheet_week: sunday_week_start(t),
             assignee_filter: None,
             show_search: false,
             search_focus: false,
@@ -1802,9 +1802,7 @@ impl App {
                     if new.name.trim().is_empty() {
                         new.name = old.name.clone();
                     }
-                    if old.status != new.status
-                        && self.data.extra.labs.iter().any(|l| l == "confetti")
-                    {
+                    if old.status != new.status && self.data.lab(Lab::Confetti) {
                         let closes = self.data.statuses_for_list(new.list_id).iter().any(|s| {
                             s.name == new.status
                                 && matches!(s.kind, StatusKind::Closed | StatusKind::Done)
@@ -2927,9 +2925,7 @@ impl App {
                 }
             }
             let title = if self.cal_week {
-                let ws = week_anchor
-                    - Duration::days(week_anchor.weekday().num_days_from_sunday() as i64);
-                week_range(ws)
+                week_range(sunday_week_start(week_anchor))
             } else {
                 self.cal_month.text("%B %Y")
             };
@@ -2978,11 +2974,12 @@ impl App {
                 t.text3,
             );
         }
-        let start = if self.cal_week {
-            week_anchor - Duration::days(week_anchor.weekday().num_days_from_sunday() as i64)
+        // the grid begins on Sunday (its weekday labels are fixed)
+        let start = sunday_week_start(if self.cal_week {
+            week_anchor
         } else {
-            self.cal_month - Duration::days(self.cal_month.weekday().num_days_from_sunday() as i64)
-        };
+            self.cal_month
+        });
         // a task dragged from the Unscheduled panel or another day
         let dragging = egui::DragAndDrop::has_payload_of_type::<u64>(ui.ctx());
         let released = ui.input(|i| i.pointer.any_released());

@@ -265,6 +265,27 @@ fn new_filter_fields() {
 }
 
 #[test]
+fn week_start_follows_the_labs_option_and_keeps_unknown_labs() {
+    let mut d = Data::seed();
+    d.extra.labs = vec!["from_a_newer_app".into()];
+    let day = |m, n| NaiveDate::from_ymd_opt(2026, m, n).unwrap();
+    // Sunday 22 Nov 2026, Wednesday 25 Nov 2026
+    assert_eq!(d.week_start(day(11, 22)), day(11, 22));
+    assert_eq!(d.week_start(day(11, 25)), day(11, 22));
+    d.set_lab(Lab::WeekMonday, true);
+    assert!(d.lab(Lab::WeekMonday));
+    assert_eq!(
+        d.week_start(day(11, 22)),
+        day(11, 16),
+        "a Sunday ends the week"
+    );
+    assert_eq!(d.week_start(day(11, 25)), day(11, 23));
+    assert_eq!(sunday_week_start(day(11, 25)), day(11, 22), "fixed Sunday");
+    d.set_lab(Lab::WeekMonday, false);
+    assert_eq!(d.extra.labs, vec!["from_a_newer_app".to_string()]);
+}
+
+#[test]
 fn start_and_due_filters_agree_on_this_week() {
     use parity::{FilterField, FilterRow};
     let mut a = app();

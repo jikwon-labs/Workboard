@@ -8,7 +8,7 @@ use super::*;
 
 impl App {
     fn list_row_h(&self) -> f32 {
-        if self.data.extra.labs.iter().any(|l| l == "compact") {
+        if self.data.lab(Lab::Compact) {
             30.0
         } else {
             36.0

@@ -1092,6 +1092,300 @@ impl App {
         None
     }
 
+    /// The panel at the right of a channel's messages: Followers, Find,
+    /// the kinds of messages to show, Settings.
+    fn channel_side_panel(&mut self, ui: &mut Ui, cid: u64, channel: &Channel) {
+        let t = self.t();
+        // right panel: narrower in a small window so the messages keep room;
+        // where even that leaves them too little (a thread open beside a
+        // small window) only its icons, named on hover: it was drawn
+        // over the messages
+        let icons_only = ui.available_width() < 560.0;
+        let panel_w = if icons_only {
+            46.0
+        } else {
+            (ui.available_width() * 0.3).clamp(170.0, 230.0)
+        };
+        egui::SidePanel::right(egui::Id::new(("chan_panel", cid)))
+            .exact_width(panel_w)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(egui::Frame::new().inner_margin(egui::Margin {
+                left: 8,
+                right: 12,
+                top: 12,
+                bottom: 8,
+            }))
+            .show_inside(ui, |ui| {
+                // it scrolls when the window is short (an iPad's keyboard up),
+                // instead of making the messages beside it as tall as it is
+                egui::ScrollArea::vertical()
+                    .id_salt(("chan_panel_scroll", cid))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        egui::Frame::new()
+                            .stroke(Stroke::new(1.0_f32, t.border))
+                            .corner_radius(10)
+                            .inner_margin(egui::Margin::same(6))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                let rows: [(Icon, &str, PanelRow); 9] = [
+                                    (Icon::Person, "Followers", PanelRow::Followers),
+                                    (Icon::Search, "Find in channel", PanelRow::Find),
+                                    (
+                                        Icon::Reply,
+                                        "Replies",
+                                        PanelRow::Show(ChannelPanel::Replies),
+                                    ),
+                                    (
+                                        Icon::Pin,
+                                        "Pinned messages",
+                                        PanelRow::Show(ChannelPanel::Pinned),
+                                    ),
+                                    (Icon::Bookmark, "Saved", PanelRow::Show(ChannelPanel::Saved)),
+                                    (Icon::Attach, "Files", PanelRow::Show(ChannelPanel::Files)),
+                                    (Icon::Link, "Links", PanelRow::Show(ChannelPanel::Links)),
+                                    (
+                                        Icon::Task,
+                                        "Turned into tasks",
+                                        PanelRow::Show(ChannelPanel::Tasks),
+                                    ),
+                                    (Icon::Settings, "Settings", PanelRow::Settings),
+                                ];
+                                for (icon, label, code) in rows {
+                                    let w = ui.available_width();
+                                    let (r, resp) =
+                                        ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+                                    let sel = code == PanelRow::Show(self.channel_panel);
+                                    if sel {
+                                        ui.painter().rect_filled(r, 6.0, t.row_selected);
+                                    } else if resp.hovered() {
+                                        ui.painter().rect_filled(r, 6.0, t.hover);
+                                    }
+                                    let at = if icons_only {
+                                        r.center() - vec2(12.0, 0.0)
+                                    } else {
+                                        r.left_center()
+                                    };
+                                    if code == PanelRow::Followers {
+                                        paint_avatars(
+                                            ui.painter(),
+                                            at + vec2(4.0, 0.0),
+                                            8.0,
+                                            &channel
+                                                .members
+                                                .iter()
+                                                .take(1)
+                                                .copied()
+                                                .collect::<Vec<_>>(),
+                                            &self.data,
+                                            t.bg,
+                                        );
+                                    } else {
+                                        line_icon(
+                                            ui.painter(),
+                                            icon,
+                                            at + vec2(12.0, 0.0),
+                                            t.text2,
+                                        );
+                                    }
+                                    let resp = if icons_only {
+                                        name_it(&resp, label);
+                                        resp.on_hover_text(tr(label))
+                                    } else {
+                                        let count_w = if code == PanelRow::Followers {
+                                            24.0
+                                        } else {
+                                            0.0
+                                        };
+                                        paint_fit(
+                                            ui,
+                                            r.left_center() + vec2(28.0, 0.0),
+                                            Align2::LEFT_CENTER,
+                                            tr(label),
+                                            FontId::proportional(14.0),
+                                            t.text,
+                                            w - 32.0 - count_w,
+                                        );
+                                        if code == PanelRow::Followers {
+                                            ui.painter().text(
+                                                r.right_center() - vec2(8.0, 0.0),
+                                                Align2::RIGHT_CENTER,
+                                                channel.members.len().to_string(),
+                                                FontId::proportional(12.0),
+                                                t.text3,
+                                            );
+                                        }
+                                        resp
+                                    };
+                                    if resp.clicked() {
+                                        match code {
+                                            PanelRow::Followers | PanelRow::Settings => {
+                                                self.modal = Some(Modal::ChannelSettings(cid))
+                                            }
+                                            PanelRow::Find => {
+                                                self.channel_find = if self.channel_find.is_some() {
+                                                    None
+                                                } else {
+                                                    Some(String::new())
+                                                }
+                                            }
+                                            PanelRow::Show(c) => {
+                                                self.channel_panel = if self.channel_panel == c {
+                                                    ChannelPanel::All
+                                                } else {
+                                                    c
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                    });
+            });
+    }
+
+    /// The row over a channel's messages: bookmarks, the find box and the
+    /// kind of messages shown.
+    fn channel_chips(&mut self, ui: &mut Ui, find_id: egui::Id) {
+        let t = self.t();
+        // the chips start under the Channel tab and clear the line above,
+        // level with the box on the right
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            if ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(tr("Add bookmarks, notes, and more"))
+                            .size(13.5)
+                            .color(t.text2),
+                    )
+                    .corner_radius(14),
+                )
+                .clicked()
+            {
+                self.modal = Some(Modal::Bookmark {
+                    title: String::new(),
+                    url: String::new(),
+                });
+            }
+            if let Some(mut q) = self.channel_find.take() {
+                let r = ui
+                    .add(
+                        field(&mut q)
+                            .id(find_id)
+                            .hint_text(tr("Find in channel"))
+                            .desired_width(200.0),
+                    )
+                    .on_hover_text(tr("Narrow messages with has:file, has:link or from:name"));
+                // Escape in it closes it, and every message shows again
+                if !(r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+                    self.channel_find = Some(q);
+                }
+            }
+            if self.channel_panel != ChannelPanel::All {
+                let label = match self.channel_panel {
+                    ChannelPanel::Pinned => tr("Pinned messages"),
+                    ChannelPanel::Replies => tr("Messages with replies"),
+                    ChannelPanel::Saved => tr("Saved messages"),
+                    ChannelPanel::Files => tr("Messages with files"),
+                    ChannelPanel::Links => tr("Messages with links"),
+                    ChannelPanel::Tasks | ChannelPanel::All => tr("Messages turned into tasks"),
+                };
+                if ui
+                    .add(egui::Button::new(format!("{}  \u{00D7}", label)).corner_radius(14))
+                    .clicked()
+                {
+                    self.channel_panel = ChannelPanel::All;
+                }
+            }
+        });
+    }
+
+    /// Chat with no conversation yet: what channels and direct messages
+    /// are for, and the buttons to start one.
+    fn chat_empty_state(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        // empty state: no channel or DM yet
+        let mut make = false;
+        ui.vertical_centered(|ui| {
+            ui.add_space((ui.available_height() * 0.28).max(40.0));
+            let (r, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
+            ui.painter().rect_filled(r, 14.0, t.accent_bg);
+            super::shell::line_icon(ui.painter(), Icon::Chat, r.center(), t.accent_text);
+            ui.add_space(14.0);
+            ui.label(RichText::new(tr("Chat with your team")).size(22.0).color(t.text));
+            ui.add_space(4.0);
+            ui.label(RichText::new(tr("Channels keep conversations about a topic in one place. Direct messages are for one-on-one talks and calls.")).color(t.text2));
+            ui.add_space(18.0);
+            ui.horizontal(|ui| {
+                let w = 170.0 * 2.0 + 150.0 + 16.0;
+                ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
+                let b = ui.add(Tint(primary_btn(&t, tr("#  Create a Channel")).min_size(vec2(170.0, CONTROL_H))));
+                name_it(&b, "Create a Channel");
+                if b.clicked() {
+                    make = true;
+                }
+                if icon_button_ex(ui, &t, Icon::Send, tr("Message someone"), "Message someone", true, 170.0, t.text, t.text2).clicked() {
+                    self.new_message_open = true;
+                }
+                if icon_button_ex(ui, &t, Icon::Teams, tr("Work together"), "Work together", true, 150.0, t.text, t.text2).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
+                    self.modal = Some(self.together_modal());
+                }
+            });
+        });
+        if make {
+            self.apply_chat(vec![ChatAction::NewChannel("general".into())]);
+        }
+    }
+
+    /// Moves the red "New" line of the open conversation (`ChatUi::read_line`)
+    /// for this frame: `at` is where its messages are, in time order.
+    /// Returns the time of its newest message.
+    fn update_read_line(&mut self, ctx: &egui::Context, cid: u64, at: &[(usize, usize)]) -> i64 {
+        let first_unread = at.iter().find_map(|&(c, m)| {
+            let ch = &self.data.channels[c];
+            let msg = &ch.messages[m];
+            self.is_unread(ch, msg).then_some(msg.id)
+        });
+        let newest = at
+            .last()
+            .map(|&(c, m)| self.data.channels[c].messages[m].ts)
+            .unwrap_or(0);
+        let pass = ctx.cumulative_pass_nr();
+        let reopened = pass > self.chat.drawn_pass + 1;
+        self.chat.drawn_pass = pass;
+        match self.chat.read_line {
+            Some((c, line)) if c == cid && !reopened => {
+                // messages that come in while I'm scrolled up or away from
+                // the window: the line goes above the first of them
+                if line.is_none() && (!self.chat.at_bottom || self.notify_rt.away) {
+                    self.chat.read_line = Some((cid, first_unread));
+                } else if line.is_some()
+                    && self.chat.at_bottom
+                    && !self.notify_rt.away
+                    && self.chat.keep_unread != Some(cid)
+                    && self
+                        .chat
+                        .bottom_seen
+                        .is_some_and(|(c, ts)| c == cid && newest > ts)
+                {
+                    // a message comes in while I'm reading along at the
+                    // bottom: I've caught up, and a line left above the
+                    // earlier ones would make them look still unread
+                    self.chat.read_line = Some((cid, None));
+                }
+            }
+            _ => {
+                self.chat.read_line = Some((cid, first_unread));
+                self.chat.bottom_seen = Some((cid, newest));
+                self.chat.at_bottom = true;
+            }
+        }
+        newest
+    }
+
     pub(super) fn chat(&mut self, ui: &mut Ui) {
         let t = self.t();
         // nothing open, or (from a search, a saved place, a link) a channel I
@@ -1112,37 +1406,7 @@ impl App {
         }
         let mut acts: Vec<ChatAction> = vec![];
         let Some(cid) = self.chat.open else {
-            // empty state: no channel or DM yet
-            let mut make = false;
-            ui.vertical_centered(|ui| {
-                ui.add_space((ui.available_height() * 0.28).max(40.0));
-                let (r, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
-                ui.painter().rect_filled(r, 14.0, t.accent_bg);
-                super::shell::line_icon(ui.painter(), Icon::Chat, r.center(), t.accent_text);
-                ui.add_space(14.0);
-                ui.label(RichText::new(tr("Chat with your team")).size(22.0).color(t.text));
-                ui.add_space(4.0);
-                ui.label(RichText::new(tr("Channels keep conversations about a topic in one place. Direct messages are for one-on-one talks and calls.")).color(t.text2));
-                ui.add_space(18.0);
-                ui.horizontal(|ui| {
-                    let w = 170.0 * 2.0 + 150.0 + 16.0;
-                    ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
-                    let b = ui.add(Tint(primary_btn(&t, tr("#  Create a Channel")).min_size(vec2(170.0, CONTROL_H))));
-                    name_it(&b, "Create a Channel");
-                    if b.clicked() {
-                        make = true;
-                    }
-                    if icon_button_ex(ui, &t, Icon::Send, tr("Message someone"), "Message someone", true, 170.0, t.text, t.text2).clicked() {
-                        self.new_message_open = true;
-                    }
-                    if icon_button_ex(ui, &t, Icon::Teams, tr("Work together"), "Work together", true, 150.0, t.text, t.text2).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
-                        self.modal = Some(self.together_modal());
-                    }
-                });
-            });
-            if make {
-                self.apply_chat(vec![ChatAction::NewChannel("general".into())]);
-            }
+            self.chat_empty_state(ui);
             return;
         };
         let Some(ci) = self.data.channels.iter().position(|c| c.id == cid) else {
@@ -1180,46 +1444,8 @@ impl App {
             .collect();
         at.sort_by_key(|&(c, m)| self.data.channels[c].messages[m].ts);
         let no_messages = at.is_empty();
-        // ---- where I'd read up to (see ChatUi::read_line)
-        let first_unread = at.iter().find_map(|&(c, m)| {
-            let ch = &self.data.channels[c];
-            let msg = &ch.messages[m];
-            self.is_unread(ch, msg).then_some(msg.id)
-        });
-        let newest = at
-            .last()
-            .map(|&(c, m)| self.data.channels[c].messages[m].ts)
-            .unwrap_or(0);
-        let pass = ui.ctx().cumulative_pass_nr();
-        let reopened = pass > self.chat.drawn_pass + 1;
-        self.chat.drawn_pass = pass;
-        match self.chat.read_line {
-            Some((c, line)) if c == cid && !reopened => {
-                // messages that come in while I'm scrolled up or away from
-                // the window: the line goes above the first of them
-                if line.is_none() && (!self.chat.at_bottom || self.notify_rt.away) {
-                    self.chat.read_line = Some((cid, first_unread));
-                } else if line.is_some()
-                    && self.chat.at_bottom
-                    && !self.notify_rt.away
-                    && self.chat.keep_unread != Some(cid)
-                    && self
-                        .chat
-                        .bottom_seen
-                        .is_some_and(|(c, ts)| c == cid && newest > ts)
-                {
-                    // a message comes in while I'm reading along at the
-                    // bottom: I've caught up, and a line left above the
-                    // earlier ones would make them look still unread
-                    self.chat.read_line = Some((cid, None));
-                }
-            }
-            _ => {
-                self.chat.read_line = Some((cid, first_unread));
-                self.chat.bottom_seen = Some((cid, newest));
-                self.chat.at_bottom = true;
-            }
-        }
+        // where I'd read up to (see ChatUi::read_line)
+        let newest = self.update_read_line(ui.ctx(), cid, &at);
         let line_at = self.chat.read_line.and_then(|(_, l)| l);
         // the channel's own settings, without its messages
         let messages = std::mem::take(&mut self.data.channels[ci].messages);
@@ -1480,85 +1706,8 @@ impl App {
             });
             let r = ui.available_rect_before_wrap();
             ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
-            // right panel: narrower in a small window so the messages keep room;
-            // where even that leaves them too little (a thread open beside a
-            // small window) only its icons, named on hover: it was drawn
-            // over the messages
-            let icons_only = ui.available_width() < 560.0;
-            let panel_w = if icons_only { 46.0 } else { (ui.available_width() * 0.3).clamp(170.0, 230.0) };
-            egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(panel_w).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
-                // it scrolls when the window is short (an iPad's keyboard up),
-                // instead of making the messages beside it as tall as it is
-                egui::ScrollArea::vertical().id_salt(("chan_panel_scroll", cid)).auto_shrink([false, true]).show(ui, |ui| {
-                egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let rows: [(Icon, &str, PanelRow); 9] = [(Icon::Person, "Followers", PanelRow::Followers), (Icon::Search, "Find in channel", PanelRow::Find), (Icon::Reply, "Replies", PanelRow::Show(ChannelPanel::Replies)), (Icon::Pin, "Pinned messages", PanelRow::Show(ChannelPanel::Pinned)), (Icon::Bookmark, "Saved", PanelRow::Show(ChannelPanel::Saved)), (Icon::Attach, "Files", PanelRow::Show(ChannelPanel::Files)), (Icon::Link, "Links", PanelRow::Show(ChannelPanel::Links)), (Icon::Task, "Turned into tasks", PanelRow::Show(ChannelPanel::Tasks)), (Icon::Settings, "Settings", PanelRow::Settings)];
-                    for (icon, label, code) in rows {
-                        let w = ui.available_width();
-                        let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                        let sel = code == PanelRow::Show(self.channel_panel);
-                        if sel {
-                            ui.painter().rect_filled(r, 6.0, t.row_selected);
-                        } else if resp.hovered() {
-                            ui.painter().rect_filled(r, 6.0, t.hover);
-                        }
-                        let at = if icons_only { r.center() - vec2(12.0, 0.0) } else { r.left_center() };
-                        if code == PanelRow::Followers {
-                            paint_avatars(ui.painter(), at + vec2(4.0, 0.0), 8.0, &channel.members.iter().take(1).copied().collect::<Vec<_>>(), &self.data, t.bg);
-                        } else {
-                            line_icon(ui.painter(), icon, at + vec2(12.0, 0.0), t.text2);
-                        }
-                        let resp = if icons_only {
-                            name_it(&resp, label);
-                            resp.on_hover_text(tr(label))
-                        } else {
-                            let count_w = if code == PanelRow::Followers { 24.0 } else { 0.0 };
-                            paint_fit(ui, r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, tr(label), FontId::proportional(14.0), t.text, w - 32.0 - count_w);
-                            if code == PanelRow::Followers {
-                                ui.painter().text(r.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, channel.members.len().to_string(), FontId::proportional(12.0), t.text3);
-                            }
-                            resp
-                        };
-                        if resp.clicked() {
-                            match code {
-                                PanelRow::Followers | PanelRow::Settings => self.modal = Some(Modal::ChannelSettings(cid)),
-                                PanelRow::Find => self.channel_find = if self.channel_find.is_some() { None } else { Some(String::new()) },
-                                PanelRow::Show(c) => self.channel_panel = if self.channel_panel == c { ChannelPanel::All } else { c },
-                            }
-                        }
-                    }
-                });
-                });
-            });
-            // the chips start under the Channel tab and clear the line above,
-            // level with the box on the right
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.add_space(16.0);
-                if ui.add(egui::Button::new(RichText::new(tr("Add bookmarks, notes, and more")).size(13.5).color(t.text2)).corner_radius(14)).clicked() {
-                    self.modal = Some(Modal::Bookmark { title: String::new(), url: String::new() });
-                }
-                if let Some(mut q) = self.channel_find.take() {
-                    let r = ui.add(field(&mut q).id(find_id).hint_text(tr("Find in channel")).desired_width(200.0)).on_hover_text(tr("Narrow messages with has:file, has:link or from:name"));
-                    // Escape in it closes it, and every message shows again
-                    if !(r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
-                        self.channel_find = Some(q);
-                    }
-                }
-                if self.channel_panel != ChannelPanel::All {
-                    let label = match self.channel_panel {
-                        ChannelPanel::Pinned => tr("Pinned messages"),
-                        ChannelPanel::Replies => tr("Messages with replies"),
-                        ChannelPanel::Saved => tr("Saved messages"),
-                        ChannelPanel::Files => tr("Messages with files"),
-                        ChannelPanel::Links => tr("Messages with links"),
-                        ChannelPanel::Tasks | ChannelPanel::All => tr("Messages turned into tasks"),
-                    };
-                    if ui.add(egui::Button::new(format!("{}  \u{00D7}", label)).corner_radius(14)).clicked() {
-                        self.channel_panel = ChannelPanel::All;
-                    }
-                }
-            });
+            self.channel_side_panel(ui, cid, &channel);
+            self.channel_chips(ui, find_id);
             // a gap and a hairline under the chips, so a message scrolled up
             // under them reads as cut off by the list, not covered by a chip
             ui.add_space(4.0);

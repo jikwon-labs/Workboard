@@ -362,7 +362,7 @@ public enum Edits {
         let task: JSON = [
             "id": .id(id), "list_id": .id(list), "parent": parent.map(JSON.id) ?? .null,
             "name": .string(clean.isEmpty ? "Untitled task" : clean),
-            "description": "", "status": .string(status), "priority": 0,
+            "description": "", "status": .string(status), "priority": .int(Int64(defaultPriority)),
             "assignees": .array(assignees.map(JSON.id)),
             "start": nil, "due": due.map(JSON.string) ?? .null, "tags": [], "checklist": [],
             "activity": .array(activity),
@@ -392,6 +392,8 @@ public enum Edits {
 
     /// PRIORITIES labels in src/model.rs (0 = none ... 4 = low).
     public static let priorityLabels = ["No Priority", "Urgent", "High", "Normal", "Low"]
+    /// The priority a new task starts with: Normal, as the Mac's DEFAULT_PRIORITY.
+    public static let defaultPriority = 3
 
     @discardableResult
     public static func setPriority(_ data: inout JSON, task: UInt64, to p: Int, me: UInt64, ts: Int64) -> Bool {

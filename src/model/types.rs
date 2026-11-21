@@ -72,6 +72,10 @@ pub struct PriorityDef {
     pub color: [u8; 3],
 }
 
+/// The priority a new task starts with when whoever makes it doesn't pick
+/// one: Normal (an index into `PRIORITIES`).
+pub const DEFAULT_PRIORITY: u8 = 3;
+
 pub const PRIORITIES: [PriorityDef; 5] = [
     PriorityDef {
         label: "No Priority",

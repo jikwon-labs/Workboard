@@ -135,7 +135,7 @@ extension Edits {
     /// answers are checked and written as the Mac's form_check does.
     public static func submitForm(_ data: inout JSON, form: UInt64, answers: [Int: String], me: UInt64, id: UInt64, ts: Int64) -> Result<UInt64, FormError> {
         guard let f = WorkspaceView(data).forms(data).first(where: { $0.id == form }) else { return .failure(.noList) }
-        var name = "", desc = "", priority = 0, due: String?, assignees: [UInt64] = []
+        var name = "", desc = "", priority = defaultPriority, due: String?, assignees: [UInt64] = []
         for (i, fld) in f.fields.enumerated() {
             let label = fld.label.isBlank ? "Untitled question" : fld.label.trimmed
             var v = (answers[i] ?? "").trimmed

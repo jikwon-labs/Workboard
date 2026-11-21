@@ -442,7 +442,21 @@ fn create_task_window_has_description_status_and_tags() {
     assert_eq!(t.description, "Some details");
     assert_eq!(t.status, "in progress");
     assert_eq!(t.tags, vec!["urgent-fix".to_string()]);
+    assert_eq!(t.priority, 3, "no priority picked: it starts Normal");
     assert!(h.app.quick_add.is_none());
+}
+
+#[test]
+fn create_task_window_starts_normal_and_can_clear_it() {
+    let mut h = Ui1::new();
+    h.click("Create");
+    h.click("Task");
+    h.type_text("No flag");
+    h.click("Priority");
+    h.click("Clear");
+    h.click_side("Create Task", true);
+    let t = h.app.data.tasks.iter().find(|t| t.name == "No flag");
+    assert_eq!(t.expect("created").priority, 0, "cleared stays cleared");
 }
 
 #[test]

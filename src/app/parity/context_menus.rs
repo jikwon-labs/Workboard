@@ -185,7 +185,7 @@ impl App {
                 list: task.list_id,
                 name: String::new(),
                 status: None,
-                priority: 0,
+                priority: DEFAULT_PRIORITY,
                 assignees: vec![],
                 due: None,
                 parent: Some(tid),

@@ -1725,7 +1725,7 @@ impl App {
             list,
             name,
             status: g.status.as_ref().map(|s| s.name.clone()),
-            priority: g.priority.unwrap_or(0),
+            priority: g.priority.unwrap_or(DEFAULT_PRIORITY),
             assignees,
             due,
             parent: None,
@@ -2817,6 +2817,7 @@ impl App {
             let mut qa = QuickAdd {
                 list,
                 due,
+                priority: DEFAULT_PRIORITY,
                 ..Default::default()
             };
             // made from My Tasks / Today & Overdue: mine (and due today there)

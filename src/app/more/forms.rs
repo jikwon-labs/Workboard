@@ -170,7 +170,11 @@ pub(crate) fn old_answer_form(forms: &[Form], name: &str, list: u64) -> Option<u
 /// Checks the answers (required, number, email) and turns them into task
 /// fields; a problem comes with the question it is about.
 fn form_check(f: &Form, fill: &HashMap<usize, String>) -> Result<FormAnswers, (usize, String)> {
-    let mut a = FormAnswers::default();
+    // a form that doesn't ask for a priority makes a Normal task, like any other new task
+    let mut a = FormAnswers {
+        priority: DEFAULT_PRIORITY,
+        ..Default::default()
+    };
     for (i, fld) in f.fields.iter().enumerate() {
         let label = question_title(fld);
         let mut v = fill

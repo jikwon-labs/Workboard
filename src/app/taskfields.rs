@@ -646,7 +646,7 @@ impl App {
                 list: task.list_id,
                 name: item.text,
                 status: None,
-                priority: 0,
+                priority: DEFAULT_PRIORITY,
                 assignees: item.assignee.into_iter().collect(),
                 due: None,
                 parent: Some(tid),

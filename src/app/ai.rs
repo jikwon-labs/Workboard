@@ -949,7 +949,7 @@ impl App {
                 list,
                 name,
                 status: None,
-                priority: 0,
+                priority: DEFAULT_PRIORITY,
                 assignees: vec![],
                 due: None,
                 parent: Some(task),

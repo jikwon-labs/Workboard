@@ -3709,7 +3709,7 @@ impl App {
                         list,
                         name,
                         status: None,
-                        priority: 0,
+                        priority: DEFAULT_PRIORITY,
                         assignees: vec![me],
                         due: None,
                         parent: None,

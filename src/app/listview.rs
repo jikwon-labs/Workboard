@@ -667,7 +667,7 @@ impl App {
                 list: parent.list_id,
                 name,
                 status: None,
-                priority: 0,
+                priority: DEFAULT_PRIORITY,
                 assignees: vec![],
                 due: None,
                 parent: Some(parent.id),

@@ -16,6 +16,7 @@ final class EditTests: XCTestCase {
         XCTAssertEqual(t["name"], "New one")
         XCTAssertEqual(t["status"], "to do")
         XCTAssertEqual(t["order"], 207)
+        XCTAssertEqual(t["priority"], 3, "a new task starts Normal")
     }
 
     func testNewTaskLogsEveryoneElsePutOnIt() {

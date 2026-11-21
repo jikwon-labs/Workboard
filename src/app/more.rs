@@ -504,7 +504,7 @@ impl App {
                     // assigned to the attendees ticked above (none ticked: nobody)
                     let who: Vec<u64> = self.data.extra.meetings[idx].attendees.iter().copied().filter(|a| self.data.member(*a).is_some()).collect();
                     for n in make_tasks {
-                        self.actions.push(Action::Add { list, name: n, status: None, priority: 0, assignees: who.clone(), due: None, parent: None, open: false });
+                        self.actions.push(Action::Add { list, name: n, status: None, priority: DEFAULT_PRIORITY, assignees: who.clone(), due: None, parent: None, open: false });
                     }
                     self.toast(trf!("Tasks created from the meeting notes in {}", self.data.list_name(list)));
                 } else {
@@ -941,7 +941,7 @@ impl App {
                     list,
                     name,
                     status: None,
-                    priority: 0,
+                    priority: DEFAULT_PRIORITY,
                     assignees: vec![me],
                     due: Some(d),
                     parent: None,

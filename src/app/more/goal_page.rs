@@ -74,84 +74,68 @@ impl App {
         let mut act: Option<GoalAct> = None;
         let mut page_act: Option<PageAct> = None;
         let page = ui.max_rect();
-        egui::ScrollArea::vertical()
-            .id_salt(("goal_page", gid))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui::Frame::new()
-                    .inner_margin(egui::Margin {
-                        left: 32,
-                        right: 32,
-                        top: 18,
-                        bottom: 40,
-                    })
-                    .show(ui, |ui| {
-                        let w = ui.available_width().min(1160.0);
-                        ui.set_max_width(w);
-                        // ---- back to the Goals page
-                        ui.horizontal(|ui| {
-                            let b = icons::icon_button(
-                                ui,
-                                &t,
-                                "chevron_left",
-                                tr("Goals"),
-                                "Back to goals",
-                                false,
-                            );
-                            if b.clicked() {
-                                act = Some(GoalAct::Back);
-                            }
-                            ui.label(RichText::new("/").color(t.text3));
-                            // the name gives way to the settings button
-                            let name_w = (ui.available_width() - 40.0).max(0.0);
-                            ui.scope(|ui| {
-                                ui.set_max_width(name_w);
-                                ui.add(
-                                    egui::Label::new(RichText::new(&g.name).color(t.text))
-                                        .truncate(),
-                                );
-                            });
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let b =
-                                    icons::icon_button(ui, &t, "dots", "", "Goal settings", false);
-                                if b.clicked() {
-                                    page_act = Some(PageAct::Settings);
-                                }
-                            });
-                        });
-                        ui.add_space(12.0);
-                        if let Some(a) = self.goal_hero(ui, &t, &row, day) {
+        let mut head_act: Option<PageAct> = None;
+        goals_frame(
+            ui,
+            ("goal_page", gid),
+            |ui| {
+                // ---- back to the Goals page
+                let b =
+                    icons::icon_button(ui, &t, "chevron_left", tr("Goals"), "Back to goals", false);
+                if b.clicked() {
+                    act = Some(GoalAct::Back);
+                }
+                ui.label(RichText::new("/").color(t.text3));
+                // the name gives way to the settings button
+                let name_w = (ui.available_width() - 40.0).max(0.0);
+                ui.scope(|ui| {
+                    ui.set_max_width(name_w);
+                    ui.add(egui::Label::new(RichText::new(&g.name).color(t.text)).truncate());
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let b = icons::icon_button(ui, &t, "dots", "", "Goal settings", false);
+                    if b.clicked() {
+                        head_act = Some(PageAct::Settings);
+                    }
+                });
+            },
+            |ui| {
+                let w = ui.available_width();
+                if let Some(a) = self.goal_hero(ui, &t, &row, day) {
+                    page_act = Some(a);
+                }
+                ui.add_space(18.0);
+                let wide = w > 900.0;
+                let gap = 18.0;
+                let left_w = if wide { (w - gap) * 0.62 } else { w };
+                let right_w = if wide { w - gap - left_w } else { w };
+                let left = |ui: &mut Ui, me: &mut App| -> Option<PageAct> {
+                    ui.set_width(left_w);
+                    me.goal_targets_card(ui, &t, gi, &g, &views, color)
+                };
+                if wide {
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        if let Some(a) = ui.vertical(|ui| left(ui, self)).inner {
                             page_act = Some(a);
                         }
-                        ui.add_space(18.0);
-                        let wide = w > 900.0;
-                        let gap = 18.0;
-                        let left_w = if wide { (w - gap) * 0.62 } else { w };
-                        let right_w = if wide { w - gap - left_w } else { w };
-                        let left = |ui: &mut Ui, me: &mut App| -> Option<PageAct> {
-                            ui.set_width(left_w);
-                            me.goal_targets_card(ui, &t, gi, &g, &views, color)
-                        };
-                        if wide {
-                            ui.horizontal_top(|ui| {
-                                ui.spacing_mut().item_spacing.x = gap;
-                                if let Some(a) = ui.vertical(|ui| left(ui, self)).inner {
-                                    page_act = Some(a);
-                                }
-                                ui.vertical(|ui| {
-                                    ui.set_width(right_w);
-                                    self.goal_history_card(ui, &t, &g);
-                                });
-                            });
-                        } else {
-                            if let Some(a) = left(ui, self) {
-                                page_act = Some(a);
-                            }
-                            ui.add_space(gap);
+                        ui.vertical(|ui| {
+                            ui.set_width(right_w);
                             self.goal_history_card(ui, &t, &g);
-                        }
+                        });
                     });
-            });
+                } else {
+                    if let Some(a) = left(ui, self) {
+                        page_act = Some(a);
+                    }
+                    ui.add_space(gap);
+                    self.goal_history_card(ui, &t, &g);
+                }
+            },
+        );
+        if head_act.is_some() {
+            page_act = head_act;
+        }
         if let Some((_, m, at)) = self.goal_banner.filter(|b| b.0 == gid) {
             if now_ts() - at > MILESTONE_SECS {
                 self.goal_banner = None;
@@ -215,7 +199,8 @@ impl App {
             .corner_radius(18)
             .inner_margin(egui::Margin::same(26))
             .show(ui, |ui| {
-                ui.set_width(w - 52.0);
+                // the margins and the 1 pt outline on each side
+                ui.set_width(w - 54.0);
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 28.0;
                     // ring
@@ -366,27 +351,15 @@ impl App {
                             }
                         }
                         if done {
-                            ui.horizontal(|ui| {
-                                let b = ui.add(
-                                    egui::Button::new(
-                                        RichText::new(tr("Share to team chat"))
-                                            .color(Color32::WHITE)
-                                            .strong(),
-                                    )
-                                    .fill(color)
-                                    .corner_radius(10)
-                                    .min_size(vec2(0.0, 36.0)),
-                                );
-                                name_it(&b, "Share to team chat");
-                                if b.clicked() {
-                                    act = Some(PageAct::Share);
-                                }
-                                let b = secondary_button(ui, tr("Set the next goal"));
-                                name_it(&b, "Set the next goal");
-                                if b.clicked() {
-                                    act = Some(PageAct::NextGoal);
-                                }
-                            });
+                            let (share, next) = achieved_buttons(ui, color);
+                            name_it(&share, "Share to team chat");
+                            if share.clicked() {
+                                act = Some(PageAct::Share);
+                            }
+                            name_it(&next, "Set the next goal");
+                            if next.clicked() {
+                                act = Some(PageAct::NextGoal);
+                            }
                         }
                     });
                     if w > 760.0 {
@@ -456,7 +429,9 @@ impl App {
                     }
                 });
             });
-        let _ = resp;
+        resp.response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Goal overview")
+        });
         act
     }
 
@@ -479,7 +454,8 @@ impl App {
             .corner_radius(16)
             .inner_margin(egui::Margin::same(18))
             .show(ui, |ui| {
-                ui.set_width(w - 36.0);
+                // the margins and the 1 pt outline on each side
+                ui.set_width(w - 38.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr("Targets")).size(16.0).strong());
                     egui::Frame::new()
@@ -822,7 +798,8 @@ impl App {
             .corner_radius(16)
             .inner_margin(egui::Margin::same(18))
             .show(ui, |ui| {
-                ui.set_width(w - 36.0);
+                // the margins and the 1 pt outline on each side
+                ui.set_width(w - 38.0);
                 ui.label(RichText::new(tr("History")).size(16.0).strong());
                 ui.add_space(8.0);
                 if g.log.is_empty() {

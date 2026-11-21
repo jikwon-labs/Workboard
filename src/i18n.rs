@@ -393,6 +393,7 @@ fn date_pattern(p: &str) -> &str {
         "%b %-d" => "%-m\u{c6d4} %-d\u{c77c}",
         "%b %-d, %Y" => "%Y\u{b144} %-m\u{c6d4} %-d\u{c77c}",
         "%B %Y" | "%b %Y" => "%Y\u{b144} %-m\u{c6d4}",
+        "%b" | "%B" => "%-m\u{c6d4}",
         "%A, %B %-d" => "%-m\u{c6d4} %-d\u{c77c} %A",
         "%a %-d" => "%-d\u{c77c} (%a)",
         "%b %-d, %-I:%M %p" | "%b %-d at %-I:%M %p" => "%-m\u{c6d4} %-d\u{c77c} %p %-I:%M",

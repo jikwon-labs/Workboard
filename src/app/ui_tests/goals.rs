@@ -485,3 +485,144 @@ fn an_achieved_goal_is_shared_to_chat_as_a_card_that_opens_it() {
         "the achieved goal's page offers sharing too"
     );
 }
+
+const SUMMARY: [&str; 3] = [
+    "Summary average progress",
+    "Summary coming up",
+    "Summary achieved this year",
+];
+
+/// Both goals achieved, nothing in progress.
+fn all_achieved(h: &mut Ui1) {
+    for g in &mut h.app.data.extra.goals {
+        for tg in &mut g.targets {
+            match &mut tg.kind {
+                TargetKind::Number {
+                    current, target, ..
+                } => *current = *target,
+                TargetKind::TrueFalse { done } => *done = true,
+                TargetKind::Tasks { .. } => {}
+            }
+        }
+    }
+    // the first look starts their history, the next notes the day
+    h.app.goal_watch(now_ts());
+    h.app.goal_watch(now_ts());
+    h.settle();
+}
+
+#[test]
+fn the_goals_page_and_a_goals_page_line_up_and_centre_in_a_wide_window() {
+    let (mut h, _, _) = two_goals();
+    let first = h.rect(SUMMARY[0]);
+    let last = h.rect(SUMMARY[2]);
+    h.click("Goal Beta launch");
+    let page = h.rect("Goal overview");
+    let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+    assert!(near(page.top(), first.top()), "the boxes start on one line");
+    assert!(near(page.left(), first.left()));
+    assert!(near(page.right(), last.right()), "and end at one edge");
+    assert_eq!(
+        h.rect("Back to goals").center().y,
+        {
+            h.click("Back to goals");
+            h.rect("New goal").center().y
+        },
+        "the rows on top are one height"
+    );
+
+    // 560 pt wider: the page moves right by half of that, a goal's page too
+    let mut w = Ui1::sized(1440.0 + 560.0, 900.0);
+    w.app.data.extra.goals = h.app.data.extra.goals.clone();
+    w.click("Rail More");
+    w.click("Goals");
+    w.settle();
+    let wide = w.rect(SUMMARY[0]);
+    assert!(near(wide.left() - first.left(), 280.0), "in the middle");
+    assert!(near(w.rect(SUMMARY[2]).right() - last.right(), 280.0));
+    w.click("Goal Beta launch");
+    assert!(near(w.rect("Goal overview").left(), wide.left()));
+}
+
+#[test]
+fn the_three_boxes_on_top_are_one_height_and_never_empty() {
+    let (mut h, _, _) = two_goals();
+    let same = |h: &Ui1| {
+        let r: Vec<Rect> = SUMMARY.iter().map(|n| h.rect(n)).collect();
+        assert!(
+            r.iter()
+                .all(|x| x.top() == r[0].top() && x.height() == r[0].height()),
+            "{:?}",
+            r
+        );
+    };
+    same(&h);
+    // none achieved yet: the one closest to done
+    assert!(!h.painted_text("Next up: Beta launch · 38%").is_empty());
+    assert!(
+        h.has("Achieved in Jan") && h.has("Achieved in Dec"),
+        "the months"
+    );
+
+    h.click("Done Lease signed");
+    h.key(egui::Key::Escape);
+    h.settle();
+    same(&h);
+    let latest = format!("Latest: Office move, {}", today().text("%b %-d"));
+    assert!(!h.painted_text(&latest).is_empty());
+}
+
+#[test]
+fn a_card_says_not_done_and_centres_its_footer_under_the_line() {
+    let (h, _, _) = two_goals();
+    assert!(!h.painted_text("Not done").is_empty());
+    assert!(h.painted_text("Not yet").is_empty());
+    let card = h.rect("Goal Beta launch");
+    let (text, _) = h.painted_text("0 of 2 targets done")[0];
+    // the band under the line is 50 pt, the text in its middle
+    assert!(
+        (card.bottom() - 25.0 - text.center().y).abs() < 2.0,
+        "{:?} {:?}",
+        card,
+        text
+    );
+}
+
+#[test]
+fn the_list_view_shows_achieved_goals_as_rows_too() {
+    let (mut h, _, b) = two_goals();
+    all_achieved(&mut h);
+    assert!(h.has("Achieved Office move") && h.has("Achieved Beta launch"));
+
+    // nothing in progress, yet the switch changes the page
+    h.click("Show as list");
+    assert!(h.has("Goal row Office move") && h.has("Goal row Beta launch"));
+    assert!(!h.has("Achieved Office move"), "rows instead of cards");
+    let when = format!("Achieved {}", today().text("%b %-d"));
+    assert_eq!(h.painted_text(&when).len(), 2, "when, for the days left");
+    h.click("Goal row Office move");
+    assert_eq!(h.app.goal_open, Some(b));
+    h.click("Back to goals");
+
+    h.click("Show as cards");
+    assert!(h.has("Achieved Office move"));
+}
+
+#[test]
+fn share_and_set_the_next_goal_are_one_height() {
+    let (mut h, _, _) = two_goals();
+    h.click("Done Lease signed");
+    assert_eq!(
+        h.rect("Share from achieved").height(),
+        h.rect("Next goal from achieved").height(),
+        "in Goal achieved"
+    );
+    h.key(egui::Key::Escape);
+    h.settle();
+    h.click("Achieved Office move");
+    assert_eq!(
+        h.rect("Share to team chat").height(),
+        h.rect("Set the next goal").height(),
+        "on the goal's page"
+    );
+}

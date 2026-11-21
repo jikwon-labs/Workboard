@@ -149,6 +149,83 @@ pub(crate) fn paint_bar(p: &egui::Painter, r: Rect, frac: f32, color: Color32, t
     }
 }
 
+/// The widest the Goals page and a goal's page get.
+pub(crate) const PAGE_W: f32 = 1160.0;
+/// The row at the top of both pages (the title and its controls, or the way
+/// back), the same height on both so the boxes below start at one place.
+const HEADER_H: f32 = 40.0;
+
+/// The frame the Goals page and a goal's page share: the same margins and
+/// header row, at most `PAGE_W` wide and centred in a wider window, so going
+/// from one to the other moves nothing. `header` fills the row at the top,
+/// `body` what is under it.
+pub(crate) fn goals_frame(
+    ui: &mut Ui,
+    id: impl std::hash::Hash,
+    header: impl FnOnce(&mut Ui),
+    body: impl FnOnce(&mut Ui),
+) {
+    egui::ScrollArea::vertical()
+        .id_salt(id)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            egui::Frame::new()
+                .inner_margin(egui::Margin {
+                    left: 32,
+                    right: 32,
+                    top: 24,
+                    bottom: 40,
+                })
+                .show(ui, |ui| {
+                    let avail = ui.available_rect_before_wrap();
+                    let w = avail.width().min(PAGE_W);
+                    let left = avail.left() + (avail.width() - w) / 2.0;
+                    let rect =
+                        Rect::from_min_max(pos2(left, avail.top()), pos2(left + w, avail.bottom()));
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                        ui.set_max_width(w);
+                        ui.allocate_ui_with_layout(
+                            vec2(w, HEADER_H),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.set_min_size(vec2(w, HEADER_H));
+                                header(ui);
+                            },
+                        );
+                        ui.add_space(18.0);
+                        body(ui);
+                    });
+                });
+        });
+}
+
+/// Share to team chat (in the goal's colour) and Set the next goal side by
+/// side, the same height, as Goal achieved and an achieved goal's page show
+/// them. Returns their responses.
+pub(crate) fn achieved_buttons(ui: &mut Ui, color: Color32) -> (Response, Response) {
+    ui.horizontal(|ui| {
+        let share = ui.add(
+            egui::Button::new(
+                RichText::new(tr("Share to team chat"))
+                    .color(Color32::WHITE)
+                    .strong(),
+            )
+            .fill(color)
+            .corner_radius(10)
+            .min_size(vec2(0.0, ACHIEVED_BTN_H)),
+        );
+        let next = ui.add(
+            egui::Button::new(RichText::new(tr("Set the next goal")).strong())
+                .corner_radius(10)
+                .min_size(vec2(0.0, ACHIEVED_BTN_H)),
+        );
+        (share, next)
+    })
+    .inner
+}
+
+pub(crate) const ACHIEVED_BTN_H: f32 = 36.0;
+
 /// A pill with a dot and the pace's name.
 pub(crate) fn pace_pill(ui: &mut Ui, t: &Theme, pace: Pace) -> Response {
     let (bg, fg) = pace_colors(pace, t);
@@ -447,81 +524,76 @@ impl App {
         let mut achieved: Vec<&GoalRow> = shown.iter().copied().filter(|r| r.pct >= 100).collect();
         achieved.sort_by_key(|r| std::cmp::Reverse(r.g.done_on));
         let list_view = self.data.extra.goals_view == "list";
+        let mut head_act: Option<GoalAct> = None;
         let mut act: Option<GoalAct> = None;
-        egui::ScrollArea::vertical()
-            .id_salt("goals_page")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui::Frame::new()
-                    .inner_margin(egui::Margin {
-                        left: 32,
-                        right: 32,
-                        top: 24,
-                        bottom: 40,
-                    })
-                    .show(ui, |ui| {
-                        let w = ui.available_width().min(1160.0);
-                        ui.set_max_width(w);
-                        // ---- header
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(tr("Goals")).size(24.0).strong());
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let b = primary_button(ui, &t, tr("+ New goal"));
-                                name_it(&b, "New goal");
-                                if b.clicked() {
-                                    act = Some(GoalAct::NewGoal);
-                                }
-                                ui.add_space(6.0);
-                                if let Some(v) = view_switch(ui, &t, list_view) {
-                                    act = Some(GoalAct::View(v));
-                                }
-                                ui.add_space(6.0);
-                                let counts = [n_all, n_mine, n_done];
-                                if let Some(f) = filter_tabs(ui, &t, filter, counts) {
-                                    act = Some(GoalAct::Filter(f));
-                                }
-                            });
-                        });
-                        ui.add_space(18.0);
-                        // ---- summary
-                        let active_all: Vec<&GoalRow> =
-                            rows.iter().filter(|r| r.pct < 100).collect();
-                        let done_all: Vec<&GoalRow> =
-                            rows.iter().filter(|r| r.pct >= 100).collect();
-                        if let Some(a) = self.goals_summary(ui, &t, &active_all, &done_all, day) {
+        goals_frame(
+            ui,
+            "goals_page",
+            |ui| {
+                ui.label(RichText::new(tr("Goals")).size(24.0).strong());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let b = primary_button(ui, &t, tr("+ New goal"));
+                    name_it(&b, "New goal");
+                    if b.clicked() {
+                        head_act = Some(GoalAct::NewGoal);
+                    }
+                    ui.add_space(6.0);
+                    if let Some(v) = view_switch(ui, &t, list_view) {
+                        head_act = Some(GoalAct::View(v));
+                    }
+                    ui.add_space(6.0);
+                    let counts = [n_all, n_mine, n_done];
+                    if let Some(f) = filter_tabs(ui, &t, filter, counts) {
+                        head_act = Some(GoalAct::Filter(f));
+                    }
+                });
+            },
+            |ui| {
+                // ---- summary
+                let active_all: Vec<&GoalRow> = rows.iter().filter(|r| r.pct < 100).collect();
+                let done_all: Vec<&GoalRow> = rows.iter().filter(|r| r.pct >= 100).collect();
+                if let Some(a) = self.goals_summary(ui, &t, &active_all, &done_all, day) {
+                    act = Some(a);
+                }
+                ui.add_space(24.0);
+                if filter != 2 {
+                    section_title(ui, &t, tr("In progress"), active.len());
+                    ui.add_space(10.0);
+                    if active.is_empty() {
+                        ui.label(
+                            RichText::new(tr("Nothing in progress. Start a new goal."))
+                                .color(t.text2),
+                        );
+                    } else if list_view {
+                        if let Some(a) = self.goal_rows(ui, &t, &active, day) {
                             act = Some(a);
                         }
-                        ui.add_space(24.0);
-                        if filter != 2 {
-                            section_title(ui, &t, tr("In progress"), active.len());
-                            ui.add_space(10.0);
-                            if active.is_empty() {
-                                ui.label(
-                                    RichText::new(tr("Nothing in progress. Start a new goal."))
-                                        .color(t.text2),
-                                );
-                            } else if list_view {
-                                if let Some(a) = self.goal_rows(ui, &t, &active, day) {
-                                    act = Some(a);
-                                }
-                            } else if let Some(a) = self.goal_cards(ui, &t, &active, day) {
-                                act = Some(a);
-                            }
-                            ui.add_space(28.0);
-                        }
-                        section_title(ui, &t, tr("Achieved"), achieved.len());
-                        ui.add_space(10.0);
-                        let next = active
-                            .iter()
-                            .copied()
-                            .max_by_key(|r| r.pct)
-                            .filter(|_| filter != 2);
-                        if let Some(a) = achieved_shelf(ui, &t, &achieved, next) {
-                            act = Some(a);
-                        }
-                    });
-            });
-        if let Some(a) = act {
+                    } else if let Some(a) = self.goal_cards(ui, &t, &active, day) {
+                        act = Some(a);
+                    }
+                    ui.add_space(28.0);
+                }
+                section_title(ui, &t, tr("Achieved"), achieved.len());
+                ui.add_space(10.0);
+                // as rows too in the list view, so the switch changes the
+                // page even when nothing is in progress
+                if list_view && !achieved.is_empty() {
+                    if let Some(a) = self.goal_rows(ui, &t, &achieved, day) {
+                        act = Some(a);
+                    }
+                } else {
+                    let next = active
+                        .iter()
+                        .copied()
+                        .max_by_key(|r| r.pct)
+                        .filter(|_| filter != 2);
+                    if let Some(a) = achieved_shelf(ui, &t, &achieved, next) {
+                        act = Some(a);
+                    }
+                }
+            },
+        );
+        if let Some(a) = head_act.or(act) {
             self.goal_apply(a);
         }
     }
@@ -541,7 +613,8 @@ impl App {
         let w = ui.available_width();
         let cols = if w > 760.0 { 3 } else { 1 };
         let box_w = (w - gap * (cols as f32 - 1.0)) / cols as f32;
-        let h = 172.0;
+        // the contents of each fit in this, so their bottoms line up
+        let h = SUMMARY_H;
         let avg = if active.is_empty() {
             0
         } else {
@@ -575,15 +648,18 @@ impl App {
             .iter()
             .filter(|r| r.g.done_on.is_some())
             .max_by_key(|r| r.g.done_on);
+        let by_month = achieved_by_month(done, day.year());
+        let closest = active.iter().max_by_key(|r| r.pct);
         let mut boxes = |ui: &mut Ui, i: usize| {
-            egui::Frame::new()
+            let resp = egui::Frame::new()
                 .fill(t.card)
                 .stroke(Stroke::new(1.0, t.border))
                 .corner_radius(14)
                 .inner_margin(egui::Margin::symmetric(18, 16))
                 .show(ui, |ui| {
-                    ui.set_width(box_w - 36.0);
-                    ui.set_height(h - 32.0);
+                    // the margins and the 1 pt outline on each side
+                    ui.set_width(box_w - 38.0);
+                    ui.set_height(h - 34.0);
                     match i {
                         0 => {
                             ui.horizontal(|ui| {
@@ -734,11 +810,7 @@ impl App {
                             ui.horizontal(|ui| {
                                 let (r, _) =
                                     ui.allocate_exact_size(vec2(46.0, 46.0), Sense::hover());
-                                let (bg, fg) = if t.dark {
-                                    (rgb([70, 55, 15]), rgb([250, 205, 100]))
-                                } else {
-                                    (rgb([255, 244, 214]), rgb([143, 98, 0]))
-                                };
+                                let (bg, fg) = gold(t);
                                 ui.painter().rect_filled(r, 14.0, bg);
                                 icons::line_icon(ui.painter(), "goals", r.center(), fg);
                                 ui.add_space(6.0);
@@ -748,28 +820,37 @@ impl App {
                                         .strong(),
                                 );
                             });
-                            ui.add_space(6.0);
-                            if let Some(l) = latest {
-                                let d = l.g.done_on.unwrap();
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(trf!(
-                                            "Latest: {}, {}",
-                                            l.g.name,
-                                            d.text("%b %-d")
-                                        ))
-                                        .size(12.5)
-                                        .color(t.text2),
-                                    )
+                            ui.add_space(8.0);
+                            month_strip(ui, t, &by_month, day);
+                            ui.add_space(4.0);
+                            // the latest one, else the one closest to done,
+                            // so the box always says something
+                            let line = if let Some(l) = latest {
+                                trf!(
+                                    "Latest: {}, {}",
+                                    l.g.name,
+                                    l.g.done_on.unwrap().text("%b %-d")
+                                )
+                            } else if let Some(c) = closest {
+                                trf!("Next up: {} · {}%", c.g.name, c.pct)
+                            } else {
+                                tr("Goals reaching 100% are counted here").into()
+                            };
+                            ui.add(
+                                egui::Label::new(RichText::new(line).size(12.5).color(t.text2))
                                     .truncate(),
-                                );
-                            }
+                            );
                         }
                     }
                 });
+            let name = SUMMARY_NAMES[i];
+            resp.response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, name));
         };
         if cols == 3 {
-            ui.horizontal(|ui| {
+            // top-aligned: a centred row would nudge the boxes down a little,
+            // off the line a goal's page starts its box on
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 for i in 0..3 {
                     // a column each, so a box's contents stack
@@ -916,7 +997,7 @@ impl App {
                     let (label, c) = if *done {
                         (tr("Done"), pace_colors(Pace::OnTrack, t).1)
                     } else {
-                        (tr("Not yet"), t.text3)
+                        (tr("Not done"), t.text3)
                     };
                     let lw = p
                         .text(
@@ -1019,10 +1100,12 @@ impl App {
                 }
             }
         }
-        // footer: owner and targets done, due date
+        // footer: owner and targets done, due date, in the middle of the
+        // band under the line
         let p = ui.painter();
-        let fy = rect.bottom() - 18.0 - 12.0;
-        p.hline(inner.x_range(), fy - 12.0, Stroke::new(1.0, t.border));
+        let line_y = rect.bottom() - CARD_FOOTER_H;
+        let fy = line_y + CARD_FOOTER_H / 2.0;
+        p.hline(inner.x_range(), line_y, Stroke::new(1.0, t.border));
         let mut x = inner.left();
         if let Some(m) = self.data.member(g.owner) {
             paint_avatar(p, pos2(x + 11.0, fy), 11.0, m, t.card);
@@ -1074,10 +1157,11 @@ impl App {
                     t.text2,
                 )
                 .width();
+            // the 16 pt icon, the usual gap before the date
             icons::line_icon(
                 p,
                 "calendar",
-                pos2(inner.right() - dw - tw - 20.0, fy),
+                pos2(inner.right() - dw - 8.0 - tw - icons::ICON_GAP - 8.0, fy),
                 t.text2,
             );
         }
@@ -1094,7 +1178,8 @@ impl App {
         day: NaiveDate,
     ) -> Option<GoalAct> {
         let mut act = None;
-        let w = ui.available_width();
+        // inside the 1 pt outline on each side
+        let w = ui.available_width() - 2.0;
         egui::Frame::new()
             .fill(t.card)
             .stroke(Stroke::new(1.0, t.border))
@@ -1217,10 +1302,15 @@ impl App {
                             Some(pc @ (Pace::Behind | Pace::AtRisk)) => pace_colors(pc, t).1,
                             _ => t.text2,
                         };
+                        // when it was achieved instead of the days left
+                        let under = match g.done_on.filter(|_| r.pct >= 100) {
+                            Some(d) => trf!("Achieved {}", d.text("%b %-d")),
+                            None => dday(due, day),
+                        };
                         p.text(
                             pos2(rr.left() + cols[3], cy + 10.0),
                             Align2::LEFT_CENTER,
-                            dday(due, day),
+                            under,
                             FontId::proportional(12.0),
                             fg,
                         );
@@ -1285,7 +1375,7 @@ impl App {
                                 if st.done {
                                     tr("Done").to_string()
                                 } else {
-                                    tr("Not yet").to_string()
+                                    tr("Not done").to_string()
                                 }
                             } else if st.unit.is_empty() {
                                 st.value.clone()
@@ -1454,11 +1544,24 @@ pub(crate) enum GoalAct {
     ToggleTask { g: u64, i: usize, task: u64 },
 }
 
+/// The height of the three boxes on top of the Goals page.
+const SUMMARY_H: f32 = 180.0;
+/// The three boxes on top, as screen readers and tests know them.
+const SUMMARY_NAMES: [&str; 3] = [
+    "Summary average progress",
+    "Summary coming up",
+    "Summary achieved this year",
+];
+
 const TARGET_BAR_H: f32 = 34.0;
 const TARGET_BOOL_H: f32 = 22.0;
 const TARGET_GAP: f32 = 12.0;
+/// The band at the bottom of a card under its line: owner, targets done,
+/// due date.
+const CARD_FOOTER_H: f32 = 50.0;
 
-/// A card's height: title, its targets, the footer.
+/// A card's height: title, its targets, 18 pt to the line (the gap after the
+/// last target and 6 more), the footer.
 fn card_height(r: &GoalRow) -> f32 {
     let targets: f32 = if r.g.targets.is_empty() {
         TARGET_BOOL_H + TARGET_GAP
@@ -1471,7 +1574,7 @@ fn card_height(r: &GoalRow) -> f32 {
             })
             .sum()
     };
-    18.0 + 82.0 + targets + 8.0 + 24.0 + 30.0
+    18.0 + 82.0 + targets + 6.0 + CARD_FOOTER_H
 }
 
 /// Where a row's bar gets today's mark, 0-100: none before any time has
@@ -1555,6 +1658,83 @@ fn row_cols(w: f32) -> [f32; 5] {
     let c1 = flex * 0.48;
     let c2 = c1 + flex * 0.52;
     [16.0, c1, c2, c2 + 120.0, c2 + 240.0]
+}
+
+/// The trophy's colours: (fill, ink).
+fn gold(t: &Theme) -> (Color32, Color32) {
+    if t.dark {
+        (rgb([70, 55, 15]), rgb([250, 205, 100]))
+    } else {
+        (rgb([255, 244, 214]), rgb([143, 98, 0]))
+    }
+}
+
+/// How many goals were achieved in each month of `year`.
+fn achieved_by_month(done: &[&GoalRow], year: i32) -> [usize; 12] {
+    let mut out = [0; 12];
+    for r in done {
+        if let Some(d) = r.g.done_on.filter(|d| d.year() == year) {
+            out[d.month0() as usize] += 1;
+        }
+    }
+    out
+}
+
+/// This year's months in a row, each filled in gold by how many goals were
+/// achieved in it and the months still ahead fainter, with January, this
+/// month and December named under them. Hovering a month says how many.
+fn month_strip(ui: &mut Ui, t: &Theme, by_month: &[usize; 12], day: NaiveDate) {
+    let (_, ink) = gold(t);
+    let w = ui.available_width();
+    let (r, _) = ui.allocate_exact_size(vec2(w, 8.0 + 5.0 + 14.0), Sense::hover());
+    let gap = 3.0;
+    let seg = (w - gap * 11.0) / 12.0;
+    let most = by_month.iter().copied().max().unwrap_or(0).max(1);
+    let now = day.month0() as usize;
+    let font = FontId::proportional(11.0);
+    // the labels placed so far, left to right, so none overlaps another
+    let mut taken: Vec<(f32, f32)> = vec![];
+    for (m, n) in by_month.iter().copied().enumerate() {
+        let x = r.left() + m as f32 * (seg + gap);
+        let bar = Rect::from_min_size(pos2(x, r.top()), vec2(seg, 8.0));
+        let first = NaiveDate::from_ymd_opt(day.year(), m as u32 + 1, 1).unwrap_or(day);
+        let resp = ui.interact(
+            bar.expand2(vec2(gap / 2.0, 6.0)),
+            ui.id().with(("achieved month", m)),
+            Sense::hover(),
+        );
+        name_it(&resp, &format!("Achieved in {}", first.format("%b")));
+        let p = ui.painter();
+        let track = if m > now {
+            t.hover.gamma_multiply(0.5)
+        } else {
+            t.hover
+        };
+        p.rect_filled(bar, 4.0, track);
+        if n > 0 {
+            let k = 0.45 + 0.55 * n as f32 / most as f32;
+            p.rect_filled(bar, 4.0, ink.gamma_multiply(k));
+        }
+        let label = first.text("%b");
+        if m == 0 || m == now || m == 11 {
+            let g = p.layout_no_wrap(
+                label.clone(),
+                font.clone(),
+                if m == now { t.text2 } else { t.text3 },
+            );
+            let gx = match m {
+                0 => bar.left(),
+                11 => bar.right() - g.size().x,
+                _ => bar.center().x - g.size().x / 2.0,
+            };
+            let span = (gx - 4.0, gx + g.size().x + 4.0);
+            if !taken.iter().any(|s| span.0 < s.1 && s.0 < span.1) {
+                taken.push(span);
+                p.galley(pos2(gx, bar.bottom() + 5.0), g, t.text3);
+            }
+        }
+        resp.on_hover_text(trf!("{}: {} achieved", label, n));
+    }
 }
 
 fn section_title(ui: &mut Ui, t: &Theme, text: &str, n: usize) {

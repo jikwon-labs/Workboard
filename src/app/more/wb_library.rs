@@ -38,7 +38,7 @@ pub(super) const TEMPLATES: [(&str, &str, [u8; 3]); 5] = [
 
 /// A shape a template lays out: (kind, text in English, top left, size,
 /// filled). The text is made in the language of whoever makes the board.
-type TplShape = (&'static str, &'static str, [f32; 2], [f32; 2], bool);
+type TplShape = (ShapeKind, &'static str, [f32; 2], [f32; 2], bool);
 
 /// A line a template lays out: (from shape, to shape, where a loose end
 /// sits, elbow, dashed, arrow). A shape is its place in the template's
@@ -57,10 +57,10 @@ fn template_items(name: &str) -> (Vec<TplShape>, Vec<TplLine>) {
     match name {
         "Organizational Chart" => (
             vec![
-                ("rect", "CEO", [260.0, 40.0], ORG, true),
-                ("rect", "CTO", [40.0, 164.0], ORG, false),
-                ("rect", "COO", [260.0, 164.0], ORG, false),
-                ("rect", "CMO", [480.0, 164.0], ORG, false),
+                (ShapeKind::Rect, "CEO", [260.0, 40.0], ORG, true),
+                (ShapeKind::Rect, "CTO", [40.0, 164.0], ORG, false),
+                (ShapeKind::Rect, "COO", [260.0, 164.0], ORG, false),
+                (ShapeKind::Rect, "CMO", [480.0, 164.0], ORG, false),
             ],
             (1..4)
                 .map(|k| (Some(0), Some(k), free, true, false, false))
@@ -68,12 +68,12 @@ fn template_items(name: &str) -> (Vec<TplShape>, Vec<TplLine>) {
         ),
         "Action Plan" => (
             vec![
-                ("rect", "Goal", [40.0, 40.0], STEP, true),
-                ("rect", "Step 1", [280.0, 40.0], STEP, false),
-                ("rect", "Step 2", [520.0, 40.0], STEP, false),
-                ("rect", "Step 3", [760.0, 40.0], STEP, false),
+                (ShapeKind::Rect, "Goal", [40.0, 40.0], STEP, true),
+                (ShapeKind::Rect, "Step 1", [280.0, 40.0], STEP, false),
+                (ShapeKind::Rect, "Step 2", [520.0, 40.0], STEP, false),
+                (ShapeKind::Rect, "Step 3", [760.0, 40.0], STEP, false),
                 (
-                    "rect",
+                    ShapeKind::Rect,
                     "Owner / due date",
                     [40.0, 210.0],
                     [420.0, 90.0],
@@ -96,7 +96,13 @@ fn template_items(name: &str) -> (Vec<TplShape>, Vec<TplLine>) {
             .enumerate()
             .map(|(k, (txt, cy))| {
                 let x = 40.0 + k as f32 * (DOT[0] + GAP);
-                ("ellipse", *txt, [x, cy - DOT[1] / 2.0], DOT, k == 0)
+                (
+                    ShapeKind::Ellipse,
+                    *txt,
+                    [x, cy - DOT[1] / 2.0],
+                    DOT,
+                    k == 0,
+                )
             })
             .collect(),
             (0..4)
@@ -105,9 +111,21 @@ fn template_items(name: &str) -> (Vec<TplShape>, Vec<TplLine>) {
         ),
         "Flow Chart" => (
             vec![
-                ("pill", "Start", [40.0, 120.0], [150.0, 64.0], true),
-                ("diamond", "Decision?", [250.0, 92.0], [150.0, 120.0], false),
-                ("rect", "Step", [460.0, 120.0], [150.0, 64.0], false),
+                (ShapeKind::Pill, "Start", [40.0, 120.0], [150.0, 64.0], true),
+                (
+                    ShapeKind::Diamond,
+                    "Decision?",
+                    [250.0, 92.0],
+                    [150.0, 120.0],
+                    false,
+                ),
+                (
+                    ShapeKind::Rect,
+                    "Step",
+                    [460.0, 120.0],
+                    [150.0, 64.0],
+                    false,
+                ),
             ],
             vec![
                 (Some(0), Some(1), free, false, false, true),
@@ -117,11 +135,17 @@ fn template_items(name: &str) -> (Vec<TplShape>, Vec<TplLine>) {
         "Root Cause Analysis" => (
             // the problem at the fish's head, the causes along its bones
             vec![
-                ("rect", "Problem", [640.0, 160.0], [170.0, 80.0], true),
-                ("text", "People", [55.0, 34.0], LABEL, false),
-                ("text", "Process", [295.0, 34.0], LABEL, false),
-                ("text", "Tools", [55.0, 330.0], LABEL, false),
-                ("text", "Environment", [295.0, 330.0], LABEL, false),
+                (
+                    ShapeKind::Rect,
+                    "Problem",
+                    [640.0, 160.0],
+                    [170.0, 80.0],
+                    true,
+                ),
+                (ShapeKind::Text, "People", [55.0, 34.0], LABEL, false),
+                (ShapeKind::Text, "Process", [295.0, 34.0], LABEL, false),
+                (ShapeKind::Text, "Tools", [55.0, 330.0], LABEL, false),
+                (ShapeKind::Text, "Environment", [295.0, 330.0], LABEL, false),
             ],
             vec![
                 // the spine, from its tail to the head
@@ -288,7 +312,7 @@ fn paint_thumbnail(p: &egui::Painter, t: &Theme, w: &Whiteboard, area: Rect) {
     for s in &w.shapes {
         let r = Rect::from_min_size(to(s.pos), vec2(s.size[0], s.size[1]) * scale);
         paint_shape_body(p, t, s, r, 1.2);
-        if s.kind == "text" {
+        if s.shape_kind() == ShapeKind::Text {
             // a label: a short bar where its words are
             p.hline(
                 r.center().x - r.width() * 0.3..=r.center().x + r.width() * 0.3,
@@ -379,7 +403,7 @@ impl App {
             .zip(&sids)
             .map(|((kind, txt, pos, size, filled), id)| WbShape {
                 id: *id,
-                kind: kind.to_string(),
+                kind: kind.key().to_string(),
                 pos,
                 size,
                 text: tr(txt).to_string(),

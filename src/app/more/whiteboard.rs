@@ -143,8 +143,8 @@ pub struct WhiteboardUi {
     pub sel: Option<(u64, WbSel)>,
     /// The shape being typed in: (whiteboard, shape, still to take the focus).
     pub edit: Option<(u64, u64, bool)>,
-    /// The Shape tool's shape (in `SHAPE_KINDS`).
-    pub kind: usize,
+    /// The Shape tool's shape.
+    pub kind: ShapeKind,
     /// How the Line tool draws.
     pub line_style: WbLineStyle,
     /// The line being dragged out with the Line tool.
@@ -169,7 +169,7 @@ impl Default for WhiteboardUi {
             new: None,
             sel: None,
             edit: None,
-            kind: 0,
+            kind: ShapeKind::Rect,
             line_style: WbLineStyle::default(),
             link: None,
             bars: vec![],

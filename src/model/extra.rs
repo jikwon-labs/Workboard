@@ -329,6 +329,50 @@ pub struct WbShape {
     pub filled: bool,
 }
 
+/// What a whiteboard shape is drawn as. The file keeps `WbShape::kind` as
+/// its string; this is that string read once for drawing and placing text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShapeKind {
+    #[default]
+    Rect,
+    Pill,
+    Diamond,
+    Ellipse,
+    /// A label with no outline.
+    Text,
+}
+
+impl ShapeKind {
+    /// The kind a saved string names; anything else (a kind from a newer
+    /// app, say) is drawn as a rectangle.
+    pub fn of(kind: &str) -> ShapeKind {
+        match kind {
+            "pill" => ShapeKind::Pill,
+            "diamond" => ShapeKind::Diamond,
+            "ellipse" => ShapeKind::Ellipse,
+            "text" => ShapeKind::Text,
+            _ => ShapeKind::Rect,
+        }
+    }
+
+    /// The string saved for it.
+    pub fn key(self) -> &'static str {
+        match self {
+            ShapeKind::Rect => "rect",
+            ShapeKind::Pill => "pill",
+            ShapeKind::Diamond => "diamond",
+            ShapeKind::Ellipse => "ellipse",
+            ShapeKind::Text => "text",
+        }
+    }
+}
+
+impl WbShape {
+    pub fn shape_kind(&self) -> ShapeKind {
+        ShapeKind::of(&self.kind)
+    }
+}
+
 /// A line on a whiteboard. Each end is tied to a shape (`from`, `to`: it
 /// follows the shape when it moves) or, with 0, sits at `a` / `b`.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]

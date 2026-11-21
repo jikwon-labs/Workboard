@@ -709,11 +709,11 @@ impl App {
         };
         if kinds > 0 {
             for (i, (kind, name, _)) in SHAPE_KINDS.iter().enumerate() {
-                let on = self.sweep.wb.kind == i;
+                let on = self.sweep.wb.kind == *kind;
                 let (c, resp) = pic_button(x, ui.id().with(("wb_kind", i)), name, on);
-                paint_kind_icon(&p, kind, c, if on { t.primary } else { t.text2 });
+                paint_kind_icon(&p, *kind, c, if on { t.primary } else { t.text2 });
                 if resp.on_hover_text(tr(name)).clicked() {
-                    self.sweep.wb.kind = i;
+                    self.sweep.wb.kind = *kind;
                 }
                 x += SW;
             }

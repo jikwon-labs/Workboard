@@ -14,12 +14,12 @@ use crate::app::icons::paint_plus;
 use egui::{Pos2, Response};
 
 /// The shapes the Shape tool puts down: (kind, name, size on the board).
-pub(crate) const SHAPE_KINDS: [(&str, &str, [f32; 2]); 5] = [
-    ("rect", "Rectangle", [160.0, 80.0]),
-    ("pill", "Rounded rectangle", [160.0, 64.0]),
-    ("diamond", "Diamond", [150.0, 110.0]),
-    ("ellipse", "Circle", [120.0, 120.0]),
-    ("text", "Text", [160.0, 40.0]),
+pub(crate) const SHAPE_KINDS: [(ShapeKind, &str, [f32; 2]); 5] = [
+    (ShapeKind::Rect, "Rectangle", [160.0, 80.0]),
+    (ShapeKind::Pill, "Rounded rectangle", [160.0, 64.0]),
+    (ShapeKind::Diamond, "Diamond", [150.0, 110.0]),
+    (ShapeKind::Ellipse, "Circle", [120.0, 120.0]),
+    (ShapeKind::Text, "Text", [160.0, 40.0]),
 ];
 
 /// Space between a shape and one its + adds; the templates are laid out
@@ -208,8 +208,8 @@ fn shape_fill(t: &Theme, s: &WbShape) -> Color32 {
 pub(crate) fn paint_shape_body(p: &egui::Painter, t: &Theme, s: &WbShape, r: Rect, w: f32) {
     let st = Stroke::new(w, ink(t, s.color));
     let fill = shape_fill(t, s);
-    match s.kind.as_str() {
-        "text" => {
+    match s.shape_kind() {
+        ShapeKind::Text => {
             if s.filled {
                 p.rect_filled(r, 4.0, fill);
             } else if s.text.is_empty() {
@@ -229,12 +229,12 @@ pub(crate) fn paint_shape_body(p: &egui::Painter, t: &Theme, s: &WbShape, r: Rec
                 ));
             }
         }
-        "pill" => {
+        ShapeKind::Pill => {
             let rad = r.height().min(r.width()) / 2.0;
             p.rect_filled(r, rad, fill);
             p.rect_stroke(r, rad, st, egui::StrokeKind::Middle);
         }
-        "diamond" => {
+        ShapeKind::Diamond => {
             let pts = vec![
                 r.center_top(),
                 r.right_center(),
@@ -243,7 +243,7 @@ pub(crate) fn paint_shape_body(p: &egui::Painter, t: &Theme, s: &WbShape, r: Rec
             ];
             p.add(egui::Shape::convex_polygon(pts, fill, st));
         }
-        "ellipse" => {
+        ShapeKind::Ellipse => {
             // as many points as it is big (egui's own ellipse showed its corners)
             let (rx, ry) = (r.width() / 2.0, r.height() / 2.0);
             let n = ((rx + ry) * 0.8).clamp(24.0, 240.0) as usize;
@@ -255,7 +255,7 @@ pub(crate) fn paint_shape_body(p: &egui::Painter, t: &Theme, s: &WbShape, r: Rec
                 .collect();
             p.add(egui::Shape::convex_polygon(pts, fill, st));
         }
-        _ => {
+        ShapeKind::Rect => {
             let rad = (r.height().min(r.width()) * 0.12).min(10.0);
             p.rect_filled(r, rad, fill);
             p.rect_stroke(r, rad, st, egui::StrokeKind::Middle);
@@ -304,18 +304,18 @@ pub(crate) fn paint_line(p: &egui::Painter, l: &WbLine, pts: &[Pos2], w: f32, co
 }
 
 /// Where a shape's text sits inside `r`.
-fn text_area(kind: &str, r: Rect, z: f32) -> Rect {
+fn text_area(kind: ShapeKind, r: Rect, z: f32) -> Rect {
     match kind {
-        "diamond" => Rect::from_center_size(r.center(), r.size() * vec2(0.62, 0.5)),
-        "ellipse" => Rect::from_center_size(r.center(), r.size() * 0.72),
-        "pill" => r.shrink2(vec2(r.height() * 0.3 + 6.0 * z, 6.0 * z)),
-        "text" => r.shrink2(vec2(4.0 * z, 2.0 * z)),
-        _ => r.shrink(10.0 * z),
+        ShapeKind::Diamond => Rect::from_center_size(r.center(), r.size() * vec2(0.62, 0.5)),
+        ShapeKind::Ellipse => Rect::from_center_size(r.center(), r.size() * 0.72),
+        ShapeKind::Pill => r.shrink2(vec2(r.height() * 0.3 + 6.0 * z, 6.0 * z)),
+        ShapeKind::Text => r.shrink2(vec2(4.0 * z, 2.0 * z)),
+        ShapeKind::Rect => r.shrink(10.0 * z),
     }
 }
 
-fn shape_font(ctx: &egui::Context, kind: &str, z: f32) -> FontId {
-    if kind == "text" {
+fn shape_font(ctx: &egui::Context, kind: ShapeKind, z: f32) -> FontId {
+    if kind == ShapeKind::Text {
         crate::app::bold_font(ctx, 15.0 * z)
     } else {
         FontId::proportional(14.0 * z)
@@ -329,14 +329,14 @@ fn centred(text: &str, font: FontId, color: Color32, width: f32) -> egui::text::
 }
 
 /// A small picture of a shape kind, for the Shape tool's choices.
-pub(super) fn paint_kind_icon(p: &egui::Painter, kind: &str, c: Pos2, col: Color32) {
+pub(super) fn paint_kind_icon(p: &egui::Painter, kind: ShapeKind, c: Pos2, col: Color32) {
     let s = Stroke::new(1.5_f32, col);
     match kind {
-        "pill" => {
+        ShapeKind::Pill => {
             let r = Rect::from_center_size(c, vec2(18.0, 10.0));
             p.rect_stroke(r, 5.0, s, egui::StrokeKind::Middle);
         }
-        "diamond" => {
+        ShapeKind::Diamond => {
             let pts = vec![
                 c + vec2(0.0, -7.5),
                 c + vec2(8.5, 0.0),
@@ -345,14 +345,14 @@ pub(super) fn paint_kind_icon(p: &egui::Painter, kind: &str, c: Pos2, col: Color
             ];
             p.add(egui::Shape::closed_line(pts, s));
         }
-        "ellipse" => {
+        ShapeKind::Ellipse => {
             p.circle_stroke(c, 7.0, s);
         }
-        "text" => {
+        ShapeKind::Text => {
             p.line_segment([c + vec2(-6.0, -6.5), c + vec2(6.0, -6.5)], s);
             p.line_segment([c + vec2(0.0, -6.5), c + vec2(0.0, 7.0)], s);
         }
-        _ => {
+        ShapeKind::Rect => {
             let r = Rect::from_center_size(c, vec2(16.0, 12.0));
             p.rect_stroke(r, 2.0, s, egui::StrokeKind::Middle);
         }
@@ -587,8 +587,8 @@ impl App {
                     edit = Some(s.id);
                 }
             }
-            let area = text_area(&s.kind, r, z);
-            let font = shape_font(ui.ctx(), &s.kind, z);
+            let area = text_area(s.shape_kind(), r, z);
+            let font = shape_font(ui.ctx(), s.shape_kind(), z);
             if let Some(e) = editing.as_mut().filter(|e| e.1 == s.id) {
                 // typed in place, in the middle like the text it stands for
                 let g = p.layout_job(centred(
@@ -864,7 +864,7 @@ impl App {
 
         // the bar above it
         let mut toggles: Vec<(&str, &str, bool, usize)> = vec![];
-        if s.kind != "text" {
+        if s.shape_kind() != ShapeKind::Text {
             toggles.push(("Fill shape", "Fill", s.filled, 9));
         }
         let hit = self.wb_pick_bar(
@@ -1180,11 +1180,15 @@ impl App {
     /// The Shape tool's click: the chosen shape, centred where it was
     /// clicked, picked and ready to type in (the tool goes back to Select).
     pub(crate) fn wb_place_shape(&mut self, wid: u64, wi: usize, at: [f32; 2]) {
-        let (kind, _, size) = SHAPE_KINDS[self.sweep.wb.kind.min(SHAPE_KINDS.len() - 1)];
+        let kind = self.sweep.wb.kind;
+        let size = SHAPE_KINDS
+            .iter()
+            .find(|k| k.0 == kind)
+            .map_or([160.0, 80.0], |k| k.2);
         let id = self.data.new_id();
         self.data.extra.whiteboards[wi].shapes.push(WbShape {
             id,
-            kind: kind.to_string(),
+            kind: kind.key().to_string(),
             pos: [at[0] - size[0] / 2.0, at[1] - size[1] / 2.0],
             size,
             text: String::new(),
@@ -1381,6 +1385,18 @@ mod tests {
             size: [160.0, 80.0],
             ..Default::default()
         }
+    }
+
+    /// The saved kind strings read back as the same kind; one from a newer
+    /// app is drawn as a rectangle and stays as it was in the file.
+    #[test]
+    fn shape_kinds_keep_their_saved_strings() {
+        for (k, _, _) in SHAPE_KINDS {
+            assert_eq!(ShapeKind::of(k.key()), k);
+        }
+        let s = shape(1, "hexagon", [0.0, 0.0]);
+        assert_eq!(s.shape_kind(), ShapeKind::Rect);
+        assert_eq!(s.kind, "hexagon");
     }
 
     /// A line meets a shape at the middle of its top, right, bottom or left,

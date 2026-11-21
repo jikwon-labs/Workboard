@@ -247,3 +247,43 @@ fn a_chat_row_shows_the_message_without_its_formatting_marks() {
     );
     assert_eq!(h.painted_text("Alex Kim commented: 2 * 3 = 6").len(), 1);
 }
+
+/// Where the text `text` was painted and the rectangle it was clipped to.
+fn text_and_clip(h: &Ui1, text: &str) -> Option<(Rect, Rect)> {
+    let mut found = None;
+    each_text(&h.shapes, |ts, clip| {
+        if ts.galley.text() == text {
+            found = Some((ts.visual_bounding_rect(), clip));
+        }
+    });
+    found
+}
+
+#[test]
+fn a_long_title_stops_before_the_time_in_the_smallest_window() {
+    const LONG: &str = "A very long task name that keeps going and going so that it runs right across the row and under the time on the right";
+    let mut h = Ui1::sized(900.0, 560.0);
+    let me = h.app.data.me;
+    for t in &mut h.app.data.tasks {
+        t.activity.retain(|a| a.author == me);
+    }
+    for c in &mut h.app.data.channels {
+        c.messages.clear();
+    }
+    comment_on(&mut h.app.data, LONG, "Short comment", 3 * 3600);
+    h.app.data_changed();
+    // the pointer is on the window, as it is for a person
+    h.hover(pos2(450.0, 300.0));
+    h.click("Inbox");
+    // away from the row, so its buttons don't show
+    h.hover(pos2(450.0, 80.0));
+    let (title, clip) = text_and_clip(&h, LONG).expect("the title is drawn");
+    let time = h.painted_text(&fmt_ago(now_ts() - 3 * 3600));
+    assert_eq!(time.len(), 1);
+    let shown_right = title.right().min(clip.right());
+    assert!(
+        shown_right <= time[0].0.left() - 8.0,
+        "the title ({shown_right}) runs into the time ({:?})",
+        time[0].0
+    );
+}

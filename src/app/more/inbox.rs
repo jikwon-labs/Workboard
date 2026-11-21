@@ -335,7 +335,11 @@ impl App {
                                 }
                                 _ => false,
                             };
-                            ui.painter().text(
+                            // the title stops where the line under it does, before the
+                            // time and the buttons on the right
+                            let text_clip =
+                                Rect::from_min_max(r.min, pos2(r.right() - 190.0, r.bottom()));
+                            ui.painter().with_clip_rect(text_clip).text(
                                 r.left_top() + vec2(48.0, 18.0),
                                 Align2::LEFT_CENTER,
                                 if archived {
@@ -349,10 +353,7 @@ impl App {
                             let line = self
                                 .inbox_line(it.author, &it.text, it.comment, it.src, it.mention);
                             ui.painter()
-                                .with_clip_rect(Rect::from_min_max(
-                                    r.min,
-                                    pos2(r.right() - 190.0, r.bottom()),
-                                ))
+                                .with_clip_rect(text_clip)
                                 .text(
                                     r.left_top() + vec2(48.0, 40.0),
                                     Align2::LEFT_CENTER,

@@ -183,6 +183,14 @@ public enum Mentions {
         return (everyoneWords.prefix(1) + [hereWord] + teams(of: data).map(\.name)).filter { q.isEmpty || $0.lowercased().hasPrefix(q) }
     }
 
+    /// The "@" `text` ends in is the one a pick from the list just filled
+    /// in (`completed`: the text right after that pick), so the list stays
+    /// closed for it while the text still starts with that pick.
+    public static func isCompleted(_ text: String, after completed: String?) -> Bool {
+        guard let c = completed, text.hasPrefix(c), let at = text.lastIndex(of: "@"), let cAt = c.lastIndex(of: "@") else { return false }
+        return text.distance(from: text.startIndex, to: at) == c.distance(from: c.startIndex, to: cAt)
+    }
+
     /// `text` with the "@query" it ends in replaced by "@<name> ".
     public static func complete(_ text: String, with name: String) -> String {
         guard query(in: text) != nil, let at = text.lastIndex(of: "@") else { return text + "@" + name + " " }

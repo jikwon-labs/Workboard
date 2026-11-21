@@ -730,6 +730,14 @@ final class MentionPickTests: XCTestCase {
         XCTAssertEqual(Mentions.candidates("jam", members: members, me: 2).map(\.id), [1])
         XCTAssertEqual(Mentions.complete("hi @al", with: "Alex"), "hi @Alex ")
         XCTAssertEqual(Mentions.complete("@", with: "Jamie Park"), "@Jamie Park ")
+        // after a pick the list stays closed for that "@", even as a name with
+        // a space reads like a query again, and opens for the next "@"
+        let picked = Mentions.complete("hi @al", with: "Alex Kim")
+        XCTAssertTrue(Mentions.isCompleted(picked, after: picked))
+        XCTAssertTrue(Mentions.isCompleted(picked + "and", after: picked))
+        XCTAssertFalse(Mentions.isCompleted(picked + "@j", after: picked))
+        XCTAssertFalse(Mentions.isCompleted("hi @Al", after: picked), "the pick was erased")
+        XCTAssertFalse(Mentions.isCompleted(picked, after: nil))
     }
 
     /// "@channel", "@here" and a team's name keep everyone they stand for

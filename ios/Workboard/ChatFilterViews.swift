@@ -83,9 +83,7 @@ struct MessageFilterBanner: View {
             .accessibilityLabel("All messages")
             .accessibilityIdentifier("clearFilterButton")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Capsule().fill(Color(.secondarySystemBackground)))
+        .pill(horizontal: 12, vertical: 8)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.bar)

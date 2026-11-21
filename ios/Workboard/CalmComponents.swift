@@ -92,6 +92,14 @@ extension View {
             .toolbarRole(.editor)
             .toolbar { ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) } }
     }
+
+    /// A grey pill behind the content: the message box's suggestion chips
+    /// and the filter banner over a conversation.
+    func pill(horizontal: CGFloat = 10, vertical: CGFloat = 5) -> some View {
+        padding(.horizontal, horizontal)
+            .padding(.vertical, vertical)
+            .background(Capsule().fill(Color(.secondarySystemBackground)))
+    }
 }
 
 /// The big title under "<", with the place's coloured icon.

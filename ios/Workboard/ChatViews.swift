@@ -878,106 +878,13 @@ struct Composer: View {
         self.send = send
     }
 
-    /// The people the @ list shows now (none: no list).
-    var mentionChoices: [MemberView] {
-        guard let q = Mentions.query(in: text), let at = text.lastIndex(of: "@") else { return [] }
-        if let c = completed, text.hasPrefix(c), let cAt = c.lastIndex(of: "@"),
-           text.distance(from: text.startIndex, to: at) == c.distance(from: c.startIndex, to: cAt) { return [] }
-        return Mentions.candidates(q, members: client.view.members, me: client.me)
-    }
-
-    /// The groups the @ list shows after the people: "@channel", "@here", teams.
-    var groupChoices: [String] {
-        guard let q = Mentions.query(in: text), let at = text.lastIndex(of: "@"), let d = client.data else { return [] }
-        if let c = completed, text.hasPrefix(c), let cAt = c.lastIndex(of: "@"),
-           text.distance(from: text.startIndex, to: at) == c.distance(from: c.startIndex, to: cAt) { return [] }
-        return Mentions.groupCandidates(q, data: d)
-    }
-
     var ready: [JSON] { pending.compactMap(\.attachment) }
     var uploading: Bool { pending.contains { $0.attachment == nil && $0.error == nil } }
 
     var body: some View {
         let can = client.canEdit
         VStack(spacing: 6) {
-            let slash = SlashCommands.choices(text, commands: client.commands)
-            if !slash.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(slash, id: \.0) { name, about in
-                            Button {
-                                text = "/\(name) "
-                            } label: {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Text("/" + name).font(.subheadline.weight(.medium).monospaced())
-                                    if !about.isEmpty { Text(L(about)).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Capsule().fill(Color(.secondarySystemBackground)))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("command-\(name)")
-                        }
-                    }
-                    .padding(.horizontal, 4)
-                }
-            }
-            let choices = mentionChoices
-            let groups = groupChoices
-            if !choices.isEmpty || !groups.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(choices) { m in
-                            Button {
-                                text = Mentions.complete(text, with: m.name)
-                                completed = text
-                                if !mentioned.contains(m.id) { mentioned.append(m.id) }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Avatar(member: m, size: 22)
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        Text(m.name).font(.subheadline.weight(.medium))
-                                        // tells apart people with the same name
-                                        if !m.email.isEmpty { Text(m.email).font(.caption2).foregroundStyle(.secondary) }
-                                    }
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Capsule().fill(Color(.secondarySystemBackground)))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Mention \(m.name)" + (m.email.isEmpty ? "" : ", \(m.email)"))
-                            .accessibilityIdentifier("mention-\(m.id)")
-                        }
-                        ForEach(groups, id: \.self) { g in
-                            Button {
-                                text = Mentions.complete(text, with: g)
-                                completed = text
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "person.3").font(.caption)
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        Text("@" + g).font(.subheadline.weight(.medium))
-                                        Text(g == "channel" ? L("Everyone in this conversation") : g == "here" ? L("Everyone here who is online") : L("Everyone in this team"))
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                    }
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Capsule().fill(Color(.secondarySystemBackground)))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Mention @\(g)")
-                            .accessibilityIdentifier("mention-group-\(g)")
-                        }
-                    }
-                    .padding(.horizontal, 4)
-                }
-                .accessibilityIdentifier("mentionList")
-            }
+            SuggestionBar(text: $text, mentioned: $mentioned, completed: $completed)
             if !pending.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {

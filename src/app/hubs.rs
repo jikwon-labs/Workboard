@@ -116,10 +116,11 @@ impl App {
     /// The hubs share `hub_filter`, but each reads it its own way (Docs'
     /// Archived is 6, a team's page 9, which Forms would show as Favorites).
     /// A hub that comes up after another without its filter being set (a
-    /// search result, Back, a form made from a + menu) starts on its first
-    /// filter instead of the other hub's; back on the hub that set it,
-    /// after pages without filters (Home), the filter is still there. Run
-    /// at the start of each frame.
+    /// search result, Back, a form made from a + menu) takes the filter it
+    /// had when it was last left, else its first, instead of the other
+    /// hub's. Pages without filters (Home) in between don't count. Opening
+    /// an app from the bar starts it afresh (`open_app`). Run at the start
+    /// of each frame.
     pub(super) fn fit_hub_filter(&mut self) {
         let hub = matches!(
             self.section,
@@ -134,8 +135,16 @@ impl App {
             return;
         }
         if let Some((owner, filter)) = self.sweep.hub_filter_was {
-            if owner != self.section && filter == self.hub_filter {
-                self.hub_filter = 0;
+            if owner != self.section {
+                self.sweep.hub_filters.insert(owner, filter);
+                if filter == self.hub_filter {
+                    self.hub_filter = self
+                        .sweep
+                        .hub_filters
+                        .get(&self.section)
+                        .copied()
+                        .unwrap_or(0);
+                }
             }
         }
         self.sweep.hub_filter_was = Some((self.section, self.hub_filter));

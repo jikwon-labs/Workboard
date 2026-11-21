@@ -97,6 +97,8 @@ pub struct SweepUi {
     pub side_find: HashMap<&'static str, String>,
     /// The hub last shown and its filter then (`App::fit_hub_filter`).
     pub hub_filter_was: Option<(Section, u8)>,
+    /// Each hub's filter when another hub came up, for when it comes back.
+    pub hub_filters: HashMap<Section, u8>,
     /// Dashboard card being renamed: (index, text).
     pub card_rename: Option<(usize, String)>,
     /// Time entry being changed.

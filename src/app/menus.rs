@@ -1273,6 +1273,8 @@ impl App {
     pub(super) fn open_app(&mut self, label: &str) {
         self.open_task = None;
         self.hub_filter = 0;
+        // every hub starts afresh, not on the filter it was last left on
+        self.sweep.hub_filters.clear();
         let temp = match label {
             "Docs" => Some(Section::Docs),
             "Dashboards" => Some(Section::Dashboards),

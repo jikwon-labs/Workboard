@@ -33,6 +33,9 @@ pub const T: &[(&str, &str)] = &[
     ("Assigned", "할당됨"),
     ("Add bookmarks, notes, and more", "북마크, 메모 등 추가"),
     ("Messages with replies", "답장이 있는 메시지"),
+    ("Files", "파일"),
+    ("Messages with files", "파일이 있는 메시지"),
+    ("Messages with links", "링크가 있는 메시지"),
     ("Messages turned into tasks", "작업으로 만든 메시지"),
     // a long channel shows its newest messages first
     ("Show 1 earlier message", "이전 메시지 1개 보기"),

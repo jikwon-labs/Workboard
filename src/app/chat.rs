@@ -490,6 +490,17 @@ fn stands_without_text(m: &Message) -> bool {
         || m.post_title.as_ref().is_some_and(|t| !t.trim().is_empty())
 }
 
+/// A message with pictures, videos or other files sent in it (the channel
+/// panel's Files).
+pub(super) fn has_files(m: &Message) -> bool {
+    !m.attachments.is_empty()
+}
+
+/// A message with a web address in its text (the channel panel's Links).
+pub(super) fn has_links(m: &Message) -> bool {
+    m.preview.is_some() || super::chatfmt::first_url(&m.text).is_some()
+}
+
 fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
     for m in msgs.iter_mut() {
         if m.id == id {
@@ -1369,7 +1380,7 @@ impl App {
             egui::SidePanel::right(egui::Id::new(("chan_panel", cid))).exact_width(panel_w).resizable(false).show_separator_line(false).frame(egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 12, top: 12, bottom: 8 })).show_inside(ui, |ui| {
                 egui::Frame::new().stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let rows: [(&str, &str, u8); 7] = [("person", "Followers", 10), ("search", "Find in channel", 11), ("reply", "Replies", 2), ("pin", "Pinned messages", 1), ("bookmark", "Saved", 4), ("task", "Turned into tasks", 3), ("settings", "Settings", 12)];
+                    let rows: [(&str, &str, u8); 9] = [("person", "Followers", 10), ("search", "Find in channel", 11), ("reply", "Replies", 2), ("pin", "Pinned messages", 1), ("bookmark", "Saved", 4), ("attach", "Files", 5), ("link", "Links", 6), ("task", "Turned into tasks", 3), ("settings", "Settings", 12)];
                     for (icon, label, code) in rows {
                         let w = ui.available_width();
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
@@ -1423,6 +1434,8 @@ impl App {
                         1 => tr("Pinned messages"),
                         2 => tr("Messages with replies"),
                         4 => tr("Saved messages"),
+                        5 => tr("Messages with files"),
+                        6 => tr("Messages with links"),
                         _ => tr("Messages turned into tasks"),
                     };
                     if ui.add(egui::Button::new(format!("{}  \u{00D7}", label)).corner_radius(14)).clicked() {
@@ -1448,6 +1461,8 @@ impl App {
                     2 => !m.replies.is_empty(),
                     3 => m.task.is_some(),
                     4 => m.saved || m.replies.iter().any(|r| r.saved),
+                    5 => has_files(m),
+                    6 => has_links(m),
                     _ => true,
                 })
                 .collect();

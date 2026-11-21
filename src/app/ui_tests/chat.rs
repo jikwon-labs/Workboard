@@ -3733,3 +3733,80 @@ fn channel_tabs_drag_into_a_new_order_and_add_view_adds_a_tab() {
         ["Calendar", "List", "Board", "Channel"]
     );
 }
+
+/// Files and Links in a conversation's panel show only the messages that
+/// sent a file or a web address; clicking the row again shows them all.
+#[test]
+fn files_and_links_show_only_those_messages() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let me = h.app.data.me;
+    let mut file = crate::app::slack::new_message(
+        h.app.data.new_id(),
+        me,
+        "Here is the plan".into(),
+        now_ts(),
+    );
+    file.attachments.push(Attachment {
+        file: "0".repeat(64),
+        name: "plan.pdf".into(),
+        kind: MediaKind::File,
+        bytes: 1000,
+        w: 0,
+        h: 0,
+        secs: 0.0,
+        thumb: None,
+    });
+    let link = crate::app::slack::new_message(
+        h.app.data.new_id(),
+        me,
+        "The spec is at https://example.com/spec".into(),
+        now_ts() + 1,
+    );
+    let plain = crate::app::slack::new_message(
+        h.app.data.new_id(),
+        me,
+        "Lunch at noon".into(),
+        now_ts() + 2,
+    );
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap();
+    ch.messages.extend([file, link, plain]);
+    h.settle();
+    let shown = |h: &Ui1, text: &str| !h.painted_text(text).is_empty();
+    // the rows of the panel on the right, by the words on them
+    let row = |h: &mut Ui1, label: &str| {
+        let r = h.painted_text(label).first().expect(label).0;
+        h.click_at(r.center());
+    };
+    assert!(shown(&h, "Here is the plan") && shown(&h, "Lunch at noon"));
+
+    row(&mut h, "Files");
+    assert_eq!(h.app.channel_panel, 5);
+    assert!(shown(&h, "Here is the plan"), "the message with a file");
+    assert!(!shown(&h, "Lunch at noon"), "not the others");
+    assert!(!shown(&h, "The spec is at https://example.com/spec"));
+    assert!(
+        h.has("Messages with files  \u{00D7}"),
+        "named over the list"
+    );
+
+    row(&mut h, "Links");
+    assert_eq!(h.app.channel_panel, 6);
+    assert!(
+        shown(&h, "The spec is at https://example.com/spec"),
+        "the message with a link"
+    );
+    assert!(!shown(&h, "Here is the plan"));
+    assert!(!shown(&h, "Lunch at noon"));
+
+    row(&mut h, "Links");
+    assert_eq!(h.app.channel_panel, 0);
+    assert!(shown(&h, "Lunch at noon"), "every message again");
+}

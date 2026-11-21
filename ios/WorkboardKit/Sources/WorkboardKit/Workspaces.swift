@@ -50,13 +50,15 @@ extension ServerAddress {
 extension DeviceSettings {
     /// These settings for another workspace on this same iPhone: what
     /// belongs to the device (its id, its push token and the servers still
-    /// to be told to stop pushes) comes from `device`.
+    /// to be told to stop pushes) comes from `device`. Whether this
+    /// workspace's server has the token (`pushSentTo`) stays its own: taking
+    /// the other workspace's made the first welcome back look unpushed, and
+    /// every message pushed while away notified a second time.
     func onDevice(_ device: DeviceSettings) -> DeviceSettings {
         var s = self
         s.device = device.device
         s.pushToken = device.pushToken
         s.pushEnv = device.pushEnv
-        s.pushSentTo = device.pushSentTo
         s.pushUnregister = device.pushUnregister
         return s
     }

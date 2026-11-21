@@ -132,6 +132,30 @@ final class Round3ClientTests: FakeServerTestCase {
         XCTAssertEqual(b.registeredPushTokens[c.settings.device], "ffee")
     }
 
+    func testBackToAKeptWorkspaceItsWelcomeIsMarkedAsPushed() async throws {
+        let a = FakeServer(snapshot: SampleWorkspace.make())
+        let b = FakeServer(snapshot: SampleWorkspace.make())
+        let pa = try await a.start(port: 0), pb = try await b.start(port: 0)
+        defer { a.stop(); b.stop() }
+        let (ua, ub) = ("ws://127.0.0.1:\(pa)", "ws://127.0.0.1:\(pb)")
+        let c = client(ua, me: 1)
+        c.setPushToken("ffee", env: "development")
+        await until("registered on a") { a.registeredPushTokens[c.settings.device] == "ffee" }
+        await until("a's copy") { c.data != nil }
+        c.setServer(ub)
+        c.setMe(1)
+        await until("registered on b") { b.registeredPushTokens[c.settings.device] == "ffee" }
+
+        // a tap on a's notification opens a: a pushed what came meanwhile
+        var marks: [Bool] = []
+        c.onUpdate = { [weak c] in marks.append(c?.pushedWhileAway ?? false) }
+        c.switchTo(try XCTUnwrap(c.savedWorkspaces.first))
+        XCTAssertEqual(c.settings.pushSentTo, ua, "a's server has the token, not b's")
+        await until("welcomed by a") { c.state.isConnected && !marks.isEmpty }
+        c.onUpdate = {}
+        XCTAssertEqual(marks.first, true, "the welcome's messages were pushed already")
+    }
+
     func testSwitchingToAWorkspaceNotKeptStopsPushesFromTheOldOne() async throws {
         let a = FakeServer(snapshot: SampleWorkspace.make())
         let b = FakeServer(snapshot: SampleWorkspace.make())

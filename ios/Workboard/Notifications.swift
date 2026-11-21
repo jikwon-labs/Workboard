@@ -139,9 +139,9 @@ final class Notifier {
         return p
     }
 
-    /// Keys already told (or that existed at the first look) in this run.
-    @ObservationIgnored private var seen: Set<String> = []
-    @ObservationIgnored private var seeded = false
+    /// Keys already told (or that existed at the first look) in this run,
+    /// each workspace's apart.
+    @ObservationIgnored private var told = Notify.Told()
 
     /// After the team's changes came in (notify_scan): tell what is new, keep
     /// the icon's number and the clock notices up to date.
@@ -166,18 +166,13 @@ final class Notifier {
         let inbox = client.inboxItems(me: me)
         let found = Notify.candidates(data, prefs: prefs, me: me, manager: manager, inbox: inbox)
         let all = Notify.candidates(data, prefs: .everything, me: me, manager: manager, inbox: inbox, everyTask: true).map(\.key)
-        if !seeded {
-            seen = Set(all).union(found.map(\.key))
-            seeded = true
-        } else {
-            var fresh = Notify.fresh(found, all: all, seen: &seen, now: nowTs())
-            let active = UIApplication.shared.applicationState == .active
-            fresh.removeAll { active && visible($0.target, nav: nav) }
-            // back after being away (a notification tapped, the app brought
-            // forward): the server pushed those messages already
-            if client.pushedWhileAway { fresh.removeAll { Notify.pushedByServer($0.kind) } }
-            deliver(fresh, view: client.view)
-        }
+        var fresh = told.fresh(found, all: all, workspace: client.pushKey, now: nowTs())
+        let active = UIApplication.shared.applicationState == .active
+        fresh.removeAll { active && visible($0.target, nav: nav) }
+        // back after being away (a notification tapped, the app brought
+        // forward): the server pushed those messages already
+        if client.pushedWhileAway { fresh.removeAll { Notify.pushedByServer($0.kind) } }
+        deliver(fresh, view: client.view)
         updateBadge(data, view: client.view, me: me, inbox: inbox)
         scheduleClock(client: client)
     }

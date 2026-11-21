@@ -120,6 +120,19 @@ final class NotifyTests: XCTestCase {
         XCTAssertTrue(seen.contains("x"), "what exists with every kind on isn't news later")
     }
 
+    func testEachWorkspaceRemembersWhatWasToldOnItsOwn() {
+        let now: Int64 = 100_000
+        func note(_ k: String) -> Note { Note(key: k, kind: .direct, title: "", body: "", target: .people, ts: now - 10) }
+        var told = Notify.Told()
+        XCTAssertTrue(told.fresh([note("a1")], all: ["a1"], workspace: "A", now: now).isEmpty, "the first look only remembers")
+        XCTAssertEqual(told.fresh([note("a1"), note("a2")], all: [], workspace: "A", now: now).map(\.key), ["a2"])
+        // another workspace opened: its last day is not news
+        XCTAssertTrue(told.fresh([note("b1"), note("b2")], all: ["b1", "b2"], workspace: "B", now: now).isEmpty)
+        XCTAssertEqual(told.fresh([note("b1"), note("b3")], all: [], workspace: "B", now: now).map(\.key), ["b3"])
+        // back to the first: only what came since it was left
+        XCTAssertEqual(told.fresh([note("a1"), note("a2"), note("a3")], all: [], workspace: "A", now: now).map(\.key), ["a3"])
+    }
+
     func testPrefsSaveAndReadBackAndOldFilesKeepDefaults() throws {
         var p = NotifyPrefs()
         p.setChannelMode(301, "all")

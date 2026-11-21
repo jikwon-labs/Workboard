@@ -413,6 +413,26 @@ public enum Notify {
         return out
     }
 
+    /// What was already told, per workspace (its `SyncClient.pushKey`).
+    /// The first look at a workspace in this run only remembers what is
+    /// there; switching to another one and back keeps each one's own list,
+    /// so a workspace just opened doesn't announce its whole last day.
+    public struct Told: Sendable {
+        var byWorkspace: [String: Set<String>] = [:]
+        public init() {}
+
+        /// `Notify.fresh` for `workspace`, or nothing on its first look.
+        public mutating func fresh(_ found: [Note], all: [String], workspace: String, now: Int64) -> [Note] {
+            guard var seen = byWorkspace[workspace] else {
+                byWorkspace[workspace] = Set(all).union(found.map(\.key))
+                return []
+            }
+            let out = Notify.fresh(found, all: all, seen: &seen, now: now)
+            byWorkspace[workspace] = seen
+            return out
+        }
+    }
+
     /// The once-a-day summary of my tasks due on `day` and overdue by then,
     /// or nil when there are none ("3 tasks are due today", "2 overdue tasks").
     public static func dueSummary(_ view: WorkspaceView, me: UInt64, day: String) -> String? {

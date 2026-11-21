@@ -1582,3 +1582,51 @@ fn small_window_docs_list_headers_and_form_footer_fit() {
     let over = overlapping(&h.texts_in(page));
     assert!(over.is_empty(), "Fill out: {:?}", over);
 }
+
+/// A sidebar whose rows all fit does not move under the wheel: an empty gap
+/// kept after the last row for when the list is scrolled to its end made a
+/// list that fits a few points too tall, so it slid that far.
+#[test]
+fn sidebar_that_fits_does_not_scroll() {
+    let side_rect = |h: &Ui1| {
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sidebar"))
+            .expect("the sidebar is open")
+            .rect
+    };
+    let last_row = |h: &Ui1, side: Rect| {
+        h.painted_text(&tr("New message"))
+            .into_iter()
+            .map(|(r, _)| r)
+            .filter(|r| side.x_range().contains(r.left()))
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+            .expect("the sidebar lists New message")
+    };
+    let mut tall = Ui1::sized(1440.0, 1400.0);
+    tall.settle();
+    // the room left under the bottom row, down to the sidebar's edge
+    let spare = side_rect(&tall).bottom() - tall.rect("New message").bottom();
+    // a window just tall enough for the rows: the bottom row ends 4 points
+    // above the sidebar's 6-point bottom margin
+    let mut h = Ui1::sized(1440.0, (1400.0 - spare + 6.0 + 4.0).ceil());
+    h.settle();
+    let side = side_rect(&h);
+    let before = last_row(&h, side);
+    for _ in 0..4 {
+        h.frame(vec![egui::Event::PointerMoved(pos2(
+            side.center().x,
+            300.0,
+        ))]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -200.0),
+            modifiers: Default::default(),
+        }]);
+    }
+    h.settle();
+    let after = last_row(&h, side);
+    assert_eq!(
+        before.top(),
+        after.top(),
+        "the rows fit, so the wheel leaves them where they are"
+    );
+}

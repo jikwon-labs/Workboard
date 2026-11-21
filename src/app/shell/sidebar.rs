@@ -114,7 +114,13 @@ impl App {
 
                     // Direct Messages
                     self.sidebar_dms(ui, t, filter, muted);
-                    ui.add_space(20.0);
+                    // room under the last row once the list is taller than
+                    // the sidebar, so its end scrolls clear of the edge and
+                    // the unread pill; a list that fits gets none, or the
+                    // gap alone made it scroll
+                    if ui.min_rect().height() > ui.clip_rect().height() {
+                        ui.add_space(20.0);
+                    }
                 });
                 self.unread_below(ui, &out);
             });

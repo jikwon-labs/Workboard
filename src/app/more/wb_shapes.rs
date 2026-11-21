@@ -72,89 +72,77 @@ pub(crate) fn shape_rect(s: &WbShape) -> Rect {
     Rect::from_min_size(bpos(s.pos), vec2(s.size[0], s.size[1]))
 }
 
-/// Where a line from the middle of `s` toward `to` crosses its outline.
-fn edge_toward(s: &WbShape, to: Pos2) -> Pos2 {
-    let r = shape_rect(s);
-    let c = r.center();
-    let d = to - c;
-    let (hw, hh) = (r.width().max(1.0) / 2.0, r.height().max(1.0) / 2.0);
-    if d.length() < 0.01 {
-        return c;
-    }
-    let k = match s.kind.as_str() {
-        "diamond" => 1.0 / (d.x.abs() / hw + d.y.abs() / hh),
-        "ellipse" => 1.0 / ((d.x / hw).powi(2) + (d.y / hh).powi(2)).sqrt(),
-        _ => 1.0 / (d.x.abs() / hw).max(d.y.abs() / hh),
-    };
-    c + d * k
-}
-
 /// The points a line goes through on the board, from its `a` end to its
-/// `b` end. A tied end starts at its shape's outline; an elbow line leaves
-/// and enters through the middle of a side and turns at right angles.
+/// `b` end. A tied end meets its shape at the middle of the side facing the
+/// other end (top, right, bottom or left, which every kind of shape has on
+/// its outline); an elbow line turns at right angles between them.
 pub(crate) fn line_path(l: &WbLine, shapes: &[WbShape]) -> Vec<Pos2> {
     let find = |id: u64| (id != 0).then(|| shapes.iter().find(|s| s.id == id))?;
-    let (fs, ts) = (find(l.from), find(l.to));
-    let a0 = fs.map_or(bpos(l.a), |s| shape_rect(s).center());
-    let b0 = ts.map_or(bpos(l.b), |s| shape_rect(s).center());
-    if l.elbow {
-        let (ra, rb) = (fs.map(shape_rect), ts.map(shape_rect));
-        let d = b0 - a0;
-        // up and down when one shape is wholly above the other (an org
-        // chart's boxes, however far apart sideways), across when they sit
-        // side by side, else whichever way they are further apart
-        let gap = |lo: fn(&Rect) -> f32, hi: fn(&Rect) -> f32| match (ra, rb) {
-            (Some(x), Some(y)) => Some(lo(&y) >= hi(&x) || lo(&x) >= hi(&y)),
-            _ => None,
-        };
-        let above = gap(|r| r.top(), |r| r.bottom());
-        let beside = gap(|r| r.left(), |r| r.right());
-        let upright = match (above, beside) {
-            (Some(true), _) => true,
-            (_, Some(true)) => false,
-            _ => d.y.abs() >= d.x.abs(),
-        };
-        if upright {
-            let down = d.y >= 0.0;
-            let a = ra.map_or(a0, |r| {
-                if down {
-                    r.center_bottom()
-                } else {
-                    r.center_top()
-                }
-            });
-            let b = rb.map_or(b0, |r| {
-                if down {
-                    r.center_top()
-                } else {
-                    r.center_bottom()
-                }
-            });
-            let my = (a.y + b.y) / 2.0;
-            vec![a, pos2(a.x, my), pos2(b.x, my), b]
-        } else {
-            let right = d.x >= 0.0;
-            let a = ra.map_or(a0, |r| {
-                if right {
-                    r.right_center()
-                } else {
-                    r.left_center()
-                }
-            });
-            let b = rb.map_or(b0, |r| {
-                if right {
-                    r.left_center()
-                } else {
-                    r.right_center()
-                }
-            });
-            let mx = (a.x + b.x) / 2.0;
-            vec![a, pos2(mx, a.y), pos2(mx, b.y), b]
+    let (ra, rb) = (find(l.from).map(shape_rect), find(l.to).map(shape_rect));
+    let a0 = ra.map_or(bpos(l.a), |r| r.center());
+    let b0 = rb.map_or(bpos(l.b), |r| r.center());
+    let d = b0 - a0;
+    // up and down when one shape is wholly above the other (an org chart's
+    // boxes, however far apart sideways), across when they sit side by
+    // side; else the side the way from one middle to the other leaves
+    // through (a loose end toward a wide box meets its left or right)
+    let gap = |lo: fn(&Rect) -> f32, hi: fn(&Rect) -> f32| match (ra, rb) {
+        (Some(x), Some(y)) => Some(lo(&y) >= hi(&x) || lo(&x) >= hi(&y)),
+        _ => None,
+    };
+    let above = gap(|r| r.top(), |r| r.bottom());
+    let beside = gap(|r| r.left(), |r| r.right());
+    let upright = match (above, beside) {
+        (Some(true), _) => true,
+        (_, Some(true)) => false,
+        _ => {
+            let half = ra.or(rb).map_or(vec2(1.0, 1.0), |r| r.size() / 2.0);
+            d.y.abs() / half.y.max(1.0) >= d.x.abs() / half.x.max(1.0)
         }
+    };
+    let (a, b) = if upright {
+        let down = d.y >= 0.0;
+        let a = ra.map_or(a0, |r| {
+            if down {
+                r.center_bottom()
+            } else {
+                r.center_top()
+            }
+        });
+        let b = rb.map_or(b0, |r| {
+            if down {
+                r.center_top()
+            } else {
+                r.center_bottom()
+            }
+        });
+        (a, b)
     } else {
-        let a = fs.map_or(a0, |s| edge_toward(s, b0));
-        let b = ts.map_or(b0, |s| edge_toward(s, a0));
+        let right = d.x >= 0.0;
+        let a = ra.map_or(a0, |r| {
+            if right {
+                r.right_center()
+            } else {
+                r.left_center()
+            }
+        });
+        let b = rb.map_or(b0, |r| {
+            if right {
+                r.left_center()
+            } else {
+                r.right_center()
+            }
+        });
+        (a, b)
+    };
+    if !l.elbow {
         vec![a, b]
+    } else if upright {
+        let my = (a.y + b.y) / 2.0;
+        vec![a, pos2(a.x, my), pos2(b.x, my), b]
+    } else {
+        let mx = (a.x + b.x) / 2.0;
+        vec![a, pos2(mx, a.y), pos2(mx, b.y), b]
     }
 }
 
@@ -564,6 +552,40 @@ impl App {
                 continue;
             }
             paint_shape_body(&p, t, s, r, lw);
+            // picked, moved and opened for typing with the Select tool, also
+            // while typed in (a shape just put down is): before its text box,
+            // which stays on top for clicks on the text
+            if selecting {
+                let h = ui.interact(
+                    r.intersect(rect),
+                    ui.id().with(("wb_shape", wid, s.id)),
+                    Sense::click_and_drag(),
+                );
+                let label = if s.text.is_empty() {
+                    (i + 1).to_string()
+                } else {
+                    s.text.clone()
+                };
+                name_it(&h, &format!("Shape {}", label));
+                if h.hovered() && !h.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+                }
+                // only the left button moves it (the middle one moves
+                // the board)
+                let left = egui::PointerButton::Primary;
+                if h.drag_started_by(left) {
+                    grab = Some(s.clone());
+                }
+                if h.dragged_by(left) {
+                    moved = Some((i, h.drag_delta() / z));
+                }
+                if h.clicked() || h.drag_started_by(left) {
+                    pick = Some(s.id);
+                }
+                if h.double_clicked() {
+                    edit = Some(s.id);
+                }
+            }
             let area = text_area(&s.kind, r, z);
             let font = shape_font(ui.ctx(), &s.kind, z);
             if let Some(e) = editing.as_mut().filter(|e| e.1 == s.id) {
@@ -603,44 +625,11 @@ impl App {
                     // a click elsewhere (or Escape) ends the typing
                     e.1 = 0;
                 }
-            } else {
-                if !s.text.is_empty() {
-                    let g = p.layout_job(centred(&s.text, font, t.text, area.width()));
-                    let y = (area.center().y - g.size().y / 2.0).max(r.top());
-                    p.with_clip_rect(r.intersect(rect))
-                        .galley(pos2(area.center().x, y), g, t.text);
-                }
-                if selecting {
-                    let h = ui.interact(
-                        r.intersect(rect),
-                        ui.id().with(("wb_shape", wid, s.id)),
-                        Sense::click_and_drag(),
-                    );
-                    let label = if s.text.is_empty() {
-                        (i + 1).to_string()
-                    } else {
-                        s.text.clone()
-                    };
-                    name_it(&h, &format!("Shape {}", label));
-                    if h.hovered() && !h.dragged() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
-                    }
-                    // only the left button moves it (the middle one moves
-                    // the board)
-                    let left = egui::PointerButton::Primary;
-                    if h.drag_started_by(left) {
-                        grab = Some(s.clone());
-                    }
-                    if h.dragged_by(left) {
-                        moved = Some((i, h.drag_delta() / z));
-                    }
-                    if h.clicked() || h.drag_started_by(left) {
-                        pick = Some(s.id);
-                    }
-                    if h.double_clicked() {
-                        edit = Some(s.id);
-                    }
-                }
+            } else if !s.text.is_empty() {
+                let g = p.layout_job(centred(&s.text, font, t.text, area.width()));
+                let y = (area.center().y - g.size().y / 2.0).max(r.top());
+                p.with_clip_rect(r.intersect(rect))
+                    .galley(pos2(area.center().x, y), g, t.text);
             }
         }
         if let Some((i, d)) = moved {
@@ -1375,5 +1364,68 @@ pub(crate) fn undo_shapes(wb: &mut Whiteboard, op: WbUndo) -> Option<WbUndo> {
             ))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shape(id: u64, kind: &str, pos: [f32; 2]) -> WbShape {
+        WbShape {
+            id,
+            kind: kind.into(),
+            pos,
+            size: [160.0, 80.0],
+            ..Default::default()
+        }
+    }
+
+    /// A line meets a shape at the middle of its top, right, bottom or left,
+    /// whatever its kind and wherever the other end is. It met the outline
+    /// wherever the way between the two middles crossed it.
+    #[test]
+    fn a_line_meets_a_shape_at_the_middle_of_a_side() {
+        let a = shape(1, "rect", [0.0, 0.0]);
+        let mut l = WbLine {
+            from: 1,
+            to: 2,
+            ..Default::default()
+        };
+        let ends = |l: &WbLine, b: &WbShape| {
+            let p = line_path(l, &[a.clone(), b.clone()]);
+            (p[0], p[p.len() - 1])
+        };
+        for kind in ["rect", "pill", "diamond", "ellipse", "text"] {
+            // below and off to the right: bottom to top
+            let b = shape(2, kind, [300.0, 200.0]);
+            for elbow in [false, true] {
+                l.elbow = elbow;
+                assert_eq!(ends(&l, &b), (pos2(80.0, 80.0), pos2(380.0, 200.0)));
+            }
+            // beside and a little lower: right to left
+            let b = shape(2, kind, [300.0, 40.0]);
+            for elbow in [false, true] {
+                l.elbow = elbow;
+                assert_eq!(ends(&l, &b), (pos2(160.0, 40.0), pos2(300.0, 80.0)));
+            }
+            // above and to the left: top to bottom
+            let b = shape(2, kind, [-250.0, -200.0]);
+            l.elbow = false;
+            assert_eq!(ends(&l, &b), (pos2(80.0, 0.0), pos2(-170.0, -120.0)));
+        }
+        // a loose end meets the side facing it
+        let loose = |at: [f32; 2]| {
+            let l = WbLine {
+                from: 1,
+                b: at,
+                ..Default::default()
+            };
+            line_path(&l, &[a.clone()])[0]
+        };
+        assert_eq!(loose([400.0, 60.0]), pos2(160.0, 40.0));
+        assert_eq!(loose([-200.0, 30.0]), pos2(0.0, 40.0));
+        assert_eq!(loose([90.0, 300.0]), pos2(80.0, 80.0));
+        assert_eq!(loose([60.0, -300.0]), pos2(80.0, 0.0));
     }
 }

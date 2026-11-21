@@ -2264,3 +2264,43 @@ fn cmd_shift_z(h: &mut Ui1) {
 fn can_redo(h: &Ui1, wid: u64) -> bool {
     h.app.sweep.wb_redo.iter().any(|u| u.0 == wid)
 }
+
+/// A shape just put down (or added by a +) is ready to type in, and a drag
+/// on it moves it all the same, typed text and all. It stayed where it was:
+/// while typed in, it had nothing to take the drag.
+#[test]
+fn a_shape_being_typed_in_moves_with_a_drag() {
+    let mut h = Ui1::new();
+    let wid = board_with_notes(&mut h, &[]);
+    h.hover(h.rect("Whiteboard canvas").center());
+    h.click("Shape");
+    h.click("Rectangle");
+    h.click_at(on_screen(&h, [200.0, 200.0]));
+    h.type_text("Plan");
+    let s0 = board_of(&h, wid).shapes[0].clone();
+    assert!(h.app.sweep.wb_edit.is_some(), "typing in it");
+    // from its top left, away from the text in the middle
+    let at = on_screen(&h, [s0.pos[0] + 15.0, s0.pos[1] + 12.0]);
+    h.drag_by(at, at + vec2(100.0, 40.0));
+    let s1 = board_of(&h, wid).shapes[0].clone();
+    assert_eq!(s1.pos, [s0.pos[0] + 100.0, s0.pos[1] + 40.0]);
+    assert_eq!(s1.text, "Plan");
+    assert_eq!(
+        h.app.sweep.wb_sel,
+        Some((wid, crate::app::more::WbSel::Shape(s0.id))),
+        "still picked"
+    );
+    h.click("Undo");
+    assert_eq!(board_of(&h, wid).shapes[0].pos, s0.pos);
+
+    // the same for one a + added
+    h.click("Add shape right");
+    let s2 = board_of(&h, wid).shapes[1].clone();
+    assert!(h.app.sweep.wb_edit.is_some_and(|e| e.1 == s2.id));
+    let at = on_screen(&h, [s2.pos[0] + 15.0, s2.pos[1] + 12.0]);
+    h.drag_by(at, at + vec2(0.0, 80.0));
+    assert_eq!(
+        board_of(&h, wid).shapes[1].pos,
+        [s2.pos[0], s2.pos[1] + 80.0]
+    );
+}

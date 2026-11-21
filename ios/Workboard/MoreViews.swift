@@ -81,6 +81,13 @@ struct AppPage: View {
     let name: String
 
     var body: some View {
+        // the title small in the bar, as the other pushed screens: a large
+        // one under Home's hidden bar stayed drawn over the first row and
+        // took its taps (Dashboards' "Workspace overview" didn't open)
+        page.navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder var page: some View {
         switch name {
         case "goals": GoalsView()
         case "meetings": MeetingsView()

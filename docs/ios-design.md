@@ -83,6 +83,8 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 #   -destination 'platform=iOS Simulator,id=A59C0212-4DEC-4488-8E16-2EDEE67EBD7D'
 ```
 
+UI 테스트 전에는 모든 시뮬레이터에서 Workboard 앱을 꺼 둔다(`xcrun simctl terminate <기기> com.seojigwon.workboard`, `WB_IOS_UI=1 scripts/wt verify` 는 알아서 끈다). 예전 실행에서 남은 앱은 가짜 서버 주소에 계속 붙어 있다가, 서버를 새로 띄우면 자기가 가진 예전 작업공간을 그대로 다시 올린다. 그러면 예제의 마감일이 그 앱을 띄운 날 기준으로 남고, 테스트가 만든 작업이 수십 개 쌓여 "오늘·내일" 작업, 새로 만든 작업 줄, 대시보드를 찾는 테스트가 실패한다(2026-11-22, 하루 전에 띄운 앱 하나 때문에 6개가 실패했다).
+
 `--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`, `&imported=KEY` 를 붙이면 맥의 Slack 가져오기가 쓴 것처럼 `imported` 가 붙는다. `&file=NAME` 은 파일을 붙여 보내고(`&kind=Image` 면 1x1 그림, 앱이 받아 갈 수 있게 서버에 둔다), `&reply=ID` 는 그 메시지의 스레드 답글로 보낸다), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`), 다음 관리 요청에 N초 늦게 답하기(`/admin/late-answer?secs=N`, 그동안 그 연결에는 아무것도 가지 않는다), 다른 사람이 입력 중이라고 알리기(`/admin/typing?channel=C&member=M`)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
 
 예제 작업공간에서는 Sam Lee(멤버 3)에게만 이메일(`sam@example.com`)이 있다. 초대 코드에 이메일을 비워도 되는 경우와 이메일을 꼭 넣어야 하는 경우(멤버 2)를 둘 다 시험하기 위해서다.

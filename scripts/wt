@@ -103,6 +103,13 @@ cmd_verify() {
     say "swift test (ios/WorkboardKit) on $(git rev-parse --short HEAD)"
     swift test --package-path ios/WorkboardKit
     if [ -n "${WB_IOS_UI:-}" ]; then
+      # an app left running on any simulator from an earlier run stays on
+      # the fake servers' addresses and puts its old copy of the workspace
+      # back on them as soon as they start: stale due dates, piles of tasks
+      say "closing Workboard on every booted simulator"
+      for dev in $(xcrun simctl list devices booted | sed -n 's/.*(\([0-9A-F-]\{36\}\)) (Booted).*/\1/p'); do
+        xcrun simctl terminate "$dev" com.seojigwon.workboard 2>/dev/null || true
+      done
       say "iOS UI tests on the simulator"
       xcodebuild -quiet -project ios/Workboard.xcodeproj -scheme Workboard \
         -destination "platform=iOS Simulator,name=${WB_IOS_SIM:-iPhone 17}" test

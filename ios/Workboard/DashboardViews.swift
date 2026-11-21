@@ -32,6 +32,7 @@ struct DashboardsView: View {
                             let id = client.newId()
                             client.edit { d, me in Edits.addDashboard(&d, name: label, kind: k, space: nil, me: me, id: id) }
                         }
+                        .accessibilityIdentifier("newDashboard-\(k.isEmpty ? "all" : k)")
                     }
                 } label: { Image(systemName: "plus") }
                     .disabled(!client.canEdit)

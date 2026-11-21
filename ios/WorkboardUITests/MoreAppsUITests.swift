@@ -116,11 +116,13 @@ final class MoreAppsUITests: WorkboardUITestCase {
         let new = a.buttons["newDashboardButton"]
         let enabled = expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: new)
         wait(for: [enabled], timeout: 10)
+        // one made by an earlier run may be there too: the new one is last
+        let made = a.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'dashboard-' AND label CONTAINS 'Time Tracking'"))
+        let before = made.count
         new.tap()
-        a.buttons["Time Tracking"].tap()
-        let made = a.buttons.matching(NSPredicate(format: "label CONTAINS 'Time Tracking'")).firstMatch
-        XCTAssertTrue(made.waitForExistence(timeout: 5))
-        made.tap()
+        a.buttons["newDashboard-time"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "count == %d", before + 1), evaluatedWith: made)], timeout: 5)
+        made.element(boundBy: before).tap()
         XCTAssertTrue(a.staticTexts["Time tracked this week"].waitForExistence(timeout: 5))
         XCTAssertFalse(a.staticTexts["Task totals"].exists, "the time template has only time cards")
     }

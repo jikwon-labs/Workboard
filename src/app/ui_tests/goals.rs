@@ -893,3 +893,26 @@ fn sharing_leaves_out_people_who_left_the_team() {
         "nobody to mention, not \"Mention the people involved ()\""
     );
 }
+
+#[test]
+fn every_new_goal_button_starts_in_the_next_colour() {
+    let (mut h, _, _) = two_goals();
+    // two goals already: the third colour, as the empty page's button and
+    // Goal achieved's "Set the next goal" give
+    let next = [0x10, 0x90, 0xe0];
+    h.click("New goal");
+    let Some(Modal::NewGoal(d)) = &h.app.modal else {
+        panic!("New goal opens")
+    };
+    assert_eq!(d.color, next, "+ New goal on the Goals page");
+    h.click("Cancel new goal");
+    h.click("Done Lease signed");
+    h.key(egui::Key::Escape);
+    h.settle();
+    h.click("Achieved Office move");
+    h.click("Set the next goal");
+    let Some(Modal::NewGoal(d)) = &h.app.modal else {
+        panic!("New goal opens")
+    };
+    assert_eq!(d.color, next, "Set the next goal on an achieved goal's page");
+}

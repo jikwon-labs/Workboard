@@ -1484,9 +1484,8 @@ impl App {
                 self.goal_open = None;
                 self.goal_banner = None;
             }
-            GoalAct::NewGoal => {
-                self.modal = Some(Modal::NewGoal(Box::new(GoalDraft::new(self.data.me))))
-            }
+            // in the next colour, as from the empty page and Goal achieved
+            GoalAct::NewGoal => self.open_new_goal(None),
             GoalAct::View(v) => {
                 self.data.extra.goals_view = v.into();
                 self.dirty = true;

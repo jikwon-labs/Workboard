@@ -42,6 +42,9 @@ final class GoalsMeetingsTests: XCTestCase {
         d.set("tasks", .array(tasks))
         let goal = { (id: UInt64) in WorkspaceView(d).goals(d).first { $0.id == id }! }
         XCTAssertEqual(WorkspaceView(d).progress(of: goal(801)), 0.5, accuracy: 0.0001)
+        let n = WorkspaceView(d).goalTaskCounts([201, 206, 99999])
+        XCTAssertEqual(n.done, 1)
+        XCTAssertEqual(n.total, 2, "what its row says matches its progress")
         XCTAssertEqual(WorkspaceView(d).percent(of: goal(801)), 50)
         // 995 of 1,000 rounds to 100 but isn't done: 99
         Edits.addGoal(&d, name: "Almost", me: 1, id: 802)

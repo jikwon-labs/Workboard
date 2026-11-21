@@ -156,9 +156,8 @@ private struct TargetRow: View {
             .accessibilityIdentifier("targetDone-\(index)")
         case .tasks(let ids):
             Button(action: pickTasks) {
-                let v = client.view
-                let live = ids.compactMap { id in v.tasks.first { $0.id == id } }
-                LabeledContent(target.name, value: "\(live.filter { v.status(of: $0).isClosed }.count) of \(live.count) done")
+                let n = client.view.goalTaskCounts(ids)
+                LabeledContent(target.name, value: "\(n.done) of \(n.total) done")
             }
             .foregroundStyle(.primary)
         }

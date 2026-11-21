@@ -124,10 +124,17 @@ extension WorkspaceView {
             case .tasks(let ids):
                 // tasks deleted since they were picked don't count either
                 // way; archived ones still do, as on the Mac
-                let live = ids.compactMap { goalTaskClosed[$0] }
-                return live.isEmpty ? 0 : Double(live.filter { $0 }.count) / Double(live.count)
+                let (done, total) = goalTaskCounts(ids)
+                return total == 0 ? 0 : Double(done) / Double(total)
             }
         }.reduce(0, +) / Double(g.targets.count)
+    }
+
+    /// A tasks target's tasks closed and in all, counted as its progress
+    /// is (archived ones too, deleted ones not).
+    public func goalTaskCounts(_ ids: [UInt64]) -> (done: Int, total: Int) {
+        let live = ids.compactMap { goalTaskClosed[$0] }
+        return (live.filter { $0 }.count, live.count)
     }
 
     /// pct_of in src/app/more/goals.rs: the progress as a whole percent,

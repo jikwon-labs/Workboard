@@ -5115,30 +5115,22 @@ impl App {
                     }
                     ui.add_space(6.0);
                     // location
-                    let mut all: Vec<(u64, String)> = vec![];
-                    for s in self.data.spaces.iter().filter(|s| !s.archived) {
-                        for l in s.lists.iter().filter(|l| !l.archived) {
-                            all.push((l.id, format!("{} / {}", s.name, l.name)));
-                        }
-                        for f in &s.folders {
-                            for l in f.lists.iter().filter(|l| !l.archived) {
-                                all.push((l.id, format!("{} / {} / {}", s.name, f.name, l.name)));
-                            }
-                        }
-                    }
+                    // as Move tasks: not in someone else's Personal space nor archived
+                    let all = self.all_list_paths();
                     let cur = all
                         .iter()
                         .find(|x| x.0 == qa.list)
                         .map(|x| x.1.clone())
                         .unwrap_or_else(|| tr("Choose list").into());
                     let before = qa.list;
-                    egui::ComboBox::from_id_salt("qa_list")
+                    let pick = egui::ComboBox::from_id_salt("qa_list")
                         .selected_text(truncate(&cur, 40))
                         .show_ui(ui, |ui| {
                             for (id, name) in &all {
                                 ui.selectable_value(&mut qa.list, *id, name);
                             }
                         });
+                    name_it(&pick.response, "Task list");
                     if qa.list != before {
                         qa.status = None;
                     }

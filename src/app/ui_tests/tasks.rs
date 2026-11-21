@@ -465,6 +465,58 @@ fn create_task_window_starts_normal_and_can_clear_it() {
 }
 
 #[test]
+fn create_task_list_picker_hides_others_personal_spaces_and_archived_folders() {
+    let mut d = Data::seed();
+    let other = d.members.iter().find(|m| m.id != d.me).unwrap().id;
+    let (sid, fid, l1, l2) = (9_001, 9_002, 9_003, 9_004);
+    d.spaces.push(Space {
+        id: sid,
+        name: "Their Space".into(),
+        statuses: d.spaces[0].statuses.clone(),
+        lists: vec![ListItem {
+            id: l1,
+            name: "Their List".into(),
+            ..Default::default()
+        }],
+        expanded: true,
+        private_owner: Some(other),
+        ..Default::default()
+    });
+    d.spaces[0].folders.push(Folder {
+        id: fid,
+        name: "Shelved".into(),
+        lists: vec![ListItem {
+            id: l2,
+            name: "Old List".into(),
+            ..Default::default()
+        }],
+        expanded: true,
+        archived: true,
+    });
+    let first = d.spaces[0].name.clone();
+    let mut h = Ui1::with_data(d);
+    h.click("Create");
+    h.click("Task");
+    let cur = h.app.quick_add.as_ref().unwrap().list;
+    let (_, path) = h
+        .app
+        .all_list_paths()
+        .into_iter()
+        .find(|(id, _)| *id == cur)
+        .expect("the window starts on a list it offers");
+    h.click("Task list");
+    assert!(h.has(&path), "the picker is open");
+    assert!(
+        !h.has("Their Space / Their List"),
+        "someone's Personal space"
+    );
+    assert!(
+        !h.has(&format!("{first} / Shelved / Old List")),
+        "a List in an archived Folder"
+    );
+}
+
+#[test]
 fn create_task_window_closes_from_the_header_x() {
     let mut h = Ui1::new();
     h.click("Create");

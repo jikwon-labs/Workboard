@@ -135,7 +135,7 @@ pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
 /// A call in progress. Dropping it leaves the call.
 pub struct Call {
-    tx: Sender<Cmd>,
+    tx: tokio::sync::mpsc::UnboundedSender<Cmd>,
     rx: Receiver<Event>,
     pictures: Pictures,
     seen: Mutex<HashMap<String, u64>>,
@@ -144,7 +144,7 @@ pub struct Call {
 impl Call {
     /// Join a call; `video` is where pictures come from once the camera is turned on.
     pub fn start(join: Join, audio: Audio, video: Video, wake: Wake) -> Call {
-        let (tx, crx) = mpsc::channel();
+        let (tx, crx) = tokio::sync::mpsc::unbounded_channel();
         let (etx, rx) = mpsc::channel();
         let pictures: Pictures = Default::default();
         let pics = pictures.clone();
@@ -417,7 +417,7 @@ async fn run(
     join: Join,
     audio: Audio,
     video: Video,
-    crx: Receiver<Cmd>,
+    mut crx: tokio::sync::mpsc::UnboundedReceiver<Cmd>,
     etx: &Sender<Event>,
     wake: &Wake,
     pictures: Pictures,
@@ -530,83 +530,81 @@ async fn run(
                 }
                 Some(_) => {}
             },
-            _ = tick.tick() => {
-                loop {
-                    match crx.try_recv() {
-                        Ok(Cmd::Mute(true)) => publication.mute(),
-                        Ok(Cmd::Mute(false)) => publication.unmute(),
-                        Ok(Cmd::Camera(true)) if camera.is_none() => {
-                            let source = NativeVideoSource::new(VideoResolution { width: quality::CAMERA_WIDTH, height: quality::CAMERA_WIDTH * 9 / 16 }, false);
-                            let track = LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
-                            match room.local_participant().publish_track(LocalTrack::Video(track), quality::camera_options()).await {
-                                Ok(p) => {
-                                    let pics = pictures.clone();
-                                    let (etx2, wake2) = (etx.clone(), wake.clone());
-                                    let feed = video::start_feed(video, source, camera_limits.clone(), move |pic| match pic {
-                                        Some(pic) => put_picture(&pics, ME, pic),
-                                        None => {
-                                            pics.lock().unwrap().remove(ME);
-                                        }
-                                    }, move |why| {
-                                        let _ = etx2.send(Event::Trouble(why));
-                                        wake2();
-                                    });
-                                    camera = Some((p, feed));
+            // what the app asks, as soon as it asks
+            cmd = crx.recv() => match cmd {
+                Some(Cmd::Mute(true)) => publication.mute(),
+                Some(Cmd::Mute(false)) => publication.unmute(),
+                Some(Cmd::Camera(true)) if camera.is_none() => {
+                    let source = NativeVideoSource::new(VideoResolution { width: quality::CAMERA_WIDTH, height: quality::CAMERA_WIDTH * 9 / 16 }, false);
+                    let track = LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
+                    match room.local_participant().publish_track(LocalTrack::Video(track), quality::camera_options()).await {
+                        Ok(p) => {
+                            let pics = pictures.clone();
+                            let (etx2, wake2) = (etx.clone(), wake.clone());
+                            let feed = video::start_feed(video, source, camera_limits.clone(), move |pic| match pic {
+                                Some(pic) => put_picture(&pics, ME, pic),
+                                None => {
+                                    pics.lock().unwrap().remove(ME);
                                 }
-                                Err(e) => {
-                                    emit(Event::Trouble(format!("Couldn't send your video: {}", e)));
-                                }
-                            }
+                            }, move |why| {
+                                let _ = etx2.send(Event::Trouble(why));
+                                wake2();
+                            });
+                            camera = Some((p, feed));
                         }
-                        Ok(Cmd::Camera(false)) => {
-                            if let Some((p, feed)) = camera.take() {
-                                drop(feed);
-                                let _ = room.local_participant().unpublish_track(&p.sid()).await;
-                                pictures.lock().unwrap().remove(ME);
-                            }
+                        Err(e) => {
+                            emit(Event::Trouble(format!("Couldn't send your video: {}", e)));
                         }
-                        Ok(Cmd::Camera(_)) => {}
-                        Ok(Cmd::Screen(share)) => {
-                            if let Some((p, feed)) = screen.take() {
-                                drop(feed);
-                                let _ = room.local_participant().unpublish_track(&p.sid()).await;
-                            }
-                            // test pictures stand in for the screen too
-                            let share = match (share, video) {
-                                (Some(Share::Pattern(c)), _) => Some(Share::Pattern(c)),
-                                (Some(_), Video::Pattern(c)) => Some(Share::Pattern([255 - c[0], 255 - c[1], 255 - c[2]])),
-                                (s, _) => s,
-                            };
-                            if let Some(share) = share {
-                                let (w, h) = (quality::SCREEN_WIDTH, quality::SCREEN_WIDTH * 9 / 16);
-                                let source = NativeVideoSource::new(VideoResolution { width: w, height: h }, true);
-                                let track = LocalVideoTrack::create_video_track("screen", RtcVideoSource::Native(source.clone()));
-                                match room.local_participant().publish_track(LocalTrack::Video(track), quality::screen_options()).await {
-                                    Ok(p) => {
-                                        let (etx2, wake2) = (etx.clone(), wake.clone());
-                                        let feed = screen::start_screen(share, source, screen_limits.clone(), move |why| {
-                                            let _ = etx2.send(Event::ScreenEnded(why));
-                                            wake2();
-                                        });
-                                        screen = Some((p, feed));
-                                    }
-                                    Err(e) => {
-                                        emit(Event::ScreenEnded(Some(ScreenTrouble::Failed(format!("Couldn't send your screen: {}", e)))));
-                                    }
-                                }
-                            }
-                        }
-                        Ok(Cmd::Views(v)) => {
-                            views = v;
-                            ask_layers(&room, &views, &mut asked);
-                        }
-                        Ok(Cmd::Leave) | Err(mpsc::TryRecvError::Disconnected) => {
-                            let _ = room.close().await;
-                            return None;
-                        }
-                        Err(mpsc::TryRecvError::Empty) => break,
                     }
                 }
+                Some(Cmd::Camera(false)) => {
+                    if let Some((p, feed)) = camera.take() {
+                        drop(feed);
+                        let _ = room.local_participant().unpublish_track(&p.sid()).await;
+                        pictures.lock().unwrap().remove(ME);
+                    }
+                }
+                Some(Cmd::Camera(_)) => {}
+                Some(Cmd::Screen(share)) => {
+                    if let Some((p, feed)) = screen.take() {
+                        drop(feed);
+                        let _ = room.local_participant().unpublish_track(&p.sid()).await;
+                    }
+                    // test pictures stand in for the screen too
+                    let share = match (share, video) {
+                        (Some(Share::Pattern(c)), _) => Some(Share::Pattern(c)),
+                        (Some(_), Video::Pattern(c)) => Some(Share::Pattern([255 - c[0], 255 - c[1], 255 - c[2]])),
+                        (s, _) => s,
+                    };
+                    if let Some(share) = share {
+                        let (w, h) = (quality::SCREEN_WIDTH, quality::SCREEN_WIDTH * 9 / 16);
+                        let source = NativeVideoSource::new(VideoResolution { width: w, height: h }, true);
+                        let track = LocalVideoTrack::create_video_track("screen", RtcVideoSource::Native(source.clone()));
+                        match room.local_participant().publish_track(LocalTrack::Video(track), quality::screen_options()).await {
+                            Ok(p) => {
+                                let (etx2, wake2) = (etx.clone(), wake.clone());
+                                let feed = screen::start_screen(share, source, screen_limits.clone(), move |why| {
+                                    let _ = etx2.send(Event::ScreenEnded(why));
+                                    wake2();
+                                });
+                                screen = Some((p, feed));
+                            }
+                            Err(e) => {
+                                emit(Event::ScreenEnded(Some(ScreenTrouble::Failed(format!("Couldn't send your screen: {}", e)))));
+                            }
+                        }
+                    }
+                }
+                Some(Cmd::Views(v)) => {
+                    views = v;
+                    ask_layers(&room, &views, &mut asked);
+                }
+                Some(Cmd::Leave) | None => {
+                    let _ = room.close().await;
+                    return None;
+                }
+            },
+            _ = tick.tick() => {
                 // a screen share that ended by itself: take it down
                 if screen.as_ref().is_some_and(|(_, f)| f.stopped()) {
                     if let Some((p, _)) = screen.take() {

@@ -68,6 +68,27 @@ final class NotifyTests: XCTestCase {
         XCTAssertTrue(Notify.candidates(d, prefs: NotifyPrefs(), me: 1, manager: false).filter { $0.kind == .member }.isEmpty)
     }
 
+    /// Two forms can share a name (two made from one template): an answer
+    /// tells the owner of the form the task says it answers, and an answer
+    /// from an app that doesn't record it goes by the name, then by the
+    /// form's list when several share it (as on the Mac).
+    func testAFormAnswerTellsOnlyThatFormsOwner() {
+        var d = SampleWorkspace.make()
+        Edits.addForm(&d, list: 120, me: 1, id: 830)
+        Edits.addForm(&d, list: 111, me: 3, id: 831)
+        _ = Edits.submitForm(&d, form: 831, answers: [0: "Theirs"], me: 2, id: 9000, ts: 11)
+        func forms(_ d: JSON) -> [Note] { Notify.candidates(d, prefs: NotifyPrefs(), me: 1, manager: false).filter { $0.kind == .form } }
+        XCTAssertTrue(forms(d).isEmpty, "an answer to someone else's form of the same name")
+        _ = Edits.submitForm(&d, form: 830, answers: [0: "Mine"], me: 2, id: 9001, ts: 12)
+        XCTAssertEqual(forms(d).map(\.body), ["Alex Kim answered: Mine"])
+        // answers older apps sent, without the form: told apart by list
+        for (tid, list) in [(UInt64(9002), UInt64(120)), (9003, 111)] {
+            Edits.addTask(&d, list: list, name: "Old \(tid)", assignees: [], due: nil, me: 2, id: tid, ts: 13)
+            d.updateItem(at: "tasks", id: tid) { t in Edits.log(&t, me: 2, text: "submitted the form New Form", ts: 13) }
+        }
+        XCTAssertEqual(Set(forms(d).map(\.body)), ["Alex Kim answered: Mine", "Alex Kim answered: Old 9002"])
+    }
+
     func testOnlyFreshNewsOnceAndHuddlesShortly() {
         let now: Int64 = 100_000
         let notes = [

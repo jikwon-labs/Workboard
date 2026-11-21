@@ -353,15 +353,21 @@ public enum Notify {
 
         // answers to my forms
         if n.forms {
-            let mineForms = Set((data.at("extra.forms")?.array ?? []).filter { $0["owner"]?.uint == me }.compactMap { $0["name"]?.string })
-            if !mineForms.isEmpty {
+            let forms = data.at("extra.forms")?.array ?? []
+            let mine = forms.filter { $0["owner"]?.uint == me }
+            let mineIds = Set(mine.compactMap { $0["id"]?.uint })
+            let mineNames = Set(mine.compactMap { $0["name"]?.string })
+            if !mine.isEmpty {
                 for t in data["tasks"]?.array ?? [] {
                     guard let tid = t["id"]?.uint else { continue }
                     for a in t["activity"]?.array ?? [] where a["author"]?.uint != me && a["comment"]?.bool != true {
                         let text = a["text"]?.string ?? ""
                         guard text.hasPrefix("submitted the form ") else { continue }
                         let name = String(text.dropFirst("submitted the form ".count))
-                        guard mineForms.contains(name) else { continue }
+                        // the form the task says it answers; by its name (then
+                        // its list) for answers from apps that don't record it
+                        let form = t["form"]?.uint ?? Edits.oldAnswerForm(forms, name: name, list: t["list_id"]?.uint ?? 0)
+                        guard form.map(mineIds.contains) ?? mineNames.contains(name) else { continue }
                         add(Note(key: "form:\(tid)", kind: .form, title: "New answer to \(name)", body: "\(who(a["author"]?.uint ?? 0)) answered: \(t["name"]?.string ?? "")",
                                  target: .task(tid), ts: a["ts"]?.int, who: who(a["author"]?.uint ?? 0), subject: name))
                     }

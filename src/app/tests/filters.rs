@@ -6,7 +6,7 @@ use super::*;
 fn filters_search_me_mode_and_assignee() {
     let mut a = app();
     a.loc = Location::Everything;
-    a.show_closed = true;
+    a.prefs.show_closed = true;
     a.search = "homepage".into();
     let r: Vec<String> = a.filtered().iter().map(|t| t.name.clone()).collect();
     assert!(!r.is_empty() && r.iter().all(|n| n.to_lowercase().contains("homepage")));
@@ -51,9 +51,9 @@ fn archived_tasks_leave_views_until_the_archived_filter() {
     let id = add_task(&mut a, list, "Old work");
     a.set_archived(&[id], true);
     assert!(!a.filtered().iter().any(|t| t.id == id));
-    a.filter.archived = true;
+    a.prefs.filter.archived = true;
     assert!(a.filtered().iter().any(|t| t.id == id));
-    a.filter.archived = false;
+    a.prefs.filter.archived = false;
     a.set_archived(&[id], false);
     assert!(a.filtered().iter().any(|t| t.id == id));
 }
@@ -63,25 +63,25 @@ fn filter_conditions_status_priority_due_and_sort_direction() {
     let mut a = app();
     a.loc = Location::Everything;
     let all = a.filtered().len();
-    a.filter.priorities = vec![1];
+    a.prefs.filter.priorities = vec![1];
     assert!(a.filtered().iter().all(|t| t.priority == 1));
-    a.filter = Default::default();
-    a.filter.statuses = vec!["in progress".into()];
+    a.prefs.filter = Default::default();
+    a.prefs.filter.statuses = vec!["in progress".into()];
     assert!(!a.filtered().is_empty());
     assert!(a.filtered().iter().all(|t| t.status == "in progress"));
-    a.filter = Default::default();
-    a.filter.due = 1;
+    a.prefs.filter = Default::default();
+    a.prefs.filter.due = 1;
     assert!(a
         .filtered()
         .iter()
         .all(|t| t.due.map_or(false, |d| d < today())));
-    a.filter.due = 5;
+    a.prefs.filter.due = 5;
     assert!(a.filtered().iter().all(|t| t.due.is_none()));
-    a.filter = Default::default();
+    a.prefs.filter = Default::default();
     assert_eq!(a.filtered().len(), all);
-    a.sort_by = SortBy::Name;
+    a.prefs.sort_by = SortBy::Name;
     let asc: Vec<u64> = a.filtered().iter().map(|t| t.id).collect();
-    a.sort_desc = true;
+    a.prefs.sort_desc = true;
     let mut desc: Vec<u64> = a.filtered().iter().map(|t| t.id).collect();
     desc.reverse();
     assert_eq!(asc, desc);
@@ -102,7 +102,7 @@ fn manual_order_moves_a_task_among_its_siblings() {
         .unwrap()
         .list_id;
     a.loc = Location::List(web);
-    a.show_closed = true;
+    a.prefs.show_closed = true;
     let before = names(&a);
     let (drag, target) = (
         tid(&a, "Collect feedback from beta users"),
@@ -146,8 +146,8 @@ fn manual_order_moves_a_task_among_its_siblings() {
 fn new_sorts_and_groups() {
     let mut a = app();
     a.loc = Location::Everything;
-    a.show_closed = true;
-    a.sort_by = SortBy::Status;
+    a.prefs.show_closed = true;
+    a.prefs.sort_by = SortBy::Status;
     let sts: Vec<StatusKind> = a
         .filtered()
         .iter()
@@ -163,14 +163,14 @@ fn new_sorts_and_groups() {
         sts.windows(2).all(|w| rank(&w[0]) <= rank(&w[1])),
         "open statuses first"
     );
-    a.sort_by = SortBy::StartDate;
+    a.prefs.sort_by = SortBy::StartDate;
     let v = a.filtered();
     let firsts: Vec<bool> = v.iter().map(|t| t.start.is_none()).collect();
     assert!(
         firsts.windows(2).all(|w| !w[0] || w[1]),
         "no start date last"
     );
-    a.sort_by = SortBy::Assignee;
+    a.prefs.sort_by = SortBy::Assignee;
     let v = a.filtered();
     assert!(v.last().unwrap().assignees.is_empty() || v.iter().all(|t| !t.assignees.is_empty()));
     let id = tid(&a, "Newsletter draft");
@@ -180,7 +180,7 @@ fn new_sorts_and_groups() {
         .find(|t| t.id == id)
         .unwrap()
         .estimate_min = Some(5);
-    a.sort_by = SortBy::Estimate;
+    a.prefs.sort_by = SortBy::Estimate;
     assert_eq!(a.filtered()[0].id, id);
     a.data
         .tasks
@@ -188,11 +188,11 @@ fn new_sorts_and_groups() {
         .find(|t| t.id == id)
         .unwrap()
         .updated = now_ts() + 100;
-    a.sort_by = SortBy::Updated;
+    a.prefs.sort_by = SortBy::Updated;
     assert_eq!(a.filtered()[0].id, id, "most recently updated first");
     // Group: Tags (a task under each of its tags) and Group: List
-    a.sort_by = SortBy::Manual;
-    a.group_by = GroupBy::Tags;
+    a.prefs.sort_by = SortBy::Manual;
+    a.prefs.group_by = GroupBy::Tags;
     let tasks = a.filtered();
     let groups = a.groups(&tasks, false);
     let design = groups
@@ -201,12 +201,12 @@ fn new_sorts_and_groups() {
         .expect("a design group");
     assert_eq!(design.tasks.len(), 2);
     assert!(groups.iter().any(|g| g.label == "NO TAGS"));
-    a.group_by = GroupBy::List;
+    a.prefs.group_by = GroupBy::List;
     let tasks = a.filtered();
     let groups = a.groups(&tasks, false);
     assert!(groups.iter().any(|g| g.label == "MARKETING"));
     // adding from a tag group gives the task that tag; from a list group, that list
-    a.group_by = GroupBy::Tags;
+    a.prefs.group_by = GroupBy::Tags;
     let tasks = a.filtered();
     let g = a
         .groups(&tasks, false)
@@ -219,7 +219,7 @@ fn new_sorts_and_groups() {
         a.task(tid(&a, "Tagged")).unwrap().tags,
         vec!["bug".to_string()]
     );
-    a.group_by = GroupBy::List;
+    a.prefs.group_by = GroupBy::List;
     let tasks = a.filtered();
     let g = a
         .groups(&tasks, false)
@@ -245,22 +245,22 @@ fn new_filter_fields() {
         not: false,
         values: vec![v.to_string()],
     };
-    a.filter.rows = vec![row(FilterField::HasSubtasks, "yes")];
+    a.prefs.filter.rows = vec![row(FilterField::HasSubtasks, "yes")];
     assert_eq!(names(&a), vec!["Design new homepage layout".to_string()]);
-    a.filter.rows = vec![row(FilterField::StartDate, "5")];
+    a.prefs.filter.rows = vec![row(FilterField::StartDate, "5")];
     assert!(!a.filtered().is_empty() && a.filtered().iter().all(|t| t.start.is_none()));
-    a.filter.rows = vec![row(FilterField::CreatedBy, "2")];
+    a.prefs.filter.rows = vec![row(FilterField::CreatedBy, "2")];
     assert!(
         a.filtered().is_empty(),
         "the seed tasks were all made by Me"
     );
-    a.filter.rows = vec![row(FilterField::CreatedBy, "1")];
+    a.prefs.filter.rows = vec![row(FilterField::CreatedBy, "1")];
     assert!(!a.filtered().is_empty());
-    a.filter.rows = vec![row(FilterField::Created, "1")];
+    a.prefs.filter.rows = vec![row(FilterField::Created, "1")];
     assert!(a.filtered().is_empty(), "nothing was made today");
-    a.filter.rows = vec![row(FilterField::Created, "3")];
+    a.prefs.filter.rows = vec![row(FilterField::Created, "3")];
     assert!(!a.filtered().is_empty());
-    a.filter.rows = vec![row(FilterField::Updated, "1")];
+    a.prefs.filter.rows = vec![row(FilterField::Updated, "1")];
     assert!(!a.filtered().is_empty());
 }
 
@@ -464,6 +464,38 @@ fn empty_filter_groups_are_left_out() {
 }
 
 #[test]
+fn view_settings_are_written_with_the_names_they_always_had() {
+    use crate::app::listview::ViewPrefs;
+    let mut p = ViewPrefs::new();
+    p.hidden_cols = ["Tags", "Assignee"].map(String::from).into();
+    p.filter.rows = vec![urgent()];
+    p.filter.statuses = vec!["open".into()];
+    let v = serde_json::to_value(&p).unwrap();
+    let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "archived",
+            "filter_rows",
+            "group_by",
+            "hidden_cols",
+            "show_closed",
+            "sort_by",
+            "sort_desc",
+            "subtasks_open"
+        ]
+    );
+    assert_eq!(v["hidden_cols"], serde_json::json!(["Assignee", "Tags"]));
+    let back: ViewPrefs = serde_json::from_value(v).unwrap();
+    assert_eq!(back.filter.rows, p.filter.rows);
+    assert!(
+        back.filter.statuses.is_empty(),
+        "the fixed fields aren't saved"
+    );
+}
+
+#[test]
 fn view_settings_from_before_filter_groups_still_load() {
     use parity::{FilterGroup, Join};
     let p: crate::app::listview::ViewPrefs = serde_json::from_value(serde_json::json!({
@@ -471,28 +503,28 @@ fn view_settings_from_before_filter_groups_still_load() {
         "filter_rows": [{"field": "Priority", "not": false, "values": ["1"]}]
     }))
     .unwrap();
-    assert_eq!(p.filter_rows.len(), 1);
-    assert!(p.filter_groups.is_empty() && p.filter_join == Join::And);
+    assert_eq!(p.filter.rows.len(), 1);
+    assert!(p.filter.groups.is_empty() && p.filter.join == Join::And);
     // groups are remembered per location like the rows
     let mut a = app();
-    a.filter.join = Join::Or;
-    a.filter.groups = vec![FilterGroup {
+    a.prefs.filter.join = Join::Or;
+    a.prefs.filter.groups = vec![FilterGroup {
         join: Join::Or,
         rows: vec![urgent(), tagged_x()],
     }];
-    let v = serde_json::to_value(a.current_prefs()).unwrap();
+    let v = serde_json::to_value(a.prefs.clone()).unwrap();
     let back: crate::app::listview::ViewPrefs = serde_json::from_value(v).unwrap();
-    assert_eq!(back.filter_join, Join::Or);
-    assert_eq!(back.filter_groups, a.filter.groups);
+    assert_eq!(back.filter.join, Join::Or);
+    assert_eq!(back.filter.groups, a.prefs.filter.groups);
 }
 
 #[test]
 fn saved_filters_keep_the_nested_shape_and_old_files_still_load() {
     use parity::{FilterGroup, Join};
     let mut a = app();
-    a.filter.rows = vec![urgent()];
-    a.filter.join = Join::Or;
-    a.filter.groups = vec![FilterGroup {
+    a.prefs.filter.rows = vec![urgent()];
+    a.prefs.filter.join = Join::Or;
+    a.prefs.filter.groups = vec![FilterGroup {
         join: Join::Or,
         rows: vec![tagged_x()],
     }];
@@ -500,9 +532,9 @@ fn saved_filters_keep_the_nested_shape_and_old_files_still_load() {
     assert_eq!(a.data.extra.saved_filters.len(), 1);
     let saved = a.data.extra.saved_filters[0].clone();
     assert_eq!(saved.name, "Hot");
-    assert!(saved.is_shown(&a.filter));
+    assert!(saved.is_shown(&a.prefs.filter));
     // saving under the same name updates it
-    a.filter.join = Join::And;
+    a.prefs.filter.join = Join::And;
     a.save_filter("Hot");
     assert_eq!(a.data.extra.saved_filters.len(), 1);
     assert_eq!(a.data.extra.saved_filters[0].id, saved.id);
@@ -516,10 +548,10 @@ fn saved_filters_keep_the_nested_shape_and_old_files_still_load() {
         serde_json::json!("Or")
     );
     // bringing it back after the builder was cleared
-    a.filter = Default::default();
-    back.extra.saved_filters[0].apply_to(&mut a.filter);
-    assert_eq!(a.filter.groups.len(), 1);
-    assert_eq!(a.filter.count(), 2);
+    a.prefs.filter = Default::default();
+    back.extra.saved_filters[0].apply_to(&mut a.prefs.filter);
+    assert_eq!(a.prefs.filter.groups.len(), 1);
+    assert_eq!(a.prefs.filter.count(), 2);
     // a file from before saved filters and groups still loads
     let mut old = v.clone();
     old["extra"]
@@ -538,7 +570,7 @@ fn saved_filters_keep_the_nested_shape_and_old_files_still_load() {
 fn search_finds_subtasks() {
     let mut a = app();
     a.loc = Location::Everything;
-    a.show_closed = true;
+    a.prefs.show_closed = true;
     a.search = "hero".into();
     let v = names(&a);
     assert!(
@@ -561,24 +593,28 @@ fn view_settings_are_kept_per_location() {
     let (l1, l2) = (lists[0], lists[1]);
     a.loc = Location::List(l1);
     a.sync_view_prefs();
-    a.group_by = GroupBy::Priority;
-    a.sort_by = SortBy::Name;
+    a.prefs.group_by = GroupBy::Priority;
+    a.prefs.sort_by = SortBy::Name;
     a.sync_view_prefs();
     a.loc = Location::List(l2);
     a.sync_view_prefs();
     assert!(
-        a.group_by == GroupBy::Priority,
+        a.prefs.group_by == GroupBy::Priority,
         "a list never changed keeps what was showing"
     );
-    a.group_by = GroupBy::Assignee;
-    a.show_closed = true;
+    a.prefs.group_by = GroupBy::Assignee;
+    a.prefs.show_closed = true;
     a.sync_view_prefs();
     a.loc = Location::List(l1);
     a.sync_view_prefs();
-    assert!(a.group_by == GroupBy::Priority && a.sort_by == SortBy::Name && !a.show_closed);
+    assert!(
+        a.prefs.group_by == GroupBy::Priority
+            && a.prefs.sort_by == SortBy::Name
+            && !a.prefs.show_closed
+    );
     a.loc = Location::List(l2);
     a.sync_view_prefs();
-    assert!(a.group_by == GroupBy::Assignee && a.show_closed);
+    assert!(a.prefs.group_by == GroupBy::Assignee && a.prefs.show_closed);
     // and they survive a round trip through the saved file format
     let s = serde_json::to_string(&a.view_prefs).unwrap();
     let back: HashMap<String, listview::ViewPrefs> = serde_json::from_str(&s).unwrap();

@@ -508,8 +508,8 @@ pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             a.section = Section::Home;
             a.loc = Location::Everything;
             a.view = ViewKind::List;
-            a.filter.rows = vec![parity::FilterRow::default(), parity::FilterRow::default()];
-            a.filter.groups = vec![parity::FilterGroup {
+            a.prefs.filter.rows = vec![parity::FilterRow::default(), parity::FilterRow::default()];
+            a.prefs.filter.groups = vec![parity::FilterGroup {
                 join: parity::Join::Or,
                 rows: vec![parity::FilterRow::default(), parity::FilterRow::default()],
             }];

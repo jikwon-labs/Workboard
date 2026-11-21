@@ -93,7 +93,7 @@ impl App {
         if nsub > 0 {
             let ar = Rect::from_center_size(pos2(x, rect.center().y), vec2(16.0, 16.0));
             let a = ui.interact(ar, id.with("exp"), Sense::click());
-            let open = self.subtasks_open || self.expanded_tasks.contains(&task.id);
+            let open = self.prefs.subtasks_open || self.expanded_tasks.contains(&task.id);
             if a.hovered() || resp.hovered() || open {
                 paint_triangle(
                     ui.painter(),

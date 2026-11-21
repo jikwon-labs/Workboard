@@ -19,8 +19,8 @@ impl App {
         // closed tasks are hidden by default: their columns say how many
         // instead of a plain 0
         let mut hidden_closed: HashMap<String, usize> = HashMap::new();
-        if !self.show_closed {
-            self.show_closed = true;
+        if !self.prefs.show_closed {
+            self.prefs.show_closed = true;
             for x in self.filtered() {
                 if self.data.is_closed(x) {
                     *hidden_closed
@@ -28,7 +28,7 @@ impl App {
                         .or_default() += 1;
                 }
             }
-            self.show_closed = false;
+            self.prefs.show_closed = false;
         }
         let mut dropped: Option<(u64, usize)> = None;
         egui::ScrollArea::horizontal()
@@ -162,7 +162,7 @@ impl App {
                                             )));
                                             name_it(&b, &format!("Show closed in {}", g.label));
                                             if b.clicked() {
-                                                self.show_closed = true;
+                                                self.prefs.show_closed = true;
                                             }
                                         }
                                         self.board_add_task(ui, g, col_w - 16.0, accent);
@@ -173,7 +173,7 @@ impl App {
                             }
                         });
                     }
-                    if self.group_by == GroupBy::Status {
+                    if self.prefs.group_by == GroupBy::Status {
                         if let Some(sid) = self
                             .data
                             .lists_in(self.loc)
@@ -200,7 +200,7 @@ impl App {
         if let Some((tid, gi)) = dropped {
             if let Some(mut task) = self.task(tid).cloned() {
                 let g = &groups[gi];
-                match self.group_by {
+                match self.prefs.group_by {
                     GroupBy::Status => {
                         if let Some(st) = &g.status {
                             let own = self.data.statuses_for_list(task.list_id);

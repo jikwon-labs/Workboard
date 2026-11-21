@@ -194,20 +194,56 @@ fn due_matches(due: u8, t: &Task, data: &Data) -> bool {
 /// Field conditions from the Filter panel: the rows and groups of the
 /// condition builder, combined with `join`, plus fixed fields kept for code
 /// that sets them directly (those must all match).
-#[derive(Clone, Default, PartialEq)]
+///
+/// Saved as part of a location's view settings (`listview::ViewPrefs`,
+/// under the names it always had there): the rows, join, groups and
+/// Archived. The fixed fields are not saved.
+#[derive(Clone, Default, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TaskFilter {
+    #[serde(rename = "filter_rows", default)]
     pub rows: Vec<FilterRow>,
     /// How the top-level rows and groups combine.
+    #[serde(rename = "filter_join", default, skip_serializing_if = "Join::is_and")]
     pub join: Join,
     /// Groups of rows with their own And / Or (one level deep).
+    #[serde(
+        rename = "filter_groups",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub groups: Vec<FilterGroup>,
+    #[serde(skip)]
     pub statuses: Vec<String>,
+    #[serde(skip)]
     pub priorities: Vec<u8>,
+    #[serde(skip)]
     pub assignees: Vec<u64>,
+    #[serde(skip)]
     pub unassigned: bool,
+    #[serde(skip)]
     pub tags: Vec<String>,
+    #[serde(skip)]
     pub due: u8,
+    #[serde(default)]
     pub archived: bool,
+}
+
+impl TaskFilter {
+    /// Whether the saved part (rows, join, groups, Archived) differs.
+    pub fn saved_differs(&self, other: &TaskFilter) -> bool {
+        self.rows != other.rows
+            || self.join != other.join
+            || self.groups != other.groups
+            || self.archived != other.archived
+    }
+
+    /// Takes the saved part from `saved`, keeping the fixed fields.
+    pub fn take_saved(&mut self, saved: &TaskFilter) {
+        self.rows = saved.rows.clone();
+        self.join = saved.join;
+        self.groups = saved.groups.clone();
+        self.archived = saved.archived;
+    }
 }
 
 impl TaskFilter {

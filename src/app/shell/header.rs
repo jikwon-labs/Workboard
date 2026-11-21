@@ -643,12 +643,12 @@ impl App {
                     // full chip labels, and whether they all fit in one row; if
                     // not (a narrow window) the chips show only their icon
                     let grouped = matches!(self.view, ViewKind::List | ViewKind::Board);
-                    let group_label = format!("Group: {}", self.group_by.label());
+                    let group_label = format!("Group: {}", self.prefs.group_by.label());
                     let alabel = match self.assignee_filter.and_then(|a| self.data.member(a)) {
                         Some(m) => m.shown().to_string(),
                         None => "Assignee".into(),
                     };
-                    let nf = self.filter.count()
+                    let nf = self.prefs.filter.count()
                         + usize::from(!self.search.is_empty())
                         + usize::from(self.me_mode);
                     let flabel = if nf > 0 {
@@ -656,14 +656,15 @@ impl App {
                     } else {
                         "Filter".to_string()
                     };
-                    let sort_arrow = if self.sort_desc && self.sort_by != SortBy::Manual {
+                    let sort_arrow = if self.prefs.sort_desc && self.prefs.sort_by != SortBy::Manual
+                    {
                         " \u{2193}"
                     } else {
                         ""
                     };
-                    let slabel = format!("Sort: {}{}", self.sort_by.label(), sort_arrow);
+                    let slabel = format!("Sort: {}{}", self.prefs.sort_by.label(), sort_arrow);
                     // the same labels in the interface language (the English ones name the chips)
-                    let group_shown = trf!("Group: {}", tr(self.group_by.label()));
+                    let group_shown = trf!("Group: {}", tr(self.prefs.group_by.label()));
                     let ashown = match self.assignee_filter.and_then(|a| self.data.member(a)) {
                         Some(_) => alabel.clone(),
                         None => tr("Assignee").to_string(),
@@ -673,7 +674,7 @@ impl App {
                     } else {
                         tr("Filter").to_string()
                     };
-                    let sshown = trf!("Sort: {}{}", tr(self.sort_by.label()), sort_arrow);
+                    let sshown = trf!("Sort: {}{}", tr(self.prefs.sort_by.label()), sort_arrow);
                     let closed_shown = crate::i18n::tr_ctx("Closed (tasks)", "Closed");
                     let compact = {
                         let pw = |s: &str| {
@@ -726,10 +727,10 @@ impl App {
                         popup(ui, &r, ui.id().with("group_pop"), 160.0, |ui| {
                             for g in GroupBy::ALL {
                                 if ui
-                                    .selectable_label(self.group_by == g, tr(g.label()))
+                                    .selectable_label(self.prefs.group_by == g, tr(g.label()))
                                     .clicked()
                                 {
-                                    self.group_by = g;
+                                    self.prefs.group_by = g;
                                     close_popup(ui);
                                 }
                             }
@@ -739,18 +740,19 @@ impl App {
                             "Subtasks",
                             tr("Subtasks"),
                             "",
-                            self.subtasks_open,
+                            self.prefs.subtasks_open,
                             false,
                             "subtasks",
                         )
                         .on_hover_text(tr("Show all subtasks"))
                         .clicked()
                         {
-                            self.subtasks_open = !self.subtasks_open;
+                            self.prefs.subtasks_open = !self.prefs.subtasks_open;
                         }
                     }
                     if self.view == ViewKind::List {
                         let n = self
+                            .prefs
                             .hidden_cols
                             .iter()
                             .filter(|c| {
@@ -884,14 +886,14 @@ impl App {
                             "Closed",
                             closed_shown,
                             "",
-                            self.show_closed,
+                            self.prefs.show_closed,
                             false,
                             "check",
                         )
                         .on_hover_text(tr("Show closed tasks"))
                         .clicked()
                         {
-                            self.show_closed = !self.show_closed;
+                            self.prefs.show_closed = !self.prefs.show_closed;
                         }
                         let fshort = if nf > 0 {
                             nf.to_string()
@@ -922,34 +924,34 @@ impl App {
                             &slabel,
                             &sshown,
                             sort_arrow.trim(),
-                            self.sort_by != SortBy::Manual,
+                            self.prefs.sort_by != SortBy::Manual,
                             false,
                             "sort",
                         );
                         popup(ui, &sr, ui.id().with("sort_pop"), 160.0, |ui| {
                             for s in SortBy::ALL {
                                 if ui
-                                    .selectable_label(self.sort_by == s, tr(s.label()))
+                                    .selectable_label(self.prefs.sort_by == s, tr(s.label()))
                                     .clicked()
                                 {
-                                    self.sort_by = s;
+                                    self.prefs.sort_by = s;
                                     close_popup(ui);
                                 }
                             }
-                            if self.sort_by != SortBy::Manual {
+                            if self.prefs.sort_by != SortBy::Manual {
                                 ui.separator();
                                 ui.horizontal(|ui| {
                                     if ui
-                                        .selectable_label(!self.sort_desc, tr("Ascending"))
+                                        .selectable_label(!self.prefs.sort_desc, tr("Ascending"))
                                         .clicked()
                                     {
-                                        self.sort_desc = false;
+                                        self.prefs.sort_desc = false;
                                     }
                                     if ui
-                                        .selectable_label(self.sort_desc, tr("Descending"))
+                                        .selectable_label(self.prefs.sort_desc, tr("Descending"))
                                         .clicked()
                                     {
-                                        self.sort_desc = true;
+                                        self.prefs.sort_desc = true;
                                     }
                                 });
                             }

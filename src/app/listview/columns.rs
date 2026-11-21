@@ -28,7 +28,11 @@ pub(super) const FIELD_COL_W: f32 = 130.0;
 
 #[cfg(test)]
 /// Column rectangles from the right; hidden columns get an empty rect.
-pub(crate) fn col_layout(row: Rect, hidden: &HashSet<String>, show_pr: bool) -> Cols {
+pub(crate) fn col_layout(
+    row: Rect,
+    hidden: &std::collections::BTreeSet<String>,
+    show_pr: bool,
+) -> Cols {
     col_layout_with(row, hidden, show_pr, &[])
 }
 
@@ -37,7 +41,7 @@ pub(crate) fn col_layout(row: Rect, hidden: &HashSet<String>, show_pr: bool) -> 
 /// while the name keeps room to read.
 pub(super) fn col_layout_with(
     row: Rect,
-    hidden: &HashSet<String>,
+    hidden: &std::collections::BTreeSet<String>,
     show_pr: bool,
     fields: &[u64],
 ) -> Cols {
@@ -136,7 +140,7 @@ impl App {
     pub(crate) fn list_cols(&self, row: Rect) -> Cols {
         col_layout_with(
             row,
-            &self.hidden_cols,
+            &self.prefs.hidden_cols,
             self.data.extra.apps.priorities,
             &self.list_field_ids(),
         )

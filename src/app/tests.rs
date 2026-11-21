@@ -172,9 +172,9 @@ fn closing_a_task_hides_it_unless_closed_is_shown() {
     t.status = "complete".into();
     a.apply(Action::Replace(t));
     assert!(a.data.is_closed(a.task(id).unwrap()));
-    a.show_closed = false;
+    a.prefs.show_closed = false;
     assert!(!a.filtered().iter().any(|t| t.id == id));
-    a.show_closed = true;
+    a.prefs.show_closed = true;
     assert!(a.filtered().iter().any(|t| t.id == id));
 }
 
@@ -483,7 +483,7 @@ fn personal_list_is_private() {
     assert_eq!(a.personal_list_id(), Some(lid));
     let id = add_task(&mut a, lid, "My secret errand");
     a.loc = Location::Everything;
-    a.show_closed = true;
+    a.prefs.show_closed = true;
     assert!(a.filtered().iter().any(|t| t.id == id));
     a.data.me = 2; // someone else on this computer
     assert!(
@@ -1884,7 +1884,7 @@ fn archived_subtasks_hide_and_my_subtasks_show_on_personal_views() {
     assert!(!a.filtered().iter().any(|t| t.id == sub));
     // the archived view still reaches it
     a.loc = Location::List(list);
-    a.filter.archived = true;
+    a.prefs.filter.archived = true;
     assert!(a.filtered().iter().any(|t| t.id == sub));
     assert!(!a.task_visible(a.task(sub).unwrap()));
 }

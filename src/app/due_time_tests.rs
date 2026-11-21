@@ -137,7 +137,7 @@ fn sorting_by_due_date_orders_a_day_by_time() {
     early.due = Some(d - Duration::days(1));
     early.due_time = Some(Some(hm(23, 0)));
     a.data.tasks.push(early);
-    a.sort_by = SortBy::DueDate;
+    a.prefs.sort_by = SortBy::DueDate;
     let names: Vec<&str> = a
         .filtered()
         .into_iter()

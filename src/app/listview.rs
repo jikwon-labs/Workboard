@@ -3,14 +3,14 @@
 // menu, and deleting with an Undo.
 
 use super::*;
-use parity::{FilterGroup, FilterRow, Join};
 
 mod columns;
 mod row;
 
 pub(super) use columns::*;
 
-/// The view settings remembered for one location (List, Folder, Space...).
+/// The List's view settings, as shown and as remembered for each location
+/// (List, Folder, Space...).
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ViewPrefs {
     pub group_by: GroupBy,
@@ -21,16 +21,43 @@ pub struct ViewPrefs {
     pub show_closed: bool,
     #[serde(default)]
     pub subtasks_open: bool,
+    /// The columns hidden (written in name order).
     #[serde(default)]
-    pub hidden_cols: Vec<String>,
-    #[serde(default)]
-    pub filter_rows: Vec<FilterRow>,
-    #[serde(default, skip_serializing_if = "Join::is_and")]
-    pub filter_join: Join,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub filter_groups: Vec<FilterGroup>,
-    #[serde(default)]
-    pub archived: bool,
+    pub hidden_cols: std::collections::BTreeSet<String>,
+    /// The Filter panel's conditions; their saved names are `filter_rows`,
+    /// `filter_join`, `filter_groups` and `archived`.
+    #[serde(flatten)]
+    pub filter: TaskFilter,
+}
+
+impl ViewPrefs {
+    /// What a location shows before anyone changes it.
+    pub fn new() -> Self {
+        ViewPrefs {
+            group_by: GroupBy::Status,
+            sort_by: SortBy::Manual,
+            sort_desc: false,
+            show_closed: false,
+            subtasks_open: false,
+            hidden_cols: std::iter::once("Date created")
+                .chain(parity::PROPERTIES)
+                .map(String::from)
+                .collect(),
+            filter: TaskFilter::default(),
+        }
+    }
+
+    /// Differs from `o` in what is saved (the filter's fixed fields
+    /// aside).
+    fn saved_differs(&self, o: &ViewPrefs) -> bool {
+        self.group_by != o.group_by
+            || self.sort_by != o.sort_by
+            || self.sort_desc != o.sort_desc
+            || self.show_closed != o.show_closed
+            || self.subtasks_open != o.subtasks_open
+            || self.hidden_cols != o.hidden_cols
+            || self.filter.saved_differs(&o.filter)
+    }
 }
 
 /// A row drawn this frame, for dropping a dragged row and for range
@@ -63,36 +90,6 @@ impl App {
         format!("{}|{:?}", self.ws_file, self.loc)
     }
 
-    pub(super) fn current_prefs(&self) -> ViewPrefs {
-        let mut hidden: Vec<String> = self.hidden_cols.iter().cloned().collect();
-        hidden.sort();
-        ViewPrefs {
-            group_by: self.group_by,
-            sort_by: self.sort_by,
-            sort_desc: self.sort_desc,
-            show_closed: self.show_closed,
-            subtasks_open: self.subtasks_open,
-            hidden_cols: hidden,
-            filter_rows: self.filter.rows.clone(),
-            filter_join: self.filter.join,
-            filter_groups: self.filter.groups.clone(),
-            archived: self.filter.archived,
-        }
-    }
-
-    fn apply_prefs(&mut self, p: &ViewPrefs) {
-        self.group_by = p.group_by;
-        self.sort_by = p.sort_by;
-        self.sort_desc = p.sort_desc;
-        self.show_closed = p.show_closed;
-        self.subtasks_open = p.subtasks_open;
-        self.hidden_cols = p.hidden_cols.iter().cloned().collect();
-        self.filter.rows = p.filter_rows.clone();
-        self.filter.join = p.filter_join;
-        self.filter.groups = p.filter_groups.clone();
-        self.filter.archived = p.archived;
-    }
-
     /// Called once a frame: entering a location brings back the settings
     /// last used there (a location never changed keeps what was showing),
     /// and a change made here is remembered for it.
@@ -104,20 +101,23 @@ impl App {
         }
         let key = self.prefs_key();
         if self.view_prefs_at.as_ref().map(|(k, _)| k) != Some(&key) {
-            if let Some(p) = self.view_prefs.get(&key).cloned() {
-                self.apply_prefs(&p);
+            if let Some(p) = self.view_prefs.get(&key) {
+                let filter = self.prefs.filter.clone();
+                self.prefs = p.clone();
+                // the filter's fixed fields aren't saved: they stay
+                self.prefs.filter = filter;
+                self.prefs.filter.take_saved(&p.filter);
             }
-            self.view_prefs_at = Some((key, self.current_prefs()));
+            self.view_prefs_at = Some((key, self.prefs.clone()));
             return;
         }
-        let cur = self.current_prefs();
         if self
             .view_prefs_at
             .as_ref()
-            .is_some_and(|(_, seen)| *seen != cur)
+            .is_some_and(|(_, seen)| seen.saved_differs(&self.prefs))
         {
-            self.view_prefs.insert(key.clone(), cur.clone());
-            self.view_prefs_at = Some((key, cur));
+            self.view_prefs.insert(key.clone(), self.prefs.clone());
+            self.view_prefs_at = Some((key, self.prefs.clone()));
             if self.persist {
                 if let Ok(s) = serde_json::to_string_pretty(&self.view_prefs) {
                     let _ = std::fs::create_dir_all(Data::dir());
@@ -202,7 +202,7 @@ impl App {
         if parent != target_parent {
             return;
         }
-        let manual = self.sort_by == SortBy::Manual;
+        let manual = self.prefs.sort_by == SortBy::Manual;
         if manual {
             self.reorder_task(dragged, target, after);
         }
@@ -819,12 +819,12 @@ impl App {
                 ui.add_space(8.0);
                 if groups.iter().all(|g| g.tasks.is_empty()) {
                     // completed tasks are hidden by default: say so instead of "no tasks"
-                    let hidden = if self.show_closed {
+                    let hidden = if self.prefs.show_closed {
                         0
                     } else {
-                        self.show_closed = true;
+                        self.prefs.show_closed = true;
                         let n = self.filtered().len();
-                        self.show_closed = false;
+                        self.prefs.show_closed = false;
                         n.saturating_sub(self.filtered().len())
                     };
                     // archived ones are hidden too: say how many, and where they are
@@ -861,7 +861,7 @@ impl App {
                                     )
                                     .clicked()
                                 {
-                                    self.show_closed = true;
+                                    self.prefs.show_closed = true;
                                 }
                                 if primary_button(ui, &t, tr("Add Task")).clicked() {
                                     self.open_quick_add(None);
@@ -893,7 +893,7 @@ impl App {
                                     let b = ghost_btn(ui, tr("Show archived tasks"));
                                     name_it(&b, "Show archived tasks");
                                     if b.clicked() {
-                                        self.filter.archived = true;
+                                        self.prefs.filter.archived = true;
                                     }
                                 }
                                 // tasks in archived Lists come back with their List
@@ -1013,7 +1013,7 @@ impl App {
         }
         for &id in g.tasks.iter().filter(|id| shown.contains(id)) {
             self.task_row_by_id(ui, id, 0);
-            if self.subtasks_open || self.expanded_tasks.contains(&id) {
+            if self.prefs.subtasks_open || self.expanded_tasks.contains(&id) {
                 // a subtask that is a row of its own here (my subtasks on My
                 // Tasks) isn't shown a second time under its parent
                 let subs: Vec<u64> = self

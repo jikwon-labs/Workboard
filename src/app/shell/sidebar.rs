@@ -1026,15 +1026,17 @@ impl App {
         let on = self.section == Section::Home && self.on_personal_list();
         match (on, self.personal_saved) {
             (true, None) => {
-                self.personal_saved =
-                    Some((self.group_by, self.hidden_cols.contains("Date created")));
-                self.group_by = GroupBy::None;
-                self.hidden_cols.remove("Date created");
+                self.personal_saved = Some((
+                    self.prefs.group_by,
+                    self.prefs.hidden_cols.contains("Date created"),
+                ));
+                self.prefs.group_by = GroupBy::None;
+                self.prefs.hidden_cols.remove("Date created");
             }
             (false, Some((g, hid))) => {
-                self.group_by = g;
+                self.prefs.group_by = g;
                 if hid {
-                    self.hidden_cols.insert("Date created".into());
+                    self.prefs.hidden_cols.insert("Date created".into());
                 }
                 self.personal_saved = None;
             }

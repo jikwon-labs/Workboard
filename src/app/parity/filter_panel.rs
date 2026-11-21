@@ -7,7 +7,7 @@ use super::*;
 
 impl App {
     pub(crate) fn col_on(&self, c: &str) -> bool {
-        !self.hidden_cols.contains(c)
+        !self.prefs.hidden_cols.contains(c)
     }
 
     /// The text a property column shows for a task.
@@ -115,9 +115,9 @@ impl App {
                                     let mut on = shown;
                                     if switch(ui, &t, &mut on, &format!("Field {}", n)).clicked() {
                                         if on {
-                                            self.hidden_cols.remove(n);
+                                            self.prefs.hidden_cols.remove(n);
                                         } else {
-                                            self.hidden_cols.insert(n.to_string());
+                                            self.prefs.hidden_cols.insert(n.to_string());
                                         }
                                     }
                                 });
@@ -133,7 +133,7 @@ impl App {
                             let key = super::listview::field_col_key(*fid);
                             ui.horizontal(|ui| {
                                 super::icons::icon_label(ui, "fields", RichText::new(name).color(t.text), t.text2);
-                                let on_now = !self.hidden_cols.contains(&key);
+                                let on_now = !self.prefs.hidden_cols.contains(&key);
                                 if on_now && !field_fits.contains(fid) {
                                     ui.label(RichText::new(tr("no room")).small().color(t.text3)).on_hover_text(tr("The List is too narrow to show this column; widen the window or turn another field off."));
                                 }
@@ -141,9 +141,9 @@ impl App {
                                     let mut on = on_now;
                                     if switch(ui, &t, &mut on, &format!("Field {}", name)).clicked() {
                                         if on {
-                                            self.hidden_cols.remove(&key);
+                                            self.prefs.hidden_cols.remove(&key);
                                         } else {
-                                            self.hidden_cols.insert(key.clone());
+                                            self.prefs.hidden_cols.insert(key.clone());
                                         }
                                     }
                                 });
@@ -401,7 +401,7 @@ impl App {
                 _ => {
                     // the name is as the person typed it
                     if ui
-                        .selectable_label(s.is_shown(&self.filter), &s.name)
+                        .selectable_label(s.is_shown(&self.prefs.filter), &s.name)
                         .on_hover_text(tr("Show this filter"))
                         .clicked()
                     {
@@ -428,7 +428,7 @@ impl App {
         }
         if let Some(id) = apply {
             if let Some(s) = self.data.extra.saved_filters.iter().find(|s| s.id == id) {
-                s.apply_to(&mut self.filter);
+                s.apply_to(&mut self.prefs.filter);
             }
         }
         if let Some(id) = delete {
@@ -462,7 +462,7 @@ impl App {
             );
             name_field(&r, "Saved filter name");
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let can = !name.trim().is_empty() && self.filter.conditions() > 0;
+            let can = !name.trim().is_empty() && self.prefs.filter.conditions() > 0;
             let b = ui
                 .add_enabled(can, egui::Button::new(tr("Save filter")))
                 .on_disabled_hover_text(tr("Pick a condition and type a name first"));
@@ -488,7 +488,7 @@ impl App {
         if name.is_empty() {
             return;
         }
-        let f = &self.filter;
+        let f = &self.prefs.filter;
         let mut saved = SavedFilter {
             id: 0,
             name,
@@ -534,7 +534,7 @@ impl App {
                             ui.label(RichText::new(tr("Filters")).strong());
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui.small_button(tr("Clear all")).clicked() {
-                                    self.filter = Default::default();
+                                    self.prefs.filter = Default::default();
                                     self.search.clear();
                                     self.me_mode = false;
                                     self.assignee_filter = None;
@@ -549,7 +549,7 @@ impl App {
                         name_field(&r, "Filter search");
                         ui.add_space(6.0);
                         // edit a copy, then put it back if anything changed
-                        let mut f = self.filter.clone();
+                        let mut f = self.prefs.filter.clone();
                         let top_join = f.join;
                         let mut flip = self.filter_rows_ui(
                             ui,
@@ -638,13 +638,13 @@ impl App {
                                 });
                             }
                         });
-                        if f != self.filter {
-                            self.filter = f;
+                        if f != self.prefs.filter {
+                            self.prefs.filter = f;
                         }
                         ui.separator();
                         check(
                             ui,
-                            &mut self.filter.archived,
+                            &mut self.prefs.filter.archived,
                             tr("Show archived tasks only"),
                         );
                         check(ui, &mut self.me_mode, tr("Only my tasks"));

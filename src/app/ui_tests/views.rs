@@ -222,7 +222,7 @@ fn fields_panel_searches_and_adds_property_columns() {
     // the column is laid out, with a value ("Me" made the seed tasks)
     let cols = crate::app::shell::col_layout(
         Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 30.0)),
-        &h.app.hidden_cols,
+        &h.app.prefs.hidden_cols,
         true,
     );
     assert_eq!(
@@ -253,7 +253,7 @@ fn filter_builder_rows_are_joined_with_and() {
         h.app.filter_open,
         "the panel stays while a drop-down closes"
     );
-    assert_eq!(h.app.filter.rows.len(), 1);
+    assert_eq!(h.app.prefs.filter.rows.len(), 1);
     assert!(h.app.filtered().iter().all(|t| t.priority == 1));
     let urgent = h.app.filtered().len();
     // a second row: Status is not "to do"
@@ -265,7 +265,7 @@ fn filter_builder_rows_are_joined_with_and() {
     h.click("Filter 2 values");
     h.click("TO DO");
     h.key(egui::Key::Escape);
-    assert_eq!(h.app.filter.count(), 2);
+    assert_eq!(h.app.prefs.filter.count(), 2);
     assert!(h
         .app
         .filtered()
@@ -273,9 +273,9 @@ fn filter_builder_rows_are_joined_with_and() {
         .all(|t| t.priority == 1 && t.status != "to do"));
     assert!(h.app.filtered().len() <= urgent);
     h.click("Remove filter 2");
-    assert_eq!(h.app.filter.rows.len(), 1);
+    assert_eq!(h.app.prefs.filter.rows.len(), 1);
     h.click("Clear all");
-    assert_eq!(h.app.filter.count(), 0);
+    assert_eq!(h.app.prefs.filter.count(), 0);
     h.key(egui::Key::Escape);
     assert!(!h.app.filter_open);
 }
@@ -296,7 +296,7 @@ fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
     h.key(egui::Key::Escape);
     // or a group: Status is TO DO or Priority is High
     h.click("+ Add group");
-    assert_eq!(h.app.filter.groups.len(), 1);
+    assert_eq!(h.app.prefs.filter.groups.len(), 1);
     h.click("Group 1 filter 1 field");
     h.click("Status");
     h.click("Group 1 filter 1 values");
@@ -309,13 +309,13 @@ fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
     h.click("High");
     h.key(egui::Key::Escape);
     assert!(h.app.filter_open, "the panel stays open");
-    assert_eq!(h.app.filter.groups[0].rows.len(), 2);
+    assert_eq!(h.app.prefs.filter.groups[0].rows.len(), 2);
     // And inside the group: TO DO and High
     let and_inside = h.app.filtered().len();
     h.click("Group 1 join");
-    assert_eq!(h.app.filter.groups[0].join, Join::Or);
+    assert_eq!(h.app.prefs.filter.groups[0].join, Join::Or);
     h.click("Filter join");
-    assert_eq!(h.app.filter.join, Join::Or);
+    assert_eq!(h.app.prefs.filter.join, Join::Or);
     let shown: Vec<(u8, String)> = h
         .app
         .filtered()
@@ -328,14 +328,14 @@ fn filter_groups_with_their_own_or_and_the_badge_counts_them() {
         .all(|(p, s)| *p == 1 || s == "to do" || *p == 2));
     assert!(shown.iter().any(|(p, _)| *p != 1), "not only Urgent");
     // the badge counts every condition, the ones in the group too
-    assert_eq!(h.app.filter.count(), 3);
+    assert_eq!(h.app.prefs.filter.count(), 3);
     assert!(h.has("Filter \u{00B7} 3"));
     // removing a row in the group, then the group
     h.click("Remove group 1 filter 2");
-    assert_eq!(h.app.filter.count(), 2);
+    assert_eq!(h.app.prefs.filter.count(), 2);
     h.click("Remove group 1");
-    assert!(h.app.filter.groups.is_empty());
-    assert_eq!(h.app.filter.count(), 1);
+    assert!(h.app.prefs.filter.groups.is_empty());
+    assert_eq!(h.app.prefs.filter.count(), 1);
     assert!(h.has("Filter \u{00B7} 1"));
 }
 
@@ -357,9 +357,9 @@ fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
         not: false,
         values: vec![v.to_string()],
     };
-    h.app.filter.rows = vec![row(FilterField::Priority, "1")];
-    h.app.filter.join = Join::Or;
-    h.app.filter.groups = vec![FilterGroup {
+    h.app.prefs.filter.rows = vec![row(FilterField::Priority, "1")];
+    h.app.prefs.filter.join = Join::Or;
+    h.app.prefs.filter.groups = vec![FilterGroup {
         join: Join::Or,
         rows: vec![
             row(FilterField::Status, "to do"),
@@ -377,10 +377,10 @@ fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
     assert!(h.has("Urgent or to do"));
     // clear, then bring it back by its name
     h.click("Clear all");
-    assert_eq!(h.app.filter.count(), 0);
+    assert_eq!(h.app.prefs.filter.count(), 0);
     h.click("Urgent or to do");
-    assert_eq!(h.app.filter.count(), 3);
-    assert_eq!(h.app.filter.groups, saved.groups);
+    assert_eq!(h.app.prefs.filter.count(), 3);
+    assert_eq!(h.app.prefs.filter.groups, saved.groups);
     assert_eq!(h.app.filtered().len(), shown);
     assert!(h.has("Filter \u{00B7} 3"));
     // rename
@@ -394,7 +394,7 @@ fn save_a_filter_then_bring_it_back_rename_and_delete_it() {
     assert!(h.has("Urgent or to do soon"));
     // changing the builder leaves the saved filter as it was
     h.click("Remove group 1");
-    assert_eq!(h.app.filter.count(), 1);
+    assert_eq!(h.app.prefs.filter.count(), 1);
     assert_eq!(h.app.data.extra.saved_filters[0].groups.len(), 1);
     // delete
     h.click("Delete saved filter Urgent or to do soon");
@@ -460,11 +460,11 @@ fn personal_list_looks_like_the_original_and_my_tasks_stays_open() {
     // is "Assigned to me", so that has no row of its own
     assert!(h.has("Today & Overdue") && h.has("Personal List"));
     assert!(!h.has("Assigned to me"));
-    assert!(h.app.group_by == GroupBy::Status);
+    assert!(h.app.prefs.group_by == GroupBy::Status);
     h.click("Personal List");
     let pl = h.app.personal_list_id().unwrap();
     assert_eq!(h.app.loc, Location::List(pl));
-    assert!(h.app.group_by == GroupBy::None, "Group: None");
+    assert!(h.app.prefs.group_by == GroupBy::None, "Group: None");
     assert!(h.app.col_on("Date created"));
     assert!(h.has("View Board") && h.has("View List"));
     assert!(
@@ -492,14 +492,14 @@ fn personal_list_looks_like_the_original_and_my_tasks_stays_open() {
     // leaving brings the earlier settings back
     h.click("My Tasks");
     assert_eq!(h.app.loc, Location::MyTasks);
-    assert!(h.app.group_by == GroupBy::Status);
+    assert!(h.app.prefs.group_by == GroupBy::Status);
     assert!(!h.app.col_on("Date created"));
     assert!(h.has("Personal List"), "still open after moving away");
 }
 
 #[test]
 fn property_columns_never_squeeze_the_name_away() {
-    let mut hidden = HashSet::new();
+    let mut hidden = std::collections::BTreeSet::new();
     hidden.insert("Date created".to_string());
     let row = Rect::from_min_size(pos2(0.0, 0.0), vec2(1100.0, 30.0));
     let cols = crate::app::shell::col_layout(row, &hidden, true);
@@ -521,7 +521,7 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
     // columns: the name keeps its room, the property cells start after it
     let row = h.rect("Task Write copy for landing page");
     let due = h.rect("Due date of Write copy for landing page");
-    let cols = crate::app::shell::col_layout(row, &h.app.hidden_cols, true);
+    let cols = crate::app::shell::col_layout(row, &h.app.prefs.hidden_cols, true);
     assert!(
         cols.left - row.left() >= 220.0,
         "name column {} px wide",
@@ -596,7 +596,7 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
 fn task_names_use_the_room_up_to_the_columns() {
     let mut h = Ui1::sized(900.0, 560.0);
     let row = h.rect("Task Write copy for landing page");
-    let cols = crate::app::shell::col_layout(row, &h.app.hidden_cols, true);
+    let cols = crate::app::shell::col_layout(row, &h.app.prefs.hidden_cols, true);
     assert!(
         h.painted_text("Write copy for landing page")
             .iter()
@@ -1321,8 +1321,8 @@ fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them()
     h.app.view = ViewKind::List;
     h.settle();
     // make room for two field columns next to the name
-    h.app.hidden_cols.insert("Comments".into());
-    h.app.hidden_cols.insert("Assignee".into());
+    h.app.prefs.hidden_cols.insert("Comments".into());
+    h.app.prefs.hidden_cols.insert("Assignee".into());
     h.settle();
     let custom = |h: &Ui1, f: u64| h.app.task(tid).unwrap().custom.get(&f).cloned();
     // a checkbox ticks in place, without opening the task
@@ -1337,18 +1337,18 @@ fn list_view_shows_custom_field_columns_edits_them_in_place_and_remembers_them()
     h.click("Columns");
     assert!(h.has("Custom fields"));
     h.click("Field Billable");
-    assert!(h.app.hidden_cols.contains("field:9001"));
+    assert!(h.app.prefs.hidden_cols.contains("field:9001"));
     h.key(egui::Key::Escape);
     assert!(!h.has(&format!("Billable of {}", name)));
     let other = list_of_other(&h, list);
     h.app.apply(Action::Go(Location::List(other)));
     h.settle();
-    h.app.hidden_cols.remove("field:9001");
+    h.app.prefs.hidden_cols.remove("field:9001");
     h.settle();
     h.app.apply(Action::Go(Location::List(list)));
     h.settle();
     assert!(
-        h.app.hidden_cols.contains("field:9001"),
+        h.app.prefs.hidden_cols.contains("field:9001"),
         "the first list still hides it"
     );
     // text and number fields open a box; a number takes only numbers
@@ -1382,7 +1382,7 @@ fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
     let list = task_named(&h, name).list_id;
     h.app.apply(Action::Go(Location::List(list)));
     h.app.view = ViewKind::List;
-    h.app.hidden_cols.remove("Created by");
+    h.app.prefs.hidden_cols.remove("Created by");
     h.settle();
     let w = h.app.list_width;
     assert!(w > 0.0);
@@ -1407,7 +1407,7 @@ fn columns_panel_marks_a_property_custom_fields_leave_no_room_for() {
         assert!(n < 10);
     }
     assert!(
-        crate::app::shell::col_layout(row, &h.app.hidden_cols, prio)
+        crate::app::shell::col_layout(row, &h.app.prefs.hidden_cols, prio)
             .extra
             .iter()
             .any(|c| c.0 == "Created by"),

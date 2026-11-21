@@ -1036,7 +1036,7 @@ fn bulk_bar_tags_unassign_start_date_and_unarchive() {
         assert_eq!(h.app.task(h.task_id(n)).unwrap().start, Some(today()));
     }
     h.click("Archive");
-    h.app.filter.archived = true;
+    h.app.prefs.filter.archived = true;
     h.settle();
     h.hover(h.find(&format!("Task {}", a)).unwrap());
     h.click(&format!("Select {}", a));
@@ -1621,7 +1621,7 @@ fn my_subtask_shows_once_on_my_tasks() {
         open: false,
     });
     h.app.loc = Location::MyTasks;
-    h.app.subtasks_open = true;
+    h.app.prefs.subtasks_open = true;
     h.settle();
     h.scroll_into_view("Task Sub of mine");
     assert_eq!(

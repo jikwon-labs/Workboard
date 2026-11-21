@@ -466,9 +466,6 @@ pub struct App {
     open_task: Option<u64>,
     search: String,
     me_mode: bool,
-    show_closed: bool,
-    group_by: GroupBy,
-    sort_by: SortBy,
     collapsed: HashSet<String>,
     expanded_tasks: HashSet<u64>,
     adding: Option<(String, String)>,
@@ -530,7 +527,6 @@ pub struct App {
     show_search: bool,
     // focus the toolbar search box once, on the frame it opens
     search_focus: bool,
-    subtasks_open: bool,
     modal: Option<Modal>,
     /// The sign-in screen, filling the window in place of the app (see login.rs).
     login: Option<login::LoginScreen>,
@@ -610,8 +606,6 @@ pub struct App {
     new_channel: Option<String>,
     /// Tasks ticked for bulk editing.
     selected: HashSet<u64>,
-    filter: TaskFilter,
-    hidden_cols: HashSet<String>,
     /// The Fields panel (toolbar Columns) is open.
     fields_open: bool,
     /// Width of the List's rows last drawn (to tell which fields fit).
@@ -621,7 +615,6 @@ pub struct App {
     /// Group and "Date created" column to restore when leaving the Personal
     /// List (it shows Group: None and Date created, as in the original).
     personal_saved: Option<(GroupBy, bool)>,
-    sort_desc: bool,
     cal_week: bool,
     /// Gantt scale: 0 days, 1 weeks, 2 months.
     gantt_zoom: u8,
@@ -630,6 +623,9 @@ pub struct App {
     doc_preview: bool,
     settings_tab: u8,
     settings_state: Option<Modal>,
+    /// The List's view settings shown now: grouping, sorting, columns and
+    /// filter (see listview.rs).
+    prefs: listview::ViewPrefs,
     /// View settings per location (see listview.rs), and the location they
     /// were last brought in for with what was showing then.
     view_prefs: HashMap<String, listview::ViewPrefs>,
@@ -1022,9 +1018,6 @@ impl App {
             open_task,
             search: String::new(),
             me_mode: false,
-            show_closed: false,
-            group_by: GroupBy::Status,
-            sort_by: SortBy::Manual,
             collapsed: HashSet::new(),
             expanded_tasks: HashSet::new(),
             adding: None,
@@ -1084,7 +1077,6 @@ impl App {
             assignee_filter: None,
             show_search: false,
             search_focus: false,
-            subtasks_open: false,
             modal: start_modal,
             login: start_login,
             notepad_open: false,
@@ -1153,16 +1145,11 @@ impl App {
             typing_was_on: false,
             focus_was: None,
             previews: Default::default(),
-            filter: TaskFilter::default(),
-            hidden_cols: std::iter::once("Date created")
-                .chain(parity::PROPERTIES)
-                .map(String::from)
-                .collect(),
+            prefs: listview::ViewPrefs::new(),
             fields_open: false,
             list_width: 0.0,
             filter_open: false,
             personal_saved: None,
-            sort_desc: false,
             cal_week: false,
             gantt_zoom: 0,
             gantt_jump: true,
@@ -1274,7 +1261,7 @@ impl App {
 
     fn subtasks(&self, id: u64) -> Vec<&Task> {
         // archived subtasks only show with the Archived filter on
-        let shows = |t: &Task| t.parent == Some(id) && (self.filter.archived || !t.archived);
+        let shows = |t: &Task| t.parent == Some(id) && (self.prefs.filter.archived || !t.archived);
         let mut v: Vec<&Task> = if self.dirty {
             // a change not taken in yet may have moved one under it
             self.data.tasks.iter().filter(|t| shows(t)).collect()
@@ -1309,7 +1296,7 @@ impl App {
             .filter(|t| {
                 t.parent.is_none()
                     || (matches!(self.loc, Location::MyTasks | Location::TodayOverdue) && t.assignees.contains(&self.data.me))
-                    || (self.filter.archived && t.archived && !t.parent.and_then(|p| self.task(p)).is_some_and(|p| p.archived))
+                    || (self.prefs.filter.archived && t.archived && !t.parent.and_then(|p| self.task(p)).is_some_and(|p| p.archived))
                     // a search finds subtasks too
                     || !q.is_empty()
             })
@@ -1323,8 +1310,8 @@ impl App {
             .filter(|t| info.get(&t.list_id).and_then(|l| l.private_owner).map(|o| o == self.data.me).unwrap_or(true))
             .filter(|t| matches!(self.loc, Location::List(_)) || !info.get(&t.list_id).is_some_and(|l| l.archived))
             .filter(|t| self.assignee_filter.map(|a| t.assignees.contains(&a)).unwrap_or(true))
-            .filter(|t| self.show_closed || self.filter.archived || !closed_in(&info, t))
-            .filter(|t| self.filter.matches(t, &self.data))
+            .filter(|t| self.prefs.show_closed || self.prefs.filter.archived || !closed_in(&info, t))
+            .filter(|t| self.prefs.filter.matches(t, &self.data))
             .collect();
         self.sort(&mut v);
         v
@@ -1343,7 +1330,7 @@ impl App {
     }
 
     fn sort(&self, v: &mut [&Task]) {
-        match self.sort_by {
+        match self.prefs.sort_by {
             SortBy::Manual => v.sort_by_key(|t| t.order),
             // by day, then by time within it (a day without one last)
             SortBy::DueDate => v.sort_by_key(|t| (t.due.is_none(), t.due_moment(), t.order)),
@@ -1390,7 +1377,7 @@ impl App {
                 v.sort_by_key(|t| (key(t).is_none(), key(t), t.order));
             }
         }
-        if self.sort_desc && self.sort_by != SortBy::Manual {
+        if self.prefs.sort_desc && self.prefs.sort_by != SortBy::Manual {
             v.reverse();
         }
     }
@@ -1430,7 +1417,7 @@ impl App {
     }
 
     fn groups(&self, tasks: &[&Task], include_empty: bool) -> Vec<Group> {
-        self.groups_by(self.group_by, tasks, include_empty)
+        self.groups_by(self.prefs.group_by, tasks, include_empty)
     }
 
     /// The groups `tasks` fall into under `by` (the Timeline's lanes use
@@ -1441,7 +1428,7 @@ impl App {
         match by {
             GroupBy::Status => {
                 for st in self.location_statuses() {
-                    if !self.show_closed
+                    if !self.prefs.show_closed
                         && matches!(st.kind, StatusKind::Closed | StatusKind::Done)
                         && !include_empty
                     {
@@ -1546,7 +1533,7 @@ impl App {
                     .map(|x| due_group_key(x.due, self.data.is_closed(x)))
                     .collect();
                 for k in keys {
-                    if k == "done" && !self.show_closed && !include_empty {
+                    if k == "done" && !self.prefs.show_closed && !include_empty {
                         continue;
                     }
                     let ids: Vec<u64> = tasks
@@ -1717,7 +1704,7 @@ impl App {
 
     /// Gives a task the field value of the group it is dropped into.
     fn move_to_group(&self, task: &mut Task, g: &Group) {
-        match self.group_by {
+        match self.prefs.group_by {
             GroupBy::Status => {
                 if let Some(st) = &g.status {
                     if self
@@ -3687,13 +3674,13 @@ impl App {
             _ => false,
         };
         for c in TableCol::FIXED {
-            if !self.hidden_cols.contains(&c.key()) && !app_off(c) {
+            if !self.prefs.hidden_cols.contains(&c.key()) && !app_off(c) {
                 cols.push(c);
             }
         }
         for f in &fields {
             let c = TableCol::Field(f.id);
-            if !self.hidden_cols.contains(&c.key()) {
+            if !self.prefs.hidden_cols.contains(&c.key()) {
                 cols.push(c);
             }
         }
@@ -3858,14 +3845,14 @@ impl App {
                 popup(ui, &pr, ui.id().with("thead_plus_pop"), 220.0, |ui| {
                     ui.label(RichText::new(tr("Columns")).small().color(t.text3));
                     for (key, label, shown) in &choices {
-                        let mut on = !self.hidden_cols.contains(key);
+                        let mut on = !self.prefs.hidden_cols.contains(key);
                         let r = check(ui, &mut on, shown.as_str());
                         name_it(&r, &format!("Column {}", label));
                         if r.changed() {
                             if on {
-                                self.hidden_cols.remove(key);
+                                self.prefs.hidden_cols.remove(key);
                             } else {
-                                self.hidden_cols.insert(key.clone());
+                                self.prefs.hidden_cols.insert(key.clone());
                             }
                         }
                     }

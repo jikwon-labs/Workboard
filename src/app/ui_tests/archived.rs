@@ -49,7 +49,7 @@ fn views_with_only_archived_tasks_say_so_and_show_the_way_back() {
     h.app.actions.push(Action::Go(Location::List(web)));
     h.settle();
     h.click("Show archived tasks");
-    assert!(h.app.filter.archived);
+    assert!(h.app.prefs.filter.archived);
     assert!(h.has("Task Design new homepage layout"));
 }
 

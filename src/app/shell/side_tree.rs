@@ -719,12 +719,12 @@ impl App {
     /// tasks the Archived filter would show, tasks in archived Lists, which
     /// come back with their List). Nothing while the Archived filter is on.
     pub(crate) fn archived_here(&mut self) -> (usize, usize) {
-        if self.filter.archived {
+        if self.prefs.filter.archived {
             return (0, 0);
         }
-        self.filter.archived = true;
+        self.prefs.filter.archived = true;
         let own = self.filtered().len();
-        self.filter.archived = false;
+        self.prefs.filter.archived = false;
         if matches!(self.loc, Location::List(_)) {
             return (own, 0);
         }

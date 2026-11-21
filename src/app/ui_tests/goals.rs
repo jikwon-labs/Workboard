@@ -952,3 +952,66 @@ fn a_rows_arrow_shows_its_targets_without_opening_it() {
     assert_eq!(h.app.goal_list_open, None, "the arrow folds them again");
     assert!(h.painted_text("38 / 50 people").is_empty());
 }
+
+#[test]
+fn deleting_a_goal_closes_its_page_and_unlinks_its_chat_card() {
+    let (mut h, _, b) = two_goals();
+    h.click("Done Lease signed");
+    h.click("Share from achieved");
+    h.click("Send goal to chat");
+    h.click("Achieved Office move");
+    h.click("Goal settings");
+    h.click("Delete goal");
+    // the confirm dialog's own Delete button (the lowest of the "Delete"s)
+    let at = h
+        .tree
+        .iter()
+        .filter(|(n, r)| n == "Delete" && r.height() < 40.0)
+        .map(|(_, r)| r.center())
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .unwrap();
+    h.click_at(at);
+    assert!(h.app.modal.is_none());
+    assert!(h.app.data.extra.goals.iter().all(|g| g.id != b), "gone");
+    assert_eq!(h.app.goal_open, None, "back on the Goals page");
+    assert!(h.has("Goal Beta launch"));
+    assert!(h.app.data.extra.trash.iter().any(|x| x.kind == "Goal"));
+
+    // its card in the channel stays, without the way to open it
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    h.app.section = Section::Chat;
+    h.app.chat.open = Some(general);
+    h.settle();
+    assert!(!h.painted_text("Office move").is_empty(), "the card");
+    assert!(!h.has("Open goal Office move"));
+
+    // a notice about it opens the Goals page, not an empty one
+    h.app.open_target(&format!("goal:{}", b));
+    h.settle();
+    assert_eq!(h.app.section, Section::Goals);
+    assert!(h.has("Goal Beta launch"));
+    assert_eq!(h.app.goal_open, None);
+
+    // Trash brings it back as it was, achieved, with its history
+    let j = h
+        .app
+        .data
+        .extra
+        .trash
+        .iter()
+        .position(|x| x.kind == "Goal")
+        .unwrap();
+    h.app.restore_trash(j);
+    h.settle();
+    let g = goal(&h, b);
+    assert_eq!(g.done_on, Some(today()));
+    assert!(g.log.iter().any(|e| e.what == GoalChange::Milestone(100)));
+    assert!(h.has("Achieved Office move"));
+}

@@ -1635,11 +1635,71 @@ fn list_crumb_opens_the_list_menu() {
     assert!(h.has("Export to CSV"));
     h.click("List menu");
     assert!(!h.has("Export to CSV"));
-    // not on a Space: there is no List to manage
+    // not on a Space: there is no List to manage, the Space's own menu instead
     let space = h.app.data.space_of_list(list).unwrap().id;
     h.app.apply(Action::Go(Location::Space(space)));
     h.settle();
     assert!(!h.has("List menu"));
+    h.click("Space menu");
+    assert!(h.has("Share & permissions") || h.has("Add to Favorites"));
+    h.click("Space menu");
+}
+
+#[test]
+fn folder_crumb_opens_the_folder_menu() {
+    let mut h = Ui1::new();
+    let fid = h
+        .app
+        .data
+        .spaces
+        .iter()
+        .flat_map(|s| s.folders.iter())
+        .map(|f| f.id)
+        .next()
+        .expect("a folder in the sample workspace");
+    h.app.apply(Action::Go(Location::Folder(fid)));
+    h.settle();
+    h.click("Folder menu");
+    h.click("Rename");
+    assert!(matches!(h.app.rename, Some((Target::Folder(id), _)) if id == fid));
+}
+
+#[test]
+fn gathered_views_have_no_crumb_arrow() {
+    let mut h = Ui1::new();
+    // Everything, My Tasks and Today & Overdue have nothing to manage: their
+    // crumb has no arrow that would look like a menu and do nothing
+    for loc in [
+        Location::Everything,
+        Location::MyTasks,
+        Location::TodayOverdue,
+    ] {
+        h.app.apply(Action::Go(loc));
+        h.settle();
+        let name = h.app.data.location_name(loc);
+        let crumb = h
+            .painted_text(tr(&name))
+            .iter()
+            .map(|(r, _)| *r)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap_or_else(|| panic!("the {} crumb", name));
+        let after = Rect::from_min_max(
+            pos2(crumb.right(), crumb.top()),
+            pos2(crumb.right() + 18.0, crumb.bottom()),
+        );
+        let arrow = h
+            .shapes
+            .iter()
+            .filter(|s| {
+                matches!(&s.shape, egui::Shape::LineSegment { points: [a, b], .. }
+                    if after.contains(*a) && after.contains(*b))
+            })
+            .count();
+        assert_eq!(arrow, 0, "an arrow after the {} crumb", name);
+        for m in ["List menu", "Folder menu", "Space menu"] {
+            assert!(!h.has(m), "{} on {}", m, name);
+        }
+    }
 }
 
 // the small number drawn at the corner of a rail icon, if any

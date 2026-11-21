@@ -177,15 +177,19 @@ impl App {
                 }
                 cap
             };
-            // the List's own crumb (icon, name and arrow) opens the same menu
-            // as Manage on the right
-            let list_menu = match self.loc {
-                Location::List(id) => Some(id),
+            // the last crumb (icon, name and arrow) opens what that place can
+            // do: a List the same menu as Manage on the right, a Space or a
+            // Folder the menu from its row in the sidebar. The gathered views
+            // (Everything, My Tasks, ...) have none, so no arrow either.
+            let crumb_menu = match self.loc {
+                Location::List(id) => Some(CrumbMenu::List(id)),
+                Location::Folder(id) => Some(CrumbMenu::Folder(id)),
+                Location::Space(id) => Some(CrumbMenu::Space(id)),
                 _ => None,
             };
             for (i, (name, kind, color)) in crumbs.iter().enumerate() {
                 let last = i + 1 == n;
-                let menu_here = last && list_menu.is_some();
+                let menu_here = last && crumb_menu.is_some();
                 let sense = if menu_here {
                     Sense::click()
                 } else {
@@ -252,28 +256,41 @@ impl App {
                     line_icon(ui.painter(), "lock", r.center(), t.text3);
                     lr.on_hover_text(tr("Private: only you can see this List"));
                 }
-                if last {
+                if let Some(menu) = crumb_menu.filter(|_| last) {
                     let (cr, chev) = ui.allocate_exact_size(vec2(10.0, 16.0), sense);
-                    if let Some(lid) = list_menu {
-                        // one target for the icon, the name and the arrow
-                        let resp = (icon_resp | name_resp | chev)
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .on_hover_text(tr("Manage"));
-                        name_it(&resp, "List menu");
-                        if resp.hovered() {
-                            ui.painter().set(
-                                hover_bg,
-                                egui::Shape::rect_filled(
-                                    resp.rect.expand2(vec2(4.0, 2.0)),
-                                    6.0,
-                                    t.hover,
-                                ),
-                            );
-                        }
-                        popup(ui, &resp, ui.id().with("crumb_list_pop"), 200.0, |ui| {
-                            self.list_manage_menu(ui, &t, lid);
-                        });
+                    // one target for the icon, the name and the arrow
+                    let resp = (icon_resp | name_resp | chev)
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text(tr("Manage"));
+                    name_it(
+                        &resp,
+                        match menu {
+                            CrumbMenu::List(_) => "List menu",
+                            CrumbMenu::Folder(_) => "Folder menu",
+                            CrumbMenu::Space(_) => "Space menu",
+                        },
+                    );
+                    if resp.hovered() {
+                        ui.painter().set(
+                            hover_bg,
+                            egui::Shape::rect_filled(
+                                resp.rect.expand2(vec2(4.0, 2.0)),
+                                6.0,
+                                t.hover,
+                            ),
+                        );
                     }
+                    popup(
+                        ui,
+                        &resp,
+                        ui.id().with("crumb_list_pop"),
+                        200.0,
+                        |ui| match menu {
+                            CrumbMenu::List(lid) => self.list_manage_menu(ui, &t, lid),
+                            CrumbMenu::Folder(fid) => self.folder_menu(ui, fid, false),
+                            CrumbMenu::Space(sid) => self.space_menu(ui, sid, false),
+                        },
+                    );
                     let cv = cr.center();
                     ui.painter().line_segment(
                         [cv + vec2(-3.5, -1.5), cv + vec2(0.0, 2.0)],
@@ -941,4 +958,12 @@ impl App {
                 });
             });
     }
+}
+
+/// What the last crumb in the header opens.
+#[derive(Clone, Copy)]
+enum CrumbMenu {
+    List(u64),
+    Folder(u64),
+    Space(u64),
 }

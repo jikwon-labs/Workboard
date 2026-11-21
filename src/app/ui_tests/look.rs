@@ -217,8 +217,6 @@ fn dark_theme_post_chip_and_ai_hint_read() {
     h.click("Comment box");
     h.type_text("Shipped");
     h.click("Send Post");
-    // sending the post closed the window: open it again to see the chip
-    h.click_left("Task Write copy for landing page", 120.0);
     let chips: Vec<_> = h.painted_text("Post");
     assert!(!chips.is_empty());
     for (r, c) in chips {

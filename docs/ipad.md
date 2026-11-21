@@ -11,6 +11,16 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 - 데이터는 앱 컨테이너의 `Library/Application Support/Workboard` 에 둔다(`src/os.rs`).
 - 이 맥에는 Simulator 창 앱이 없어 화면 없이 돈다. 화면은 `xcrun simctl io <udid> screenshot x.png` 나 아래 UI 테스트로 본다.
 
+## 실제 iPad 에 설치
+
+    scripts/ipad-device               # 연결된 iPad 에 정식(release) 빌드를 서명해 설치하고 실행
+    WB_DEBUG=1 scripts/ipad-device    # 디버그 빌드
+
+- iPad 를 케이블로 연결하고 "이 컴퓨터를 신뢰", 설정 > 개인정보 보호 및 보안 > 개발자 모드를 켠다.
+- 서명 프로파일은 Xcode 자동 서명으로 만든다. iPhone 앱 프로젝트를 이 앱의 번들 ID 로 한 번 빌드하면 iPad 가 팀에 등록되고 개발용 프로파일이 생긴다(`target/ipad-device/desk.mobileprovision`, iPad 가 바뀌면 다시 만든다).
+- 앱은 LiveKit 의 WebRTC 를 거쳐 Swift 라이브러리를 쓰므로, 실기기에서는 `/usr/lib/swift` 를 찾게 해야 한다(`build.rs`). 없으면 "Library not loaded: @rpath/libswiftCoreMedia.dylib" 로 시작하자마자 꺼진다.
+- 2026-11-22 iPad mini 6세대(iPad14,1, iPadOS 27.2.1)에 설치해 실행되는 것까지 확인했다.
+
 ## 손으로 누르는 시험
 
 `ios/WorkboardUITests/DeskUITests.swift` 가 XCUITest 로 이 앱을 띄워 좌표로 누르고, 걸음마다 스크린샷을 남긴다. egui 가 iOS 에서 접근성 요소를 내놓지 않아 좌표로 누른다. 평소 iOS 테스트에서는 건너뛴다.
@@ -39,5 +49,5 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 - **단축키:** iPad 하드웨어 키보드의 Cmd 는 egui 명령 키로 잡히지 않고 Ctrl 이 그 역할을 한다(egui-winit 이 macOS 에서만 Cmd 를 쓴다). 표기도 "Ctrl+J".
 - **마우스 올리기 전용 UI:** 올려야 보이는 버튼은 손가락으로 열 수 없다. 트랙패드에서는 된다. 버튼이 손가락에 작다.
 - **맥 전용 기능:** 사진 고르기·붙여 넣기, 알림, 카메라, 화면 공유(`crates/wb-voice/src/screen.rs` 에서 iOS 는 "아직 안 됨"), 업데이트 확인, 파일 열기.
-- **실기기:** 서명·실기기 설치, 음성 통화(LiveKit 빌드는 된다)는 확인하지 않았다.
+- **실기기:** 설치·실행까지만 확인했다. 손으로 쓰는 느낌, 음성 통화(LiveKit 빌드는 된다)는 아직 확인하지 않았다.
 - **접근성:** egui 의 AccessKit 이 iOS 를 지원하지 않아 VoiceOver 와 UI 테스트 요소가 없다.

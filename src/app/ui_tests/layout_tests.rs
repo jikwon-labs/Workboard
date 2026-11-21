@@ -1417,6 +1417,41 @@ fn small_window_view_tabs_and_add_view_fit() {
     }
 }
 
+/// Hiding a view from the "+ View" menu shortens the tab row and moves the
+/// button left; the open menu stays where it is, so the next box is still
+/// under the pointer.
+#[test]
+fn add_view_menu_stays_put_when_a_view_is_hidden() {
+    let mut h = Ui1::sized(1440.0, 900.0);
+    let list = h.app.data.first_list().unwrap();
+    h.app.loc = Location::List(list);
+    h.app.view = ViewKind::List;
+    h.settle();
+    h.click("+  View");
+    let plus = h.rect("+  View");
+    let table = h.rect("Table");
+    h.click("Timeline");
+    assert!(h
+        .app
+        .data
+        .extra
+        .hidden_views
+        .iter()
+        .any(|v| v == "Timeline"));
+    assert!(!h.has("View Timeline"), "the tab is gone");
+    assert!(
+        h.rect("+  View").left() < plus.left() - 20.0,
+        "the button moved"
+    );
+    assert_eq!(h.rect("Table"), table, "the menu didn't");
+    h.click("Gantt");
+    assert_eq!(h.rect("Table"), table);
+    // closed and opened again, it sits under the button where it is now
+    h.key(egui::Key::Escape);
+    h.click("+  View");
+    assert!(h.rect("Table").left() < table.left() - 20.0);
+}
+
 /// The Timesheet fits the smallest window (the day columns narrow), and a
 /// long task name is shortened with an ellipsis instead of cut mid-letter;
 /// the calendar's "Unscheduled" cards shorten theirs the same way.

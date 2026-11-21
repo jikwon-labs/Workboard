@@ -39,8 +39,27 @@ pub fn popup<R>(
     // is last frame's, or the minimum before it has been shown)
     let wide_id = id.with("__wide");
     let wide: f32 = ui.data(|d| d.get_temp(wide_id)).unwrap_or(width + 24.0);
-    let over = resp.rect.left() + wide + 8.0 - screen.right();
     let mut at = resp.clone();
+    // an open popup stays where it opened even when its button moves: a
+    // click inside it (hiding a view tab) shortened the row and slid the
+    // button and the popup left under the pointer. A new window width lets
+    // it follow the button again.
+    let pin_id = id.with("__pin");
+    if ui.memory(|m| m.is_popup_open(id)) {
+        let (x, w) = ui.data_mut(|d| {
+            *d.get_temp_mut_or_insert_with(pin_id, || (at.rect.left(), screen.width()))
+        });
+        let x = if w == screen.width() {
+            x
+        } else {
+            ui.data_mut(|d| d.insert_temp(pin_id, (at.rect.left(), screen.width())));
+            at.rect.left()
+        };
+        at.rect = at.rect.translate(vec2(x - at.rect.left(), 0.0));
+    } else {
+        ui.data_mut(|d| d.remove::<(f32, f32)>(pin_id));
+    }
+    let over = at.rect.left() + wide + 8.0 - screen.right();
     if over > 0.0 {
         at.rect = at.rect.translate(vec2(-over, 0.0));
     }

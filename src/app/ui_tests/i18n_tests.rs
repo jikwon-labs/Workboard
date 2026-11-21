@@ -838,6 +838,13 @@ fn goal_screens_have_no_english_left() {
     h.click("Goal row Launch");
     h.settle();
     texts(&h.shapes, &mut shown);
+    // a milestone floating over the page, and the settings dialog
+    h.app.goal_banner = Some((801, 50, now_ts()));
+    h.settle();
+    texts(&h.shapes, &mut shown);
+    h.app.modal = Some(Modal::GoalSettings { id: 801 });
+    h.settle();
+    texts(&h.shapes, &mut shown);
     h.app.modal = Some(Modal::NewGoal(Box::new(super::more::GoalDraft::new(me))));
     h.settle();
     texts(&h.shapes, &mut shown);

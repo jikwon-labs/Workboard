@@ -102,7 +102,6 @@ pub const T: &[(&str, &str)] = &[
     ("Closest to done", "달성이 가장 가까운 목표"),
     ("Coming up", "다가오는 마감"),
     ("Create goal", "목표 만들기"),
-    ("Done or not · counts 100% once done", "완료 여부 · 완료하면 100%"),
     ("Done right on the deadline", "마감일에 달성했어요"),
     ("Done {} days after the deadline", "마감 {}일 뒤에 달성했어요"),
     ("Done {} days before the deadline", "마감 {}일 전에 해냈어요"),
@@ -203,6 +202,7 @@ pub const T: &[(&str, &str)] = &[
     // goals
     ("Due {}", "마감 {}"),
     ("Delete goal", "목표 삭제"),
+    ("Goal settings", "목표 설정"),
     ("now", "현재"),
     ("from", "시작"),
     ("Pick tasks", "작업 선택"),

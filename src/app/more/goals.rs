@@ -290,6 +290,14 @@ impl App {
                 });
                 reached = Some(m);
                 changed = true;
+            } else if m < g.reached {
+                // dropped back (a target undone): the milestones above
+                // aren't reached any more and leave the history; crossing
+                // again records them anew (notify tells people only once)
+                g.reached = m;
+                g.log
+                    .retain(|e| !matches!(e.what, GoalChange::Milestone(x) if x > m));
+                changed = true;
             }
             if pct >= 100 && g.done_on.is_none() {
                 g.done_on = Some(day);
@@ -311,6 +319,13 @@ impl App {
                 }
             }
             changed = true;
+        }
+        // a milestone's banner goes when the goal drops back below it
+        let gid = g.id;
+        if let Some((bg, bm, _)) = self.goal_banner {
+            if bg == gid && pct < bm {
+                self.goal_banner = None;
+            }
         }
         if changed {
             self.dirty = true;
@@ -358,7 +373,7 @@ impl App {
             self.goal_banner = None;
             self.modal = Some(Modal::GoalAchieved { id: gid });
         } else if let Some(m) = reached.filter(|m| *m < 100) {
-            self.goal_banner = Some((gid, m));
+            self.goal_banner = Some((gid, m, now));
         }
     }
 

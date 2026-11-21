@@ -2687,7 +2687,7 @@ fn goal_pace_compares_progress_with_time_used() {
 }
 
 #[test]
-fn goal_milestones_are_kept_once_and_old_goals_start_quietly() {
+fn goal_milestones_follow_progress_and_old_goals_start_quietly() {
     let mut a = app();
     let me = a.data.me;
     let set = |a: &mut App, v: f64| {
@@ -2728,10 +2728,17 @@ fn goal_milestones_are_kept_once_and_old_goals_start_quietly() {
         .log
         .iter()
         .any(|e| e.what == GoalChange::Milestone(100) && e.who == 0));
-    // dropping back clears the day; crossing again isn't announced twice
+    // dropping back clears the day and takes the milestones above off
     set(&mut a, 5.0);
     a.goal_watch(now_ts());
-    assert_eq!(a.data.extra.goals[0].done_on, None);
+    let g = &a.data.extra.goals[0];
+    assert_eq!(g.done_on, None);
+    assert_eq!(g.reached, 50);
+    assert!(!g
+        .log
+        .iter()
+        .any(|e| matches!(e.what, GoalChange::Milestone(_))));
+    // crossing again records it anew, once
     set(&mut a, 10.0);
     a.goal_watch(now_ts());
     let g = &a.data.extra.goals[0];

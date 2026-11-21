@@ -159,6 +159,7 @@ fn recording_a_number_moves_the_goal_and_shows_the_milestone() {
     let (mut h, a, _) = two_goals();
     h.click("Goal Beta launch");
     assert_eq!(h.app.goal_open, Some(a));
+    let row = h.rect("Minus 1 Beta testers");
     h.click("Plus 10 Beta testers");
     h.click("Plus 1 Beta testers");
     h.click("Plus 1 Beta testers");
@@ -169,8 +170,17 @@ fn recording_a_number_moves_the_goal_and_shows_the_milestone() {
     assert_eq!(current, 50.0);
     // the number full and the review not done: halfway
     assert_eq!((h.app.goal_progress(&g) * 100.0).round() as u8, 50);
-    assert_eq!(h.app.goal_banner, Some((a, 50)), "the 50% banner shows");
+    assert_eq!(
+        h.app.goal_banner.map(|b| (b.0, b.1)),
+        Some((a, 50)),
+        "the 50% banner shows"
+    );
     assert!(h.has("Close milestone"));
+    assert_eq!(
+        h.rect("Minus 1 Beta testers"),
+        row,
+        "the banner floats over the page: nothing on it moves"
+    );
     let me = h.app.data.me;
     assert!(g
         .log
@@ -191,6 +201,63 @@ fn recording_a_number_moves_the_goal_and_shows_the_milestone() {
         panic!()
     };
     assert_eq!(current, 49.0);
+}
+
+#[test]
+fn undoing_a_target_takes_back_the_milestone_it_passed() {
+    let (mut h, a, _) = two_goals();
+    h.click("Goal Beta launch");
+    let milestones = |h: &Ui1| -> Vec<u8> {
+        goal(h, a)
+            .log
+            .iter()
+            .filter_map(|e| match e.what {
+                GoalChange::Milestone(m) => Some(m),
+                _ => None,
+            })
+            .collect()
+    };
+    let button = h.rect("Done Store review");
+    // 38 of 50 people and the review done: 88%
+    h.click("Done Store review");
+    assert_eq!(h.app.goal_banner.map(|b| (b.0, b.1)), Some((a, 75)));
+    assert_eq!(milestones(&h), [75]);
+    assert_eq!(
+        h.rect("Done Store review").size(),
+        button.size(),
+        "Done and Mark done are the same size"
+    );
+    // undone: back to 38%, the 75% milestone goes from the banner and the
+    // history, and the milestones show it as still to reach
+    h.click("Done Store review");
+    assert_eq!(h.app.goal_banner, None);
+    assert!(milestones(&h).is_empty(), "{:?}", goal(&h, a).log);
+    assert_eq!(goal(&h, a).reached, 25);
+    // done again: the milestone comes back once
+    h.click("Done Store review");
+    assert_eq!(milestones(&h), [75]);
+    assert!(h.has("Close milestone"));
+    // it floats a few seconds, then goes by itself
+    let (g, m, _) = h.app.goal_banner.unwrap();
+    h.app.goal_banner = Some((g, m, now_ts() - 60));
+    h.settle();
+    assert_eq!(h.app.goal_banner, None);
+    assert!(!h.has("Close milestone"));
+}
+
+#[test]
+fn a_targets_remove_button_is_round() {
+    let (mut h, _, _) = two_goals();
+    h.click("Goal Beta launch");
+    let r = h.rect("Remove target Beta testers");
+    assert_eq!(r.width(), r.height(), "{r:?}");
+    h.hover(r.center());
+    assert_eq!(
+        h.circle_fill_at(r.center()),
+        Some(crate::widgets::hover_fill_for(false)),
+        "a round hover fill"
+    );
+    assert!(!h.hover_fill_at(r.center()), "not a rounded box");
 }
 
 #[test]
@@ -263,6 +330,12 @@ fn new_goal_dialog_creates_a_goal_with_its_targets() {
     h.type_text("Hire two designers");
     h.click("Measure by Done or not");
     h.click("Another target");
+    let x = h.rect("Remove Target");
+    assert_eq!(
+        x.width(),
+        x.height(),
+        "the added target's remove button is round"
+    );
     h.click("Measure by Number");
     h.click("Due end of month");
     h.click("Create goal");
@@ -298,11 +371,20 @@ fn the_empty_goals_page_starts_from_a_sample() {
 }
 
 #[test]
-fn a_goals_settings_change_its_name_owner_and_colour() {
+fn a_goals_settings_open_from_its_page_in_a_dialog() {
     let (mut h, a, _) = two_goals();
     h.click("Goal Beta launch");
+    assert!(
+        !h.has("Goal name") && !h.has("Delete goal"),
+        "not on the page itself"
+    );
+    h.click("Goal settings");
+    assert!(matches!(h.app.modal, Some(Modal::GoalSettings { id }) if id == a));
     h.click("Goal color [16, 144, 224]");
     assert_eq!(goal(&h, a).color, [0x10, 0x90, 0xe0]);
+    h.click("Close goal settings");
+    assert!(h.app.modal.is_none());
+    h.click("Goal settings");
     h.click("Delete goal");
     assert!(matches!(
         h.app.modal,

@@ -60,8 +60,10 @@ pub struct Goal {
     /// written (null too) so an older copy's day isn't filled back in.
     #[serde(default)]
     pub done_on: Option<NaiveDate>,
-    /// The highest milestone (25, 50, 75 or 100) reached so far. It only
-    /// goes up, so dropping back and crossing again isn't announced twice.
+    /// The highest milestone (25, 50, 75 or 100) it is at now. Dropping
+    /// back (a target undone) lowers it and takes the milestones above off
+    /// the history; crossing again records them anew. People are told of a
+    /// milestone only once (notify's keys), however often it is crossed.
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub reached: u8,
     /// What happened to it, oldest first (the last `GOAL_LOG_KEEP`).

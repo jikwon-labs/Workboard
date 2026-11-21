@@ -330,16 +330,15 @@ impl App {
                         .corner_radius(14)
                         .inner_margin(egui::Margin {
                             left: 10,
-                            right: 4,
+                            right: 3,
                             top: 2,
                             bottom: 2,
                         })
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
                                 ui.label(RichText::new(&tg.name).size(13.0));
-                                let x = ui.add(ghost(egui::Button::new(
-                                    RichText::new("\u{00D7}").color(t.text2),
-                                )));
+                                let x = close_x(ui, 20.0, t.text2);
                                 name_it(&x, &format!("Remove {}", tg.name));
                                 if x.clicked() {
                                     drop = Some(i);

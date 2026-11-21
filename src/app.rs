@@ -535,8 +535,9 @@ pub struct App {
     goal_filter: u8,
     /// the goal whose targets show under its row in the rows view
     goal_list_open: Option<u64>,
-    /// a milestone just reached on a goal's page: (goal, 25/50/75)
-    goal_banner: Option<(u64, u8)>,
+    /// a milestone just reached on a goal's page: (goal, 25/50/75, when);
+    /// it floats over the page for a few seconds
+    goal_banner: Option<(u64, u8, i64)>,
     /// the tasks target showing its closed tasks too: (goal, target)
     goal_show_done: Option<(u64, usize)>,
     ws_file: String,

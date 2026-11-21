@@ -226,6 +226,10 @@ pub(super) enum Modal {
         text: String,
         mention: bool,
     },
+    /// A goal's name, dates, owner, colour and Delete (its page's "⋯").
+    GoalSettings {
+        id: u64,
+    },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -1337,6 +1341,7 @@ impl App {
             Modal::NewGoal(_) => tr("New goal").into(),
             Modal::GoalAchieved { .. } => tr("Goal achieved").into(),
             Modal::ShareGoal { .. } => tr("Share to team chat").into(),
+            Modal::GoalSettings { .. } => tr("Goal settings").into(),
             Modal::Together { .. } => tr("Work together").into(),
             Modal::WhoAmI { .. } => tr("Who are you?").into(),
             Modal::JoinTeam { .. } => tr("Join a team").into(),
@@ -1590,6 +1595,10 @@ impl App {
             } => {
                 let id = *id;
                 close = self.share_goal_body(ui, t, id, channel, text, mention);
+            }
+            Modal::GoalSettings { id } => {
+                let id = *id;
+                close = self.goal_settings_body(ui, t, id);
             }
         }
         close

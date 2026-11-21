@@ -1,6 +1,7 @@
 // A goal's own page: its ring, pace and milestones on top, its targets with
 // the controls that move them (a number up or down, done or not, tasks
-// ticked off), its history and its settings.
+// ticked off) and its history. Its settings open in a dialog from the "⋯"
+// by its name; a milestone reached floats over the page for a few seconds.
 
 use super::goals::*;
 use super::*;
@@ -72,6 +73,7 @@ impl App {
             .collect();
         let mut act: Option<GoalAct> = None;
         let mut page_act: Option<PageAct> = None;
+        let page = ui.max_rect();
         egui::ScrollArea::vertical()
             .id_salt(("goal_page", gid))
             .auto_shrink([false, false])
@@ -100,9 +102,22 @@ impl App {
                                 act = Some(GoalAct::Back);
                             }
                             ui.label(RichText::new("/").color(t.text3));
-                            ui.add(
-                                egui::Label::new(RichText::new(&g.name).color(t.text)).truncate(),
-                            );
+                            // the name gives way to the settings button
+                            let name_w = (ui.available_width() - 40.0).max(0.0);
+                            ui.scope(|ui| {
+                                ui.set_max_width(name_w);
+                                ui.add(
+                                    egui::Label::new(RichText::new(&g.name).color(t.text))
+                                        .truncate(),
+                                );
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let b =
+                                    icons::icon_button(ui, &t, "dots", "", "Goal settings", false);
+                                if b.clicked() {
+                                    page_act = Some(PageAct::Settings);
+                                }
+                            });
                         });
                         ui.add_space(12.0);
                         if let Some(a) = self.goal_hero(ui, &t, &row, day) {
@@ -126,10 +141,6 @@ impl App {
                                 ui.vertical(|ui| {
                                     ui.set_width(right_w);
                                     self.goal_history_card(ui, &t, &g);
-                                    ui.add_space(gap);
-                                    if let Some(a) = self.goal_settings_card(ui, &t, gi) {
-                                        page_act = Some(a);
-                                    }
                                 });
                             });
                         } else {
@@ -138,13 +149,31 @@ impl App {
                             }
                             ui.add_space(gap);
                             self.goal_history_card(ui, &t, &g);
-                            ui.add_space(gap);
-                            if let Some(a) = self.goal_settings_card(ui, &t, gi) {
-                                page_act = Some(a);
-                            }
                         }
                     });
             });
+        if let Some((_, m, at)) = self.goal_banner.filter(|b| b.0 == gid) {
+            if now_ts() - at > MILESTONE_SECS {
+                self.goal_banner = None;
+            } else if self.modal.is_none() {
+                // (not over a dialog: the goal's settings, say)
+                let left: Vec<&str> = views
+                    .iter()
+                    .filter(|v| !v.st.done)
+                    .map(|v| v.name.as_str())
+                    .collect();
+                // above the app's own toast when one is up
+                let lift = if self.toast.is_some() { 64.0 } else { 0.0 };
+                match milestone_float(ui.ctx(), &t, page, lift, m, &left) {
+                    Float::Closed => page_act = Some(PageAct::DismissBanner),
+                    // read while the pointer is on it: it stays
+                    Float::Held => self.goal_banner = Some((gid, m, now_ts())),
+                    Float::Shown => {}
+                }
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(500));
+            }
+        }
         if let Some(a) = act {
             self.goal_apply(a);
         }
@@ -431,7 +460,7 @@ impl App {
         act
     }
 
-    /// The targets, each with what moves it, and the milestone banner.
+    /// The targets, each with what moves it.
     fn goal_targets_card(
         &mut self,
         ui: &mut Ui,
@@ -476,14 +505,6 @@ impl App {
                     });
                 });
                 ui.add_space(10.0);
-                if let Some((bg, m)) = self.goal_banner {
-                    if bg == gid {
-                        if milestone_banner(ui, t, m, views) {
-                            act = Some(PageAct::DismissBanner);
-                        }
-                        ui.add_space(10.0);
-                    }
-                }
                 if views.is_empty() {
                     ui.label(RichText::new(tr("Add a target to measure this goal: a number, done or not, or a set of tasks.")).color(t.text2));
                 }
@@ -547,42 +568,20 @@ impl App {
                     )
                     .trim_end()
                     .to_string(),
-                    1 => tr("Done or not · counts 100% once done").into(),
+                    1 => tr("Done or not").into(),
                     _ => trf!("Tasks · {} picked", v.tasks.len()),
                 };
                 ui.label(RichText::new(sub).size(12.5).color(t.text2));
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let x = ui.add(ghost(egui::Button::new(
-                    RichText::new("\u{00D7}").size(16.0).color(t.text3),
-                )));
+                let x = close_x(ui, 28.0, t.text3);
                 name_it(&x, &format!("Remove target {}", v.name));
                 if x.clicked() {
                     act = Some(PageAct::RemoveTarget(i));
                 }
                 match v.kind {
                     1 => {
-                        let done = v.st.done;
-                        let b = if done {
-                            ui.add(
-                                egui::Button::new(
-                                    RichText::new(format!("\u{2713} {}", tr("Done")))
-                                        .color(Color32::WHITE)
-                                        .strong(),
-                                )
-                                .fill(color)
-                                .corner_radius(10)
-                                .min_size(vec2(0.0, 34.0)),
-                            )
-                        } else {
-                            ui.add(
-                                egui::Button::new(RichText::new(tr("Mark done")).strong())
-                                    .fill(t.card)
-                                    .stroke(Stroke::new(1.0, t.border))
-                                    .corner_radius(10)
-                                    .min_size(vec2(0.0, 34.0)),
-                            )
-                        };
+                        let b = done_toggle(ui, t, v.st.done, color);
                         name_it(&b, &format!("Done {}", v.name));
                         if b.clicked() {
                             act = Some(PageAct::Goal(GoalAct::ToggleDone { g: gid, i }));
@@ -862,9 +861,15 @@ impl App {
             });
     }
 
-    /// Name, dates, owner, colour and Delete.
-    fn goal_settings_card(&mut self, ui: &mut Ui, t: &Theme, gi: usize) -> Option<PageAct> {
-        let mut act = None;
+    /// Goal settings, opened from the "⋯" on the goal's page: name, dates,
+    /// owner, colour and Delete. Changes apply as they are made. Returns
+    /// true when it should close.
+    pub(crate) fn goal_settings_body(&mut self, ui: &mut Ui, t: &Theme, gid: u64) -> bool {
+        let Some(gi) = self.data.extra.goals.iter().position(|g| g.id == gid) else {
+            return true;
+        };
+        let mut close = false;
+        let mut delete = false;
         let w = ui.available_width();
         let members: Vec<(u64, String)> = self
             .data
@@ -872,111 +877,99 @@ impl App {
             .iter()
             .map(|m| (m.id, m.shown().to_string()))
             .collect();
-        egui::Frame::new()
-            .fill(t.card)
-            .stroke(Stroke::new(1.0, t.border))
-            .corner_radius(16)
-            .inner_margin(egui::Margin::same(18))
-            .show(ui, |ui| {
-                ui.set_width(w - 36.0);
-                ui.label(RichText::new(tr("Settings")).size(16.0).strong());
-                ui.add_space(10.0);
-                let gid = self.data.extra.goals[gi].id;
-                let g = &mut self.data.extra.goals[gi];
-                let mut ch = false;
-                ui.label(
-                    RichText::new(tr("Goal name"))
-                        .size(12.5)
-                        .strong()
-                        .color(t.text2),
-                );
-                let r = ui.add(field(&mut g.name).desired_width(f32::INFINITY));
-                name_field(&r, "Goal name");
-                ch |= r.changed();
-                ui.add_space(8.0);
-                ui.columns(2, |cols| {
-                    for (c, (label, which)) in
-                        cols.iter_mut().zip([("Start date", 0), ("Due date", 1)])
-                    {
-                        c.label(RichText::new(tr(label)).size(12.5).strong().color(t.text2));
-                        let cur = if which == 0 { g.start } else { g.due };
-                        let txt = cur
-                            .map(|d| d.text("%b %-d"))
-                            .unwrap_or_else(|| tr("Pick a date").into());
-                        let r = icons::icon_button(c, t, "calendar", &txt, label, true);
-                        let mut d = cur;
-                        if let Some(true) = popup(c, &r, c.id().with((label, gid)), 380.0, |ui| {
-                            date_menu(ui, t, ui.id().with((label, "cal", gid)), &mut d)
-                        }) {
-                            if which == 0 {
-                                // a start is kept once set: clearing it puts it back
-                                if d.is_some() {
-                                    g.start = d;
-                                }
-                            } else {
-                                g.due = d;
-                            }
-                            ch = true;
+        let label = |ui: &mut Ui, s: &str| {
+            ui.label(RichText::new(s).size(12.5).strong().color(t.text2));
+        };
+        let g = &mut self.data.extra.goals[gi];
+        let mut ch = false;
+        label(ui, tr("Goal name"));
+        let r = ui.add(field(&mut g.name).desired_width(f32::INFINITY));
+        name_field(&r, "Goal name");
+        ch |= r.changed();
+        ui.add_space(10.0);
+        ui.columns(2, |cols| {
+            for (c, (name, which)) in cols.iter_mut().zip([("Start date", 0), ("Due date", 1)]) {
+                label(c, tr(name));
+                let cur = if which == 0 { g.start } else { g.due };
+                let txt = cur
+                    .map(|d| d.text("%b %-d"))
+                    .unwrap_or_else(|| tr("Pick a date").into());
+                let r = icons::icon_button(c, t, "calendar", &txt, name, true);
+                let mut d = cur;
+                if let Some(true) = popup(c, &r, c.id().with((name, gid)), 380.0, |ui| {
+                    date_menu(ui, t, ui.id().with((name, "cal", gid)), &mut d)
+                }) {
+                    if which == 0 {
+                        // a start is kept once set: clearing it puts it back
+                        if d.is_some() {
+                            g.start = d;
                         }
+                    } else {
+                        g.due = d;
                     }
-                });
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(crate::i18n::tr_ctx("Owner (goal)", "Owner"))
-                        .size(12.5)
-                        .strong()
-                        .color(t.text2),
-                );
-                let cur = members
-                    .iter()
-                    .find(|m| m.0 == g.owner)
-                    .map(|m| m.1.clone())
-                    .unwrap_or_else(|| tr("Nobody").into());
-                egui::ComboBox::from_id_salt(("goal_owner", gid))
-                    .selected_text(cur)
-                    .width(w - 60.0)
-                    .show_ui(ui, |ui| {
-                        for (id, n) in &members {
-                            ch |= ui.selectable_value(&mut g.owner, *id, n).changed();
-                        }
-                    });
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(tr("Color"))
-                        .size(12.5)
-                        .strong()
-                        .color(t.text2),
-                );
-                ui.horizontal_wrapped(|ui| {
-                    for c in GOAL_COLORS {
-                        let (r, resp) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
-                        ui.painter().circle_filled(r.center(), 11.0, rgb(c));
-                        hover_ring(ui, &resp, r.shrink(1.0), 12.0);
-                        if g.color == c {
-                            ui.painter()
-                                .circle_stroke(r.center(), 13.0, Stroke::new(1.5, t.text));
-                        }
-                        name_it(&resp, &format!("Goal color {:?}", c));
-                        if resp.clicked() {
-                            g.color = c;
-                            ch = true;
-                        }
-                    }
-                });
-                if ch {
-                    self.dirty = true;
+                    ch = true;
                 }
-                ui.add_space(10.0);
-                ui.separator();
-                let d = ui.add(ghost(egui::Button::new(
-                    RichText::new(tr("Delete goal")).color(t.danger),
-                )));
-                name_it(&d, "Delete goal");
-                if d.clicked() {
-                    act = Some(PageAct::Delete);
+            }
+        });
+        ui.add_space(10.0);
+        label(ui, crate::i18n::tr_ctx("Owner (goal)", "Owner"));
+        let cur = members
+            .iter()
+            .find(|m| m.0 == g.owner)
+            .map(|m| m.1.clone())
+            .unwrap_or_else(|| tr("Nobody").into());
+        egui::ComboBox::from_id_salt(("goal_owner", gid))
+            .selected_text(cur)
+            .width(w)
+            .show_ui(ui, |ui| {
+                for (id, n) in &members {
+                    ch |= ui.selectable_value(&mut g.owner, *id, n).changed();
                 }
             });
-        act
+        ui.add_space(10.0);
+        label(ui, tr("Color"));
+        ui.horizontal_wrapped(|ui| {
+            for c in GOAL_COLORS {
+                let (r, resp) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+                ui.painter().circle_filled(r.center(), 11.0, rgb(c));
+                hover_ring(ui, &resp, r.shrink(1.0), 12.0);
+                if g.color == c {
+                    ui.painter()
+                        .circle_stroke(r.center(), 13.0, Stroke::new(1.5, t.text));
+                }
+                name_it(&resp, &format!("Goal color {:?}", c));
+                if resp.clicked() {
+                    g.color = c;
+                    ch = true;
+                }
+            }
+        });
+        if ch {
+            self.dirty = true;
+        }
+        ui.add_space(14.0);
+        ui.separator();
+        ui.horizontal(|ui| {
+            let d = ui.add(ghost(egui::Button::new(
+                RichText::new(tr("Delete goal")).color(t.danger),
+            )));
+            name_it(&d, "Delete goal");
+            delete = d.clicked();
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let b = primary_button(ui, t, tr("Done"));
+                name_it(&b, "Close goal settings");
+                close = b.clicked();
+            });
+        });
+        if delete {
+            let name = self.data.extra.goals[gi].name.clone();
+            self.modal = Some(Modal::ConfirmRemove {
+                kind: "goal",
+                id: gid,
+                name,
+            });
+        }
+        close
     }
 
     fn goal_page_apply(&mut self, gid: u64, a: PageAct) {
@@ -995,15 +988,7 @@ impl App {
             PageAct::ShowDone(v) => self.goal_show_done = v,
             PageAct::NextGoal => self.goal_apply(GoalAct::NewGoal),
             PageAct::Share => self.open_goal_share(gid),
-            PageAct::Delete => {
-                if let Some(g) = self.data.extra.goals.iter().find(|g| g.id == gid) {
-                    self.modal = Some(Modal::ConfirmRemove {
-                        kind: "goal",
-                        id: g.id,
-                        name: g.name.clone(),
-                    });
-                }
-            }
+            PageAct::Settings => self.modal = Some(Modal::GoalSettings { id: gid }),
         }
     }
 }
@@ -1016,7 +1001,7 @@ enum PageAct {
     ShowDone(Option<(u64, usize)>),
     NextGoal,
     Share,
-    Delete,
+    Settings,
 }
 
 /// The colours offered for a goal.
@@ -1090,52 +1075,136 @@ fn history_text(what: &GoalChange, who: &str) -> String {
     }
 }
 
-/// "75% reached! Almost there" with what is left, and a close button.
-/// Returns true when closed.
-fn milestone_banner(ui: &mut Ui, t: &Theme, m: u8, views: &[TargetView]) -> bool {
-    let mut close = false;
+/// How long a milestone just reached floats over the page, in seconds.
+const MILESTONE_SECS: i64 = 6;
+
+/// What became of the floating milestone this frame.
+enum Float {
+    Shown,
+    /// the pointer is on it: it stays while being read
+    Held,
+    Closed,
+}
+
+/// "75% reached. Almost there" with what is left and a close button,
+/// floating at the foot of the goal's page (`page`, `lift` higher) so
+/// nothing on the page moves when it comes or goes.
+fn milestone_float(
+    ctx: &egui::Context,
+    t: &Theme,
+    page: Rect,
+    lift: f32,
+    m: u8,
+    left: &[&str],
+) -> Float {
+    let mut out = Float::Shown;
     let (bg, fg) = pace_colors(Pace::Done, t);
-    let left: Vec<&str> = views
-        .iter()
-        .filter(|v| !v.st.done)
-        .map(|v| v.name.as_str())
-        .collect();
-    egui::Frame::new()
-        .fill(bg)
-        .corner_radius(12)
-        .inner_margin(egui::Margin::symmetric(14, 12))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
-                ui.painter().circle_filled(r.center(), 16.0, fg);
-                icons::line_icon(ui.painter(), "flag", r.center(), bg);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    let title = match m {
-                        25 => tr("25% reached. A good start"),
-                        50 => tr("50% reached. Halfway there"),
-                        _ => tr("75% reached. Almost there"),
-                    };
-                    ui.label(RichText::new(title).size(14.0).strong().color(fg));
-                    if !left.is_empty() {
-                        ui.label(
-                            RichText::new(trf!("Still open: {}", left.join(", ")))
-                                .size(12.5)
-                                .color(t.text2),
-                        );
-                    }
+    let w = (page.width() - 48.0).clamp(260.0, 520.0);
+    egui::Area::new(egui::Id::new("goal milestone"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::CENTER_BOTTOM)
+        .fixed_pos(pos2(page.center().x, page.bottom() - 24.0 - lift))
+        .show(ctx, |ui| {
+            let r = egui::Frame::new()
+                .fill(bg)
+                .stroke(Stroke::new(1.0, fg.gamma_multiply(0.25)))
+                .corner_radius(14)
+                .inner_margin(egui::Margin::symmetric(14, 12))
+                .shadow(egui::epaint::Shadow {
+                    offset: [0, 6],
+                    blur: 18,
+                    spread: 0,
+                    color: Color32::from_black_alpha(if t.dark { 90 } else { 30 }),
+                })
+                .show(ui, |ui| {
+                    ui.set_width(w - 28.0);
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
+                        ui.painter().circle_filled(r.center(), 16.0, fg);
+                        icons::line_icon(ui.painter(), "flag", r.center(), bg);
+                        let text_w = ui.available_width() - 36.0;
+                        ui.vertical(|ui| {
+                            ui.set_width(text_w);
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            let title = match m {
+                                25 => tr("25% reached. A good start"),
+                                50 => tr("50% reached. Halfway there"),
+                                _ => tr("75% reached. Almost there"),
+                            };
+                            ui.label(RichText::new(title).size(14.0).strong().color(fg));
+                            if !left.is_empty() {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(trf!("Still open: {}", left.join(", ")))
+                                            .size(12.5)
+                                            .color(t.text2),
+                                    )
+                                    .wrap(),
+                                );
+                            }
+                        });
+                        let x = close_x(ui, 26.0, t.text2);
+                        name_it(&x, "Close milestone");
+                        if x.clicked() {
+                            out = Float::Closed;
+                        }
+                    });
                 });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let x = ui.add(ghost(egui::Button::new(
-                        RichText::new("\u{00D7}").size(16.0).color(t.text2),
-                    )));
-                    name_it(&x, "Close milestone");
-                    close = x.clicked();
-                });
-            });
+            if !matches!(out, Float::Closed) && r.response.contains_pointer() {
+                out = Float::Held;
+            }
         });
-    close
+    out
+}
+
+/// A done-or-not target's button: "✓ Done" filled in the goal's colour or
+/// "Mark done" outlined, both as wide as the wider of the two so the button
+/// keeps its size when pressed and the rows line up.
+fn done_toggle(ui: &mut Ui, t: &Theme, done: bool, color: Color32) -> egui::Response {
+    let font = FontId::proportional(14.0);
+    let tick_w = 16.0;
+    let text_w = |s: &str| {
+        ui.painter()
+            .layout_no_wrap(s.to_string(), font.clone(), t.text)
+            .size()
+            .x
+    };
+    let w = (text_w(tr("Done")) + tick_w).max(text_w(tr("Mark done"))) + 32.0;
+    let (r, resp) = ui.allocate_exact_size(vec2(w.ceil(), 34.0), Sense::click());
+    let hovered = resp.hovered() && resp.enabled();
+    let p = ui.painter();
+    let (text, fg) = if done {
+        p.rect_filled(r, 10.0, color);
+        if hovered {
+            p.rect_filled(r, 10.0, crate::widgets::hover_fill(ui));
+        }
+        (tr("Done"), Color32::WHITE)
+    } else {
+        p.rect_filled(r, 10.0, if hovered { t.hover } else { t.card });
+        p.rect_stroke(
+            r,
+            10.0,
+            Stroke::new(
+                1.0,
+                if hovered {
+                    crate::widgets::hover_line(ui)
+                } else {
+                    t.border
+                },
+            ),
+            egui::StrokeKind::Inside,
+        );
+        (tr("Mark done"), t.text)
+    };
+    let g = p.layout_no_wrap(text.to_string(), font, fg);
+    let content = g.size().x + if done { tick_w } else { 0.0 };
+    let mut x = r.center().x - content / 2.0;
+    if done {
+        paint_tick(p, pos2(x + 5.0, r.center().y), 5.0, fg, 2.0);
+        x += tick_w;
+    }
+    p.galley(pos2(x, r.center().y - g.size().y / 2.0), g, fg);
+    resp
 }
 
 /// A small framed group (owner, dates) under the goal's name.

@@ -553,6 +553,30 @@ impl egui::Widget for Ghost<'_> {
     }
 }
 
+/// A round "×" button `size` across that removes or closes something. Its
+/// hover fill is a circle: a ghost button's fill follows the "×" glyph,
+/// which is taller than wide, so it came out as an upright pill.
+pub fn close_x(ui: &mut Ui, size: f32, color: Color32) -> Response {
+    let (r, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    if resp.enabled() && (resp.hovered() || resp.is_pointer_button_down_on()) {
+        let fill = hover_fill(ui);
+        let fill = if resp.is_pointer_button_down_on() {
+            fill.gamma_multiply(1.5)
+        } else {
+            fill
+        };
+        ui.painter().circle_filled(r.center(), size / 2.0, fill);
+    }
+    let h = (size * 0.16).max(3.0);
+    let c = r.center();
+    let s = Stroke::new(1.5, color);
+    ui.painter()
+        .line_segment([c + vec2(-h, -h), c + vec2(h, h)], s);
+    ui.painter()
+        .line_segment([c + vec2(h, -h), c + vec2(-h, h)], s);
+    resp
+}
+
 /// For a button with a fill of its own (primary, danger, a selected tab, a
 /// reaction chip): egui keeps that fill on hover, so this lays a light tint over
 /// it while the pointer is there.

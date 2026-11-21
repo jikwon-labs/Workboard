@@ -278,6 +278,24 @@ pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
     resp
 }
 
+/// For a chip in a `horizontal_wrapped` row whose text is `text` at `size`
+/// points and whose padding and buttons add `extra`: starts a new row when
+/// the chip doesn't fit in what's left of this one (egui wraps only text, so
+/// the chip ran past the edge, or wrapped its words a letter per line), and
+/// returns the widest its text may be before it is shortened.
+pub fn chip_room(ui: &mut Ui, text: &str, size: f32, extra: f32) -> f32 {
+    let w = ui
+        .painter()
+        .layout_no_wrap(one_line(text), FontId::proportional(size), Color32::WHITE)
+        .size()
+        .x;
+    let at_start = ui.cursor().left() <= ui.max_rect().left() + 0.5;
+    if !at_start && w + extra > ui.available_size_before_wrap().x {
+        ui.end_row();
+    }
+    (ui.max_rect().width() - extra).max(24.0)
+}
+
 /// `text` on one line: each line break, with the spaces around it, becomes a
 /// single space and blank lines are dropped.
 pub fn one_line(text: &str) -> String {

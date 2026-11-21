@@ -325,6 +325,8 @@ impl App {
         if !d.more.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 for (i, tg) in d.more.iter().enumerate() {
+                    // a long name starts a new row instead of running off the edge
+                    let max_w = crate::widgets::chip_room(ui, &tg.name, 13.0, 41.0);
                     egui::Frame::new()
                         .fill(t.hover)
                         .corner_radius(14)
@@ -337,7 +339,13 @@ impl App {
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label(RichText::new(&tg.name).size(13.0));
+                                ui.scope(|ui| {
+                                    ui.set_max_width(max_w);
+                                    ui.add(
+                                        egui::Label::new(RichText::new(&tg.name).size(13.0))
+                                            .truncate(),
+                                    );
+                                });
                                 let x = close_x(ui, 20.0, t.text2);
                                 name_it(&x, &format!("Remove {}", tg.name));
                                 if x.clicked() {

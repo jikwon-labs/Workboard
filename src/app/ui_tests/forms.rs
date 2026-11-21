@@ -1433,3 +1433,59 @@ fn a_question_without_text_shows_as_untitled() {
         "Untitled question: an answer"
     );
 }
+
+/// In "Will be created", two questions that both go to the description sit
+/// as whole chips, the second on its own row when it doesn't fit beside the
+/// first: it used to wrap a letter per line in the space left.
+#[test]
+fn will_be_created_chips_wrap_whole() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    h.click("Feedback Form");
+    let fid = h.app.form_open.unwrap();
+    let qs: Vec<String> = form(&h, fid)
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(i, q)| format!("{} \u{00B7} {}", i + 1, q.label))
+        .collect();
+    for q in &qs {
+        let shown = h.painted_text(q);
+        assert_eq!(shown.len(), 1, "{:?} is drawn whole once", q);
+        assert!(
+            shown[0].0.height() < 20.0,
+            "{:?} is one line, not {:?}",
+            q,
+            shown[0].0
+        );
+    }
+}
+
+/// Long dropdown choices in the smallest window start new rows instead of
+/// running past the window, so every choice's × can be pressed.
+#[test]
+fn long_choices_wrap_inside_the_window() {
+    let mut h = Ui1::sized(900.0, 560.0);
+    h.app.new_form();
+    h.settle();
+    let fid = h.app.form_open.unwrap();
+    h.click("Question 2 kind");
+    h.click("Kind Dropdown");
+    h.click("Add choice 2");
+    h.type_text(
+        "A rather long choice that has many words in it, Short, \
+         Another quite long choice text here for wrapping, \
+         아주 긴 한국어 선택지 이름이 여기 들어갑니다 정말 길게",
+    );
+    h.key(egui::Key::Enter);
+    h.settle();
+    let opts = form(&h, fid).fields[1].options.clone();
+    assert_eq!(opts.len(), 4);
+    for o in &opts {
+        let x = h.rect(&format!("Remove choice {}", o));
+        assert!(x.right() <= h.size.x, "{:?}'s × is at {:?}", o, x);
+    }
+    let last = opts[3].clone();
+    h.click(&format!("Remove choice {}", last));
+    assert!(!form(&h, fid).fields[1].options.contains(&last));
+}

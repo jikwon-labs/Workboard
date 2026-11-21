@@ -1477,3 +1477,40 @@ fn search_finds_a_goal_and_opens_it() {
     assert_eq!(h.app.goal_open, Some(a));
     assert!(h.has("Goal overview"), "its own page");
 }
+
+/// Targets with long names added in New goal start new rows in the dialog
+/// instead of stretching it wider, and each one's × can be pressed.
+#[test]
+fn long_target_chips_wrap_inside_the_dialog() {
+    let (mut h, _, _) = two_goals();
+    h.click("New goal");
+    h.click("Another target");
+    h.click("Another target");
+    h.click("Another target");
+    let names = [
+        "Ship the onboarding redesign to every customer",
+        "Short",
+        "아주 긴 한국어 목표 대상 이름이 여기에 들어갑니다 정말 길게",
+    ];
+    if let Some(Modal::NewGoal(d)) = &mut h.app.modal {
+        for (tg, n) in d.more.iter_mut().zip(names) {
+            tg.name = n.into();
+        }
+    }
+    h.settle();
+    let dialog = h.modal_rect();
+    // the chips don't stretch the dialog past its widest (620 and its margin)
+    assert!(
+        dialog.width() <= 660.0,
+        "the dialog is {} wide",
+        dialog.width()
+    );
+    for n in names {
+        let x = h.rect(&format!("Remove {}", n));
+        assert!(x.right() <= dialog.right(), "{:?}'s × is at {:?}", n, x);
+    }
+    h.click(&format!("Remove {}", names[2]));
+    if let Some(Modal::NewGoal(d)) = &h.app.modal {
+        assert_eq!(d.more.len(), 2);
+    }
+}

@@ -548,6 +548,8 @@ impl App {
             ui.add_space(52.0);
             ui.label(RichText::new(tr("Choices")).size(12.0).color(t.text2));
             for o in &opts {
+                // a long choice starts a new row instead of running off the edge
+                let max_w = crate::widgets::chip_room(ui, o, 13.0, 44.0);
                 egui::Frame::new()
                     .fill(t.column_bg)
                     .stroke(Stroke::new(1.0_f32, t.border))
@@ -561,7 +563,13 @@ impl App {
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(o).size(13.0).color(t.text));
+                            ui.scope(|ui| {
+                                ui.set_max_width(max_w);
+                                ui.add(
+                                    egui::Label::new(RichText::new(o).size(13.0).color(t.text))
+                                        .truncate(),
+                                );
+                            });
                             let x = ui.add(ghost(egui::Button::new(
                                 RichText::new("\u{00D7}").size(13.0).color(t.text3),
                             )));
@@ -810,17 +818,24 @@ impl App {
                                         qi + 1,
                                         crate::widgets::one_line(&question_title(q))
                                     );
+                                    // whole on the next row when it doesn't fit beside
+                                    // the one before (it wrapped a letter per line)
+                                    let max_w = crate::widgets::chip_room(ui, &label, 12.0, 14.0);
                                     egui::Frame::new()
                                         .fill(if own { t.accent_bg } else { t.hover })
                                         .corner_radius(6)
                                         .inner_margin(egui::Margin::symmetric(7, 2))
                                         .show(ui, |ui| {
-                                            ui.label(
-                                                RichText::new(label).size(12.0).color(if own {
-                                                    t.accent_text
-                                                } else {
-                                                    t.text2
-                                                }),
+                                            ui.set_max_width(max_w);
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(label).size(12.0).color(if own {
+                                                        t.accent_text
+                                                    } else {
+                                                        t.text2
+                                                    }),
+                                                )
+                                                .truncate(),
                                             );
                                         });
                                 }

@@ -863,3 +863,234 @@ fn a_form_made_from_a_spaces_plus_goes_to_that_space() {
     let fid = h.app.form_open.unwrap();
     assert_eq!(form(&h, fid).list_id, 0);
 }
+
+/// Every kind of question filled out on screen makes a task with each
+/// answer in its place: name, description, priority, due date and assignee
+/// on the task, the others as "question: answer" lines. A problem shows
+/// right under its question and goes once it is put right; Submit empties
+/// the form again.
+#[test]
+fn every_kind_of_answer_lands_on_the_task() {
+    let mut h = Ui1::new();
+    let fid = blank_form(&mut h);
+    // ("Made the form" would cover Add question once it is low on the page)
+    h.app.toast = None;
+    for k in [
+        "Priority", "Due date", "Assignee", "Short text", "Dropdown", "Number", "Email",
+        "Checkbox",
+    ] {
+        h.click("Add question");
+        h.click(&format!("Kind {}", k));
+    }
+    assert_eq!(form(&h, fid).fields.len(), 10);
+    h.click("Add choice 7");
+    h.type_text("Small, Large");
+    h.key(egui::Key::Enter);
+    h.key(egui::Key::Escape);
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("New monitor");
+    h.click("Answer 2");
+    h.type_text("For the design desk");
+    h.click("Answer 3 Urgent");
+    h.click("Answer 4");
+    let day = chrono::Local::now().date_naive() + chrono::Duration::days(3);
+    h.click(&format!("Day {}", day));
+    h.click("Answer 5");
+    h.click("Pick Alex Kim");
+    h.click("Answer 6");
+    h.type_text("27 inch");
+    h.click("Answer 7");
+    h.click("Choice Large");
+    h.click("Answer 8");
+    h.type_text("two");
+    h.click("Answer 9");
+    h.type_text("desk@team.io");
+    h.click("Answer 10");
+    let list = form(&h, fid).list_id;
+    let n = h.app.data.tasks.len();
+    h.click("Submit");
+    // the Number answer is refused, under its question
+    assert_eq!(h.app.data.tasks.len(), n);
+    assert_eq!(h.app.sweep.forms.error_at, Some(7));
+    let problem = h.painted_text("\"Number\" needs a number.");
+    assert_eq!(problem.len(), 1);
+    let (number, email) = (h.rect("Answer 8"), h.rect("Answer 9"));
+    assert!(problem[0].0.top() >= number.bottom() && problem[0].0.bottom() <= email.top());
+    h.click("Answer 8");
+    h.key_with(egui::Key::A, egui::Modifiers::COMMAND);
+    h.type_text("2");
+    h.click("Submit");
+    assert!(h.painted_text("\"Number\" needs a number.").is_empty());
+    let t = task_named(&h, "New monitor").clone();
+    assert_eq!(t.list_id, list);
+    assert_eq!(t.priority, 1);
+    assert_eq!(t.due, Some(day));
+    assert_eq!(t.assignees, vec![2]);
+    assert_eq!(t.form, Some(fid));
+    assert_eq!(
+        t.description,
+        "For the design desk\nShort text: 27 inch\nDropdown: Large\nNumber: 2\nEmail: desk@team.io\nCheckbox: Yes"
+    );
+    assert!(h.app.form_fill.values().all(|v| v.is_empty()), "emptied");
+    assert!(h
+        .app
+        .toast
+        .as_ref()
+        .is_some_and(|(m, _)| m.starts_with("Submitted. A task was created in")));
+}
+
+/// The table sorts by last edited (newest first) or by name.
+#[test]
+fn the_forms_table_sorts_by_last_edited_or_name() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    for (tpl, edited) in [("Order Form", 300), ("Feedback Form", 100), ("Job Application", 200)] {
+        h.click(tpl);
+        let id = h.app.form_open.unwrap();
+        h.app
+            .data
+            .extra
+            .forms
+            .iter_mut()
+            .find(|f| f.id == id)
+            .unwrap()
+            .updated = edited;
+        h.click("Back to all forms");
+    }
+    let order = |h: &Ui1| {
+        let mut rows: Vec<(f32, String)> = h
+            .tree
+            .iter()
+            .filter_map(|(n, r)| Some((r.top(), n.strip_prefix("Form ")?.to_string())))
+            .filter(|(_, n)| !n.starts_with("menu "))
+            .collect();
+        rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+        rows.into_iter().map(|x| x.1).collect::<Vec<_>>()
+    };
+    assert_eq!(order(&h), ["Order Form", "Job Application", "Feedback Form"]);
+    h.click("Sort forms");
+    assert_eq!(order(&h), ["Feedback Form", "Job Application", "Order Form"]);
+    h.click("Sort forms");
+    assert_eq!(order(&h), ["Order Form", "Job Application", "Feedback Form"]);
+}
+
+/// Delete form in the editor asks first, takes the form to Trash and back
+/// to the list (its answers' tasks stay); Restore brings it back as it was:
+/// questions, tile, maker and List.
+#[test]
+fn a_deleted_form_comes_back_from_trash_as_it_was() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    h.click("Job Application");
+    let fid = h.app.form_open.unwrap();
+    h.click("Change icon");
+    h.click("Color green");
+    h.key(egui::Key::Escape);
+    h.click("Fill out");
+    h.click("Answer 1");
+    h.type_text("Kim Bora");
+    h.click("Submit");
+    h.click("Edit");
+    let before = serde_json::to_string(&form(&h, fid)).unwrap();
+    h.click("Delete form");
+    assert!(!h.painted_text("Delete the form \"Job Application\"? It goes to Trash.").is_empty());
+    confirm_delete(&mut h);
+    assert!(h.app.data.extra.forms.iter().all(|f| f.id != fid));
+    assert_eq!(h.app.form_open, None);
+    assert!(!h.has("Open form Job Application"));
+    task_named(&h, "Kim Bora");
+    h.app.modal = Some(Modal::Trash);
+    h.settle();
+    h.click("Restore");
+    h.key(egui::Key::Escape);
+    assert_eq!(serde_json::to_string(&form(&h, fid)).unwrap(), before);
+    assert!(h.has("Open form Job Application"));
+    h.click("Open form Job Application");
+    h.click("Answers");
+    assert!(h.has("Answer task Kim Bora"), "its answers are its again");
+}
+
+/// The Answers tab and the header's count follow the tasks: one closed
+/// moves from Not done to Done, one archived or deleted leaves.
+#[test]
+fn answers_follow_their_tasks() {
+    let mut h = Ui1::new();
+    open_forms(&mut h);
+    h.click("IT Requests");
+    h.click("Fill out");
+    for n in ["Mouse", "Keyboard", "Webcam"] {
+        h.click("Answer 1");
+        h.type_text(n);
+        h.click("Submit");
+    }
+    h.click("Answers");
+    let rows = |h: &Ui1| {
+        let mut v: Vec<String> = h
+            .tree
+            .iter()
+            .filter_map(|(n, _)| n.strip_prefix("Answer task ").map(String::from))
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(rows(&h), ["Keyboard", "Mouse", "Webcam"]);
+    let mut t = task_named(&h, "Mouse").clone();
+    t.status = h
+        .app
+        .data
+        .statuses_for_list(t.list_id)
+        .last()
+        .unwrap()
+        .name
+        .clone();
+    h.app.apply(Action::Replace(t));
+    h.settle();
+    h.click("Done answers");
+    assert_eq!(rows(&h), ["Mouse"]);
+    h.click("Not done answers");
+    assert_eq!(rows(&h), ["Keyboard", "Webcam"]);
+    h.click("All answers");
+    let kb = task_named(&h, "Keyboard").id;
+    h.app.apply(Action::DeleteTask(kb));
+    let wc = task_named(&h, "Webcam").id;
+    h.app.data.tasks.iter_mut().find(|t| t.id == wc).unwrap().archived = true;
+    h.app.dirty = true;
+    h.settle();
+    assert_eq!(rows(&h), ["Mouse"]);
+    assert!(!h.painted_text("1 answer").is_empty());
+    h.click("Back to all forms");
+    h.click("Form IT Requests");
+    h.click("Answers");
+    h.click("Open the form's List");
+    assert_eq!(h.app.section, Section::Home);
+    assert_eq!(h.app.loc, Location::List(task_named(&h, "Mouse").list_id));
+}
+
+/// Searching forms takes a Korean syllable while it is still being put
+/// together, ignores case and spaces around, and says when nothing matches.
+#[test]
+fn the_forms_search_takes_korean_case_and_spaces() {
+    let mut h = Ui1::new();
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    open_forms(&mut h);
+    h.app.new_form_from(Some(0));
+    h.app.new_form_from(Some(4));
+    h.app.form_open = None;
+    h.settle();
+    h.click("Find a form");
+    h.frame(vec![
+        egui::Event::Ime(egui::ImeEvent::Enabled),
+        egui::Event::Ime(egui::ImeEvent::Preedit("피".into())),
+    ]);
+    h.settle();
+    let korean = (h.has("Form 피드백 양식"), h.has("Form IT 요청"));
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+    assert_eq!(korean, (true, false), "narrowed while the syllable is unfinished");
+    h.app.sweep.forms.search = "  it  ".into();
+    h.settle();
+    assert!(h.has("Form IT 요청") && !h.has("Form 피드백 양식"));
+    h.app.sweep.forms.search = "zzz".into();
+    h.settle();
+    assert_eq!(h.painted_text("No form has that name").len(), 2, "sidebar and table");
+}

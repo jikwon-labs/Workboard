@@ -58,7 +58,11 @@ impl Hub {
                 true
             }
             Some(c) => {
-                let written = spaces::written_marks(c);
+                // what the messages and comments this copy deletes said
+                // (only those: not every message on every push)
+                let deletes: std::collections::HashSet<u64> =
+                    wb_sync::json::meta_of(&data).tombs.into_keys().collect();
+                let written = spaces::written_marks_within(c, &deletes);
                 let changed = wb_sync::merge(c, &[data]);
                 if changed {
                     // the merge's fingerprints are this server's own
@@ -68,11 +72,13 @@ impl Hub {
                 spaces::put_back(c, &fix);
                 if changed {
                     let now = now_ms();
-                    let after = spaces::written_marks(c);
+                    let after = (!written.is_empty()).then(|| spaces::written_ids(c));
                     let graves = &mut g.saved.graves;
-                    for (id, mark) in written {
-                        if !after.contains_key(&id) {
-                            graves.insert(id, (mark, now));
+                    if let Some(after) = after {
+                        for (id, mark) in written {
+                            if !after.contains(&id) {
+                                graves.insert(id, (mark, now));
+                            }
                         }
                     }
                     graves.retain(|_, (_, t)| now - *t < GRAVE_DAYS * 86_400_000);

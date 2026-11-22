@@ -1843,3 +1843,38 @@ fn a_backup_check_with_nothing_new_reads_and_writes_nothing() {
     assert!(std::fs::read_to_string(&hourly[0]).unwrap().contains("two"));
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn marks_of_what_a_delete_takes_away_are_the_same_as_all_marks() {
+    let canon = json!({
+        "channels": [
+            {"id": 10, "messages": [
+                {"id": 11, "author": 1, "text": "hi", "replies": [{"id": 12, "author": 2, "text": "yo"}]},
+                {"id": 13, "author": 2, "text": "there"}
+            ]},
+            {"id": 20, "messages": [{"id": 21, "author": 1, "text": "x"}]}
+        ],
+        "tasks": [
+            {"id": 30, "activity": [{"id": 31, "comment": true, "author": 1, "text": "c"}, {"id": 32, "text": "moved"}]},
+            {"id": 40, "activity": [{"id": 41, "comment": true, "author": 2, "text": "d"}]}
+        ]
+    });
+    let all = spaces::written_marks(&canon);
+    let within = |ids: &[u64]| spaces::written_marks_within(&canon, &ids.iter().copied().collect());
+    let pick = |ids: &[u64]| -> std::collections::HashMap<u64, u64> {
+        ids.iter().map(|i| (*i, all[i])).collect()
+    };
+    assert_eq!(within(&[]), pick(&[]));
+    assert_eq!(within(&[13, 41]), pick(&[13, 41]));
+    // a message takes its thread along, a channel or task everything in it
+    assert_eq!(within(&[11]), pick(&[11, 12]));
+    assert_eq!(within(&[10]), pick(&[11, 12, 13]));
+    assert_eq!(within(&[30, 20]), pick(&[31, 21]));
+    assert_eq!(within(&[32, 99]), pick(&[]));
+    let ids: Vec<u64> = all.keys().copied().collect();
+    let mut want: Vec<u64> = spaces::written_ids(&canon).into_iter().collect();
+    want.sort();
+    let mut ids = ids;
+    ids.sort();
+    assert_eq!(ids, want);
+}

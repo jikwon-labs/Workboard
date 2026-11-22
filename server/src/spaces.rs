@@ -626,6 +626,61 @@ pub fn written_marks(canon: &Value) -> HashMap<u64, u64> {
     out
 }
 
+/// `written_marks` of only what deleting `ids` can take away: the messages
+/// and comments with those ids, and every one inside a channel, task or
+/// message with one of them (a thread goes with its message). Before a
+/// merge, with the ids its copy deletes: the others are only looked at,
+/// not written out (see `written_ids`).
+pub fn written_marks_within(canon: &Value, ids: &HashSet<u64>) -> HashMap<u64, u64> {
+    fn messages(list: &[Value], all: bool, ids: &HashSet<u64>, out: &mut HashMap<u64, u64>) {
+        for m in list {
+            let id = written_id(m);
+            let gone = all || id.is_some_and(|i| ids.contains(&i));
+            if let (Some(id), true) = (id, gone) {
+                out.insert(id, written_mark(m, true));
+            }
+            messages(array_at(m, "replies"), gone, ids, out);
+        }
+    }
+    let mut out = HashMap::new();
+    if ids.is_empty() {
+        return out;
+    }
+    let has = |v: &Value| written_id(v).is_some_and(|i| ids.contains(&i));
+    for ch in array_at(canon, "channels") {
+        messages(array_at(ch, "messages"), has(ch), ids, &mut out);
+    }
+    for t in array_at(canon, "tasks") {
+        let all = has(t);
+        for a in array_at(t, "activity") {
+            if let (Some(id), true) = (written_id(a), is_comment(a)) {
+                if all || ids.contains(&id) {
+                    out.insert(id, written_mark(a, false));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The ids of every chat message (with thread replies) and task comment
+/// in `canon`.
+pub fn written_ids(canon: &Value) -> HashSet<u64> {
+    let mut messages = HashMap::new();
+    for ch in array_at(canon, "channels") {
+        collect_messages(array_at(ch, "messages"), &mut messages);
+    }
+    let mut out: HashSet<u64> = messages.into_keys().collect();
+    out.extend(
+        array_at(canon, "tasks")
+            .iter()
+            .flat_map(|t| array_at(t, "activity"))
+            .filter(|a| is_comment(a))
+            .filter_map(written_id),
+    );
+    out
+}
+
 /// Chat messages, with their thread replies, by id.
 fn collect_messages<'a>(msgs: &'a [Value], out: &mut HashMap<u64, &'a Value>) {
     for m in msgs {

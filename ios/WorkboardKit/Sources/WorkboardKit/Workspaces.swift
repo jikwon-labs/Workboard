@@ -141,9 +141,8 @@ extension SyncClient {
         var kept = place.loadSettings().onDevice(settings)
         kept.server = settings.server
         storage.move(place.snapshotURL, to: storage.snapshotURL)
-        let snap = storage.loadSnapshot().map(Self.prepared)
-        data = snap
-        view = snap.map { WorkspaceView($0) } ?? .empty
+        setCopy(storage.loadSnapshot().map(Self.prepared))
+        view = data.map { WorkspaceView($0) } ?? .empty
         rev = 0
         settings = kept
         trash = place.loadTrash()

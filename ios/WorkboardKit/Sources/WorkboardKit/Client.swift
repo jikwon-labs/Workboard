@@ -145,7 +145,16 @@ final class SnapshotWriter: Sendable {
         queue.async { s.save(snapshot: snapshot) }
     }
 
+    /// A copy whose bookkeeping the app keeps apart (Sync+Kept.swift): it
+    /// is put back together here, off the main thread.
+    func write(_ tree: JSON, meta: SyncMeta) {
+        let s = storage
+        queue.async { s.save(snapshot: Sync.joined(tree, meta)) }
+    }
+
     func writeAndWait(_ snapshot: JSON) { queue.sync { storage.save(snapshot: snapshot) } }
+
+    func writeAndWait(_ tree: JSON, meta: SyncMeta) { queue.sync { storage.save(snapshot: Sync.joined(tree, meta)) } }
 
     func remove() { queue.sync { try? FileManager.default.removeItem(at: storage.snapshotURL) } }
 
@@ -333,6 +342,13 @@ public final class SyncClient {
     @ObservationIgnored public var saveDelay: TimeInterval = 1
     @ObservationIgnored public var saveMaxDelay: TimeInterval = 5
     @ObservationIgnored let snapshots: SnapshotWriter
+    /// The bookkeeping of `data`, kept parsed: `data` holds only its shared
+    /// parts, written back entry by entry as they change (Sync+Kept.swift).
+    @ObservationIgnored var syncMeta = SyncMeta()
+    /// Fingerprints of `data` and of the copy last pushed, kept between
+    /// changes (Sync+Cache.swift).
+    @ObservationIgnored var prints = FingerprintCache()
+    @ObservationIgnored var outPrints = FingerprintCache()
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     /// When the oldest change not yet on disk was made (nil: all saved).
     @ObservationIgnored private var firstUnsaved: Date?
@@ -347,9 +363,10 @@ public final class SyncClient {
         cfg.timeoutIntervalForRequest = 15
         self.session = URLSession(configuration: cfg)
         if let snap = storage.loadSnapshot() {
-            let snap = Self.prepared(snap)
-            self.data = snap
-            self.view = WorkspaceView(snap)
+            let (tree, meta) = Self.opened(snap)
+            self.syncMeta = meta
+            self.data = tree
+            self.view = WorkspaceView(tree)
         }
         self.trash = storage.loadTrash()
         self.savedWorkspaces = storage.loadSaved()
@@ -360,7 +377,27 @@ public final class SyncClient {
 
     /// A saved copy made ready to open: one saved by an older build gets
     /// what later builds keep in it.
-    static func prepared(_ saved: JSON) -> JSON {
+    /// A saved copy made ready to open, taken apart: the copy with the
+    /// shared parts of its bookkeeping, and all of the bookkeeping parsed.
+    nonisolated static func opened(_ saved: JSON) -> (JSON, SyncMeta) {
+        Sync.split(prepared(saved))
+    }
+
+    /// Open this copy (nil: none), with its bookkeeping taken apart.
+    func setCopy(_ whole: JSON?) {
+        prints.reset()
+        outPrints.reset()
+        guard let whole else {
+            syncMeta = SyncMeta()
+            data = nil
+            return
+        }
+        let (tree, meta) = Sync.split(whole)
+        syncMeta = meta
+        data = tree
+    }
+
+    nonisolated static func prepared(_ saved: JSON) -> JSON {
         var snap = saved
         // a copy saved by an older build: give activity lines their ids
         // and take today's fingerprints as the baseline (every edit made
@@ -432,7 +469,7 @@ public final class SyncClient {
                 signInReason = .needed
             }
             if freshCopy {
-                data = nil
+                setCopy(nil)
                 view = .empty
                 rev = 0
                 // people are numbered per workspace: pick again on the new one
@@ -773,42 +810,58 @@ public final class SyncClient {
     /// Merge a snapshot from the server into this device's copy.
     private func take(_ snapshot: JSON, announce: Bool, hidden: [UInt64] = []) {
         let before = data
+        let theirs = SyncMeta(of: snapshot)
         if var local = data {
-            Sync.merge(&local, [snapshot])
+            var meta = syncMeta
+            let old = meta
+            Sync.merge(&local, meta: &meta, [snapshot], cache: prints)
+            Sync.patchShared(&local, old: old, new: meta)
+            syncMeta = meta
             data = local
         } else {
             var fresh = snapshot
             Sync.fillActivityIds(&fresh)
             Sync.fillGoalIds(&fresh)
-            var meta = SyncMeta(of: fresh)
-            meta.hashes = Sync.fingerprints(fresh)
-            meta.fieldHashes = Sync.partHashes(fresh)
-            meta.parents = Sync.parentsOf(fresh)
+            prints.reset()
+            var meta = theirs
+            let pr = Sync.prints(fresh, prints)
+            meta.hashes = pr.hashes
+            meta.fieldHashes = pr.parts
+            meta.parents = pr.parents
             meta.valueHashes = Sync.valueHashes(fresh)
             meta.v = Sync.metaV
-            fresh.set("extra.sync", meta.json)
+            fresh.set("extra.sync", .object(meta.sharedJSON))
+            syncMeta = meta
             data = fresh
         }
         if !hidden.isEmpty, var d = data {
             // out of this copy without a tombstone: nothing is deleted for the others
             let gone = Sync.hide(&d, ids: hidden)
             if !gone.isEmpty {
-                var meta = SyncMeta(of: d)
-                meta.hashes = Sync.fingerprints(d)
-                meta.fieldHashes = Sync.partHashes(d)
-                d.set("extra.sync", meta.json)
+                // (hide took them out of the shared parts in `d` already)
+                var meta = syncMeta
+                for id in gone {
+                    meta.stamps[id] = nil
+                    meta.moved[id] = nil
+                    meta.parents[id] = nil
+                    meta.fields[id] = nil
+                }
+                let pr = Sync.prints(d, prints)
+                meta.hashes = pr.hashes
+                meta.fieldHashes = pr.parts
+                syncMeta = meta
                 data = d
                 settings.waitingStamps = settings.waitingStamps.filter { !gone.contains($0.key) }
                 storage.save(settings)
             }
         }
-        clearWaiting(seenIn: SyncMeta(of: snapshot))
+        clearWaiting(seenIn: theirs)
         updatesReceived += 1
         catchingUp = !announce
         pushedWhileAway = !announce && settings.pushToken != nil && settings.pushSentTo.map { ServerAddress.same($0, settings.server) } == true
         refresh()
         if announce, let before, let after = data {
-            let fresh = Self.newMessages(before: before, after: after, me: settings.me, now: nowTs())
+            let fresh = Self.newMessages(before: before, after: after, part: snapshot, revived: syncMeta.revived, me: settings.me, now: nowTs())
             if !fresh.isEmpty { onIncoming(fresh) }
         }
         onUpdate()
@@ -853,9 +906,18 @@ public final class SyncClient {
     /// with a shorter age limit. Messages a Mac brought in from a Slack
     /// export (`imported`) are old history, not news (src/app/notify.rs).
     nonisolated static func newMessages(before: JSON, after: JSON, me: UInt64?, now: Int64) -> [IncomingMessage] {
+        newMessages(before: before, after: after, part: nil, revived: SyncMeta(of: after).revived, me: me, now: now)
+    }
+
+    /// The same, looking only at the conversations in `part` (what came
+    /// from the server): nothing else can have new messages.
+    nonisolated static func newMessages(before: JSON, after: JSON, part: JSON?, revived: [UInt64: Int64], me: UInt64?, now: Int64) -> [IncomingMessage] {
+        let only: Set<UInt64>? = part.map { p in Set((p["channels"]?.array ?? []).compactMap { $0["id"]?.uint }) }
+        if only?.isEmpty == true { return [] }
         func ids(_ d: JSON) -> Set<UInt64> {
             var s = Set<UInt64>()
             for c in d["channels"]?.array ?? [] {
+                if let only, !only.contains(c["id"]?.uint ?? 0) { continue }
                 for m in c["messages"]?.array ?? [] {
                     if let id = m["id"]?.uint { s.insert(id) }
                     for r in m["replies"]?.array ?? [] { if let id = r["id"]?.uint { s.insert(id) } }
@@ -865,11 +927,11 @@ public final class SyncClient {
         }
         // seconds, also for a stamp in milliseconds (push.rs secs)
         func secs(_ t: Int64) -> Int64 { t > 100_000_000_000 ? t / 1000 : t }
-        let revived = SyncMeta(of: after).revived
         let old = ids(before)
         var out: [IncomingMessage] = []
         for c in after["channels"]?.array ?? [] {
             let ch = c["id"]?.uint ?? 0
+            if let only, !only.contains(ch) { continue }
             let backAt = revived[ch].map(secs)
             func news(_ m: JSON) -> Bool {
                 if MessageView.isImported(m) { return false }
@@ -935,7 +997,7 @@ public final class SyncClient {
         settings.waitingStamps = [:]
         settings.waitingTombs = [:]
         settings.reuploads = []
-        data = nil
+        setCopy(nil)
         view = .empty
         rev = 0
         dropSnapshot()
@@ -1043,16 +1105,17 @@ public final class SyncClient {
         Sync.fillActivityIds(&d)
         Sync.fillBoardIds(&d)
         Sync.fillGoalIds(&d)
-        let old = SyncMeta(of: d)
+        let old = syncMeta
         var meta = old
-        Sync.stamp(d, &meta, now: nowMs())
+        Sync.stamp(d, &meta, now: nowMs(), cache: prints)
         for (id, t) in meta.stamps where old.stamps[id] != t { settings.waitingStamps[id] = t }
         for (id, t) in meta.tombs where old.tombs[id] != t {
             settings.waitingTombs[id] = t
             settings.waitingStamps[id] = nil
         }
         storage.save(settings)
-        d.set("extra.sync", meta.json)
+        Sync.patchShared(&d, old: old, new: meta)
+        syncMeta = meta
         data = d
         refresh()
         schedulePush()
@@ -1086,7 +1149,7 @@ public final class SyncClient {
         var push: JSON? = out
         if var s = summary {
             // only what the server doesn't have yet (nothing: no push)
-            push = Sync.delta(since: s, out)
+            push = Sync.delta(since: s, out, cache: outPrints, meta: syncMeta)
             if let p = push { s.absorb(p) }
             summary = s
         } else if serverDeltas {
@@ -1127,7 +1190,7 @@ public final class SyncClient {
         saveTask?.cancel()
         saveTask = nil
         firstUnsaved = nil
-        if let d = data { snapshots.write(d) }
+        if let d = data { snapshots.write(d, meta: syncMeta) }
     }
 
     /// Put the newest copy on disk before returning (the app going to the
@@ -1137,7 +1200,7 @@ public final class SyncClient {
         saveTask = nil
         if firstUnsaved != nil, let d = data {
             firstUnsaved = nil
-            snapshots.writeAndWait(d)
+            snapshots.writeAndWait(d, meta: syncMeta)
         } else {
             firstUnsaved = nil
             snapshots.wait()

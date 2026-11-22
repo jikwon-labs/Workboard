@@ -371,6 +371,16 @@ extension Sync {
     /// than the bookkeeping changed.
     @discardableResult
     public static func merge(_ local: inout JSON, _ others: [JSON], cache: FingerprintCache? = nil) -> Bool {
+        var lmeta = SyncMeta(of: local)
+        let changed = merge(&local, meta: &lmeta, others, cache: cache)
+        local.set("extra.sync", lmeta.json)
+        return changed
+    }
+
+    /// The same with this copy's bookkeeping kept apart in `lmeta` (the
+    /// app keeps it parsed): the copy's own `extra.sync` is left as it was.
+    @discardableResult
+    public static func merge(_ local: inout JSON, meta lmeta: inout SyncMeta, _ others: [JSON], cache: FingerprintCache? = nil) -> Bool {
         // copies from before activity had ids: give their entries the same ids
         // here as everywhere else, or their comments would not be matched up
         fillActivityIds(&local)
@@ -384,7 +394,6 @@ extension Sync {
             return o
         }
         let before = local
-        var lmeta = SyncMeta(of: local)
         let metas = others.map { SyncMeta(of: $0) }
         var tombs = lmeta.tombs
         var revived = lmeta.revived
@@ -453,7 +462,6 @@ extension Sync {
         lmeta.parents = pr.parents
         lmeta.valueHashes = valueHashes(local)
         lmeta.v = metaV
-        local.set("extra.sync", lmeta.json)
         return stripSync(before) != stripSync(local)
     }
 

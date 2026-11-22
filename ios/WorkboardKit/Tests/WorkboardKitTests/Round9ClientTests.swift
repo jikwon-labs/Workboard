@@ -46,7 +46,8 @@ final class Round9ClientTests: FakeServerTestCase {
         XCTAssertTrue(c.edit { d, _ in Edits.rename(&d, task: 201, to: "Renamed offline", ts: nowTs()) })
         let after = SyncMeta(of: try XCTUnwrap(c.data))
         XCTAssertEqual(after.values["extra.slack_map/UA"], 100, "the old match is nobody's new decision")
-        XCTAssertNotNil(after.valueHashes["extra.slack_map/UA"])
+        // (fingerprints are this device's own: the app keeps them beside the copy)
+        XCTAssertNotNil(c.syncMeta.valueHashes["extra.slack_map/UA"])
 
         c.setServer("ws://127.0.0.1:\(port)")
         await until("merged with the team") { c.updatesReceived > 0 }

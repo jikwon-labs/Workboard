@@ -146,28 +146,47 @@ public struct SyncMeta: Equatable, Sendable {
     }
 
     public var json: JSON {
-        func obj(_ m: [UInt64: Int64]) -> JSON { .object(Dictionary(uniqueKeysWithValues: m.map { (String($0.key), JSON.int($0.value)) })) }
+        var o = sharedJSON
+        o.merge(deviceJSON) { _, d in d }
+        return .object(o)
+    }
+
+    /// The parts every device keeps (and the server merges by).
+    var sharedJSON: [String: JSON] {
         var o: [String: JSON] = [
-            "stamps": obj(stamps),
-            "tombs": obj(tombs),
-            "revived": obj(revived),
-            "hashes": .object(Dictionary(uniqueKeysWithValues: hashes.map { (String($0.key), JSON.id($0.value)) })),
+            "stamps": Self.encode(stamps),
+            "tombs": Self.encode(tombs),
+            "revived": Self.encode(revived),
             "v": .int(Int64(v)),
             "values": .object(values.mapValues { JSON.int($0) }),
+        ]
+        if !moved.isEmpty { o["moved"] = Self.encode(moved) }
+        if !fields.isEmpty {
+            o["fields"] = .object(Dictionary(uniqueKeysWithValues: fields.map { (String($0.key), Self.encode($0.value)) }))
+        }
+        return o
+    }
+
+    /// The parts only this device keeps: fingerprints and places
+    /// (`Sync.outgoing` leaves them out).
+    var deviceJSON: [String: JSON] {
+        var o: [String: JSON] = [
+            "hashes": .object(Dictionary(uniqueKeysWithValues: hashes.map { (String($0.key), JSON.id($0.value)) })),
             "value_hashes": .object(valueHashes.mapValues { JSON.id($0) }),
         ]
-        if !moved.isEmpty { o["moved"] = obj(moved) }
         if !parents.isEmpty {
             o["parents"] = .object(Dictionary(uniqueKeysWithValues: parents.map { (String($0.key), JSON.id($0.value)) }))
-        }
-        if !fields.isEmpty {
-            o["fields"] = .object(Dictionary(uniqueKeysWithValues: fields.map { (String($0.key), JSON.object($0.value.mapValues { JSON.int($0) })) }))
         }
         if !fieldHashes.isEmpty {
             o["field_hashes"] = .object(Dictionary(uniqueKeysWithValues: fieldHashes.map { (String($0.key), JSON.object($0.value.mapValues { JSON.int(Int64($0)) })) }))
         }
-        return .object(o)
+        return o
     }
+
+    static let deviceKeys = ["hashes", "value_hashes", "parents", "field_hashes"]
+
+    static func encode(_ m: [UInt64: Int64]) -> JSON { .object(Dictionary(uniqueKeysWithValues: m.map { (String($0.key), JSON.int($0.value)) })) }
+    static func encode(_ m: [String: Int64]) -> JSON { .object(m.mapValues { JSON.int($0) }) }
 }
 
 extension Sync {

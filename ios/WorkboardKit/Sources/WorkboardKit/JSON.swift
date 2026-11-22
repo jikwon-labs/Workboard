@@ -24,6 +24,9 @@ public enum JSON: Equatable, Sendable {
         get { if case .object(let o) = self { return o[key] } else { return nil } }
         set {
             guard case .object(var o) = self else { return }
+            // let go of self's hold on the object first, so it changes in
+            // place instead of being copied whole
+            self = .null
             o[key] = newValue
             self = .object(o)
         }
@@ -84,14 +87,32 @@ public enum JSON: Equatable, Sendable {
 
     private mutating func setParts(_ parts: ArraySlice<String>, _ value: JSON) {
         guard let first = parts.first else { self = value; return }
-        if case .object = self {} else { self = .object([:]) }
-        var child = self[first] ?? .object([:])
-        if parts.count == 1 {
-            child = value
-        } else {
-            child.setParts(parts.dropFirst(), value)
+        guard case .object(var o) = self else {
+            self = .object([:])
+            setParts(parts, value)
+            return
         }
-        self[first] = child
+        // taken out while it changes, so nothing is copied on the way down
+        self = .null
+        if parts.count == 1 {
+            o[first] = value
+        } else {
+            var child = o.removeValue(forKey: first) ?? .object([:])
+            child.setParts(parts.dropFirst(), value)
+            o[first] = child
+        }
+        self = .object(o)
+    }
+
+    /// Change this object in place (nothing happens to anything else). The
+    /// object is taken out of `self` while it changes, so it isn't copied.
+    @discardableResult
+    public mutating func withObject<R>(_ change: (inout [String: JSON]) -> R) -> R? {
+        guard case .object(var o) = self else { return nil }
+        self = .null
+        let r = change(&o)
+        self = .object(o)
+        return r
     }
 }
 

@@ -2,6 +2,8 @@
 // and delivers frames through the main thread's run loop, which libtest's
 // threads don't have, so this runs as its own program on the main thread
 // (harness = false in Cargo.toml). Skipped without ffmpeg to make the clip.
+// An example with `test = true` rather than a file in tests/, so `cargo test`
+// runs it without also building the app's plain binary.
 
 #[allow(dead_code)]
 #[path = "../src/media.rs"]

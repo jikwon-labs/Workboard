@@ -129,8 +129,13 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-cli
 [profile.release]
 opt-level = 2
 
-[[test]]
+# The in-app video player with a real clip (examples/player.rs). An example,
+# not tests/: an integration test makes every `cargo test` build the app's
+# plain binary as well, a second full compile of the app. `test = true` still
+# runs it with `cargo test`; no harness, as AVPlayer needs the main thread.
+[[example]]
 name = "player"
+test = true
 harness = false
 
 # password hashing (PBKDF2) runs 100k rounds: keep it quick in test builds too

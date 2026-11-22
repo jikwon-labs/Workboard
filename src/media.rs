@@ -1426,7 +1426,7 @@ mod tests {
                 .any(|p| p[0] > 100 || p[1] > 100 || p[2] > 100),
             "the still isn't black"
         );
-        // playback is checked in tests/player.rs: AVPlayer needs the main thread
+        // playback is checked in examples/player.rs: AVPlayer needs the main thread
         // something AVFoundation can't read
         let bad = dir.join("bad.mp4");
         std::fs::write(&bad, b"not a video").unwrap();

@@ -1338,3 +1338,30 @@ fn server_file_answers_are_shown_in_the_interface_language() {
         "The server said 500 can't write files"
     );
 }
+
+#[test]
+fn pictures_not_shown_for_a_while_are_let_go() {
+    use crate::app::files::{FULL, THUMB};
+    use std::time::Duration;
+    let dir = std::env::temp_dir().join(format!("wb-forget-{}", std::process::id()));
+    let mut f = crate::app::files::Files::new(dir.clone());
+    let ctx = egui::Context::default();
+    // a full-size picture: let go soon after nobody looks at it
+    f.put_texture(&ctx, "aa", FULL, Duration::from_secs(60));
+    f.put_texture(&ctx, "bb", FULL, Duration::ZERO);
+    // thumbnails: only past the limit, the least lately shown first
+    for i in 0..160 {
+        let ago = Duration::from_secs(if i < 20 { 620 - i } else { 0 });
+        f.put_texture(&ctx, &format!("t{i:03}"), THUMB, ago);
+    }
+    f.forget_now();
+    assert!(
+        f.texture("aa", FULL).is_none(),
+        "the viewer closed a minute ago"
+    );
+    assert!(f.texture("bb", FULL).is_some(), "still on screen");
+    assert!(f.texture("t000", THUMB).is_none(), "the oldest went");
+    assert!(f.texture("t159", THUMB).is_some(), "shown just now");
+    assert!(!f.decoded("t000", THUMB), "decoded again when wanted");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -321,6 +321,9 @@ pub(super) struct Files {
     /// together::token_gen() then, token)
     token: RefCell<Option<(String, String, u64, Option<String>)>>,
     textures: HashMap<String, Option<egui::TextureHandle>>,
+    /// When each picture was last asked for (`texture`), so pictures
+    /// nobody looks at any more are let go (`forget_unseen`).
+    seen: RefCell<HashMap<String, Instant>>,
     /// decoded keys that came out as a picture
     ok: HashSet<String>,
     /// prepared attachments, by the Pending they belong to
@@ -453,6 +456,7 @@ impl Files {
             cancelled,
             token: Default::default(),
             textures: Default::default(),
+            seen: Default::default(),
             ok: Default::default(),
             prepared: vec![],
             #[cfg(test)]
@@ -742,7 +746,53 @@ impl Files {
     }
 
     pub fn texture(&self, sha: &str, max: u32) -> Option<&egui::TextureHandle> {
-        self.textures.get(&key(sha, max)).and_then(|t| t.as_ref())
+        let k = key(sha, max);
+        let t = self.textures.get(&k).and_then(|t| t.as_ref());
+        if t.is_some() {
+            self.seen.borrow_mut().insert(k, Instant::now());
+        }
+        t
+    }
+
+    /// Lets go of pictures not shown for a while: a full-size one (2560 px,
+    /// tens of MB) soon after the viewer closes, smaller ones once more than
+    /// `TEXTURES_KEPT` are loaded. One wanted again is decoded again.
+    fn forget_unseen(&mut self) {
+        let now = Instant::now();
+        let seen = self.seen.get_mut();
+        let idle = |k: &str| {
+            seen.get(k)
+                .is_none_or(|at| now.duration_since(*at) >= Duration::from_secs(UNSEEN_SECS))
+        };
+        let full = format!("@{}", FULL);
+        let mut gone: Vec<String> = self
+            .textures
+            .iter()
+            .filter(|(k, t)| t.is_some() && k.ends_with(&full) && idle(k))
+            .map(|(k, _)| k.clone())
+            .collect();
+        let loaded = self.textures.values().filter(|t| t.is_some()).count() - gone.len();
+        if loaded > TEXTURES_KEPT {
+            // the least lately shown first
+            let mut old: Vec<(Instant, &String)> = self
+                .textures
+                .iter()
+                .filter(|(k, t)| t.is_some() && !gone.contains(k) && idle(k))
+                .map(|(k, _)| (seen.get(k).copied().unwrap_or(self.started), k))
+                .collect();
+            old.sort();
+            gone.extend(
+                old.into_iter()
+                    .take(loaded - TEXTURES_KEPT)
+                    .map(|(_, k)| k.clone()),
+            );
+        }
+        for k in gone {
+            self.textures.remove(&k);
+            self.ok.remove(&k);
+            self.asked.remove(&k);
+            seen.remove(&k);
+        }
     }
 
     /// A picture that couldn't be decoded.
@@ -801,6 +851,10 @@ impl Files {
                     })
                     .collect::<Vec<_>>(),
             );
+        }
+        let full = format!("@{}", FULL);
+        if self.textures.len() > TEXTURES_KEPT || self.textures.keys().any(|k| k.ends_with(&full)) {
+            self.forget_unseen();
         }
         for (sha, ext, kind, max) in self.wants.take() {
             let k = key(&sha, max);
@@ -1014,6 +1068,23 @@ impl Files {
         self.ok.contains(&key(sha, max))
     }
 
+    /// Put a loaded picture in, shown `ago` (tests of letting go).
+    #[cfg(test)]
+    pub fn put_texture(&mut self, ctx: &egui::Context, sha: &str, max: u32, ago: Duration) {
+        let k = key(sha, max);
+        let tex = ctx.load_texture(&k, egui::ColorImage::example(), Default::default());
+        self.textures.insert(k.clone(), Some(tex));
+        self.ok.insert(k.clone());
+        let at = Instant::now().checked_sub(ago).unwrap_or(self.started);
+        self.seen.get_mut().insert(k, at);
+    }
+
+    /// Lets go of pictures not shown lately now (tests).
+    #[cfg(test)]
+    pub fn forget_now(&mut self) {
+        self.forget_unseen();
+    }
+
     /// Tries so far at fetching a file, and whether the next one waits (tests).
     #[cfg(test)]
     pub fn fetch_tries(&self, sha: &str) -> Option<(usize, bool)> {
@@ -1192,6 +1263,11 @@ fn with_ext(dir: &Path, sha: &str, ext: &str) -> PathBuf {
     }
     named
 }
+
+/// Pictures kept loaded at most (besides those shown lately).
+const TEXTURES_KEPT: usize = 150;
+/// How long a picture not shown is kept before it may be let go.
+const UNSEEN_SECS: u64 = 10;
 
 fn key(sha: &str, max: u32) -> String {
     format!("{}@{}", sha, max)

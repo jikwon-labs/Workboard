@@ -27,7 +27,7 @@ Rust + egui 데스크톱 업무 앱(작업·채팅·문서·허들)과 팀 서�
 2. **작업**: 그 워크트리 안의 파일만 고친다. 커밋은 작게, 하나의 변경 단위로.
 3. **마무리**: 워크트리 안에서 `scripts/wt ship`
    - fetch → `origin/main` 위로 rebase → `git push origin HEAD:main`. 빌드·테스트는 하지 않는다.
-   - 테스트가 필요하면 ship 전에 `scripts/wt verify` 를 직접 돌린다. 바뀐 파일을 보고 테스트를 고른다: `ios/` 는 `swift test`, 문서(`*.md`, `docs/`)만이면 생략, 그 외는 `cargo fmt --all --check` 와 `cargo test --workspace`. `WB_VERIFY_ALL=1` 은 전부, `WB_IOS_UI=1` 은 시뮬레이터 UI 테스트까지.
+   - 테스트가 필요하면 ship 전에 `scripts/wt verify` 를 직접 돌린다. 바뀐 파일을 보고 테스트를 고른다: `ios/` 는 `swift test`, 문서(`*.md`, `docs/`)만이면 생략, 그 외는 `cargo fmt --all --check` 와 바뀐 곳에 맞는 패키지의 `cargo test`(`src/` 만이면 앱만, `crates/wb-sync`·`wb-net`·`Cargo.*` 이면 전체, 자세히는 `docs/testing.md`). 테스트 프로그램은 한꺼번에 돈다. `WB_VERIFY_ALL=1` 은 전부, `WB_IOS_UI=1` 은 시뮬레이터 UI 테스트까지.
    - rebase 충돌이 나면 해결하고 `git rebase --continue` 후 다시 `scripts/wt ship`.
 4. **정리**: main 체크아웃에서 `scripts/wt rm <이름>`. 커밋 안 된 변경이나 main 에 없는 커밋이 있으면 거부한다.
    - `scripts/wt ls` 로 전체 워크트리 상태(미커밋 파일 수, main 대비 앞/뒤 커밋 수)를 본다.

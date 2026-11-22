@@ -88,29 +88,40 @@ cmd_hook_create() {
 # What to test follows what the branch changed since origin/main:
 #   ios/**            swift test in ios/WorkboardKit (UI tests too with WB_IOS_UI=1)
 #   *.md, docs/**     nothing
-#   anything else     cargo fmt --all --check, then cargo test --workspace
-# WB_VERIFY_ALL=1 runs every suite; a branch with no changes runs cargo.
+#   src/, tests/, examples/, build.rs, Resources/
+#                     the app only: nothing else in the workspace uses it
+#   crates/wb-voice/  wb-voice and the app
+#   server/           the server, the app and wb-voice (their tests run it)
+#   anything else     the whole workspace (wb-sync, wb-net, Cargo.*, ...)
+# Rust always gets cargo fmt --all --check first. WB_VERIFY_ALL=1 runs every
+# suite and the whole workspace; a branch with no changes runs the whole
+# workspace.
 cmd_verify() {
-  local base files rust=0 ios=0 f
+  local base files ios=0 f pkgs="" all=0
   [ -z "$(git status --porcelain)" ] || die "commit first: verify tests the committed HEAD"
   base=$(git merge-base origin/main HEAD)
   files=$(git diff --name-only "$base" HEAD)
-  [ -n "$files" ] || rust=1
+  [ -n "$files" ] || all=1
   while IFS= read -r f; do
     case $f in
       '') ;;
       ios/*) ios=1 ;;
       *.md|docs/*) ;;
-      *) rust=1 ;;
+      src/*|tests/*|examples/*|build.rs|Resources/*) pkgs="$pkgs workboard" ;;
+      crates/wb-voice/*) pkgs="$pkgs wb-voice workboard" ;;
+      server/*) pkgs="$pkgs workboard-server workboard wb-voice" ;;
+      *) all=1 ;;
     esac
   done <<<"$files"
-  [ -n "${WB_VERIFY_ALL:-}" ] && { rust=1; ios=1; }
-  if [ $rust = 1 ]; then
+  [ -n "${WB_VERIFY_ALL:-}" ] && { all=1; ios=1; }
+  [ $all = 1 ] && pkgs=" workboard workboard-server wb-sync wb-net wb-voice"
+  pkgs=$(tr ' ' '\n' <<<"$pkgs" | sed '/^$/d' | sort -u | tr '\n' ' ')
+  if [ -n "$pkgs" ]; then
     say "cargo fmt --check on $(git rev-parse --short HEAD)"
     cargo fmt --all --check \
       || die "Rust code is not formatted: run cargo fmt --all, commit, then verify again"
-    say "cargo test --workspace on $(git rev-parse --short HEAD)"
-    cargo test --workspace
+    say "cargo test (${pkgs% }) on $(git rev-parse --short HEAD)"
+    if [ $all = 1 ]; then cargo_tests --workspace; else cargo_tests $(sed 's/[^ ][^ ]*/-p &/g' <<<"$pkgs"); fi
   fi
   if [ $ios = 1 ]; then
     say "swift test (ios/WorkboardKit) on $(git rev-parse --short HEAD)"
@@ -128,8 +139,45 @@ cmd_verify() {
         -destination "platform=iOS Simulator,name=${WB_IOS_SIM:-iPhone 17}" test
     fi
   fi
-  [ $rust = 1 ] || [ $ios = 1 ] || say "only docs changed; no tests to run"
+  [ -n "$pkgs" ] || [ $ios = 1 ] || say "only docs changed; no tests to run"
   say "verified $(git rev-parse --short HEAD)"
+}
+
+# cargo test for the given packages, with every test program running at the
+# same time instead of one after another (cargo runs them in turn, and the
+# app's alone takes as long as the rest together). Each runs in its
+# package's folder, as under cargo test. The output of a program that fails
+# is shown whole; the others show their result line. Without jq it is plain
+# cargo test.
+cargo_tests() {
+  command -v jq >/dev/null || { cargo test "$@"; return; }
+  local logs list exe dir n=0 failed=0 i
+  logs=$(mktemp -d "${TMPDIR:-/tmp}/wb-verify.XXXXXX")
+  cargo test "$@" --no-run --message-format=json-render-diagnostics >"$logs/build.json" \
+    || { rm -rf "$logs"; die "the tests didn't build"; }
+  list=$(jq -r 'select(.reason == "compiler-artifact" and .executable != null and .profile.test)
+      | "\(.executable)\t\(.manifest_path)"' "$logs/build.json")
+  while IFS=$'\t' read -r exe dir; do
+    [ -n "$exe" ] || continue
+    n=$((n + 1))
+    dir=$(dirname "$dir")
+    echo "$exe" >"$logs/$n.name"
+    ( cd "$dir" && CARGO_MANIFEST_DIR="$dir" "$exe" >"$logs/$n.log" 2>&1; echo $? >"$logs/$n.code" ) &
+  done <<<"$list"
+  say "running $n test programs at once"
+  wait
+  for ((i = 1; i <= n; i++)); do
+    exe=$(basename "$(cat "$logs/$i.name")")
+    if [ "$(cat "$logs/$i.code" 2>/dev/null || echo 1)" = 0 ]; then
+      printf '%-40s %s\n' "${exe%-*}" "$(grep -E '^test result:|: ok$' "$logs/$i.log" | tail -1)" >&2
+    else
+      failed=$((failed + 1))
+      echo "---- ${exe%-*} failed ----" >&2
+      cat "$logs/$i.log" >&2
+    fi
+  done
+  rm -rf "$logs"
+  [ $failed = 0 ] || die "$failed of $n test programs failed"
 }
 
 cmd_ship() {

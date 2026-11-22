@@ -25,8 +25,14 @@
 
 - `ios/` 아래: `swift test`. `WB_IOS_UI=1` 이면 시뮬레이터 UI 테스트까지(`WB_IOS_SIM` 으로 시뮬레이터 이름을 바꾼다. 기본 `iPhone 17`).
 - 문서(`*.md`, `docs/`)만: 아무것도 돌리지 않는다.
-- 그 밖: `cargo fmt --all --check` 로 rustfmt 정리를 확인한 뒤 `cargo test --workspace`. 정리가 안 돼 있으면 `cargo fmt --all` 을 돌려 커밋하고 다시 검증한다.
-- `WB_VERIFY_ALL=1` 이면 전부 돌린다.
+- Rust: 먼저 `cargo fmt --all --check` 로 rustfmt 정리를 확인한다. 정리가 안 돼 있으면 `cargo fmt --all` 을 돌려 커밋하고 다시 검증한다. 그다음 바뀐 곳에 따라 패키지를 고른다.
+  - `src/`, `tests/`, `examples/`, `build.rs`, `Resources/`: 앱(`-p workboard`)만. 워크스페이스의 다른 crate 는 앱을 쓰지 않는다.
+  - `crates/wb-voice/`: wb-voice 와 앱.
+  - `server/`: 서버, 앱, wb-voice(셋 다 테스트에서 서버를 띄운다).
+  - 그 밖(`crates/wb-sync/`, `crates/wb-net/`, `Cargo.toml`, `Cargo.lock`, `third_party/`, 스크립트 등): 워크스페이스 전체.
+- 테스트 프로그램은 cargo 처럼 하나씩 돌리지 않고 한꺼번에 띄운다(각자 자기 패키지 폴더에서). 통과한 프로그램은 결과 줄만, 실패한 프로그램은 출력 전체를 보여 준다. `jq` 가 없으면 그냥 `cargo test` 로 돌린다. 2026-11-22 이 Mac 에서 전체가 105초에서 24초가 됐다(다른 빌드가 돌던 중).
+- `WB_VERIFY_ALL=1` 이면 전부(워크스페이스 전체와 `swift test`) 돌린다.
+- 재생 테스트(`examples/player.rs`)는 AVPlayer 가 메인 스레드를 써야 해서 harness 없이 따로 도는 example 이다(`test = true` 라 `cargo test` 가 돌린다). `tests/` 에 두면 `cargo test` 때마다 앱 실행 파일을 한 번 더 빌드하게 돼서 옮겼다.
 
 ## Mac mini 에서 손으로 확인하기
 

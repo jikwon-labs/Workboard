@@ -3,6 +3,10 @@ name = "wb-voice"
 version = "0.1.1"
 edition = "2021"
 
+# no doc examples to run: skips an empty doctest pass on every cargo test
+[lib]
+doctest = false
+
 [dependencies]
 # TLS for a wss:// LiveKit (LiveKit Cloud), checked against the roots macOS trusts
 livekit = { version = "0.11", features = ["rustls-tls-native-roots"] }

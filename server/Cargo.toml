@@ -3,6 +3,10 @@ name = "workboard-server"
 version = "0.1.1"
 edition = "2021"
 
+# no doc examples to run: skips an empty doctest pass on every cargo test
+[lib]
+doctest = false
+
 [dependencies]
 wb-sync = { path = "../crates/wb-sync" }
 wb-net = { path = "../crates/wb-net" }

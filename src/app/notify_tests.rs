@@ -1169,3 +1169,95 @@ fn a_goal_far_behind_isnt_announced_again_after_many_other_notices() {
     assert_eq!(docs, 1, "once per due date: {:?}", a.notify_rt.sent);
     assert!(a.data.extra.notify.fired.len() <= 310, "still trimmed");
 }
+
+/// Opening the app (or waking it, or getting back online) brings in what
+/// happened meanwhile with the server's welcome. That shows as unread and in
+/// the Inbox, so it isn't announced all at once; what comes after it is, and
+/// with what was said.
+#[test]
+fn what_came_while_away_is_not_announced_on_reconnecting() {
+    use super::tests::{net_until, ServerTeam};
+    let mut t = ServerTeam::start();
+    let g = channel_id(&t.b, "general");
+    t.b.data.extra.notify.set_channel_mode(g, "all");
+    t.b.notify_scan();
+    t.b.notify_rt.sent.clear();
+    // Sam's app is closed: the owner writes in #general meanwhile
+    t.b.sync_rt.net = None;
+    let say = |a: &mut App, text: &str| {
+        a.apply_chat(vec![super::chat::ChatAction::Send {
+            ch: g,
+            text: text.into(),
+            parent: None,
+            files: vec![],
+        }]);
+        a.sync_note_change();
+        a.write_shared();
+    };
+    for i in 0..5 {
+        say(&mut t.a, &format!("while away {}", i));
+    }
+    let file = t.server.home.join(workboard_server::WORKSPACE_FILE);
+    net_until(&mut t.a, "the server keeping them", |_| {
+        std::fs::read_to_string(&file).is_ok_and(|s| s.contains("while away 4"))
+    });
+    let has = |b: &App, text: &str| {
+        b.data
+            .channels
+            .iter()
+            .any(|c| c.id == g && c.messages.iter().any(|m| m.text == text))
+    };
+    net_until(&mut t.b, "the catch-up at Sam's", |b| {
+        has(b, "while away 4")
+    });
+    t.b.notify_scan();
+    assert!(
+        t.b.notify_rt.sent.is_empty(),
+        "nothing announced: {:?}",
+        t.b.notify_rt.sent
+    );
+    assert!(!t.b.notify_rt.catch_up);
+    // once connected, a new message is announced with its text
+    say(&mut t.a, "back now?");
+    net_until(&mut t.b, "the new message at Sam's", |b| {
+        has(b, "back now?")
+    });
+    t.b.notify_scan();
+    assert_eq!(kinds(&t.b), vec![Kind::Channel]);
+    assert_eq!(t.b.notify_rt.sent[0].body, "back now?");
+}
+
+#[test]
+fn a_call_still_rings_after_reconnecting() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    post(&mut a, dm, 2, "while away");
+    let id = post(&mut a, dm, 2, "Started a huddle");
+    a.data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == dm)
+        .unwrap()
+        .messages
+        .iter_mut()
+        .find(|m| m.id == id)
+        .unwrap()
+        .call = Some(format!("workboard-huddle:{}", dm));
+    a.notify_rt.catch_up = true;
+    a.notify_scan();
+    assert_eq!(kinds(&a), vec![Kind::Huddle]);
+}
+
+#[test]
+fn a_summary_says_who_and_what() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    for i in 0..4 {
+        post(&mut a, dm, 2, &format!("message {}", i));
+    }
+    a.notify_scan();
+    let n = &a.notify_rt.sent[0];
+    assert_eq!(n.title, "4 new notifications");
+    assert!(n.body.starts_with("Alex Kim: message 0\n"), "{:?}", n.body);
+    assert!(a.toast.as_ref().unwrap().0.contains("Alex Kim: message"));
+}

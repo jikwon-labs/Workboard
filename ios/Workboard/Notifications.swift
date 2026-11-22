@@ -169,9 +169,10 @@ final class Notifier {
         var fresh = told.fresh(found, all: all, workspace: client.pushKey, now: nowTs())
         let active = UIApplication.shared.applicationState == .active
         fresh.removeAll { active && visible($0.target, nav: nav) }
-        // back after being away (a notification tapped, the app brought
-        // forward): the server pushed those messages already
-        if client.pushedWhileAway { fresh.removeAll { Notify.pushedByServer($0.kind) } }
+        // back after being away (opened, brought forward, reconnected): what
+        // happened meanwhile shows as unread and in the Inbox, and the server
+        // pushed the messages among it already; only a call still rings
+        if client.catchingUp { fresh.removeAll { $0.kind != .huddle } }
         deliver(fresh, view: client.view)
         updateBadge(data, view: client.view, me: me, inbox: inbox)
         scheduleClock(client: client)
@@ -195,11 +196,17 @@ final class Notifier {
             calls.forEach { post($0) }
             if !rest.isEmpty {
                 post(key: "burst-\(nowTs())", title: String(localized: "\(rest.count) new notifications"),
-                     body: rest.prefix(3).map(title).joined(separator: "\n"), info: [:])
+                     body: rest.prefix(3).map(summaryLine).joined(separator: "\n"), info: [:])
             }
         } else {
             notes.forEach { post($0) }
         }
+    }
+
+    /// One line of a summary: who and what they said, not just who.
+    func summaryLine(_ n: Note) -> String {
+        let b = body(n)
+        return b.isEmpty ? title(n) : "\(title(n)): \(b.count > 60 ? String(b.prefix(60)) + "…" : b)"
     }
 
     /// The note's title in the phone's language (the Mac's words).

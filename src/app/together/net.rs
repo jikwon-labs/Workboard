@@ -528,6 +528,10 @@ impl App {
             Some(s) => self.merge_in(&[s], hidden),
             None => false,
         };
+        if changed {
+            // what happened while we weren't connected isn't announced (notify.rs)
+            self.notify_rt.catch_up = true;
+        }
         // after (re)connecting our whole copy goes up, with anything made offline
         self.write_shared();
         changed

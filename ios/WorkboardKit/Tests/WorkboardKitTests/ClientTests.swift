@@ -354,6 +354,29 @@ final class ClientTests: FakeServerTestCase {
         XCTAssertFalse(c.pushedWhileAway, "no token, no pushes")
     }
 
+    /// A welcome's changes (what happened while this phone wasn't
+    /// connected) are a catch-up, which the app doesn't announce; changes
+    /// heard while connected are not.
+    func testAWelcomeIsACatchUpAndALiveUpdateIsNot() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        let url = "ws://127.0.0.1:\(port)"
+        let a = client(url, me: 1)
+        var marks: [Bool] = []
+        a.onUpdate = { [weak a] in marks.append(a?.catchingUp ?? false) }
+        await until("welcomed") { a.state.isConnected && !marks.isEmpty }
+        XCTAssertEqual(marks.first, true, "no push token needed")
+
+        let b = client(url, me: 2)
+        await until("connected") { b.state.isConnected }
+        let seen = a.updatesReceived
+        b.edit { d, me in Edits.sendMessage(&d, channel: 303, text: "hello", me: me, id: b.newId(), ts: nowTs()) }
+        await until("update merged") { a.updatesReceived > seen }
+        a.onUpdate = {}
+        XCTAssertFalse(a.catchingUp, "heard while connected")
+    }
+
     func testPushTokenIsSentAfterWelcome() async throws {
         let server = FakeServer(snapshot: SampleWorkspace.make())
         let port = try await server.start(port: 0)

@@ -70,6 +70,11 @@ pub struct NotifyRt {
     pub(super) seeded: bool,
     /// The team's changes came in: look for news on the next frame.
     pub(super) pending: bool,
+    /// What came in is a (re)connection's catch-up: what happened while
+    /// this computer wasn't connected (the app closed, asleep, offline).
+    /// It shows as unread and in the Inbox, so only a call still going on
+    /// is announced; the rest is taken as seen.
+    pub(super) catch_up: bool,
     /// When the clock was last looked at (`i64::MAX`: never again, for UI
     /// tests that must not depend on the time of day).
     pub(super) last_clock: i64,
@@ -530,9 +535,11 @@ impl App {
                 .collect();
             self.notify_rt.seeded = true;
             self.notify_rt.pending = false;
+            self.notify_rt.catch_up = false;
             return;
         }
         self.notify_rt.pending = false;
+        let catch_up = std::mem::take(&mut self.notify_rt.catch_up);
         let mut fresh = vec![];
         for (ts, note) in found {
             if !self.notify_rt.seen.insert(note.key.clone()) {
@@ -549,6 +556,9 @@ impl App {
             fresh.push(note);
         }
         self.notify_rt.seen.extend(all);
+        if catch_up {
+            fresh.retain(|n| n.kind == Kind::Huddle);
+        }
         // what I'm looking at right now isn't news
         let focused = !self.notify_rt.away;
         fresh.retain(|n| !(focused && self.target_visible(&n.target)));
@@ -564,10 +574,17 @@ impl App {
                     .iter()
                     .any(|n| matches!(n.kind, Kind::Direct | Kind::Mention));
                 let title = trf!("{} new notifications", rest.len());
+                // who and what they said, not just who
                 let body = rest
                     .iter()
                     .take(3)
-                    .map(|n| n.title.clone())
+                    .map(|n| {
+                        if n.body.is_empty() {
+                            n.title.clone()
+                        } else {
+                            format!("{}: {}", n.title, cut(&n.body, 60))
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join("\n");
                 self.deliver(Note {

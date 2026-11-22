@@ -288,6 +288,10 @@ public final class SyncClient {
     /// this phone's push token: it pushed the messages among them already
     /// (server/src/push.rs), so they shouldn't notify a second time.
     @ObservationIgnored public private(set) var pushedWhileAway = false
+    /// Whether the changes `onUpdate` was just called for are a welcome's:
+    /// what happened while this phone wasn't connected. They show as unread
+    /// and in the Inbox, so they aren't announced (a call still going on is).
+    @ObservationIgnored public private(set) var catchingUp = false
 
     @ObservationIgnored let storage: Storage
     @ObservationIgnored let tokens: TokenStore
@@ -800,6 +804,7 @@ public final class SyncClient {
         }
         clearWaiting(seenIn: SyncMeta(of: snapshot))
         updatesReceived += 1
+        catchingUp = !announce
         pushedWhileAway = !announce && settings.pushToken != nil && settings.pushSentTo.map { ServerAddress.same($0, settings.server) } == true
         refresh()
         if announce, let before, let after = data {

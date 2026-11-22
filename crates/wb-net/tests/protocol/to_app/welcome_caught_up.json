@@ -1,0 +1,24 @@
+{
+  "type": "welcome",
+  "tag": 5,
+  "snapshot": null,
+  "rev": 15,
+  "member": 2,
+  "role": "admin",
+  "email": "sam@example.com",
+  "hidden": [
+    9001
+  ],
+  "deltas": true,
+  "epoch": 4503599627370497,
+  "since": 12,
+  "part": {
+    "channels": [
+      {
+        "id": 301,
+        "name": "general"
+      }
+    ],
+    "next_id": 7
+  }
+}

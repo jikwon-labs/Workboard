@@ -1,0 +1,14 @@
+{
+  "type": "hello",
+  "device": "dev-1",
+  "tag": 5,
+  "token": "tok-123",
+  "app": "0.1.23",
+  "sync": 5,
+  "deltas": true,
+  "have": {
+    "epoch": 4503599627370497,
+    "rev": 12
+  },
+  "mine_parts": true
+}

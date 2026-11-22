@@ -256,6 +256,7 @@ impl App {
                     token,
                     email,
                     hidden,
+                    part,
                     ..
                 } => {
                     self.member = Some(member);
@@ -266,6 +267,12 @@ impl App {
                     }
                     if let Some(s) = snapshot {
                         self.take_in(s);
+                    }
+                    // a reconnect: only what changed since the copy we had
+                    if let Some(p) = part {
+                        self.heard
+                            .push(format!("caught up {}", p.to_string().len()));
+                        self.take_in(p);
                     }
                     // what this person may no longer see leaves their copy (without deleting it)
                     if !self.data.is_null() {
@@ -322,6 +329,12 @@ impl App {
                 } => self.thread_typing.push((channel, member, t)),
                 Event::Scheduled(items) => self.scheduled = Some(items),
                 Event::Mine(m) => self.mine = Some(m),
+                Event::MinePart(p) => {
+                    self.heard.push(format!("mine part {}", p));
+                    let mut m = self.mine.take().unwrap_or_else(|| json!({}));
+                    wb_sync::mine::merge(&mut m, &p);
+                    self.mine = Some(m);
+                }
                 Event::Integrations { hooks, commands } => {
                     self.integrations = Some((hooks, commands))
                 }
@@ -6559,4 +6572,317 @@ fn ai_requests_without_an_ai_or_beyond_the_hour_are_turned_down() {
     // a request turned down for what it asks doesn't use up the hour
     assert_eq!(fake.asked().len(), 3);
     drop(limited);
+}
+
+// ------------------------------------------------------------ reconnecting
+
+/// Stands between apps and the server, passing bytes along, and can cut
+/// every connection through it at once (a laptop going to sleep, a phone
+/// losing its network) while the server and the apps keep running.
+struct Cutter {
+    port: u16,
+    open: Arc<std::sync::Mutex<Vec<std::net::TcpStream>>>,
+}
+
+impl Cutter {
+    fn new(to: u16) -> Cutter {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let open: Arc<std::sync::Mutex<Vec<std::net::TcpStream>>> = Default::default();
+        let list = open.clone();
+        std::thread::spawn(move || {
+            for app in listener.incoming() {
+                let Ok(app) = app else { return };
+                let Ok(server) = std::net::TcpStream::connect(("127.0.0.1", to)) else {
+                    continue;
+                };
+                let mut l = list.lock().unwrap();
+                l.push(app.try_clone().unwrap());
+                l.push(server.try_clone().unwrap());
+                for (mut from, mut to) in [
+                    (app.try_clone().unwrap(), server.try_clone().unwrap()),
+                    (server, app),
+                ] {
+                    std::thread::spawn(move || {
+                        let _ = std::io::copy(&mut from, &mut to);
+                        let _ = to.shutdown(std::net::Shutdown::Both);
+                    });
+                }
+            }
+        });
+        Cutter { port, open }
+    }
+
+    fn cut(&self) {
+        for s in self.open.lock().unwrap().drain(..) {
+            let _ = s.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+/// How many times this app was caught up with only what changed, and
+/// how many whole copies came in a welcome... counted from what it heard.
+fn caught_up(a: &App) -> usize {
+    a.heard
+        .iter()
+        .filter(|h| h.starts_with("caught up "))
+        .count()
+}
+
+/// B, through a connection that can be cut, in step with A.
+fn apps_with_cutter(port: u16) -> (App, App, Cutter) {
+    let mut a = App::connect(port, Some(workspace()));
+    a.wait("A's copy on the server", |_| true);
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let code = a.invite(2, Role::Member);
+    let cutter = Cutter::new(port);
+    let mut b = App::join(cutter.port, &code);
+    b.wait("B gets the team's copy", |d| {
+        task_names(d) == ["Plan", "Ship"]
+    });
+    (a, b, cutter)
+}
+
+#[test]
+fn a_reconnect_brings_only_what_changed_while_away() {
+    let home = TempHome::new("catch-up");
+    let server = Server::start_at(&home, 0);
+    let (mut a, mut b, cutter) = apps_with_cutter(server.port);
+    a.change(say("before", 3001));
+    b.wait("before at B", |d| texts(d).contains(&"before".to_string()));
+
+    cutter.cut();
+    b.wait_status(
+        |s| matches!(s, Status::Reconnecting(_)),
+        "B lost the server",
+    );
+    // while B is away: A writes, and B writes on its own too
+    a.change(say("while away 1", 3002));
+    a.change(|d| d["tasks"][1]["name"] = json!("Ship it"));
+    a.change(say("while away 2", 3003));
+    b.change(|d| d["tasks"][0]["name"] = json!("Plan (B, offline)"));
+
+    b.wait("what A wrote while B was away", |d| {
+        texts(d).contains(&"while away 2".to_string()) && task_names(d)[1] == "Ship it"
+    });
+    assert_eq!(caught_up(&b), 1, "{:?}", b.heard);
+    // B's own change made while away still goes up
+    a.wait("B's offline edit at A", |d| {
+        task_names(d)[0] == "Plan (B, offline)"
+    });
+    // and both end with the same copy
+    let shared = |d: &Value| {
+        let mut d = wb_sync::shareable(d);
+        d["extra"].as_object_mut().unwrap().remove("sync");
+        d
+    };
+    b.wait("the same copy as A", |d| {
+        texts(d) == texts(&a.data) && task_names(d) == task_names(&a.data)
+    });
+    assert_eq!(shared(&a.data)["channels"], shared(&b.data)["channels"]);
+
+    // nothing changed while away: caught up with (almost) nothing
+    cutter.cut();
+    b.wait_status(|s| matches!(s, Status::Reconnecting(_)), "B lost it again");
+    b.until("B caught up again", |b| caught_up(b) == 2);
+    let size: usize = b
+        .heard
+        .iter()
+        .rev()
+        .find_map(|h| h.strip_prefix("caught up ")?.parse().ok())
+        .unwrap();
+    assert!(size < 400, "{size}: {:?}", b.heard);
+
+    // a restarted server can't say what changed: the whole copy
+    let port = server.port;
+    server.stop();
+    let server = Server::start_at(&home, port);
+    a.change(say("after the restart", 3004));
+    b.wait("after the restart at B", |d| {
+        texts(d).contains(&"after the restart".to_string())
+    });
+    assert_eq!(caught_up(&b), 2, "{:?}", b.heard);
+    server.stop();
+}
+
+#[test]
+fn a_conversation_opened_to_me_while_away_comes_whole() {
+    let home = TempHome::new("catch-up-private");
+    let server = Server::start_at(&home, 0);
+    let (mut a, mut b, cutter) = apps_with_cutter(server.port);
+    a.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 30, "name": "plans", "kind": "Channel", "private": true, "topic": "", "members": [1, 3], "messages": [{"id": 31, "author": 1, "text": "private plans", "ts": now()}], "last_read": 0}));
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 40, "name": "open", "kind": "Channel", "private": true, "topic": "", "members": [1, 2], "messages": [{"id": 41, "author": 1, "text": "for B", "ts": now()}], "last_read": 0}));
+    });
+    b.wait("the conversation B is in", |d| channel(d, 40).is_some());
+    assert!(channel(&b.data, 30).is_none());
+
+    cutter.cut();
+    b.wait_status(
+        |s| matches!(s, Status::Reconnecting(_)),
+        "B lost the server",
+    );
+    // while B is away it is added to one conversation and taken out of the other
+    a.change(|d| {
+        let chans = d["channels"].as_array_mut().unwrap();
+        chans.iter_mut().find(|c| c["id"] == 30).unwrap()["members"] = json!([1, 2, 3]);
+        chans.iter_mut().find(|c| c["id"] == 40).unwrap()["members"] = json!([1]);
+    });
+    b.wait(
+        "the conversation B was added to, with what was said before",
+        |d| channel(d, 30).is_some_and(|c| c.to_string().contains("private plans")),
+    );
+    b.wait("the one it left is gone from its copy", |d| {
+        channel(d, 40).is_none()
+    });
+    assert_eq!(caught_up(&b), 1, "{:?}", b.heard);
+    server.stop();
+}
+
+/// A hello with a copy from another run of the server, or from a
+/// revision the server never sent this device, gets the whole copy.
+#[test]
+fn a_reconnect_the_server_cant_catch_up_gets_the_whole_copy() {
+    let home = TempHome::new("catch-up-whole");
+    let server = Server::start_at(&home, 0);
+    let (mut a, mut b, _cutter) = apps_with_cutter(server.port);
+    a.change(say("hello", 3101));
+    b.wait("hello at B", |d| texts(d).contains(&"hello".to_string()));
+    let token = b.token.clone().unwrap();
+    // the run of the server, as B's welcome said it
+    let epoch = {
+        let mut raw = Raw::connect(
+            server.port,
+            json!({"type": "hello", "device": b.device, "token": token, "deltas": true, "sync": wb_sync::META_V, "app": "test"}),
+        );
+        let w = raw.next("welcome");
+        assert!(w["snapshot"].is_object(), "no have: the whole copy");
+        assert!(w.get("since").is_none());
+        w["epoch"].as_u64().unwrap()
+    };
+    for (what, have) in [
+        ("another run", json!({"epoch": epoch ^ 1, "rev": 1})),
+        (
+            "a revision never sent",
+            json!({"epoch": epoch, "rev": 999_999}),
+        ),
+    ] {
+        let mut raw = Raw::connect(
+            server.port,
+            json!({"type": "hello", "device": b.device, "token": token, "deltas": true, "sync": wb_sync::META_V, "app": "test", "have": have}),
+        );
+        let w = raw.next("welcome");
+        assert!(w["snapshot"].is_object(), "{what}: {w}");
+        assert!(w.get("since").is_none(), "{what}");
+    }
+    server.stop();
+}
+
+/// Apps that take parts of my reading state hear only what changed, and a
+/// part that changes nothing on the server is answered with only the
+/// entries it sent that the server has newer; apps that don't still get
+/// the whole state.
+#[test]
+fn my_reading_state_travels_as_only_what_changed() {
+    use wb_sync::mine::{changes, collect, resolve, MineView};
+    let home = TempHome::new("mine-parts");
+    let server = Server::start_at(&home, 0);
+    let (mut a, _b) = two_apps(server.port);
+    // a phone of A's that takes parts
+    a.client.send(Msg::CreateLinkCode);
+    a.until("a link code", |a| {
+        a.heard.iter().any(|h| h.starts_with("link code "))
+    });
+    let code = a
+        .heard
+        .iter()
+        .find_map(|h| h.strip_prefix("link code "))
+        .unwrap()
+        .to_string();
+    let mut phone = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            link_code: Some(code),
+            mine_parts: true,
+            ..Default::default()
+        },
+    );
+    phone.until("the phone's state", |p| p.mine.is_some());
+    a.until("A's state", |a| a.mine.is_some());
+
+    // A reads two conversations
+    let mut mac = MineView::default();
+    mac.read.insert(10, 5);
+    mac.read.insert(20, 7);
+    let known = collect(&mac, &json!({}), now());
+    a.client.send(Msg::Mine {
+        data: known.clone(),
+    });
+    phone.until("the phone has both", |p| {
+        let v = resolve(p.mine.as_ref().unwrap());
+        v.read.get(&10) == Some(&5) && v.read.get(&20) == Some(&7)
+    });
+    // then a third: the phone hears only that one
+    mac.read.insert(30, 9);
+    let state = collect(&mac, &known, now() + 1);
+    a.client.send(Msg::Mine {
+        data: changes(&state, &known),
+    });
+    phone.until("the phone has the third", |p| {
+        resolve(p.mine.as_ref().unwrap()).read.get(&30) == Some(&9)
+    });
+    let part = phone
+        .heard
+        .iter()
+        .rev()
+        .find(|h| h.starts_with("mine part "))
+        .unwrap()
+        .clone();
+    assert!(
+        part.contains("\"30\"") && !part.contains("\"10\""),
+        "{part}"
+    );
+    // A, which doesn't take parts, got the whole state back
+    a.until("A hears the whole state", |a| {
+        resolve(a.mine.as_ref().unwrap()).read.len() == 3
+    });
+
+    // the phone sends an older position for one: nothing changes, and it
+    // is told the server's for that one alone
+    let heard = phone.heard.len();
+    phone.client.send(Msg::Mine {
+        data: json!({"read": {"30": {"ts": 1, "at": 1}}}),
+    });
+    phone.until("the phone is told the newer one", |p| {
+        p.heard[heard..].iter().any(|h| h.starts_with("mine part "))
+    });
+    let told = phone.heard[heard..]
+        .iter()
+        .find(|h| h.starts_with("mine part "))
+        .unwrap();
+    assert!(
+        told.contains("\"30\"") && !told.contains("\"20\""),
+        "{told}"
+    );
+    // sending what the server has already: no answer at all
+    let same = json!({"read": {"30": resolve_entry(&a, "30")}});
+    let heard = phone.heard.len();
+    phone.client.send(Msg::Mine { data: same });
+    phone.client.send(Msg::Ping);
+    std::thread::sleep(Duration::from_millis(300));
+    phone.pump();
+    assert!(
+        !phone.heard[heard..]
+            .iter()
+            .any(|h| h.starts_with("mine part ")),
+        "{:?}",
+        &phone.heard[heard..]
+    );
+    server.stop();
+}
+
+/// An entry of my reading state as the server keeps it (from A's copy of it).
+fn resolve_entry(a: &App, key: &str) -> Value {
+    a.mine.as_ref().unwrap()["read"][key].clone()
 }

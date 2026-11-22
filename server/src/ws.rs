@@ -247,6 +247,10 @@ struct SignedIn {
     deltas: bool,
     /// only notifications (see `watching`)
     watch: bool,
+    /// the copy the app has from this server already (`Hello::have`)
+    have: Option<wb_net::Have>,
+    /// the app takes `mine_part` messages
+    mine_parts: bool,
 }
 
 /// The hello a connection starts with, and signing in with it. None when
@@ -268,12 +272,14 @@ async fn hello(
         let _ = send(socket, &Msg::error("Say hello first.", None).to_json()).await;
         return None;
     };
-    let (device, app, sync, deltas, watch) = (
+    let (device, app, sync, deltas, watch, have, mine_parts) = (
         hello.device.clone(),
         hello.app.clone(),
         hello.sync,
         !hello.full_copies,
         hello.watch,
+        hello.have,
+        hello.mine_parts,
     );
     let h = hub.clone();
     // password hashing takes a moment
@@ -296,6 +302,8 @@ async fn hello(
         sync,
         deltas,
         watch,
+        have,
+        mine_parts,
     })
 }
 
@@ -314,7 +322,11 @@ struct Conn {
     told_too_old: bool,
     told_put_back: Option<std::time::Instant>,
     /// what the last copy sent left out (see Canon::delta_for)
-    was_hidden: Vec<u64>,
+    was_hidden: Arc<Vec<u64>>,
+    /// the copies sent, for catching the app up when it reconnects
+    seen: Arc<Mutex<Seen>>,
+    /// the app takes `mine_part` messages
+    mine_parts: bool,
     /// the conversation this connection's typing was last passed on for,
     /// and when (see TYPING_GAP)
     typed: Option<(u64, Option<u64>, std::time::Instant)>,
@@ -325,6 +337,12 @@ struct Conn {
 }
 
 impl Conn {
+    /// A copy of revision `rev` that left out `left_out` went to the app.
+    fn sent(&mut self, rev: u64, left_out: Vec<u64>) {
+        self.was_hidden = Arc::new(left_out);
+        self.seen.locked().sent(rev, &self.was_hidden);
+    }
+
     /// Starts answering AI request `id` (ai.rs). The answer goes to the app
     /// in pieces through `ai_out`, then `ai_done`, while this connection
     /// goes on with everything else; nothing more is sent once the app
@@ -439,7 +457,7 @@ impl Conn {
                 })
             }
             Some(Msg::Ping) => Some(Msg::Pong.to_json()),
-            Some(Msg::Mine { data }) => hub.take_mine(member, &data),
+            Some(Msg::Mine { data }) => hub.take_mine(member, &data, self.mine_parts),
             Some(Msg::Schedule { item }) => Some(match hub.schedule(member, item) {
                 Ok(items) => Msg::Scheduled { items }.to_json(),
                 Err(why) => denied(&why),
@@ -491,8 +509,8 @@ impl Conn {
                 None
             }
             // it missed a revision: the whole copy again
-            Some(Msg::Resync) => hub.latest(member).map(|(t, h)| {
-                self.was_hidden = h;
+            Some(Msg::Resync) => hub.latest(member).map(|(t, h, rev)| {
+                self.sent(rev, h);
                 t
             }),
             Some(Msg::PushToken {
@@ -605,6 +623,8 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         sync,
         deltas,
         watch,
+        have,
+        mine_parts,
     }) = hello(&mut socket, &hub, &mut stop).await
     else {
         return;
@@ -615,7 +635,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         return;
     }
     if watch {
-        let _ = (role, tag, token, app, sync, deltas);
+        let _ = (role, tag, token, app, sync, deltas, have, mine_parts);
         return watching(socket, hub, device, member, stop, closed).await;
     }
     let _online = Online::new(&hub, &device, member);
@@ -651,7 +671,18 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     let mut mines = hub.mines.subscribe();
     // this connection's requests don't bring it the access broadcast too
     let conn = NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed);
-    let (welcome, was_hidden) = hub.welcome(tag, member, role, token);
+    // a reconnect to this run of the server: only what changed since the
+    // copy its last connection sent, when the server can say
+    let before = have
+        .filter(|h| deltas && h.epoch == hub.epoch)
+        .and_then(|h| Some((h.rev, hub.seen_at(&device, member, h.rev)?)));
+    let seen = hub.seen_for(&device, member);
+    let caught =
+        before.and_then(|(rev, was)| hub.catch_up(tag, member, role, token.clone(), rev, &was));
+    let (welcome, was_hidden, rev) = match caught {
+        Some(w) => w,
+        None => hub.welcome(tag, member, role, token),
+    };
     if !send(&mut socket, &welcome).await {
         return;
     }
@@ -682,11 +713,14 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         too_old,
         told_too_old: false,
         told_put_back: None,
-        was_hidden,
+        was_hidden: Arc::new(vec![]),
+        seen,
+        mine_parts,
         typed: None,
         ai_out,
         ai_going: Default::default(),
     };
+    me.sent(rev, was_hidden);
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
     loop {
         tokio::select! {
@@ -747,7 +781,14 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
             }
             m = mines.recv() => {
                 let data = match m {
-                    Ok((who, data)) if who == member => data,
+                    // only what changed, to apps that take that
+                    Ok((who, _, Some(part))) if who == member && mine_parts => {
+                        if !send(&mut socket, &mine::mine_part_json(&part)).await {
+                            break;
+                        }
+                        continue;
+                    }
+                    Ok((who, data, _)) if who == member => data,
                     Ok(_) => continue,
                     // fell behind: what the server keeps now says it all
                     Err(broadcast::error::RecvError::Lagged(_)) => {
@@ -783,16 +824,19 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                 }
             }
             u = updates.recv() => {
-                let (text, hidden) = match u {
-                    Ok(c) => match deltas.then(|| c.delta_for(member, &me.was_hidden)).flatten() {
-                        Some(d) => d,
-                        None => c.update_for(member),
-                    },
+                let (text, hidden, rev) = match u {
+                    Ok(c) => {
+                        let (text, hidden) = match deltas.then(|| c.delta_for(member, &me.was_hidden)).flatten() {
+                            Some(d) => d,
+                            None => c.update_for(member),
+                        };
+                        (text, hidden, c.rev)
+                    }
                     // fell behind: the newest copy says it all
                     Err(broadcast::error::RecvError::Lagged(_)) => match hub.latest(member) { Some(t) => t, None => continue },
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                me.was_hidden = hidden;
+                me.sent(rev, hidden);
                 if !send(&mut socket, &text).await {
                     break;
                 }

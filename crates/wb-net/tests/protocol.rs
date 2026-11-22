@@ -12,7 +12,7 @@
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use wb_net::{
-    Backup, ChannelMode, CommandInfo, HookInfo, Msg, Person, PushPrefs, Role, ScheduledMsg,
+    Backup, ChannelMode, CommandInfo, Have, HookInfo, Msg, Person, PushPrefs, Role, ScheduledMsg,
 };
 
 fn dir() -> PathBuf {
@@ -70,6 +70,8 @@ fn hello() -> Msg {
         sync: None,
         deltas: false,
         watch: false,
+        have: None,
+        mine_parts: false,
     }
 }
 
@@ -98,6 +100,33 @@ fn to_server() -> Vec<(&'static str, Msg)> {
                     *app = Some("0.1.23".into());
                     *sync = Some(3);
                     *deltas = true;
+                }
+            }),
+        ),
+        (
+            "hello_reconnect",
+            with(&|m| {
+                if let Msg::Hello {
+                    tag,
+                    token,
+                    app,
+                    sync,
+                    deltas,
+                    have,
+                    mine_parts,
+                    ..
+                } = m
+                {
+                    *tag = Some(5);
+                    *token = Some("tok-123".into());
+                    *app = Some("0.1.23".into());
+                    *sync = Some(5);
+                    *deltas = true;
+                    *have = Some(Have {
+                        epoch: 4503599627370497,
+                        rev: 12,
+                    });
+                    *mine_parts = true;
                 }
             }),
         ),
@@ -287,6 +316,26 @@ fn to_app() -> Vec<(&'static str, Msg)> {
                 email: Some("sam@example.com".into()),
                 hidden: vec![9001],
                 deltas: true,
+                epoch: Some(4503599627370497),
+                since: None,
+                part: None,
+            },
+        ),
+        (
+            "welcome_caught_up",
+            Msg::Welcome {
+                tag: 5,
+                snapshot: None,
+                rev: 15,
+                member: 2,
+                role: Role::Admin,
+                token: None,
+                email: Some("sam@example.com".into()),
+                hidden: vec![9001],
+                deltas: true,
+                epoch: Some(4503599627370497),
+                since: Some(12),
+                part: Some(data()),
             },
         ),
         (
@@ -301,6 +350,9 @@ fn to_app() -> Vec<(&'static str, Msg)> {
                 email: None,
                 hidden: vec![],
                 deltas: false,
+                epoch: None,
+                since: None,
+                part: None,
             },
         ),
         (
@@ -406,6 +458,12 @@ fn to_app() -> Vec<(&'static str, Msg)> {
             },
         ),
         ("mine", Msg::Mine { data: json!({}) }),
+        (
+            "mine_part",
+            Msg::MinePart {
+                data: json!({"read": {"301": {"ts": 1763000000, "at": 1763000000123i64}}}),
+            },
+        ),
         (
             "integration_list",
             Msg::IntegrationList {

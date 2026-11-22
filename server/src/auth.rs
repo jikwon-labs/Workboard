@@ -544,15 +544,16 @@ impl Hub {
         }
     }
 
-    /// The welcome message, and what is hidden from `member`. The copy is
-    /// only taken (not copied) under the lock; the message is made after.
+    /// The welcome message, what is hidden from `member`, and its
+    /// revision. The copy is only taken (not copied) under the lock; the
+    /// message is made after.
     pub(crate) fn welcome(
         &self,
         tag: u16,
         member: u64,
         role: Role,
         token: Option<String>,
-    ) -> (String, Vec<u64>) {
+    ) -> (String, Vec<u64>, u64) {
         let (canon, rev, email, manages) = {
             let g = self.state();
             (
@@ -562,21 +563,99 @@ impl Hub {
                 g.saved.role_of(member).manages(),
             )
         };
+        let epoch = self.epoch;
         let Some(canon) = canon else {
             return (
-                welcome_json(tag, None, rev, member, role, token, email, &[]),
+                welcome_json(tag, None, rev, member, role, token, email, &[], epoch, None),
                 vec![],
+                rev,
             );
         };
         match copy_for(&canon, member, manages) {
             Some((copy, hidden)) => (
-                welcome_json(tag, Some(&copy), rev, member, role, token, email, &hidden),
+                welcome_json(
+                    tag,
+                    Some(&copy),
+                    rev,
+                    member,
+                    role,
+                    token,
+                    email,
+                    &hidden,
+                    epoch,
+                    None,
+                ),
                 left_out(&canon, &hidden),
+                rev,
             ),
             None => (
-                welcome_json(tag, Some(&canon), rev, member, role, token, email, &[]),
+                welcome_json(
+                    tag,
+                    Some(&canon),
+                    rev,
+                    member,
+                    role,
+                    token,
+                    email,
+                    &[],
+                    epoch,
+                    None,
+                ),
                 vec![],
+                rev,
             ),
         }
+    }
+
+    /// The welcome for an app that reconnects with the copy of revision
+    /// `since` from this run of the server, whose connection's copies left
+    /// out `was_hidden` (`Seen`): no copy, only what changed since, as a
+    /// connection that never broke would have had it (`Canon::delta_for`,
+    /// over all those revisions at once). None when the server can't say
+    /// what changed since (too long ago, a restore came between): the
+    /// whole copy then.
+    pub(crate) fn catch_up(
+        &self,
+        tag: u16,
+        member: u64,
+        role: Role,
+        token: Option<String>,
+        since: u64,
+        was_hidden: &[u64],
+    ) -> Option<(String, Vec<u64>, u64)> {
+        let (canon, rev, email, manages, changes) = {
+            let g = self.state();
+            (
+                g.canon.clone()?,
+                g.saved.rev,
+                g.saved.accounts.get(&member).map(|a| a.email.clone()),
+                g.saved.role_of(member).manages(),
+                g.catchup.since(since, g.saved.rev)?,
+            )
+        };
+        let hidden = wb_sync::hidden_from(&canon, member, manages);
+        let gone = left_out(&canon, &hidden);
+        let still: std::collections::HashSet<u64> = gone.iter().copied().collect();
+        let back: Vec<u64> = was_hidden
+            .iter()
+            .filter(|i| !still.contains(i))
+            .copied()
+            .collect();
+        let mut part = wb_sync::delta_of(&canon, &changes).unwrap_or_else(|| json!({}));
+        wb_sync::hide(&mut part, &hidden);
+        wb_sync::include_whole(&mut part, &canon, &back);
+        let text = welcome_json(
+            tag,
+            None,
+            rev,
+            member,
+            role,
+            token,
+            email,
+            &hidden,
+            self.epoch,
+            Some((since, &part)),
+        );
+        Some((text, gone, rev))
     }
 }

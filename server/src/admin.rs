@@ -6,7 +6,7 @@ use super::*;
 impl Hub {
     /// The whole team's copy `member` gets, and what is hidden from them.
     /// (The copy is taken under the lock and written out after.)
-    pub(crate) fn latest(&self, member: u64) -> Option<(String, Vec<u64>)> {
+    pub(crate) fn latest(&self, member: u64) -> Option<(String, Vec<u64>, u64)> {
         let (canon, rev, manages) = {
             let g = self.state();
             (
@@ -16,8 +16,12 @@ impl Hub {
             )
         };
         Some(match copy_for(&canon, member, manages) {
-            Some((data, hidden)) => (update_json(&data, rev, &hidden), left_out(&canon, &hidden)),
-            None => (update_json(&canon, rev, &[]), vec![]),
+            Some((data, hidden)) => (
+                update_json(&data, rev, &hidden),
+                left_out(&canon, &hidden),
+                rev,
+            ),
+            None => (update_json(&canon, rev, &[]), vec![], rev),
         })
     }
 

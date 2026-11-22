@@ -1,6 +1,6 @@
 use crate::client::{queue, send_failed, MAX_QUEUED};
 use crate::*;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Form-encoded text (an incoming webhook's payload=) and query values
 /// come back as sent; a stray % is kept.
@@ -214,6 +214,8 @@ fn a_sign_in_becomes_its_hello_and_back_byte_for_byte() {
         sync: Some(4),
         full_copies: false,
         watch: false,
+        have: Some(Have { epoch: 9, rev: 41 }),
+        mine_parts: true,
     };
     let by_hand = Msg::Hello {
         device: "d1".into(),
@@ -230,11 +232,13 @@ fn a_sign_in_becomes_its_hello_and_back_byte_for_byte() {
         sync: Some(4),
         deltas: true,
         watch: false,
+        have: Some(Have { epoch: 9, rev: 41 }),
+        mine_parts: true,
     };
     assert_eq!(Msg::from(&full).to_json(), by_hand.to_json());
     assert_eq!(
         Msg::from(&full).to_json(),
-        r#"{"type":"hello","device":"d1","tag":3,"token":"t","invite":"ABCD-EFGH-JKLM","claim":7,"email":"a@b.co","password":"pw","new_password":"new pw","reset_code":"R","link_code":"K7Q2MX","app":"0.1.7","sync":4,"deltas":true}"#
+        r#"{"type":"hello","device":"d1","tag":3,"token":"t","invite":"ABCD-EFGH-JKLM","claim":7,"email":"a@b.co","password":"pw","new_password":"new pw","reset_code":"R","link_code":"K7Q2MX","app":"0.1.7","sync":4,"deltas":true,"have":{"epoch":9,"rev":41},"mine_parts":true}"#
     );
     let back = SignIn::try_from(Msg::parse(&by_hand.to_json()).unwrap()).unwrap();
     assert_eq!(back, full);
@@ -272,6 +276,8 @@ fn messages_round_trip_as_tagged_json() {
         sync: None,
         deltas: false,
         watch: false,
+        have: None,
+        mine_parts: false,
     };
     assert_eq!(
         hello(Some(3)).to_json(),
@@ -572,6 +578,9 @@ fn fake_server(
                         email: None,
                         hidden: vec![],
                         deltas: true,
+                        epoch: None,
+                        since: None,
+                        part: None,
                     };
                     ws.send(tungstenite::Message::text(welcome.to_json()))
                         .unwrap();
@@ -742,4 +751,156 @@ fn a_watcher_hears_at_once() {
         }
     }
     drop(w);
+}
+
+/// A server that welcomes each connection with `answer(n, hello)` (n
+/// counts connections from 0), then hangs up, so the app reconnects; the
+/// hellos come back on the channel.
+fn hanging_up_server(
+    answer: impl Fn(usize, &Msg) -> Msg + Send + 'static,
+) -> (u16, std::sync::mpsc::Receiver<Msg>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for (n, sock) in listener.incoming().enumerate() {
+            let Ok(sock) = sock else { return };
+            let Ok(mut ws) = tungstenite::accept(sock) else {
+                continue;
+            };
+            let hello = loop {
+                match ws.read() {
+                    Ok(tungstenite::Message::Text(t)) => {
+                        if let Some(m) = Msg::parse(t.as_str()) {
+                            break m;
+                        }
+                    }
+                    Ok(_) => continue,
+                    Err(_) => return,
+                }
+            };
+            let w = answer(n, &hello);
+            if tx.send(hello).is_err() {
+                return;
+            }
+            let _ = ws.send(tungstenite::Message::text(w.to_json()));
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let _ = ws.close(None);
+            let _ = ws.flush();
+        }
+    });
+    (port, rx)
+}
+
+fn welcome(snapshot: Option<Value>, rev: u64, epoch: Option<u64>) -> Msg {
+    Msg::Welcome {
+        tag: 1,
+        snapshot,
+        rev,
+        member: 1,
+        role: Role::Member,
+        token: None,
+        email: None,
+        hidden: vec![],
+        deltas: true,
+        epoch,
+        since: None,
+        part: None,
+    }
+}
+
+/// The welcomes an app got, in order: (snapshot, part).
+fn welcomes(client: &Client, n: usize) -> Vec<(Option<Value>, Option<Value>)> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let mut out = vec![];
+    while out.len() < n {
+        assert!(std::time::Instant::now() < deadline, "only {:?}", out);
+        for e in client.events() {
+            if let Event::Welcome { snapshot, part, .. } = e {
+                out.push((snapshot, part));
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    out
+}
+
+/// A reconnect to the same run of a server says which copy the app has;
+/// whether the server answers with only what changed or (an older server,
+/// or one that can't tell) the whole copy, the app takes it. A server
+/// that doesn't say its run is never asked.
+#[test]
+fn a_reconnect_says_which_copy_it_has_and_takes_either_answer() {
+    let copy = json!({"tasks": [{"id": 1, "name": "a"}]});
+    let c = copy.clone();
+    let (port, hellos) = hanging_up_server(move |n, _| match n {
+        0 => welcome(Some(c.clone()), 7, Some(42)),
+        // only what changed since 7
+        1 => {
+            let mut w = welcome(None, 9, Some(42));
+            if let Msg::Welcome { since, part, .. } = &mut w {
+                *since = Some(7);
+                *part = Some(json!({"tasks": [{"id": 1, "name": "b"}]}));
+            }
+            w
+        }
+        // the whole copy, as a server that couldn't tell what changed
+        2 => welcome(Some(c.clone()), 12, Some(42)),
+        // a server that restarted
+        _ => welcome(Some(c.clone()), 3, Some(43)),
+    });
+    let client = Client::start(
+        &format!("ws://127.0.0.1:{}", port),
+        SignIn {
+            device: "d".into(),
+            token: Some("t".into()),
+            ..Default::default()
+        },
+        std::sync::Arc::new(|| {}),
+    );
+    let got = welcomes(&client, 4);
+    let have = |m: Msg| match m {
+        Msg::Hello { have, .. } => have,
+        m => panic!("{:?}", m),
+    };
+    let t = std::time::Duration::from_secs(5);
+    assert_eq!(
+        have(hellos.recv_timeout(t).unwrap()),
+        None,
+        "the first time: no copy yet"
+    );
+    assert_eq!(
+        have(hellos.recv_timeout(t).unwrap()),
+        Some(Have { epoch: 42, rev: 7 })
+    );
+    assert_eq!(
+        have(hellos.recv_timeout(t).unwrap()),
+        Some(Have { epoch: 42, rev: 9 })
+    );
+    assert_eq!(
+        have(hellos.recv_timeout(t).unwrap()),
+        Some(Have { epoch: 42, rev: 12 })
+    );
+    assert_eq!(got[0], (Some(copy.clone()), None));
+    assert_eq!(
+        got[1],
+        (None, Some(json!({"tasks": [{"id": 1, "name": "b"}]})))
+    );
+    assert_eq!(got[2], (Some(copy.clone()), None));
+    assert_eq!(got[3], (Some(copy), None));
+    drop(client);
+
+    // a server from before runs were told: never asked about a copy
+    let (port, hellos) = hanging_up_server(move |_, _| welcome(Some(json!({})), 5, None));
+    let client = Client::start(
+        &format!("ws://127.0.0.1:{}", port),
+        SignIn {
+            device: "d".into(),
+            ..Default::default()
+        },
+        std::sync::Arc::new(|| {}),
+    );
+    welcomes(&client, 2);
+    assert_eq!(have(hellos.recv_timeout(t).unwrap()), None);
+    assert_eq!(have(hellos.recv_timeout(t).unwrap()), None);
 }

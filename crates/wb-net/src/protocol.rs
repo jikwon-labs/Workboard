@@ -320,6 +320,14 @@ pub fn email_ok(e: &str) -> bool {
     })
 }
 
+/// The team's copy an app has from a server already (`Msg::Hello::have`):
+/// from which run of the server (`Welcome::epoch`) and at which revision.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Have {
+    pub epoch: u64,
+    pub rev: u64,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Msg {
@@ -371,6 +379,15 @@ pub enum Msg {
         /// `welcome` as usual, and the watcher hangs up.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         watch: bool,
+        /// The team's copy this app has from this server already (a
+        /// reconnect): the server may answer with only what changed since
+        /// (`Welcome::since`). Servers from before it send the whole copy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        have: Option<Have>,
+        /// The app takes `mine_part` messages (only what changed in my
+        /// reading state) besides whole `mine` ones.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        mine_parts: bool,
     },
     Welcome {
         /// The id tag this device must use; the server keeps them unique.
@@ -397,6 +414,18 @@ pub enum Msg {
         /// takes pushes of only what changed.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         deltas: bool,
+        /// Which run of the server this is (a new number each time it
+        /// starts): an app sends it back in `Hello::have`. Servers from
+        /// before it send none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        epoch: Option<u64>,
+        /// The answer to `Hello::have`: no `snapshot`; the app's copy at
+        /// this revision stands, with `part` (what changed since, as a
+        /// `delta` has it) merged in. Only to apps that sent `have`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        since: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        part: Option<Value>,
     },
     /// The app's shared copy, whole or only what changed (`wb_sync::delta`).
     Push {
@@ -614,6 +643,12 @@ pub enum Msg {
     /// which tells the app the server takes it: until then the app sends
     /// none. Never sent to anyone else. Older servers and apps ignore it.
     Mine {
+        data: Value,
+    },
+    /// What changed in my reading state (entries as in `mine`; the rest
+    /// stays as the app had it from the server), instead of the whole of
+    /// it: only to apps whose hello said `mine_parts`.
+    MinePart {
         data: Value,
     },
     /// Sent after `welcome` when the server can ask an AI (its ai.json has

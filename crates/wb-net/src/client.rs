@@ -36,6 +36,10 @@ pub enum Event {
         token: Option<String>,
         email: Option<String>,
         hidden: Vec<u64>,
+        /// A reconnect the server answered with only what changed since the
+        /// copy this app had (`snapshot` is None then): merge it like an
+        /// update. What came in while away, as a snapshot would be.
+        part: Option<Value>,
     },
     Update {
         data: Value,
@@ -93,6 +97,8 @@ pub enum Event {
     /// My reading state and notification choices as the server keeps them
     /// (`Msg::Mine`).
     Mine(Value),
+    /// What changed in them (`Msg::MinePart`).
+    MinePart(Value),
     /// The webhooks (owners and admins) and slash commands.
     Integrations {
         hooks: Vec<HookInfo>,
@@ -133,6 +139,11 @@ pub struct SignIn {
     pub full_copies: bool,
     /// Only notifications (see Msg::Hello::watch).
     pub watch: bool,
+    /// The team's copy this computer has from the server (set by the
+    /// connection itself on a reconnect; see Msg::Hello::have).
+    pub have: Option<Have>,
+    /// The app takes `mine_part` messages.
+    pub mine_parts: bool,
 }
 
 /// The hello a computer signs in with.
@@ -153,6 +164,8 @@ impl From<&SignIn> for Msg {
             sync: s.sync,
             deltas: !s.full_copies,
             watch: s.watch,
+            have: s.have,
+            mine_parts: s.mine_parts,
         }
     }
 }
@@ -179,6 +192,8 @@ impl TryFrom<Msg> for SignIn {
                 sync,
                 deltas,
                 watch,
+                have,
+                mine_parts,
             } => Ok(SignIn {
                 device,
                 tag,
@@ -194,6 +209,8 @@ impl TryFrom<Msg> for SignIn {
                 sync,
                 full_copies: !deltas,
                 watch,
+                have,
+                mine_parts,
             }),
             m => Err(m),
         }
@@ -425,6 +442,9 @@ fn run(
     let mut pending: Option<Value> = None;
     let mut queued: Vec<Msg> = vec![];
     let mut tries: u64 = 0;
+    // what the server had of the team's copy when the last connection
+    // ended: the next one asks for only what changed since
+    let mut known: Option<Known> = None;
     line.emit(Event::Status(Status::Connecting));
     loop {
         let end = match connect(&addr) {
@@ -438,6 +458,7 @@ fn run(
                     &mut pending,
                     &mut queued,
                     &mut tries,
+                    &mut known,
                 );
                 let _ = ws.close(None);
                 let _ = ws.flush();
@@ -483,16 +504,47 @@ fn session(
     pending: &mut Option<Value>,
     queued: &mut Vec<Msg>,
     tries: &mut u64,
+    known: &mut Option<Known>,
 ) -> End {
     let bell = match Bell::start(ws.get_ref(), ring.clone(), Cmd::Readable) {
         Ok(b) => b,
         Err(e) => return End::Lost(e.to_string()),
     };
+    sign_in.have = known
+        .as_ref()
+        .filter(|_| !sign_in.full_copies)
+        .map(|k| Have {
+            epoch: k.epoch,
+            rev: k.rev,
+        });
     let hello = Msg::from(&*sign_in);
     if let Err(e) = send(ws, &hello) {
         return End::Lost(e);
     }
-    let mut st = Synced::default();
+    let mut st = Synced {
+        known: known.take(),
+        ..Default::default()
+    };
+    let end = session_on(
+        ws, line, crx, &bell, sign_in, pending, queued, tries, &mut st,
+    );
+    // what the server had when this connection ended, for the next one
+    *known = st.known_now();
+    end
+}
+
+#[allow(clippy::too_many_arguments)]
+fn session_on(
+    ws: &mut WebSocket<Conn>,
+    line: &Line,
+    crx: &Receiver<Cmd>,
+    bell: &Bell,
+    sign_in: &mut SignIn,
+    pending: &mut Option<Value>,
+    queued: &mut Vec<Msg>,
+    tries: &mut u64,
+    st: &mut Synced,
+) -> End {
     let mut last_heard = Instant::now();
     let mut last_ping = Instant::now();
     // the app let go: what it pushed or sent just before still goes, then the
@@ -591,7 +643,7 @@ fn session(
         let res: Result<(), End> = match ws.read() {
             Ok(Message::Text(t)) => {
                 last_heard = Instant::now();
-                on_server_msg(Msg::parse(t.as_str()), ws, line, sign_in, tries, &mut st)
+                on_server_msg(Msg::parse(t.as_str()), ws, line, sign_in, tries, st)
             }
             Ok(Message::Close(_)) => Err(End::Lost("The server closed the connection.".into())),
             Ok(_) => {
@@ -628,6 +680,48 @@ struct Synced {
     summary: Option<wb_sync::Summary>,
     deltas: bool,
     rev: u64,
+    /// this run of the server (`Welcome::epoch`)
+    epoch: Option<u64>,
+    /// what the server has sent of the team's copy: `summary` without our
+    /// pushes, which may not have reached it when the connection broke
+    server: Option<wb_sync::Summary>,
+    /// what the last connection left (`Known`), until the welcome
+    known: Option<Known>,
+}
+
+/// The team's copy as a server had sent it when a connection ended: a
+/// reconnect to the same run of it asks for only what changed since.
+pub(crate) struct Known {
+    epoch: u64,
+    rev: u64,
+    server: wb_sync::Summary,
+}
+
+impl Synced {
+    /// What this connection leaves for the next (`Known`): nothing before a
+    /// welcome from a server that tells its run, or without deltas.
+    fn known_now(&mut self) -> Option<Known> {
+        if !self.welcomed {
+            return self.known.take();
+        }
+        Some(Known {
+            epoch: self.epoch?,
+            rev: self.rev,
+            server: self.server.take().filter(|_| self.deltas)?,
+        })
+    }
+
+    /// The server sent a whole copy (welcome, update).
+    fn whole(&mut self, data: &Value) {
+        if self.deltas {
+            let s = wb_sync::Summary::of(data);
+            self.server = Some(s.clone());
+            self.summary = Some(s);
+        } else {
+            self.server = None;
+            self.summary = None;
+        }
+    }
 }
 
 /// Act on a message from the server: tell the app, answer it, or end the
@@ -658,14 +752,44 @@ fn on_server_msg(
             email,
             hidden,
             deltas: server_deltas,
+            epoch,
+            since,
+            part,
         }) => {
             st.deltas = server_deltas && !sign_in.full_copies;
             st.rev = r;
-            st.summary = if st.deltas {
-                snapshot.as_ref().map(wb_sync::Summary::of)
-            } else {
-                None
+            st.epoch = epoch;
+            let known = st.known.take();
+            // only what changed since the copy we had: what the server had
+            // then, with that
+            let mut part = part;
+            let caught_up = match (since, &part, known) {
+                (Some(since), Some(p), Some(k))
+                    if st.deltas && since == k.rev && epoch == Some(k.epoch) =>
+                {
+                    let mut s = k.server;
+                    s.absorb(p);
+                    st.server = Some(s.clone());
+                    st.summary = Some(s);
+                    true
+                }
+                _ => false,
             };
+            if !caught_up {
+                match &snapshot {
+                    Some(data) => st.whole(data),
+                    None => {
+                        st.server = None;
+                        st.summary = None;
+                    }
+                }
+                if since.is_some() {
+                    // a part for a copy this connection didn't ask about:
+                    // the whole copy instead
+                    part = None;
+                    send(ws, &Msg::Resync).map_err(End::Lost)?;
+                }
+            }
             // sign in the same way next time: with the token, not the password
             sign_in.tag = Some(tag);
             if let Some(t) = &token {
@@ -684,6 +808,7 @@ fn on_server_msg(
                     token,
                     email,
                     hidden,
+                    part,
                 })
             })
         }
@@ -692,9 +817,7 @@ fn on_server_msg(
             rev: r,
             hidden,
         }) => {
-            if st.deltas {
-                st.summary = Some(wb_sync::Summary::of(&data));
-            }
+            st.whole(&data);
             st.rev = r;
             emit(Event::Update {
                 data,
@@ -716,6 +839,9 @@ fn on_server_msg(
                 Ok(())
             };
             if let Some(s) = st.summary.as_mut() {
+                s.absorb(&data);
+            }
+            if let Some(s) = st.server.as_mut() {
                 s.absorb(&data);
             }
             st.rev = st.rev.max(r);
@@ -755,6 +881,7 @@ fn on_server_msg(
         Some(Msg::Presence { online }) => emit(Event::Presence(online)),
         Some(Msg::Scheduled { items }) => emit(Event::Scheduled(items)),
         Some(Msg::Mine { data }) => emit(Event::Mine(data)),
+        Some(Msg::MinePart { data }) => emit(Event::MinePart(data)),
         Some(Msg::IntegrationList { hooks, commands }) => {
             emit(Event::Integrations { hooks, commands })
         }

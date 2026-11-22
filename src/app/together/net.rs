@@ -205,6 +205,8 @@ impl App {
             // the server takes changes only from apps that know every field
             sign_in.app = Some(APP_VERSION.to_string());
             sign_in.sync = Some(sync::META_V);
+            // my reading state may come as only what changed (take_mine_part)
+            sign_in.mine_parts = true;
             let wake: wb_net::Wake = match ctx {
                 Some(c) => {
                     let c = c.clone();
@@ -277,6 +279,7 @@ impl App {
                     token,
                     email,
                     hidden,
+                    part,
                     ..
                 } => {
                     if let Some(t) = token {
@@ -312,7 +315,7 @@ impl App {
                     if let Some(addr) = server {
                         crate::updater::set_server(&addr);
                     }
-                    changed |= self.net_welcome(tag, snapshot, member, &hidden);
+                    changed |= self.net_welcome(tag, snapshot, part, member, &hidden);
                     // whether this server has an AI, its ai_ready says next
                     self.ai_welcomed();
                     // what I scheduled (servers from before scheduling don't answer)
@@ -384,6 +387,10 @@ impl App {
                     self.take_mine(m);
                     changed = true;
                 }
+                NetEvent::MinePart(m) => {
+                    self.take_mine_part(m);
+                    changed = true;
+                }
                 NetEvent::Integrations { hooks, commands } => {
                     self.sync_rt.integrations = Some((hooks, commands))
                 }
@@ -441,10 +448,13 @@ impl App {
     }
 
     /// The server answered: finish joining, or catch up after a reconnect.
+    /// `part`: a reconnect the server answered with only what changed
+    /// since the copy this computer has (no `snapshot` then).
     pub(super) fn net_welcome(
         &mut self,
         tag: u16,
         snapshot: Option<serde_json::Value>,
+        part: Option<serde_json::Value>,
         member: u64,
         hidden: &[u64],
     ) -> bool {
@@ -524,7 +534,7 @@ impl App {
             self.data.me = member;
             self.save_local();
         }
-        let changed = match snapshot {
+        let changed = match snapshot.or(part) {
             Some(s) => self.merge_in(&[s], hidden),
             None => false,
         };

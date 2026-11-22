@@ -1807,3 +1807,155 @@ fn taking_in_a_copy_with_nothing_new_keeps_this_one() {
     assert_eq!(a.data.extra.sync.field_hashes, crate::sync::part_hashes(&v));
     assert_eq!(a.data.extra.sync.parents, crate::sync::parents_of(&v));
 }
+
+/// Passes bytes between apps and the server, counting what the server
+/// sends, and can cut every connection through it at once (the computer
+/// sleeping, the network going) while the server and the app keep running.
+struct Cutter {
+    port: u16,
+    open: std::sync::Arc<std::sync::Mutex<Vec<std::net::TcpStream>>>,
+    from_server: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Cutter {
+    fn new(to: u16) -> Cutter {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let open: std::sync::Arc<std::sync::Mutex<Vec<std::net::TcpStream>>> = Default::default();
+        let from_server: std::sync::Arc<std::sync::atomic::AtomicUsize> = Default::default();
+        let (list, count) = (open.clone(), from_server.clone());
+        std::thread::spawn(move || {
+            for app in listener.incoming() {
+                let Ok(app) = app else { return };
+                let Ok(server) = std::net::TcpStream::connect(("127.0.0.1", to)) else {
+                    continue;
+                };
+                let mut l = list.lock().unwrap();
+                l.push(app.try_clone().unwrap());
+                l.push(server.try_clone().unwrap());
+                for (mut from, mut to, counted) in [
+                    (app.try_clone().unwrap(), server.try_clone().unwrap(), None),
+                    (server, app, Some(count.clone())),
+                ] {
+                    std::thread::spawn(move || {
+                        let mut buf = [0u8; 16 * 1024];
+                        while let Ok(n) = from.read(&mut buf) {
+                            if n == 0 || to.write_all(&buf[..n]).is_err() {
+                                break;
+                            }
+                            if let Some(c) = &counted {
+                                c.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        }
+                        let _ = to.shutdown(std::net::Shutdown::Both);
+                    });
+                }
+            }
+        });
+        Cutter {
+            port,
+            open,
+            from_server,
+        }
+    }
+
+    fn cut(&self) {
+        for s in self.open.lock().unwrap().drain(..) {
+            let _ = s.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
+    /// Bytes the server sent since the last call.
+    fn heard(&self) -> usize {
+        self.from_server
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Back after the network dropped (the app kept running): only what
+/// changed while away comes, not the whole workspace again, and it isn't
+/// announced; what I wrote while away still reaches the team.
+#[test]
+fn a_reconnect_brings_only_what_changed_while_away() {
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = app();
+    // a long history, so the whole workspace is easy to tell from a part
+    let g = channel_id(&a, "general");
+    let me = a.data.me;
+    let gi = a.data.channels.iter().position(|c| c.id == g).unwrap();
+    for i in 0..2000u64 {
+        a.data.channels[gi]
+            .messages
+            .push(crate::app::slack::new_message(
+                800_000 + i,
+                me,
+                format!("an old message, number {i}, from long ago"),
+                1_000 + i as i64,
+            ));
+    }
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A shared on the server", |a| {
+        a.data.extra.shared.is_some()
+    });
+    let code = invite_code_for_sam(&mut a, &server);
+    let cutter = Cutter::new(server.port);
+    let mut b = join_with(&format!("127.0.0.1:{}", cutter.port), &code);
+    b.data.extra.notify.set_channel_mode(g, "all");
+    let has = |b: &App, text: &str| {
+        b.data
+            .channels
+            .iter()
+            .any(|c| c.id == g && c.messages.iter().any(|m| m.text == text))
+    };
+    net_until(&mut b, "B has the history", |b| {
+        has(b, "an old message, number 1999, from long ago")
+    });
+    let whole = cutter.heard();
+    assert!(whole > 100_000, "the whole workspace came: {whole}");
+    b.notify_scan();
+    b.notify_rt.sent.clear();
+
+    cutter.cut();
+    net_until(&mut b, "B lost the server", |b| {
+        matches!(b.sync_rt.net_status, Some(wb_net::Status::Reconnecting(_)))
+    });
+    let say = |a: &mut App, text: &str| {
+        a.apply_chat(vec![ChatAction::Send {
+            ch: g,
+            text: text.into(),
+            parent: None,
+            files: vec![],
+        }]);
+        a.sync_note_change();
+        a.write_shared();
+    };
+    for i in 0..3 {
+        say(&mut a, &format!("while B was away {i}"));
+    }
+    say(&mut b, "B wrote this offline");
+    cutter.heard();
+    net_until(&mut b, "what A wrote while B was away", |b| {
+        has(b, "while B was away 2")
+    });
+    net_until(&mut a, "what B wrote offline", |a| {
+        has(a, "B wrote this offline")
+    });
+    let part = cutter.heard();
+    assert!(
+        part < whole / 5,
+        "only what changed came: {part} of {whole}"
+    );
+    b.notify_scan();
+    assert!(
+        b.notify_rt.sent.is_empty(),
+        "not announced: {:?}",
+        b.notify_rt.sent
+    );
+    // once back, new messages are announced again
+    say(&mut a, "back now?");
+    net_until(&mut b, "the new message", |b| has(b, "back now?"));
+    b.notify_scan();
+    assert_eq!(b.notify_rt.sent.len(), 1, "{:?}", b.notify_rt.sent);
+}

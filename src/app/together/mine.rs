@@ -103,6 +103,16 @@ impl App {
         self.save_soon();
     }
 
+    /// The server sent what changed in my reading state (`mine_part`): the
+    /// rest is as my devices last agreed, so the whole of it is that with
+    /// this in it.
+    pub(crate) fn take_mine_part(&mut self, part: serde_json::Value) {
+        // on a tie the server's stays
+        let mut theirs = part;
+        mine::merge(&mut theirs, &self.data.extra.mine_sync);
+        self.take_mine(theirs);
+    }
+
     /// The server sent my reading state (after welcome, and when another
     /// device of mine changed it): take it in, and send back what this
     /// computer has that is newer.

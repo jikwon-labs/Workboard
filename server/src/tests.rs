@@ -466,6 +466,7 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
             link_fails: (0, 0),
             summary: None,
             backed_up: None,
+            catchup: Default::default(),
         }),
         updates: broadcast::channel(64).0,
         kicks: broadcast::channel(16).0,
@@ -486,6 +487,8 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         typing: broadcast::channel(64).0,
         mines: broadcast::channel(64).0,
         closed: watch::channel(false).0,
+        epoch: 1,
+        seen: Mutex::new(Default::default()),
     }
 }
 
@@ -511,6 +514,7 @@ fn wrong_tries_are_forgotten_and_never_pile_up() {
         link_fails: (0, 0),
         summary: None,
         backed_up: None,
+        catchup: Default::default(),
     };
     let now = now_ms();
     // old tries no longer count and go
@@ -1689,7 +1693,11 @@ fn messages_written_from_a_borrowed_copy_are_the_same_as_wb_nets() {
             email: email.clone(),
             hidden: hidden.clone(),
             deltas: true,
+            epoch: Some(77),
+            since: snapshot.is_none().then_some(5),
+            part: snapshot.is_none().then(|| json!({"tasks": []})),
         };
+        let part = json!({"tasks": []});
         let ours = welcome_json(
             3,
             snapshot.as_ref(),
@@ -1699,6 +1707,8 @@ fn messages_written_from_a_borrowed_copy_are_the_same_as_wb_nets() {
             token,
             email,
             &hidden,
+            77,
+            snapshot.is_none().then_some((5, &part)),
         );
         assert_eq!(ours, msg.to_json());
         assert_eq!(Msg::parse(&ours), Some(msg));
@@ -1772,7 +1782,7 @@ fn reading_state_is_written_on_its_own_and_moved_out_of_an_older_server_json() {
         .unwrap();
     std::thread::sleep(Duration::from_millis(20));
     let newer = json!({"read": {"10": {"ts": 9, "at": 200}}});
-    assert_eq!(hub.take_mine(1, &newer), None);
+    assert_eq!(hub.take_mine(1, &newer, false), None);
     hub.save_tick();
     assert_eq!(
         std::fs::metadata(home.join(STATE_FILE))
@@ -2003,4 +2013,41 @@ fn a_posted_message_merges_as_if_the_whole_copy_came_with_it() {
         // posted twice: nothing the second time
         assert!(schedule::with_message(&b, &w, now).is_none());
     }
+}
+
+/// What changed after a revision can be told for the revisions kept, not
+/// for older ones, and not across one that went whole (a restore).
+#[test]
+fn catching_up_reaches_back_only_as_far_as_the_kept_revisions() {
+    let changes = |id: u64| {
+        let mut s = wb_sync::Summary::of(&json!({}));
+        wb_sync::delta_advance(&mut s, &json!({"tasks": [{"id": id}]})).1
+    };
+    let mut c = Catchup {
+        from: Some(10),
+        ..Default::default()
+    };
+    // nothing yet: up to date at 10, nothing known before
+    assert!(c.since(10, 10).is_some_and(|ch| ch.is_empty()));
+    assert!(c.since(9, 10).is_none());
+    for rev in 11..=13 {
+        c.note(rev, Some(changes(rev)));
+    }
+    assert_eq!(c.since(10, 13).unwrap().len(), 3);
+    assert_eq!(c.since(12, 13).unwrap().len(), 1);
+    assert!(c.since(13, 13).unwrap().is_empty());
+    // a revision the server never had
+    assert!(c.since(14, 13).is_none());
+    // a restore: nothing from before it
+    c.note(14, None);
+    assert!(c.since(13, 14).is_none());
+    assert!(c.since(14, 14).unwrap().is_empty());
+    // only so many are kept: the oldest go
+    for rev in 15..15 + CATCHUP_REVS as u64 + 2 {
+        c.note(rev, Some(changes(rev)));
+    }
+    let newest = 14 + CATCHUP_REVS as u64 + 2;
+    assert!(c.since(14, newest).is_none());
+    assert!(c.since(16, newest).is_some());
+    assert_eq!(c.revs.len(), CATCHUP_REVS);
 }

@@ -176,6 +176,90 @@ struct Inner {
     /// the revision and hour of the last backup check (`backup_now`), which
     /// found the backups up to date
     backed_up: Option<(u64, String)>,
+    /// what the recent revisions changed, for apps that reconnect
+    catchup: Catchup,
+}
+
+/// The most revisions `Catchup` keeps, and the most ids in them together:
+/// an app away for longer gets the whole copy.
+const CATCHUP_REVS: usize = 5000;
+const CATCHUP_SIZE: usize = 200_000;
+
+/// What each recent revision changed (`wb_sync::Changes`): an app that
+/// reconnects with the copy of a revision still in here gets one part with
+/// all of it (`Hub::catch_up`) instead of the whole workspace.
+#[derive(Default)]
+struct Catchup {
+    /// the oldest revision an app can catch up from (None: none)
+    from: Option<u64>,
+    /// the revisions after `from`, in order, each with what it changed
+    revs: std::collections::VecDeque<(u64, wb_sync::Changes)>,
+    /// how many things they name together (`Changes::len`)
+    size: usize,
+}
+
+impl Catchup {
+    /// After revision `rev`: what it changed, or None when it went whole
+    /// (a restore, the first after starting), which nothing before it can
+    /// catch up across.
+    fn note(&mut self, rev: u64, changes: Option<wb_sync::Changes>) {
+        let follows = self.revs.back().map(|(r, _)| *r).or(self.from) == Some(rev - 1);
+        match changes {
+            Some(ch) if follows => {
+                self.size += ch.len();
+                self.revs.push_back((rev, ch));
+                while self.revs.len() > CATCHUP_REVS || self.size > CATCHUP_SIZE {
+                    let Some((r, ch)) = self.revs.pop_front() else {
+                        break;
+                    };
+                    self.size -= ch.len();
+                    self.from = Some(r);
+                }
+            }
+            _ => {
+                self.revs.clear();
+                self.size = 0;
+                self.from = Some(rev);
+            }
+        }
+    }
+
+    /// Everything changed after revision `since`, when it can say (`since`
+    /// is `newest` or one of the revisions it keeps, or the one before).
+    fn since(&self, since: u64, newest: u64) -> Option<wb_sync::Changes> {
+        let from = self.from?;
+        if since < from || since > newest {
+            return None;
+        }
+        let mut all = wb_sync::Changes::default();
+        for (r, ch) in &self.revs {
+            if *r > since {
+                all.add(ch);
+            }
+        }
+        Some(all)
+    }
+}
+
+/// The copies a connection last sent its app (`Hub::seen`): their
+/// revisions and what each left out (`left_out`), newest last.
+#[derive(Default)]
+pub(crate) struct Seen {
+    member: u64,
+    sent: std::collections::VecDeque<(u64, Arc<Vec<u64>>)>,
+}
+
+/// How many of them `Seen` keeps: an app that lost more than this many on
+/// the way when its connection broke gets the whole copy.
+const SEEN_KEPT: usize = 16;
+
+impl Seen {
+    pub(crate) fn sent(&mut self, rev: u64, left_out: &Arc<Vec<u64>>) {
+        self.sent.push_back((rev, left_out.clone()));
+        while self.sent.len() > SEEN_KEPT {
+            self.sent.pop_front();
+        }
+    }
 }
 
 impl Inner {
@@ -457,6 +541,8 @@ fn welcome_json(
     token: Option<String>,
     email: Option<String>,
     hidden: &[u64],
+    epoch: u64,
+    caught_up: Option<(u64, &Value)>,
 ) -> String {
     #[derive(Serialize)]
     #[serde(tag = "type", rename = "welcome")]
@@ -473,6 +559,11 @@ fn welcome_json(
         #[serde(skip_serializing_if = "<[u64]>::is_empty")]
         hidden: &'a [u64],
         deltas: bool,
+        epoch: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        part: Option<&'a Value>,
     }
     serde_json::to_string(&Welcome {
         tag,
@@ -484,6 +575,9 @@ fn welcome_json(
         email,
         hidden,
         deltas: true,
+        epoch,
+        since: caught_up.map(|(r, _)| r),
+        part: caught_up.map(|(_, p)| p),
     })
     .unwrap_or_default()
 }
@@ -536,10 +630,31 @@ struct Hub {
     typing: broadcast::Sender<Typing>,
     /// a member's own reading state changed (mine.rs): their connections
     /// send it to their apps
-    mines: broadcast::Sender<(u64, Arc<Value>)>,
+    mines: broadcast::Sender<(u64, Arc<Value>, Option<Arc<Value>>)>,
     /// true once the workspace is deleted (registry.rs): its connections
     /// end, telling their apps, and nothing more is written to its folder
     closed: watch::Sender<bool>,
+    /// this run of the server (`Welcome::epoch`): revisions are numbered
+    /// again from what was saved after a restart, so an app's copy from an
+    /// earlier run can't be caught up from its revision
+    epoch: u64,
+    /// device id -> the copies its connection sent last (newest connection
+    /// of each device), for catching it up when it reconnects
+    seen: Mutex<std::collections::HashMap<String, Arc<Mutex<Seen>>>>,
+}
+
+/// A number for a run of the server (`Hub::epoch`): random, and under
+/// 2^53 so every app reads it exactly (the iPhone's JSON numbers).
+fn new_epoch() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    );
+    (h.finish() & ((1 << 53) - 1)).max(1)
 }
 
 impl Hub {
@@ -558,6 +673,7 @@ impl Hub {
         // reading state read from an older server's server.json (or merged
         // from both files) goes to mine.json, and out of server.json, now
         let moved = !saved.mine.is_empty();
+        let rev = saved.rev;
         Ok(Hub {
             home,
             root,
@@ -576,7 +692,13 @@ impl Hub {
                 link_fails: (0, 0),
                 summary: None,
                 backed_up: None,
+                catchup: Catchup {
+                    from: Some(rev),
+                    ..Default::default()
+                },
             }),
+            epoch: new_epoch(),
+            seen: Mutex::new(Default::default()),
             updates: broadcast::channel(64).0,
             kicks: broadcast::channel(16).0,
             notes: broadcast::channel(64).0,
@@ -771,6 +893,40 @@ impl Hub {
         }
     }
 
+    /// What the copy of revision `rev` the last connection of `device` sent
+    /// (as `member`) left out, when it sent one of late (`Seen`).
+    fn seen_at(&self, device: &str, member: u64, rev: u64) -> Option<Arc<Vec<u64>>> {
+        let s = self.seen.locked().get(device)?.clone();
+        let s = s.locked();
+        if s.member != member {
+            return None;
+        }
+        s.sent
+            .iter()
+            .rev()
+            .find(|(r, _)| *r == rev)
+            .map(|(_, h)| h.clone())
+    }
+
+    /// A new connection of `device`: what it sends is kept from now on
+    /// (in place of its earlier connection's).
+    fn seen_for(&self, device: &str, member: u64) -> Arc<Mutex<Seen>> {
+        let s = Arc::new(Mutex::new(Seen {
+            member,
+            ..Default::default()
+        }));
+        let mut all = self.seen.locked();
+        all.insert(device.to_string(), s.clone());
+        // devices whose access was removed don't stay in it for good
+        if all.len() > 64 {
+            drop(all);
+            let devices: std::collections::HashSet<String> =
+                self.state().saved.devices.keys().cloned().collect();
+            self.seen.locked().retain(|d, _| devices.contains(d));
+        }
+        s
+    }
+
     /// Tell every connection the team's copy changed: apps that take deltas
     /// get what changed since the last revision, unless `whole` (a restore,
     /// after which apps send their whole copy back).
@@ -779,14 +935,23 @@ impl Hub {
         let now = std::time::Instant::now();
         let first = g.canon_due.map_or(now, |(first, _)| first);
         g.canon_due = Some((first, now));
-        if let Some(c) = &g.canon {
-            let delta = match &g.summary {
+        let g = &mut *g;
+        let Some(c) = &g.canon else {
+            g.catchup.note(g.saved.rev, None);
+            return;
+        };
+        {
+            let (delta, changes) = match g.summary.as_mut() {
                 Some(s) if !whole => {
-                    Some(wb_sync::delta(s, c).unwrap_or_else(|| serde_json::json!({})))
+                    let (d, ch) = wb_sync::delta_advance(s, c);
+                    (Some(d.unwrap_or_else(|| serde_json::json!({}))), Some(ch))
                 }
-                _ => None,
+                _ => {
+                    g.summary = Some(wb_sync::Summary::of(c));
+                    (None, None)
+                }
             };
-            g.summary = Some(wb_sync::Summary::of(c));
+            g.catchup.note(g.saved.rev, changes);
             let _ = self.updates.send(Arc::new(Canon::new(
                 c.clone(),
                 g.saved.rev,

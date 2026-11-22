@@ -287,7 +287,7 @@ impl TableCol {
 /// empty cells stay at the bottom either way. `field_num` says which custom
 /// fields hold numbers.
 fn sort_table(
-    tasks: &mut [Task],
+    tasks: &mut [&Task],
     data: &Data,
     col: TableCol,
     desc: bool,
@@ -494,8 +494,25 @@ fn list_infos(d: &Data) -> HashMap<u64, ListInfo<'_>> {
     out
 }
 
+/// `App::task_visible` with the lists looked up already.
+fn visible_in(info: &HashMap<u64, ListInfo>, t: &Task, me: u64) -> bool {
+    let l = info.get(&t.list_id);
+    !t.archived
+        && !l.is_some_and(|l| l.archived)
+        && !l.and_then(|l| l.private_owner).is_some_and(|o| o != me)
+}
+
 /// `Data::is_closed` with the lists looked up already.
 fn closed_in(info: &HashMap<u64, ListInfo>, t: &Task) -> bool {
+    matches!(
+        status_kind_in(info, t),
+        StatusKind::Closed | StatusKind::Done
+    )
+}
+
+/// The kind of a task's status (`Data::status_of`) with the lists looked up
+/// already.
+fn status_kind_in(info: &HashMap<u64, ListInfo>, t: &Task) -> StatusKind {
     let sts = info
         .get(&t.list_id)
         .map_or(default_statuses_ref(), |l| l.statuses);
@@ -504,7 +521,7 @@ fn closed_in(info: &HashMap<u64, ListInfo>, t: &Task) -> bool {
         .find(|s| s.name == t.status)
         .or(sts.first())
         .unwrap_or(&default_statuses_ref()[0]);
-    matches!(st.kind, StatusKind::Closed | StatusKind::Done)
+    st.kind
 }
 
 /// See `App::task_index`.
@@ -3536,25 +3553,24 @@ impl App {
 
     fn gantt_view(&mut self, ui: &mut Ui) {
         let t = self.t();
-        // each task's subtasks follow it once it is expanded; the rows are
-        // copied once (they're drawn while the app changes), the view's
-        // other tasks not at all
+        // each task's subtasks follow it once it is expanded; a row's task
+        // is copied only when the row is in sight
         let (rows, undated) = {
             let tasks = self.filtered();
             let undated = tasks
                 .iter()
                 .filter(|x| x.start.is_none() && x.due.is_none())
                 .count();
-            let mut rows: Vec<(Task, usize, usize)> = vec![];
+            let mut rows: Vec<(u64, usize, usize)> = vec![];
             for task in tasks {
                 let subs: Vec<&Task> = self
                     .subtasks(task.id)
                     .into_iter()
                     .filter(|x| !x.archived)
                     .collect();
-                rows.push((task.clone(), 0, subs.len()));
+                rows.push((task.id, 0, subs.len()));
                 if self.expanded_tasks.contains(&task.id) {
-                    rows.extend(subs.into_iter().map(|x| (x.clone(), 1, 0)));
+                    rows.extend(subs.into_iter().map(|x| (x.id, 1, 0)));
                 }
             }
             (rows, undated)
@@ -3608,9 +3624,16 @@ impl App {
                         );
                         ui.painter()
                             .hline(hr.x_range(), hr.bottom(), Stroke::new(1.0_f32, t.border));
-                        for (task, depth, nsub) in &rows {
+                        for &(tid, ref depth, ref nsub) in &rows {
                             let (r, resp) =
                                 ui.allocate_exact_size(vec2(name_w, rh), Sense::click());
+                            if !ui.is_rect_visible(r) {
+                                continue;
+                            }
+                            let Some(task) = self.task(tid).cloned() else {
+                                continue;
+                            };
+                            let task = &task;
                             if resp.hovered() {
                                 ui.painter().rect_filled(r, 0.0, t.hover);
                             }
@@ -3749,8 +3772,16 @@ impl App {
                             ui.allocate_exact_size(vec2(sc.width(), total_h), Sense::hover());
                         let p = ui.painter().clone();
                         timebar::paint_axis(&p, &t, area, head, &sc, td);
-                        for (k, (task, _, _)) in rows.iter().enumerate() {
+                        for (k, &(tid, _, _)) in rows.iter().enumerate() {
                             let y = area.top() + head + rh * k as f32;
+                            let row_r = Rect::from_min_size(pos2(area.left(), y), vec2(area.width(), rh));
+                            if !ui.is_rect_visible(row_r) {
+                                continue;
+                            }
+                            let Some(task) = self.task(tid).cloned() else {
+                                continue;
+                            };
+                            let task = &task;
                             p.hline(area.x_range(), y + rh, Stroke::new(0.5_f32, t.border));
                             let day_at = |x: f32| sc.day_at(area.left(), x);
                             let Some((s, e)) = timebar::bar_range(task.start, task.due) else {
@@ -3943,7 +3974,6 @@ impl App {
 
     fn table_view(&mut self, ui: &mut Ui) {
         let t = self.t();
-        let mut tasks: Vec<Task> = self.filtered().into_iter().cloned().collect();
         let now = now_ts();
         // the columns: the fixed ones and one per custom field; all but # and
         // Name can be hidden with the "+" at the end of the header
@@ -3976,9 +4006,14 @@ impl App {
         // a click on a header sorts by it; another click turns the order round
         let sort_id = egui::Id::new("table_sort");
         let sort: Option<(TableCol, bool)> = ui.data(|d| d.get_temp(sort_id)).flatten();
-        if let Some((col, desc)) = sort {
-            sort_table(&mut tasks, &self.data, col, desc, now, &field_num);
-        }
+        // the rows by id: a row is copied only when it is drawn
+        let ids: Vec<u64> = {
+            let mut tasks = self.filtered();
+            if let Some((col, desc)) = sort {
+                sort_table(&mut tasks, &self.data, col, desc, now, &field_num);
+            }
+            tasks.iter().map(|t| t.id).collect()
+        };
         let mut widths: Vec<f32> = cols.iter().map(|c| c.width()).collect();
         // Name takes the room the other columns leave (at least 200), so the
         // last column and the "+" fit instead of running off the right edge
@@ -3993,8 +4028,17 @@ impl App {
             .show(ui, |ui| {
                 let total: f32 = widths.iter().sum::<f32>() + 36.0;
                 self.table_header(ui, &cols, &widths, &fields, sort, total);
-                for (n, task) in tasks.iter().enumerate() {
+                for (n, &tid) in ids.iter().enumerate() {
                     let (rr, resp) = ui.allocate_exact_size(vec2(total, 34.0), Sense::click());
+                    // a row scrolled out of sight keeps its place, not drawn
+                    let busy = renaming.as_ref().is_some_and(|(rid, _)| *rid == tid);
+                    if !ui.is_rect_visible(rr) && !busy {
+                        continue;
+                    }
+                    let Some(task) = self.task(tid).cloned() else {
+                        continue;
+                    };
+                    let task = &task;
                     let id = ui.id().with(("trow", task.id));
                     if self.selected.contains(&task.id) {
                         ui.painter().rect_filled(rr, 0.0, t.selected_bg);
@@ -4367,28 +4411,20 @@ impl App {
                         );
                         ui.add_space(18.0);
                         let td = today();
-                        let mine: Vec<Task> = self
-                            .data
-                            .tasks
-                            .iter()
-                            .filter(|x| {
-                                x.assignees.contains(&self.data.me)
-                                    && self.task_visible(x)
-                                    && !self.data.is_closed(x)
-                            })
-                            .cloned()
-                            .collect();
-                        let done_mine: Vec<Task> = self
-                            .data
-                            .tasks
-                            .iter()
-                            .filter(|x| {
-                                x.assignees.contains(&self.data.me)
-                                    && self.task_visible(x)
-                                    && self.data.is_closed(x)
-                            })
-                            .cloned()
-                            .collect();
+                        // ids only: each section draws its first few rows, so only
+                        // those are copied (and each list is looked up once)
+                        let info = list_infos(&self.data);
+                        let me_id = self.data.me;
+                        let (mut mine, mut done_mine): (Vec<&Task>, Vec<&Task>) = (vec![], vec![]);
+                        for x in &self.data.tasks {
+                            if x.assignees.contains(&me_id) && visible_in(&info, x, me_id) {
+                                if closed_in(&info, x) {
+                                    done_mine.push(x);
+                                } else {
+                                    mine.push(x);
+                                }
+                            }
+                        }
                         // Section order follows the original's My Work tabs: Today, Overdue, Next, Unscheduled, Done.
                         // due today with a time that has passed counts as overdue
                         let now = now_local();
@@ -4396,30 +4432,36 @@ impl App {
                             (
                                 "Today",
                                 mine.iter()
+                                    .copied()
                                     .filter(|x| x.due == Some(td) && !x.is_overdue_at(now))
                                     .collect(),
                             ),
                             (
                                 "Overdue",
-                                mine.iter().filter(|x| x.is_overdue_at(now)).collect(),
+                                mine.iter().copied().filter(|x| x.is_overdue_at(now)).collect(),
                             ),
                             (
                                 "Next",
                                 mine.iter()
+                                    .copied()
                                     .filter(|x| x.due.map(|d| d > td).unwrap_or(false))
                                     .collect(),
                             ),
                             (
                                 "Unscheduled",
-                                mine.iter().filter(|x| x.due.is_none()).collect(),
+                                mine.iter().copied().filter(|x| x.due.is_none()).collect(),
                             ),
-                            ("Done", done_mine.iter().collect()),
+                            ("Done", done_mine),
                         ];
                         // today's in the order of their times, overdue and next
                         // by date (the oldest first)
                         sections[0].1.sort_by_key(|x| x.due_moment());
                         sections[1].1.sort_by_key(|x| x.due_moment());
                         sections[2].1.sort_by_key(|x| x.due_moment());
+                        let sections: Vec<(&'static str, Vec<u64>)> = sections
+                            .into_iter()
+                            .map(|(n, v)| (n, v.into_iter().map(|x| x.id).collect()))
+                            .collect();
                         let avail = ui.available_width();
                         // side by side when both fit, else one above the other
                         let side = avail >= 2.0 * 320.0 + 20.0;
@@ -4488,7 +4530,11 @@ impl App {
                                                 // a row to show the rest
                                                 let all = self.home_all.contains(name);
                                                 let cap = if all { list.len() } else { HOME_ROWS };
-                                                for task in list.iter().take(cap) {
+                                                for &tid in list.iter().take(cap) {
+                                                    let Some(task) = self.task(tid).cloned() else {
+                                                        continue;
+                                                    };
+                                                    let task = &task;
                                                     let (r, resp) = ui.allocate_exact_size(
                                                         vec2(card_w - 34.0, 30.0),
                                                         Sense::click(),

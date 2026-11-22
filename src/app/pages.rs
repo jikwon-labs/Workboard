@@ -190,7 +190,8 @@ impl App {
                     ui.label(RichText::new(week_range(week)).size(15.0));
                 });
                 ui.add_space(10.0);
-                let mine: Vec<Task> = self
+                // (id, due day, due time): a task is copied only for its chip
+                let mine: Vec<_> = self
                     .data
                     .tasks
                     .iter()
@@ -199,7 +200,7 @@ impl App {
                             && !self.data.is_closed(x)
                             && self.data.task_live(x)
                     })
-                    .cloned()
+                    .map(|x| (x.id, x.due, x.due_moment()))
                     .collect();
                 let avail = ui.available_rect_before_wrap();
                 // the "To schedule" column gives up room first in a small
@@ -240,8 +241,12 @@ impl App {
                             );
                             ui.add_space(6.0);
                             let mut none = true;
-                            for task in mine.iter().filter(|x| x.due.is_none()) {
+                            for &(tid, _, _) in mine.iter().filter(|x| x.1.is_none()) {
                                 none = false;
+                                let Some(task) = self.task(tid).cloned() else {
+                                    continue;
+                                };
+                                let task = &task;
                                 let resp = ui.dnd_drag_source(
                                     egui::Id::new(("plan", task.id)),
                                     task.id,
@@ -295,16 +300,20 @@ impl App {
                                 ui.set_width(col_w - 12.0);
                                 ui.set_min_height(inner_h);
                                 // overdue tasks from before this week are shown on today's column
-                                let carried = |x: &&Task| {
-                                    is_today && x.due.map(|dd| dd < week).unwrap_or(false)
+                                let carried = |due: Option<NaiveDate>| {
+                                    is_today && due.map(|dd| dd < week).unwrap_or(false)
                                 };
-                                let mut day: Vec<&Task> = mine
+                                let mut day: Vec<_> = mine
                                     .iter()
-                                    .filter(|x| x.due == Some(d) || carried(x))
+                                    .filter(|x| x.1 == Some(d) || carried(x.1))
                                     .collect();
                                 // in the order of their due times
-                                day.sort_by_key(|x| x.due_moment());
-                                for task in day {
+                                day.sort_by_key(|x| x.2);
+                                for &&(tid, _, _) in &day {
+                                    let Some(task) = self.task(tid).cloned() else {
+                                        continue;
+                                    };
+                                    let task = &task;
                                     let resp = ui.dnd_drag_source(
                                         egui::Id::new(("plan", task.id)),
                                         task.id,
@@ -441,9 +450,46 @@ impl App {
                     ui.label(RichText::new(tr("Bars compare open tasks with the busiest person.")).small().color(t.text3));
                 }
                 ui.add_space(12.0);
+                // everyone's open (ids), in progress, overdue and done tasks,
+                // counted in one pass with each list looked up once
+                #[derive(Default)]
+                struct Load {
+                    open: Vec<u64>,
+                    active: usize,
+                    overdue: usize,
+                    done: usize,
+                }
+                let mut loads: HashMap<u64, Load> = HashMap::new();
+                {
+                    let info = super::list_infos(&self.data);
+                    for x in &self.data.tasks {
+                        if x.archived || info.get(&x.list_id).is_some_and(|l| l.archived) {
+                            continue;
+                        }
+                        let kind = super::status_kind_in(&info, x);
+                        let closed = matches!(kind, StatusKind::Closed | StatusKind::Done);
+                        let mut seen: Vec<u64> = vec![];
+                        for &a in &x.assignees {
+                            // (someone listed twice counts once, as `contains` did)
+                            if seen.contains(&a) {
+                                continue;
+                            }
+                            seen.push(a);
+                            let l = loads.entry(a).or_default();
+                            if closed {
+                                l.done += 1;
+                            } else {
+                                l.open.push(x.id);
+                                l.active += (kind == StatusKind::Custom) as usize;
+                                l.overdue += x.is_overdue() as usize;
+                            }
+                        }
+                    }
+                }
+                let empty = Load::default();
                 let max_open = members
                     .iter()
-                    .map(|m| self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).count())
+                    .map(|m| loads.get(&m.id).map_or(0, |l| l.open.len()))
                     .max()
                     .unwrap_or(1)
                     .max(1);
@@ -453,10 +499,8 @@ impl App {
                 for row in members.chunks(cols) {
                     ui.horizontal_top(|ui| {
                         for m in row {
-                            let open: Vec<Task> = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && !self.data.is_closed(x) && self.data.task_live(x)).cloned().collect();
-                            let active = open.iter().filter(|x| self.data.status_of(x).kind == StatusKind::Custom).count();
-                            let overdue = open.iter().filter(|x| x.is_overdue()).count();
-                            let done = self.data.tasks.iter().filter(|x| x.assignees.contains(&m.id) && self.data.is_closed(x) && self.data.task_live(x)).count();
+                            let load = loads.get(&m.id).unwrap_or(&empty);
+                            let (open, active, overdue, done) = (&load.open, load.active, load.overdue, load.done);
                             egui::Frame::new().fill(t.card).stroke(Stroke::new(1.0_f32, t.border)).corner_radius(10).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     ui.set_width(cw - 30.0);
@@ -480,7 +524,7 @@ impl App {
                                         ui.label(RichText::new(trf!("{} overdue", overdue)).small().color(t.danger));
                                     }
                                     ui.add_space(4.0);
-                                    for task in open.iter().take(5) {
+                                    for task in open.iter().take(5).filter_map(|id| self.task(*id)).cloned().collect::<Vec<_>>().iter() {
                                         let (r, resp) = ui.allocate_exact_size(vec2(cw - 30.0, 26.0), Sense::click());
                                         if resp.hovered() {
                                             ui.painter().rect_filled(r, 5.0, t.hover);
@@ -710,16 +754,11 @@ impl App {
                 .unwrap_or(true)
                 && self.data.task_live(x)
         };
-        let scope: Vec<Task> = self
-            .data
-            .tasks
-            .iter()
-            .filter(|x| in_view(x))
-            .cloned()
-            .collect();
+        // borrowed, not copied: the cards only read them
+        let scope: Vec<&Task> = self.data.tasks.iter().filter(|x| in_view(x)).collect();
         // time tracked stays counted after its task is archived (Timesheets
         // shows it too), so the time cards take archived tasks as well
-        let tracked: Vec<Task> = self
+        let tracked: Vec<&Task> = self
             .data
             .tasks
             .iter()
@@ -727,13 +766,14 @@ impl App {
                 space_lists.as_ref().is_none_or(|l| l.contains(&x.list_id))
                     && (!x.time_entries.is_empty() || !x.running_timers().is_empty())
             })
-            .cloned()
             .collect();
         let w = ui.available_width();
         let half = (w - 12.0) / 2.0;
         let full = |k: &str| k == "stats" || k == "overdue";
         let n = cards.len();
         let mut change: Option<(usize, i32)> = None; // (card, -1 up / 1 down / 0 remove / 2 rename)
+                                                     // (held here while the cards borrow the tasks)
+        let mut card_rename = self.sweep.card_rename.take();
         let mut open = None;
         let mut i = 0;
         while i < n {
@@ -758,7 +798,7 @@ impl App {
                                 let title = super::more::dash_card_title(&cards[ci]);
                                 ui.horizontal(|ui| {
                                     if let Some((_, text)) =
-                                        self.sweep.card_rename.as_mut().filter(|r| r.0 == ci)
+                                        card_rename.as_mut().filter(|r| r.0 == ci)
                                     {
                                         let r = ui.add(field(text).desired_width(200.0));
                                         name_it(&r, "Card name");
@@ -813,12 +853,11 @@ impl App {
                                 });
                                 ui.add_space(6.0);
                                 // subtasks count like any task, as on the Teams page
-                                let tasks: Vec<&Task> = scope.iter().collect();
                                 if let Some(id) = self.dash_card_body(
                                     ui,
                                     &cards[ci].kind,
                                     cw - 34.0,
-                                    &tasks,
+                                    &scope,
                                     &tracked,
                                 ) {
                                     open = Some(id);
@@ -830,6 +869,9 @@ impl App {
             ui.add_space(12.0);
             i += row.len();
         }
+        drop(scope);
+        drop(tracked);
+        self.sweep.card_rename = card_rename;
         if let Some(id) = open {
             self.actions.push(Action::Open(id));
         }
@@ -883,7 +925,7 @@ impl App {
         kind: &str,
         w: f32,
         tasks: &[&Task],
-        scope: &[Task],
+        scope: &[&Task],
     ) -> Option<u64> {
         let t = self.t();
         let td = today();

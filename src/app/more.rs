@@ -32,6 +32,7 @@ pub(crate) use goals::{pct_of, GoalFilter};
 pub(crate) use goals::GoalAct;
 #[cfg(test)]
 pub use search::Hit;
+pub(super) use search::SearchRow;
 #[cfg(test)]
 pub(crate) use wb_shapes::line_path;
 pub use wb_shapes::{WbLineStyle, WbLink, WbSel};

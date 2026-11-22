@@ -34,7 +34,7 @@ impl App {
     /// workboard:// link (Copy link) or a task number finds that item.
     /// Archived tasks and Lists (Spaces, Folders) whose names match: search
     /// leaves them out, so it says how many. Kind as in SEARCH_KINDS.
-    pub(super) fn archived_matches(&self, q: &str, kind: u8) -> usize {
+    pub(crate) fn archived_matches(&self, q: &str, kind: u8) -> usize {
         let ql = q.trim().to_lowercase();
         if ql.is_empty() || super::nav::parse_link(q).is_some() {
             return 0;
@@ -491,7 +491,7 @@ impl App {
                 });
                 ui.data_mut(|d| d.insert_temp(kid, kind));
                 ui.separator();
-                let rows = self.search_rows(&q, kind);
+                let (rows, arch) = self.kept_search(&q, kind);
                 let key = format!("{}\u{1}{}", kind, q);
                 if self.sweep.search_q != key {
                     self.sweep.search_q = key;
@@ -615,7 +615,6 @@ impl App {
                             ui.add_space(8.0);
                         }
                         // archived ones are left out: say so rather than drop them silently
-                        let arch = self.archived_matches(&q, kind);
                         if arch > 0 {
                             ui.add_space(4.0);
                             ui.label(

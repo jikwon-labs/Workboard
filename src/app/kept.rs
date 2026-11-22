@@ -62,6 +62,10 @@ pub(super) struct Kept {
     /// The open conversation's messages its find box and panel let through:
     /// (key, conversation, what's in the find box, panel, places).
     #[allow(clippy::type_complexity)]
+    /// The search palette's results and archived count for a query:
+    /// (key, query, kind, rows, archived).
+    #[allow(clippy::type_complexity)]
+    search: RefCell<Option<(nav::InboxKey, String, u8, Rc<Vec<more::SearchRow>>, usize)>>,
     pub(super) matching: RefCell<
         Option<(
             nav::InboxKey,
@@ -305,5 +309,25 @@ impl App {
             *self.kept.order.borrow_mut() = Some((k, copies.to_vec(), at.clone()));
         }
         at
+    }
+
+    /// The search palette's results (`search_rows`) and how many archived
+    /// matches it leaves out (`archived_matches`), worked out again only
+    /// when the query, its kind or the workspace change: the palette asks
+    /// on every frame it is open. An empty query lists recent things, which
+    /// aren't kept.
+    pub(super) fn kept_search(&self, q: &str, kind: u8) -> (Rc<Vec<more::SearchRow>>, usize) {
+        let key = self.inbox_key().filter(|_| !q.trim().is_empty());
+        if let (Some(k), Some((kk, kq, kind2, rows, arch))) = (key, &*self.kept.search.borrow()) {
+            if k == *kk && kq == q && *kind2 == kind {
+                return (rows.clone(), *arch);
+            }
+        }
+        let rows = Rc::new(self.search_rows(q, kind));
+        let arch = self.archived_matches(q, kind);
+        if let Some(k) = key {
+            *self.kept.search.borrow_mut() = Some((k, q.to_string(), kind, rows.clone(), arch));
+        }
+        (rows, arch)
     }
 }

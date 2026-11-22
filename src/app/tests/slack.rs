@@ -166,6 +166,7 @@ fn a_slack_export_zip_opens_and_anything_else_says_why() {
     crate::app::slack::zip_folder(&dir.join("My Slack export"), &zip, true);
     let mut a = app();
     a.open_slack_export(&zip);
+    a.finish_slack_load();
     match &a.modal {
         Some(crate::app::menus::Modal::SlackImport(p)) => assert_eq!(p.channels.len(), 2),
         _ => panic!("the import dialog opens"),
@@ -183,6 +184,7 @@ fn a_slack_export_zip_opens_and_anything_else_says_why() {
             .unwrap()
             .success());
         a.open_slack_export(&finder);
+        a.finish_slack_load();
         match &a.modal {
             Some(crate::app::menus::Modal::SlackImport(p)) => assert_eq!(p.channels.len(), 2),
             _ => panic!("the import dialog opens for a Finder zip"),
@@ -192,6 +194,7 @@ fn a_slack_export_zip_opens_and_anything_else_says_why() {
     let junk = temp_home("junk").with_extension("zip");
     std::fs::write(&junk, b"not a zip").unwrap();
     a.open_slack_export(&junk);
+    a.finish_slack_load();
     assert!(a.modal.is_none());
     assert!(a.toast.as_ref().unwrap().0.contains(".zip"));
 }
@@ -1644,4 +1647,60 @@ fn joining_a_team_forgets_my_old_carried_slack_matches() {
     b.join_shared(&folder).unwrap();
     assert!(!b.data.extra.slack_carried.contains(&"UOLD".to_string()));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_big_slack_export_comes_in_and_again_without_going_through_the_channel_per_message() {
+    use crate::app::slack::{plan, SlackChannel, SlackMsg, SlackUser};
+    // 20,000 messages in one channel, every fourth a reply in the thread
+    // of the message just before it. Finding each message's earlier copy went
+    // through the whole channel, which took minutes for this.
+    let users: Vec<SlackUser> = (0..3)
+        .map(|i| SlackUser {
+            id: format!("U{}", i),
+            handle: format!("user{}", i),
+            real_name: format!("Big Person {}", i),
+            ..Default::default()
+        })
+        .collect();
+    let mut messages = vec![];
+    let mut thread = String::new();
+    for i in 0..20_000u32 {
+        let ts = format!("{}.{:06}", 1_700_000_000 + i, i);
+        let reply = i % 4 == 3;
+        if !reply {
+            thread = ts.clone();
+        }
+        messages.push(SlackMsg {
+            user: format!("U{}", i % 3),
+            text: format!("message {}", i),
+            thread: reply.then(|| thread.clone()),
+            ts,
+            ..Default::default()
+        });
+    }
+    let channels = vec![SlackChannel {
+        name: "big".into(),
+        members: users.iter().map(|u| u.id.clone()).collect(),
+        messages,
+        ..Default::default()
+    }];
+    let mut a = app();
+    let first = plan(&a.data, users.clone(), channels.clone());
+    let started = std::time::Instant::now();
+    assert_eq!(a.import_slack(&first), (1, 20_000));
+    let big = channel_id(&a, "big");
+    let ch = a.data.channels.iter().find(|c| c.id == big).unwrap();
+    assert_eq!(ch.messages.len(), 15_000);
+    let replies: usize = ch.messages.iter().map(|m| m.replies.len()).sum();
+    assert_eq!(replies, 5_000);
+    assert_eq!(ch.messages[2].replies[0].text, "message 3");
+    let members = a.data.members.len();
+    // the same export again: everything is found, nothing doubles
+    let again = plan(&a.data, users, channels);
+    assert_eq!(a.import_slack(&again), (0, 0));
+    let ch = a.data.channels.iter().find(|c| c.id == big).unwrap();
+    assert_eq!(ch.messages.len(), 15_000);
+    assert_eq!(a.data.members.len(), members);
+    eprintln!("two imports of 20,000 messages: {:?}", started.elapsed());
 }

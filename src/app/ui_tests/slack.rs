@@ -35,6 +35,8 @@ fn import_from_slack_in_an_empty_channel_brings_the_export_in() {
     crate::app::slack::zip_folder(&ex, &zip, false);
     crate::app::slack::PICKED.with(|p| *p.borrow_mut() = Some(zip));
     h.click("Import from Slack");
+    h.app.finish_slack_load();
+    h.settle();
     assert!(matches!(h.app.modal, Some(Modal::SlackImport(_))));
     h.click("Import");
     let design = h
@@ -76,6 +78,7 @@ fn the_slack_import_dialog_shows_who_goes_where_and_lets_me_change_it() {
     let zip = root.join("slack.zip");
     crate::app::slack::zip_folder(&ex, &zip, false);
     h.app.open_slack_export(&zip);
+    h.app.finish_slack_load();
     h.settle();
     // the Slack Alex Kim is proposed as the member Alex Kim
     assert!(h.has("Whose messages go where:"));
@@ -136,6 +139,7 @@ fn the_slack_matching_picker_tells_members_of_one_name_apart() {
     let zip = root.join("slack.zip");
     crate::app::slack::zip_folder(&ex, &zip, false);
     h.app.open_slack_export(&zip);
+    h.app.finish_slack_load();
     h.settle();
     h.click("Messages from Sam Lee");
     assert!(
@@ -190,6 +194,7 @@ fn the_slack_import_dialog_remembers_the_last_choice_for_each_person() {
     };
     // proposed as the member Alex Kim (by name); I take them under my name
     h.app.open_slack_export(&zip);
+    h.app.finish_slack_load();
     h.settle();
     let alex = h
         .app
@@ -205,6 +210,7 @@ fn the_slack_import_dialog_remembers_the_last_choice_for_each_person() {
     h.click("Import");
     // opened again: my name, as chosen
     h.app.open_slack_export(&zip);
+    h.app.finish_slack_load();
     h.settle();
     assert_eq!(chosen(&h), Some(crate::app::slack::Assign::Me));
     // now Sam Lee instead; the next time it's Sam Lee
@@ -221,7 +227,50 @@ fn the_slack_import_dialog_remembers_the_last_choice_for_each_person() {
     assert_eq!(chosen(&h), Some(crate::app::slack::Assign::Member(sam)));
     h.click("Import");
     h.app.open_slack_export(&zip);
+    h.app.finish_slack_load();
     h.settle();
     assert_eq!(chosen(&h), Some(crate::app::slack::Assign::Member(sam)));
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_slack_export_is_read_while_the_window_keeps_drawing() {
+    let mut h = Ui1::new();
+    h.app
+        .apply_chat(vec![crate::app::chat::ChatAction::NewChannel(
+            "fresh".into(),
+        )]);
+    h.app.section = Section::Chat;
+    h.settle();
+    let root = temp_home("ui-slack-thread");
+    let ex = root.join("export");
+    std::fs::create_dir_all(ex.join("design")).unwrap();
+    std::fs::write(ex.join("users.json"), "[]").unwrap();
+    std::fs::write(
+        ex.join("channels.json"),
+        r#"[{"id":"C1","name":"design","members":[]}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        ex.join("design/2024-01-02.json"),
+        r#"[{"type":"message","text":"first sketch","ts":"1704189600.000100"}]"#,
+    )
+    .unwrap();
+    let zip = root.join("slack.zip");
+    crate::app::slack::zip_folder(&ex, &zip, false);
+    crate::app::slack::PICKED.with(|p| *p.borrow_mut() = Some(zip));
+    h.click("Import from Slack");
+    // the export is read on its own thread; frames alone open the dialog
+    let started = std::time::Instant::now();
+    while !matches!(h.app.modal, Some(Modal::SlackImport(_))) {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(20),
+            "the import dialog opens once the export is read"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.settle();
+    }
+    // the "Reading" toast goes once the dialog is up
+    assert!(!h.has("Reading the Slack export..."));
+    assert!(h.has("Import"));
 }

@@ -525,6 +525,8 @@ pub struct App {
     focus_was: Option<egui::Id>,
     /// Link previews being fetched for messages I sent (chat.rs).
     previews: chat::Previews,
+    /// A Slack export being read on its own thread (slack.rs).
+    slack_load: Option<slack::SlackLoad>,
     data: Data,
     loc: Location,
     view: ViewKind,
@@ -1270,6 +1272,7 @@ impl App {
             typing_was_on: false,
             focus_was: None,
             previews: Default::default(),
+            slack_load: None,
             prefs: listview::ViewPrefs::new(),
             fields_open: false,
             list_width: 0.0,
@@ -5534,6 +5537,7 @@ impl App {
         }
         self.open_pending_links();
         self.previews_tick(ctx);
+        self.slack_load_tick(ctx);
         self.scheduled_tick();
         self.reminder_tick(Some(ctx));
         self.apply_actions();

@@ -418,9 +418,10 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
     // under my name, as I chose at an earlier import
     let mine = data.slack_under_me();
     let mut people: Vec<String> = vec![];
+    let mut listed: HashSet<&str> = HashSet::new();
     for c in &channels {
         for m in &c.messages {
-            if !m.user.is_empty() && !people.contains(&m.user) {
+            if !m.user.is_empty() && listed.insert(m.user.as_str()) {
                 people.push(m.user.clone());
             }
         }
@@ -480,7 +481,7 @@ pub(super) fn plan(data: &Data, users: Vec<SlackUser>, channels: Vec<SlackChanne
     let mut quiet: Vec<String> = channels
         .iter()
         .flat_map(|c| c.members.iter())
-        .filter(|u| matched.contains_key(*u) && !people.contains(u))
+        .filter(|u| matched.contains_key(*u) && !listed.contains(u.as_str()))
         .cloned()
         .collect();
     quiet.sort();
@@ -565,13 +566,26 @@ pub(crate) fn zip_folder(dir: &Path, zip: &Path, keep_parent: bool) {
     w.finish().unwrap();
 }
 
-/// Open an export .zip and match it against the workspace.
-pub(super) fn load(data: &Data, zip: &Path) -> Result<SlackPlan, String> {
+/// An export read from its .zip: its people and channels.
+type Export = (Vec<SlackUser>, Vec<SlackChannel>);
+
+/// Open an export .zip and read it (matching it against the workspace
+/// comes after, in `plan`).
+fn read_zip(zip: &Path) -> Result<Export, String> {
     let dir = unzip(zip)?;
     let read = read_export(&dir);
     let _ = std::fs::remove_dir_all(&dir);
-    let (users, channels) = read?;
-    Ok(plan(data, users, channels))
+    read
+}
+
+/// An export being unpacked and read on its own thread: a big one takes
+/// seconds, and the window kept drawing meanwhile. The dialog opens once
+/// it's done (`App::slack_load_tick`).
+pub(crate) struct SlackLoad(std::sync::mpsc::Receiver<Result<Export, String>>);
+
+/// What the toast says while an export is read.
+fn reading() -> &'static str {
+    tr("Reading the Slack export...")
 }
 
 #[cfg(test)]
@@ -664,6 +678,69 @@ fn channel_names(sc: &SlackChannel) -> (String, String) {
     (name, alt)
 }
 
+/// Where a message sits in its channel, in the order a scan from the top
+/// meets it: (message, 0) for a message, (message, reply + 1) for a reply.
+type Pos = (usize, usize);
+
+/// What a channel already holds, so each message of an export finds its
+/// copy from an earlier import without going through the whole channel
+/// (an export of tens of thousands of messages took minutes).
+#[derive(Default)]
+struct Imported {
+    /// the first message (or reply) with each import key
+    by_key: HashMap<String, (Pos, u64)>,
+    /// messages from before import keys were kept, by (time, text):
+    /// (where, author, id), in channel order
+    legacy: HashMap<(i64, String), Vec<(Pos, u64, u64)>>,
+    /// where each message (not reply) is in the channel
+    at: HashMap<u64, usize>,
+}
+
+impl Imported {
+    fn of(ch: &Channel) -> Self {
+        let mut s = Self::default();
+        for (i, m) in ch.messages.iter().enumerate() {
+            s.at.insert(m.id, i);
+            s.note(m, (i, 0));
+            for (r, x) in m.replies.iter().enumerate() {
+                s.note(x, (i, r + 1));
+            }
+        }
+        s
+    }
+
+    /// `m` is now at `pos` (always after everything noted before it).
+    fn note(&mut self, m: &Message, pos: Pos) {
+        match &m.imported {
+            Some(k) => {
+                self.by_key.entry(k.clone()).or_insert((pos, m.id));
+            }
+            None => self
+                .legacy
+                .entry((m.ts, m.text.clone()))
+                .or_default()
+                .push((pos, m.author, m.id)),
+        }
+    }
+
+    /// The copy of a Slack message already here: one with its import key,
+    /// or one imported before keys with its time, text and author (any
+    /// author for someone still to be made). The first in the channel when
+    /// both kinds match.
+    fn find(&self, key: &str, ts: i64, text: &str, author: u64, unmade: bool) -> Option<u64> {
+        let keyed = self.by_key.get(key).copied();
+        let old = self
+            .legacy
+            .get(&(ts, text.to_string()))
+            .and_then(|v| v.iter().find(|(_, a, _)| unmade || *a == author))
+            .map(|&(pos, _, id)| (pos, id));
+        match (keyed, old) {
+            (Some(k), Some(o)) => Some(if k.0 <= o.0 { k.1 } else { o.1 }),
+            (k, o) => k.or(o).map(|(_, id)| id),
+        }
+    }
+}
+
 impl App {
     /// "Import from Slack": pick the export and show what it holds.
     pub(super) fn start_slack_import(&mut self) {
@@ -681,9 +758,64 @@ impl App {
             ));
             return;
         }
-        match load(&self.data, zip) {
-            Ok(p) => self.modal = Some(Modal::SlackImport(Box::new(p))),
+        if self.slack_load.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let zip = zip.to_path_buf();
+            std::thread::spawn(move || {
+                let _ = tx.send(read_zip(&zip));
+            });
+            self.slack_load = Some(SlackLoad(rx));
+        }
+        // a second Import while one is read only says so again
+        self.toast(reading());
+    }
+
+    /// Each frame: open the import dialog once the export is read, and
+    /// keep saying it's being read until then.
+    pub(super) fn slack_load_tick(&mut self, ctx: &egui::Context) {
+        let Some(load) = &self.slack_load else {
+            return;
+        };
+        let got = match load.0.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                if self.toast.as_ref().is_some_and(|t| t.0 == reading()) {
+                    self.toast(reading());
+                }
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+                return;
+            }
+            // the reading thread stopped without an answer
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("That file couldn't be opened as a .zip.".into())
+            }
+        };
+        self.slack_load = None;
+        self.slack_loaded(got);
+    }
+
+    fn slack_loaded(&mut self, got: Result<Export, String>) {
+        if self.toast.as_ref().is_some_and(|t| t.0 == reading()) {
+            self.toast = None;
+        }
+        match got {
+            Ok((users, channels)) => {
+                let p = plan(&self.data, users, channels);
+                self.modal = Some(Modal::SlackImport(Box::new(p)));
+            }
             Err(e) => self.toast(trf!("Couldn't read the Slack export: {}", tr(&e))),
+        }
+    }
+
+    #[cfg(test)]
+    /// In tests: wait for the export being read and open the dialog.
+    pub(super) fn finish_slack_load(&mut self) {
+        if let Some(load) = self.slack_load.take() {
+            let got = load
+                .0
+                .recv()
+                .unwrap_or_else(|_| Err("That file couldn't be opened as a .zip.".into()));
+            self.slack_loaded(got);
         }
     }
 
@@ -709,7 +841,12 @@ impl App {
         // who get a new member only once a message of theirs comes in (an
         // import that adds nothing makes no one)
         let mut people: HashMap<String, u64> = HashMap::new();
-        let mut to_make: Vec<String> = vec![];
+        let mut to_make: HashSet<&str> = HashSet::new();
+        // Slack id -> person, the first one with that id (as `SlackPlan::user`)
+        let mut users: HashMap<&str, &SlackUser> = HashMap::new();
+        for u in &plan.users {
+            users.entry(u.id.as_str()).or_insert(u);
+        }
         for id in &plan.people {
             match plan.assign.get(id).copied().unwrap_or(Assign::New) {
                 Assign::Member(m) if self.data.member(m).is_some() => {
@@ -717,8 +854,8 @@ impl App {
                 }
                 Assign::Member(_) | Assign::Me => {}
                 Assign::New => {
-                    if plan.user(id).is_some() {
-                        to_make.push(id.clone());
+                    if users.contains_key(id.as_str()) {
+                        to_make.insert(id.as_str());
                     }
                 }
             }
@@ -794,16 +931,17 @@ impl App {
             };
             // Slack ts -> where that message landed (for its replies)
             let mut parents: HashMap<String, u64> = HashMap::new();
+            let mut here = Imported::of(&self.data.channels[ci]);
             let mut added = 0;
             for m in &sc.messages {
                 // a new member still to make: the message counts as theirs
-                let unmade = !people.contains_key(&m.user) && to_make.contains(&m.user);
+                let unmade = !people.contains_key(&m.user) && to_make.contains(m.user.as_str());
                 let (author, prefix) = match people.get(&m.user) {
                     Some(id) => (*id, String::new()),
                     None if unmade => (0, String::new()),
                     None => {
-                        let who = plan
-                            .user(&m.user)
+                        let who = users
+                            .get(m.user.as_str())
                             .map(|u| u.shown())
                             .filter(|n| !n.is_empty())
                             .unwrap_or_else(|| {
@@ -830,25 +968,13 @@ impl App {
                 let ts = ts_secs(&m.ts);
                 // Slack's ts is unique within a channel
                 let key = format!("slack:{}:{}", sc.name, m.ts);
-                let ch = &self.data.channels[ci];
-                let same = |x: &Message| match &x.imported {
-                    Some(k) => *k == key,
-                    // imported before messages kept where they came from
-                    None => x.ts == ts && (unmade || x.author == author) && x.text == text,
-                };
                 // already here (imported before)
-                let found = ch.messages.iter().find_map(|x| {
-                    if same(x) {
-                        return Some(x.id);
-                    }
-                    x.replies.iter().find(|r| same(r)).map(|r| r.id)
-                });
-                if let Some(id) = found {
+                if let Some(id) = here.find(&key, ts, &text, author, unmade) {
                     parents.insert(m.ts.clone(), id);
                     continue;
                 }
                 let author = if unmade {
-                    let Some(u) = plan.user(&m.user) else {
+                    let Some(u) = users.get(m.user.as_str()) else {
                         continue;
                     };
                     let mid = self.data.new_id();
@@ -882,9 +1008,14 @@ impl App {
                 msg.imported = Some(key);
                 let ch = &mut self.data.channels[ci];
                 let parent = m.thread.as_ref().and_then(|t| parents.get(t)).copied();
-                match parent.and_then(|p| ch.messages.iter_mut().find(|x| x.id == p)) {
-                    Some(p) => p.replies.push(msg),
+                match parent.and_then(|p| here.at.get(&p).copied()) {
+                    Some(pi) => {
+                        here.note(&msg, (pi, ch.messages[pi].replies.len() + 1));
+                        ch.messages[pi].replies.push(msg);
+                    }
                     None => {
+                        here.at.insert(id, ch.messages.len());
+                        here.note(&msg, (ch.messages.len(), 0));
                         ch.messages.push(msg);
                         parents.insert(m.ts.clone(), id);
                     }

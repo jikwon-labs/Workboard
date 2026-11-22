@@ -1083,15 +1083,27 @@ struct TypingLine: View {
     /// The message whose thread this line is under; nil for the conversation.
     var thread: UInt64? = nil
 
+    /// The end of the last stretch of typing that has run out.
+    @State private var over: Date?
+
     var body: some View {
         // looked at again every second while someone may be typing, so it
         // goes away when they stop; with nobody typing, nothing ticks
-        let now = Date()
         let until = client.typists.filter { $0.channel == channelId && $0.thread == thread }.map { $0.heard.addingTimeInterval(TypingAPI.shows) }.max()
-        if let until, until > now {
-            TimelineView(.explicit(Array(stride(from: now, to: until, by: 1)) + [until])) { tl in
-                line(at: tl.date)
+        VStack(spacing: 0) {
+            if let until, until != over, until > Date() {
+                TimelineView(.periodic(from: .now, by: 1)) { tl in
+                    line(at: tl.date)
+                }
             }
+        }
+        .task(id: until) {
+            // once it has run out: the clock above stops
+            guard let until else { return }
+            let wait = until.timeIntervalSinceNow + 0.25
+            if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+            guard !Task.isCancelled else { return }
+            over = until
         }
     }
 

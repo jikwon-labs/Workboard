@@ -74,11 +74,13 @@ struct WorkboardApp: App {
                 }
                 .task { await client.openSaved() }
                 .task { await notifier.refresh() }
-                // the copy is saved a moment after changes; going to the
-                // background writes it now, since iOS may stop the app before
-                // that (off the main thread, with time asked for to finish;
-                // not for a moment of Control Center or a notification)
-                .onChange(of: scenePhase) { _, p in if p == .background { saveInBackground() } }
+                // the copy is saved a moment after changes; leaving the app
+                // writes what isn't saved yet now, since iOS may stop the app
+                // before that: off the main thread, and going to the
+                // background with time asked of iOS to finish
+                .onChange(of: scenePhase) { _, p in
+                    if p == .background { saveInBackground() } else if p == .inactive { client.flushSoon {} }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in client.flushSnapshot() }
         }
     }

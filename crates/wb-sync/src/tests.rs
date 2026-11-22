@@ -1895,3 +1895,188 @@ fn turning_task_updates_back_on_reaches_every_copy_and_older_apps_keep_it() {
     assert_eq!(a["tasks"][0]["name"], "renamed again");
     assert_eq!(a["tasks"][0]["unwatched"], json!([1]));
 }
+
+/// A small xorshift: the same copies on every run.
+struct Rng(u64);
+
+impl Rng {
+    fn n(&mut self, k: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 % k.max(1) as u64) as usize
+    }
+}
+
+/// A workspace with what merging tidies: reactions, timers, time entries,
+/// custom fields, replies, comments with and without ids, strokes without
+/// ids among ones with, messages out of time order.
+fn busy_workspace(r: &mut Rng) -> Value {
+    let mut tasks = vec![];
+    for i in 0..12u64 {
+        let mut t = json!({"id": 100 + i, "list_id": 11, "name": format!("T{i}"), "tags": [], "watchers": [2]});
+        match r.n(5) {
+            0 => t["activity"] = json!([{"ts": 5, "author": 2, "text": "made", "comment": false}]),
+            1 => t["custom"] = json!({"1": "x"}),
+            2 => t["time_entries"] = json!([{"member": 2, "start": 1, "end": 2}]),
+            3 => {
+                t["timer_started"] = json!(9);
+                t["timer_by"] = json!(3);
+            }
+            _ => {}
+        }
+        tasks.push(t);
+    }
+    let mut channels = vec![];
+    for c in 0..3u64 {
+        let msgs: Vec<Value> = (0..10u64)
+            .map(|k| {
+                let mut m = json!({"id": 1000 + c * 100 + k, "author": 2, "ts": 50 + k * 2 + r.n(3) as u64, "text": "m"});
+                if r.n(3) == 0 {
+                    let emoji = ["👍", "x"][r.n(2)];
+                    m["reactions"] = json!([{"emoji": emoji, "users": [3, 2]}]);
+                }
+                if r.n(4) == 0 {
+                    m["replies"] = json!([{"id": 5000 + c * 100 + k, "author": 3, "ts": 90, "text": "r"}]);
+                }
+                m
+            })
+            .collect();
+        channels.push(json!({"id": 500 + c, "name": "c", "messages": msgs}));
+    }
+    json!({"workspace": "W", "members": [{"id": 2}, {"id": 3}],
+        "spaces": [{"id": 10, "lists": [{"id": 11}, {"id": 12}]}, {"id": 20, "lists": []}],
+        "tasks": tasks, "channels": channels, "docs": [{"id": 900, "title": "d"}],
+        "extra": {"whiteboards": [{"id": 950, "strokes": [{"points": [1]}, {"id": 951, "points": [2]}]}],
+            "slack_map": {"U1": 2}}})
+}
+
+/// One random edit to a copy, as an app would make it.
+fn busy_edit(r: &mut Rng, v: &mut Value, id: &mut u64) {
+    *id += 1;
+    let pick = |r: &mut Rng, a: &Value| r.n(a.as_array().map_or(1, |a| a.len()));
+    match r.n(9) {
+        0 => {
+            let i = pick(r, &v["tasks"]);
+            v["tasks"][i]["name"] = json!(format!("n{}", id));
+        }
+        1 => {
+            let c = pick(r, &v["channels"]);
+            v["channels"][c]["messages"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"id": *id, "author": 3, "ts": *id, "text": "new"}));
+        }
+        2 => {
+            let c = pick(r, &v["channels"]);
+            let m = pick(r, &v["channels"][c]["messages"]);
+            let msg = &mut v["channels"][c]["messages"][m];
+            let mut rs = msg["reactions"].as_array().cloned().unwrap_or_default();
+            if rs.is_empty() || r.n(2) == 0 {
+                rs.push(json!({"emoji": "🎉", "users": [r.n(3) + 2]}));
+            } else {
+                rs.pop();
+            }
+            msg["reactions"] = json!(rs);
+        }
+        3 => {
+            let i = pick(r, &v["tasks"]);
+            if v["tasks"].as_array().unwrap().len() > 3 {
+                v["tasks"].as_array_mut().unwrap().remove(i);
+            }
+        }
+        4 => {
+            // a list moves to the other space
+            if let Some(l) = v["spaces"][0]["lists"].as_array_mut().unwrap().pop() {
+                v["spaces"][1]["lists"].as_array_mut().unwrap().push(l);
+            }
+        }
+        5 => {
+            let i = pick(r, &v["tasks"]);
+            v["tasks"][i]["custom"] = json!({"2": *id});
+        }
+        6 => {
+            let s = v["extra"]["whiteboards"][0]["strokes"]
+                .as_array_mut()
+                .unwrap();
+            if r.n(2) == 0 {
+                s.push(json!({"points": [*id]}));
+            } else {
+                s.push(json!({"id": *id, "points": [1]}));
+            }
+        }
+        7 => {
+            let i = pick(r, &v["tasks"]);
+            v["tasks"][i]["timer_started"] = json!(*id);
+            v["tasks"][i]["timer_by"] = json!(2);
+        }
+        _ => v["extra"]["slack_map"][format!("U{}", r.n(3))] = json!(r.n(3) + 2),
+    }
+}
+
+/// Merging with the quick way for untouched items (and with the
+/// bookkeeping kept apart, fingerprints reused) gives exactly what merging
+/// every item the long way gives, bookkeeping included.
+#[test]
+fn untouched_items_merge_the_same_as_the_long_way() {
+    let merge_long = |local: &mut Value, others: &[Value]| {
+        merge::LONG_WAY.with(|l| l.set(true));
+        let c = merge(local, others);
+        merge::LONG_WAY.with(|l| l.set(false));
+        c
+    };
+    let mut changed = 0;
+    for seed in 1..=25u64 {
+        let mut r = Rng(seed.wrapping_mul(0x9E3779B97F4A7C15) | 1);
+        let mut id = 10_000;
+        let mut start = busy_workspace(&mut r);
+        let mut m = SyncMeta::default();
+        stamp(&start, &mut m, 1);
+        json::set_meta(&mut start, &m);
+        let mut devs = vec![start.clone(), start.clone(), start];
+        for step in 0..30i64 {
+            let now = 100 + step * 10;
+            let d = r.n(3);
+            if r.n(2) == 0 {
+                for _ in 0..1 + r.n(2) {
+                    busy_edit(&mut r, &mut devs[d], &mut id);
+                }
+                let mut m = meta_of(&devs[d]);
+                stamp(&devs[d], &mut m, now);
+                json::set_meta(&mut devs[d], &m);
+                continue;
+            }
+            let o = (d + 1 + r.n(2)) % 3;
+            // the other copy whole, or only what changed since this copy's
+            let other = if r.n(2) == 0 {
+                shareable(&devs[o])
+            } else {
+                match delta(&Summary::of(&devs[d]), &devs[o]) {
+                    Some(p) => p,
+                    None => continue,
+                }
+            };
+            let mut long = devs[d].clone();
+            let c_long = merge_long(&mut long, std::slice::from_ref(&other));
+            let mut quick = devs[d].clone();
+            let c_quick = merge(&mut quick, std::slice::from_ref(&other));
+            assert_eq!(c_quick, c_long, "seed {seed} step {step}");
+            assert_eq!(quick, long, "seed {seed} step {step}");
+            // the app's way
+            let mut apart = devs[d].clone();
+            let mut meta = meta_of(&apart);
+            apart["extra"].as_object_mut().unwrap().remove("sync");
+            let c_apart = merge_apart(&mut apart, &mut meta, &[other], true);
+            json::set_meta(&mut apart, &meta);
+            assert_eq!(c_apart, c_long, "seed {seed} step {step}");
+            assert_eq!(apart, long, "seed {seed} step {step}");
+            if quick != devs[d] {
+                changed += 1;
+            }
+            devs[d] = long;
+        }
+    }
+    // both ways were taken, many times
+    assert!(changed > 50, "{changed}");
+    assert!(merge::QUICK.with(|q| q.get()) > 1000);
+}

@@ -28,7 +28,7 @@ pub(crate) fn version_key(v: &str) -> Vec<u64> {
 /// fields it doesn't know when its copy wins. Returns its version when it
 /// wrote one ("" when it didn't).
 pub fn older_app<'a>(copy: &'a Value, mine: &str) -> Option<&'a str> {
-    let v = meta_of(copy).v;
+    let v = stamps_of(copy).v;
     match app_version_of(copy) {
         None => Some(""),
         Some(a) if version_key(a) < version_key(mine) || v < META_V => Some(a),

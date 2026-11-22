@@ -246,7 +246,11 @@ pub fn shrink_moved(moved: &mut BTreeMap<u64, i64>, data: &Value) {
 /// milliseconds. A new stamp is always later than the item's last one, so a
 /// second edit made within the same moment still wins over the first.
 pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
-    let cur = fingerprints(data);
+    let AllHashes {
+        hashes: cur,
+        parts,
+        parents: places,
+    } = hash_all(data);
     if meta.v < 1 {
         // fingerprints saved before an item's place counted: carry over the
         // unchanged ones so updating the app doesn't mark everything as edited
@@ -260,7 +264,6 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
         meta.v = 1;
     }
     // places: an item now in another item than when last saved moved there
-    let places = parents_of(data);
     for (id, p) in &places {
         if meta.parents.get(id).is_some_and(|old| old != p) {
             let next = meta.moved.get(id).map_or(now, |s| now.max(s + 1));
@@ -270,7 +273,6 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
     meta.parents = places;
     shrink_moved(&mut meta.moved, data);
     meta.v = META_V;
-    let parts = part_hashes(data);
     upgrade_split_hashes(meta, data, &parts);
     for (id, h) in &cur {
         let next = meta.stamps.get(id).map_or(now, |s| now.max(s + 1));

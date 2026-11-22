@@ -4,7 +4,9 @@
 // too. None of them panics, whatever shape the copy has.
 
 use super::SyncMeta;
+use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 
 /// The value at a dotted path ("extra.workspace_color").
 pub fn get_path<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
@@ -132,8 +134,60 @@ pub fn shown_name(member: &Value) -> String {
 pub fn meta_of(v: &Value) -> SyncMeta {
     v.get("extra")
         .and_then(|e| e.get("sync"))
-        .and_then(|s| serde_json::from_value(s.clone()).ok())
+        .and_then(|s| SyncMeta::deserialize(s).ok())
         .unwrap_or_default()
+}
+
+/// `meta_of` without this computer's fingerprints (`hashes`,
+/// `field_hashes`, `parents`, `value_hashes`, left empty): for merging and
+/// for working out what to send, which read only the stamps. They are
+/// most of a big copy's bookkeeping. (Bookkeeping that can't be read
+/// counts as none, as with `meta_of`; only fingerprints that can't be read
+/// no longer make the stamps count as unreadable.)
+pub(crate) fn stamps_of(v: &Value) -> SyncMeta {
+    /// `SyncMeta` with the fingerprints left unread.
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Stamps {
+        stamps: BTreeMap<u64, i64>,
+        tombs: BTreeMap<u64, i64>,
+        revived: BTreeMap<u64, i64>,
+        v: u32,
+        moved: BTreeMap<u64, i64>,
+        values: BTreeMap<String, i64>,
+        fields: BTreeMap<u64, BTreeMap<String, i64>>,
+        rehash: bool,
+    }
+    let Some(s) = v.get("extra").and_then(|e| e.get("sync")) else {
+        return SyncMeta::default();
+    };
+    let Ok(Stamps {
+        stamps,
+        tombs,
+        revived,
+        v,
+        moved,
+        values,
+        fields,
+        rehash,
+    }) = Stamps::deserialize(s)
+    else {
+        return SyncMeta::default();
+    };
+    SyncMeta {
+        stamps,
+        tombs,
+        revived,
+        hashes: BTreeMap::new(),
+        v,
+        moved,
+        parents: BTreeMap::new(),
+        values,
+        value_hashes: BTreeMap::new(),
+        fields,
+        field_hashes: BTreeMap::new(),
+        rehash,
+    }
 }
 
 /// Write a copy's sync metadata as its extra.sync, making `extra` an object

@@ -20,7 +20,7 @@ pub struct Summary {
 impl Summary {
     /// Everything in a whole copy.
     pub fn of(data: &Value) -> Summary {
-        let m = meta_of(data);
+        let m = stamps_of(data);
         Summary {
             hashes: fingerprints(data),
             stamps: m.stamps,
@@ -35,7 +35,7 @@ impl Summary {
 
     /// The other side has this copy (a whole one or a `delta`) too now.
     pub fn absorb(&mut self, part: &Value) {
-        let m = meta_of(part);
+        let m = stamps_of(part);
         for (id, h) in fingerprints(part) {
             self.hashes.insert(id, h);
             let set = |map: &mut BTreeMap<u64, i64>, from: &BTreeMap<u64, i64>| match from.get(&id)
@@ -95,7 +95,7 @@ impl Summary {
 /// changed.
 pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
     let cur = fingerprints(data);
-    let meta = meta_of(data);
+    let meta = stamps_of(data);
     let changed: std::collections::HashSet<u64> = cur
         .iter()
         .filter(|(id, h)| {
@@ -151,12 +151,27 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
             let (Some(id), Some(obj)) = (id_of(item), item.as_object()) else {
                 continue;
             };
-            let mut o = Map::new();
+            // the items inside first: the item's own fields are copied
+            // only when it goes in
+            let mut subs: Vec<(&String, Vec<Value>)> = vec![];
             let mut inner = false;
             for (k, v) in obj {
                 if is_id_array(v) {
-                    let mut sub = prune(v.as_array().unwrap(), changed, kept);
+                    let sub = prune(v.as_array().unwrap(), changed, kept);
                     inner |= !sub.is_empty();
+                    subs.push((k, sub));
+                }
+            }
+            if !(inner || changed.contains(&id)) {
+                continue;
+            }
+            let mut subs = subs.into_iter();
+            let mut o = Map::new();
+            for (k, v) in obj {
+                if is_id_array(v) {
+                    let Some((_, mut sub)) = subs.next() else {
+                        continue;
+                    };
                     // entries without an id are the item's own
                     sub.extend(loose_entries(v));
                     if !sub.is_empty() {
@@ -166,10 +181,8 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
                     o.insert(k.clone(), v.clone());
                 }
             }
-            if inner || changed.contains(&id) {
-                kept.push(id);
-                out.push(Value::Object(o));
-            }
+            kept.push(id);
+            out.push(Value::Object(o));
         }
         out
     }
@@ -304,7 +317,7 @@ pub fn include_whole(part: &mut Value, data: &Value, ids: &[u64]) {
             }
         }
     }
-    let meta = meta_of(data);
+    let meta = stamps_of(data);
     let mut pm = meta_of(part);
     let mut added = vec![];
     for path in SHARED {

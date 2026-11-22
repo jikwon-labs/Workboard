@@ -22,7 +22,28 @@ pub(crate) struct Ctx<'a> {
     /// source -> its field stamps
     fields: Vec<&'a BTreeMap<u64, BTreeMap<String, i64>>>,
     out_fields: BTreeMap<u64, BTreeMap<String, i64>>,
+    /// Items that came out exactly as this copy had them, with everything
+    /// inside them (see `untouched`).
+    kept: std::collections::HashSet<u64>,
+    /// While merging a top-level collection: its place in `SHARED`, and
+    /// where each of this copy's items is in it. Such an item that comes
+    /// out untouched is moved over afterwards instead of copied: a
+    /// `KEEP` stand-in holds its place until then (see `put_back`).
+    top: Option<(usize, HashMap<u64, usize>)>,
+    /// (collection, place in this copy's list) of each stand-in
+    slots: Vec<(usize, usize)>,
 }
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: merge every item the long way (no `Ctx::untouched`).
+    pub(crate) static LONG_WAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Tests: how many items came out untouched the quick way.
+    pub(crate) static QUICK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The field of a stand-in for an untouched top-level item (`Ctx::top`).
+const KEEP: &str = "\u{0}wb-keep";
 
 /// Every item with an id in one source, with the item it sits in.
 pub(crate) fn collect<'a>(src: usize, arr: &'a [Value], parent: Option<u64>, out: &mut Cands<'a>) {
@@ -100,7 +121,170 @@ impl<'a> Ctx<'a> {
             omits_defaults,
             fields,
             out_fields: BTreeMap::new(),
+            kept: Default::default(),
+            top: None,
+            slots: vec![],
         }
+    }
+
+    /// Whether merging the item `id` gives back exactly this copy's version
+    /// of it, with everything inside it, and its bookkeeping as it is: it
+    /// is only here (no other copy has it or anything inside it), alive, and
+    /// already in the shape a merge leaves it in (`merge_fields` and
+    /// `merge_arr` would rebuild it field by field into the same thing).
+    /// Such an item is copied as it is, which is much quicker. Anything a
+    /// merge could reorder or tidy (reactions, running timers, time
+    /// entries, items out of time order, entries without an id among the
+    /// items, field stamps a merge would leave out) takes the long way.
+    fn untouched(&self, id: u64) -> bool {
+        #[cfg(test)]
+        if LONG_WAY.with(|l| l.get()) {
+            return false;
+        }
+        let Some([(0, x)]) = self.cands.get(&id).map(|l| l.as_slice()) else {
+            return false;
+        };
+        if !self.alive(id) {
+            return false;
+        }
+        let Some(obj) = x.as_object() else {
+            return false;
+        };
+        let nonempty = |k: &str| obj.get(k).is_some_and(|v| v.is_array() && !is_empty_arr(v));
+        if nonempty("time_entries") || !timer_list(obj).is_empty() {
+            return false;
+        }
+        let listed = self.fields[0].get(&id);
+        let stamp = self.stamps[0].get(&id).copied().unwrap_or(0);
+        let base = listed.and_then(|e| e.get("")).copied().unwrap_or(stamp);
+        // reactions are put back in the order they were added
+        let pairs = match obj.get("reactions") {
+            Some(v) if nonempty("reactions") => match reaction_pairs(v) {
+                Some(pairs) => {
+                    if !reactions_in_order(v, &pairs, listed, base) {
+                        return false;
+                    }
+                    pairs
+                }
+                // not reactions as the app writes them: an ordinary field
+                None => vec![],
+            },
+            _ => vec![],
+        };
+        if let Some(e) = listed {
+            // a base the same as the stamp is left out
+            if e.contains_key("") && base == stamp {
+                return false;
+            }
+            for (k, t) in e {
+                if k.is_empty() {
+                    continue;
+                }
+                if SPLIT_LATER.contains(&k.as_str()) {
+                    return false;
+                }
+                let present = match k.split_once('/') {
+                    Some(("custom", key)) => obj
+                        .get("custom")
+                        .and_then(|c| c.as_object())
+                        .is_some_and(|c| c.contains_key(key)),
+                    Some(("reactions", pair)) => pairs
+                        .iter()
+                        .any(|(e, u)| pair.rsplit_once('/') == Some((e.as_str(), &u.to_string()))),
+                    Some(_) => return false,
+                    None => match obj.get(k.as_str()) {
+                        None => false,
+                        Some(v) => {
+                            if k == "reactions"
+                                || LOCAL_KEYS.contains(&k.as_str())
+                                || APPEND_KEYS.contains(&k.as_str())
+                                || TIMER_KEYS.contains(&k.as_str())
+                                || is_id_array(v)
+                            {
+                                return false;
+                            }
+                            !is_empty_arr(v)
+                        }
+                    },
+                };
+                // a field that is there and changed at the base is left out
+                if present && *t == base {
+                    return false;
+                }
+            }
+        }
+        for (k, v) in obj {
+            if is_id_array(v) {
+                let a = v.as_array().unwrap();
+                // entries without an id go after the items
+                if let Some(first_loose) = a.iter().position(|x| id_of(x).is_none()) {
+                    if a[first_loose..].iter().any(|x| id_of(x).is_some()) {
+                        return false;
+                    }
+                }
+                let items = a.iter().filter(|x| id_of(x).is_some());
+                // messages and replies read in time order
+                let times: Option<Vec<i64>> = items
+                    .clone()
+                    .map(|x| x.get("ts").and_then(|t| t.as_i64()))
+                    .collect();
+                if times.is_some_and(|t| t.windows(2).any(|w| w[0] > w[1])) {
+                    return false;
+                }
+                for c in items {
+                    if !id_of(c).is_some_and(|c| self.untouched(c)) {
+                        return false;
+                    }
+                }
+            } else if APPEND_KEYS.contains(&k.as_str()) {
+                // kept once each, in time order
+                let Some(a) = v.as_array() else {
+                    return false;
+                };
+                let ts = |x: &Value| x.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+                if a.windows(2).any(|w| ts(&w[0]) > ts(&w[1])) {
+                    return false;
+                }
+                let mut run = 0;
+                for i in 1..a.len() {
+                    if ts(&a[i]) != ts(&a[run]) {
+                        run = i;
+                    } else if a[run..i].contains(&a[i]) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// An item `untouched` said comes out as it is, with everything
+    /// inside it: its bookkeeping as merging it would note it.
+    fn keep_untouched(&mut self, x: &'a Value) {
+        fn go(cx: &mut Ctx, x: &Value) {
+            let (Some(id), Some(obj)) = (id_of(x), x.as_object()) else {
+                return;
+            };
+            cx.out
+                .insert(id, cx.stamps[0].get(&id).copied().unwrap_or(0));
+            if let Some(m) = cx.home_moved.get(&id).filter(|m| **m > 0) {
+                cx.out_moved.insert(id, *m);
+            }
+            if let Some(e) = cx.fields[0].get(&id) {
+                cx.out_fields.insert(id, e.clone());
+            }
+            for (_, child) in obj {
+                if is_id_array(child) {
+                    for c in child.as_array().unwrap() {
+                        go(cx, c);
+                    }
+                }
+            }
+        }
+        if let Some(id) = id_of(x) {
+            self.kept.insert(id);
+        }
+        go(self, x);
     }
 
     fn alive(&self, id: u64) -> bool {
@@ -111,10 +295,68 @@ impl<'a> Ctx<'a> {
     }
 }
 
+/// Whether an item's reactions (`v`, of which `pairs`) are already as
+/// `put_reactions` writes them: one entry per emoji with just its emoji and
+/// people, in the order they were added (`read_part`: by the field stamps
+/// `listed`, else at `base`).
+fn reactions_in_order(
+    v: &Value,
+    pairs: &[(String, u64)],
+    listed: Option<&BTreeMap<String, i64>>,
+    base: i64,
+) -> bool {
+    // no field stamps for reactions: every one at the base
+    let listed = listed.filter(|l| {
+        l.range::<str, _>((
+            std::ops::Bound::Included("reactions"),
+            std::ops::Bound::Unbounded,
+        ))
+        .next()
+        .is_some_and(|(k, _)| k.starts_with("reactions"))
+    });
+    let mut timed: Vec<(i64, &str, u64)> = pairs
+        .iter()
+        .map(|(e, u)| {
+            let t = listed
+                .and_then(|l| {
+                    l.get(&format!("reactions/{}/{}", e, u))
+                        .or_else(|| l.get("reactions"))
+                })
+                .copied()
+                .unwrap_or(base);
+            (t, e.as_str(), *u)
+        })
+        .collect();
+    timed.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(b.1)).then(a.2.cmp(&b.2)));
+    let mut groups: Vec<(&str, Vec<u64>)> = vec![];
+    for (_, e, u) in timed {
+        match groups.iter_mut().find(|(x, _)| *x == e) {
+            Some((_, users)) => users.push(u),
+            None => groups.push((e, vec![u])),
+        }
+    }
+    let Some(have) = v.as_array() else {
+        return false;
+    };
+    have.len() == groups.len()
+        && have.iter().zip(&groups).all(|(r, (e, users))| {
+            r.as_object().is_some_and(|o| o.len() == 2)
+                && r.get("emoji").and_then(|x| x.as_str()) == Some(*e)
+                && r.get("users").and_then(|x| x.as_array()).is_some_and(|a| {
+                    a.len() == users.len()
+                        && a.iter()
+                            .zip(users)
+                            .all(|(x, u)| x.as_u64() == Some(*u) && x.is_u64())
+                })
+        })
+}
+
 /// One copy of an item, as `merge_fields` sees it.
 pub(crate) struct Side<'a> {
     obj: &'a Map<String, Value>,
-    parts: Vec<(String, Value)>,
+    parts: Vec<(String, std::borrow::Cow<'a, Value>)>,
+    /// `parts` by name
+    by_name: HashMap<String, usize>,
     /// when its fields not listed in `listed` changed
     base: i64,
     listed: Option<&'a BTreeMap<String, i64>>,
@@ -210,13 +452,20 @@ pub(crate) fn merge_fields<'a>(
             let obj = c.1.as_object()?;
             let s = cx.stamps[c.0].get(&id).copied().unwrap_or(0);
             let listed = cx.fields[c.0].get(&id);
+            // a list of items keeps only its entries without an id here
+            let parts: Vec<_> = parts_of(obj)
+                .into_iter()
+                .filter(|(p, _)| !child.contains(part_field(p)) || child.contains(p.as_str()))
+                .collect();
+            let mut by_name = HashMap::with_capacity(parts.len());
+            for (i, (p, _)) in parts.iter().enumerate() {
+                // the first of a name, as a search from the start finds
+                by_name.entry(p.clone()).or_insert(i);
+            }
             Some(Side {
                 obj,
-                // a list of items keeps only its entries without an id here
-                parts: parts_of(obj)
-                    .into_iter()
-                    .filter(|(p, _)| !child.contains(part_field(p)) || child.contains(p.as_str()))
-                    .collect(),
+                parts,
+                by_name,
                 base: listed.and_then(|e| e.get("")).copied().unwrap_or(s),
                 listed,
                 omits: cx.omits_defaults.get(c.0).copied().unwrap_or(false),
@@ -265,7 +514,7 @@ pub(crate) fn merge_fields<'a>(
     for p in order {
         let mut win: Option<(i64, &Side, Option<&Value>)> = None;
         for sd in &sides {
-            let val = sd.parts.iter().find(|(q, _)| q == p).map(|(_, v)| v);
+            let val = sd.by_name.get(p).map(|i| sd.parts[*i].1.as_ref());
             let Some(t) = read_part(sd, p, val.is_some(), &in_vec) else {
                 continue;
             };
@@ -462,6 +711,30 @@ pub(crate) fn merge_arr<'a>(
         if parent.is_some() && cx.home.get(&id).is_some_and(|h| *h != parent) {
             continue;
         }
+        if cx.untouched(id) {
+            #[cfg(test)]
+            QUICK.with(|q| q.set(q.get() + 1));
+            let x = cx.cands[&id][0].1;
+            cx.keep_untouched(x);
+            let at = match (&cx.top, parent) {
+                (Some((path, places)), None) => places.get(&id).map(|i| (*path, *i)),
+                _ => None,
+            };
+            match at {
+                Some(slot) => {
+                    // a stand-in, sorted like the item: it has its time
+                    let mut o = Map::new();
+                    o.insert(KEEP.into(), Value::from(cx.slots.len()));
+                    if let Some(ts) = x.get("ts") {
+                        o.insert("ts".into(), ts.clone());
+                    }
+                    cx.slots.push(slot);
+                    out.push(Value::Object(o));
+                }
+                None => out.push(x.clone()),
+            }
+            continue;
+        }
         let Some(list) = cx.cands.get(&id).cloned() else {
             continue;
         };
@@ -516,16 +789,21 @@ pub(crate) fn merge_arr<'a>(
                 }
                 Value::Array(items)
             } else if APPEND_KEYS.contains(&k.as_str()) {
-                let mut all: Vec<Value> = vec![];
+                let mut all: Vec<&Value> = vec![];
+                // entries by fingerprint, to find ones already there
+                // without comparing each with every other
+                let mut by_hash: HashMap<u64, Vec<usize>> = HashMap::new();
                 for (_, v) in &vals {
                     for x in v.as_array().into_iter().flatten() {
-                        if !all.contains(x) {
-                            all.push(x.clone());
+                        let at = by_hash.entry(fnv_json(x)).or_default();
+                        if !at.iter().any(|i| all[*i] == x) {
+                            at.push(all.len());
+                            all.push(x);
                         }
                     }
                 }
                 all.sort_by_key(|x| x.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
-                Value::Array(all)
+                Value::Array(all.into_iter().cloned().collect())
             } else if LOCAL_KEYS.contains(&k.as_str())
                 && local.map_or(false, |o| o.contains_key(&k))
             {
@@ -557,11 +835,34 @@ pub(crate) fn merge_arr<'a>(
 
 /// Merge other people's copies into this one. Returns true when anything changed.
 pub fn merge(local: &mut Value, others: &[Value]) -> bool {
+    let mut meta = stamps_of(local);
+    let changed = merge_apart(local, &mut meta, others, false);
+    set_path(
+        local,
+        "extra.sync",
+        serde_json::to_value(&meta).unwrap_or_default(),
+    );
+    changed
+}
+
+/// `merge` for a copy whose bookkeeping is kept apart from it: `meta` is
+/// this copy's (any in `local` is not read or written) and becomes the
+/// merged one. With `current`, `meta`'s fingerprints (`hashes`,
+/// `field_hashes`, `parents`) are exactly what `local` gives, as `stamp`
+/// leaves them: the items that come out of the merge as they went in keep
+/// theirs instead of being fingerprinted again. Returns true when
+/// anything changed.
+pub fn merge_apart(
+    local: &mut Value,
+    meta: &mut SyncMeta,
+    others: &[Value],
+    current: bool,
+) -> bool {
     // copies from before activity had ids: give their entries the same ids
     // here as everywhere else, or their comments would not be matched up
-    fill_activity_ids(local);
-    fill_board_ids(local);
-    fill_goal_ids(local);
+    let filled_here = fill_activity_ids(local) | fill_board_ids(local) | fill_goal_ids(local);
+    // ids given here change the items they're in: fingerprinted again
+    let current = current && !filled_here;
     let filled: Vec<Value> = others
         .iter()
         .map(|o| {
@@ -573,9 +874,14 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         })
         .collect();
     let others = &filled[..];
-    let before = local.clone();
-    let mut lmeta = meta_of(local);
-    let metas: Vec<SyncMeta> = others.iter().map(meta_of).collect();
+    // this copy's items, taken out while the merged ones are made (and
+    // compared with them after)
+    let mut before: Vec<Option<Value>> = SHARED
+        .iter()
+        .map(|p| get_path_mut(local, p).map(std::mem::take))
+        .collect();
+    let lmeta = meta;
+    let metas: Vec<SyncMeta> = others.iter().map(stamps_of).collect();
     let mut tombs = lmeta.tombs.clone();
     let mut revived = lmeta.revived.clone();
     for m in &metas {
@@ -589,10 +895,12 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         }
     }
     let empty = vec![];
-    let merged: Vec<(String, Value)>;
+    let mut merged: Vec<(String, Value)>;
     let out_stamps;
     let out_moved;
     let out_fields;
+    let kept;
+    let slots;
     {
         let mut stamps: Vec<&BTreeMap<u64, i64>> = vec![&lmeta.stamps];
         stamps.extend(metas.iter().map(|m| &m.stamps));
@@ -600,16 +908,14 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         fields.extend(metas.iter().map(|m| &m.fields));
         let keeps = |m: &SyncMeta| m.v >= 2;
         let mut moved: Vec<Option<&BTreeMap<u64, i64>>> =
-            vec![keeps(&lmeta).then_some(&lmeta.moved)];
+            vec![keeps(lmeta).then_some(&lmeta.moved)];
         moved.extend(metas.iter().map(|m| keeps(m).then_some(&m.moved)));
         let mut all: Vec<Vec<(usize, &Vec<Value>)>> = vec![];
         let mut cands = HashMap::new();
-        for path in SHARED {
+        for (path, mine) in SHARED.iter().zip(&before) {
             let mut sources: Vec<(usize, &Vec<Value>)> = vec![(
                 0,
-                get_path(&before, path)
-                    .and_then(|v| v.as_array())
-                    .unwrap_or(&empty),
+                mine.as_ref().and_then(|v| v.as_array()).unwrap_or(&empty),
             )];
             for (i, o) in others.iter().enumerate() {
                 if let Some(a) = get_path(o, path).and_then(|v| v.as_array()) {
@@ -623,7 +929,14 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         }
         let mut cx = Ctx::new(stamps, fields, moved, tombs.clone(), revived.clone(), cands);
         let mut res = vec![];
-        for (path, sources) in SHARED.iter().zip(&all) {
+        for (n, (path, sources)) in SHARED.iter().zip(&all).enumerate() {
+            let places: HashMap<u64, usize> = sources[0]
+                .1
+                .iter()
+                .enumerate()
+                .filter_map(|(i, x)| Some((id_of(x)?, i)))
+                .collect();
+            cx.top = Some((n, places));
             let mut items = merge_arr(&mut cx, sources, None);
             // this computer's entries without an id stay as they are
             items.extend(sources[0].1.iter().filter(|x| id_of(x).is_none()).cloned());
@@ -633,9 +946,14 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
         out_stamps = cx.out;
         out_moved = cx.out_moved;
         out_fields = cx.out_fields;
+        kept = cx.kept;
+        slots = cx.slots;
     }
-    for (path, v) in merged {
-        set_path(local, &path, v);
+    // changed: compared without the bookkeeping, which always moves a little
+    let mut changed = false;
+    for (n, ((path, v), mine)) in merged.iter_mut().zip(&mut before).enumerate() {
+        changed |= put_back(v, mine, n, &slots);
+        set_path(local, path, std::mem::take(v));
     }
     // shared settings: the newest change wins; on a tie this computer's stays
     for path in SHARED_VALUES {
@@ -651,38 +969,142 @@ pub fn merge(local: &mut Value, others: &[Value]) -> bool {
             }
         }
         if let Some(v) = best {
+            let was = get_path(local, path).cloned();
             set_path(local, path, v.clone());
+            changed |= get_path(local, path) != was.as_ref();
         }
         if best_stamp > 0 {
             lmeta.values.insert(path.to_string(), best_stamp);
         }
     }
-    merge_maps(local, &mut lmeta, others, &metas);
+    let maps_before: Vec<Option<Value>> = SHARED_MAPS
+        .iter()
+        .map(|p| get_path(local, p).cloned())
+        .collect();
+    merge_maps(local, lmeta, others, &metas);
+    for (p, was) in SHARED_MAPS.iter().zip(&maps_before) {
+        changed |= get_path(local, p) != was.as_ref();
+    }
     lmeta.tombs = tombs;
     lmeta.revived = revived;
     lmeta.stamps = out_stamps;
     lmeta.moved = out_moved;
     shrink_moved(&mut lmeta.moved, local);
     lmeta.fields = out_fields;
-    lmeta.hashes = fingerprints(local);
-    lmeta.field_hashes = part_hashes(local);
-    lmeta.parents = parents_of(local);
+    if current {
+        rehash_changed(local, lmeta, &kept);
+    } else {
+        let all = hash_all(local);
+        lmeta.hashes = all.hashes;
+        lmeta.field_hashes = all.parts;
+        lmeta.parents = all.parents;
+    }
     lmeta.value_hashes = value_hashes(local);
     lmeta.v = META_V;
-    set_path(
-        local,
-        "extra.sync",
-        serde_json::to_value(&lmeta).unwrap_or_default(),
-    );
-    // compare without the bookkeeping, which always moves a little
-    let strip = |v: &Value| {
-        let mut v = v.clone();
-        if let Some(e) = v.get_mut("extra").and_then(|e| e.as_object_mut()) {
-            e.remove("sync");
-        }
-        v
+    changed
+}
+
+/// A top-level collection as merged (`out`): the untouched items of this
+/// copy's list (`mine`, collection `n`) moved into their stand-ins
+/// (`Ctx::top`). True when it isn't what this copy had: as comparing it
+/// with `mine` before anything was moved would say.
+fn put_back(out: &mut Value, mine: &mut Option<Value>, n: usize, slots: &[(usize, usize)]) -> bool {
+    let Some(items) = out.as_array_mut() else {
+        return true;
     };
-    strip(&before) != strip(local)
+    // where each item came from in `mine`, for the moved ones
+    let mut from: Vec<Option<usize>> = vec![None; items.len()];
+    let mut taken = vec![];
+    for (i, x) in items.iter_mut().enumerate() {
+        let Some(k) = x.get(KEEP).and_then(|k| k.as_u64()) else {
+            continue;
+        };
+        let (path, at) = slots[k as usize];
+        debug_assert_eq!(path, n);
+        let Some(arr) = mine.as_mut().and_then(|m| m.as_array_mut()) else {
+            continue;
+        };
+        *x = std::mem::take(&mut arr[at]);
+        from[i] = Some(at);
+        taken.push(at);
+    }
+    let Some(arr) = mine.as_ref().and_then(|m| m.as_array()) else {
+        return true;
+    };
+    if arr.len() != items.len() {
+        return true;
+    }
+    let mut gone = vec![false; arr.len()];
+    for at in taken {
+        gone[at] = true;
+    }
+    // an untouched item is only ever equal to itself (ids don't repeat)
+    items.iter().enumerate().any(|(i, x)| match from[i] {
+        Some(at) => at != i,
+        None => gone[i] || *x != arr[i],
+    })
+}
+
+/// The fingerprints of a merged copy (`local`) from those of the copy that
+/// went in (`meta`, see `merge_apart`'s `current`): items in `kept` (and
+/// everything inside them) keep theirs, the others are fingerprinted
+/// again, and items no longer there are left out. The same as `hash_all`.
+fn rehash_changed(local: &Value, meta: &mut SyncMeta, kept: &std::collections::HashSet<u64>) {
+    use std::collections::HashSet;
+    struct Walk<'k> {
+        kept: &'k HashSet<u64>,
+        seen: HashSet<u64>,
+        parents: BTreeMap<u64, u64>,
+    }
+    fn go(v: &Value, parent: Option<u64>, inside_kept: bool, w: &mut Walk, meta: &mut SyncMeta) {
+        for item in v.as_array().into_iter().flatten() {
+            let (Some(id), Some(obj)) = (id_of(item), item.as_object()) else {
+                continue;
+            };
+            w.seen.insert(id);
+            if let Some(p) = parent {
+                w.parents.insert(id, p);
+            }
+            // fingerprinted in the same place as now
+            let keep = (inside_kept || w.kept.contains(&id))
+                && meta.hashes.contains_key(&id)
+                && meta.field_hashes.contains_key(&id)
+                && meta.parents.get(&id) == parent.as_ref();
+            if !keep {
+                let h = own_hash(obj);
+                let h = match parent {
+                    Some(p) => fnv(format!("{}/{}", h, p).as_bytes()),
+                    None => h,
+                };
+                meta.hashes.insert(id, h);
+                meta.field_hashes.insert(
+                    id,
+                    parts_of(obj)
+                        .into_iter()
+                        .map(|(p, v)| (p, part_hash(&v)))
+                        .collect(),
+                );
+            }
+            for (_, child) in obj {
+                if is_id_array(child) {
+                    go(child, Some(id), keep, w, meta);
+                }
+            }
+        }
+    }
+    let mut w = Walk {
+        kept,
+        seen: HashSet::new(),
+        parents: BTreeMap::new(),
+    };
+    for path in SHARED {
+        if let Some(v) = get_path(local, path) {
+            go(v, None, false, &mut w, meta);
+        }
+    }
+    meta.hashes.retain(|id, _| w.seen.contains(id));
+    meta.field_hashes.retain(|id, _| w.seen.contains(id));
+    meta.parents = w.parents;
 }
 
 /// Shared maps (`SHARED_MAPS`): for each key the newest change wins (a

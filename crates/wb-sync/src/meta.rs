@@ -55,7 +55,7 @@ pub(crate) fn map_entry(part: &str) -> Option<(&'static str, &str)> {
 }
 
 pub(crate) fn json_hash(v: &Value) -> u64 {
-    fnv(serde_json::to_string(v).unwrap_or_default().as_bytes())
+    fnv_json(v)
 }
 
 /// Fields that are each person's own even inside shared items.

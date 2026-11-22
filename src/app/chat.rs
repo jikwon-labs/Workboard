@@ -36,6 +36,226 @@ pub(super) enum ChannelPanel {
     Links,
 }
 
+/// The open conversation's messages as listed, and what its find box finds
+/// in them, worked out again only when one of those changes.
+pub(super) struct Found {
+    /// Where each message shown is (channel, message), in time order.
+    pub places: Vec<(usize, usize)>,
+    /// Each match of the find box, top to bottom: the message, and which of
+    /// the words found in it (its post title's first, then its text's;
+    /// always 0 when only `has:` or `from:` was typed).
+    pub hits: Vec<(u64, usize)>,
+}
+
+/// What the find box lights up in the open conversation's list.
+pub(super) struct FindLit {
+    pub cid: u64,
+    /// The words looked for, lowercased (empty with only `has:` or
+    /// `from:`: the matching message is lit up instead).
+    pub q: String,
+    /// The messages that match.
+    pub ids: std::collections::HashSet<u64>,
+    /// The match the box is at.
+    pub at: Option<(u64, usize)>,
+}
+
+/// The fill under a word the find box found, and under the one it is at
+/// (yellow and orange, as in a web browser's find bar), with dark letters
+/// on either in both themes.
+pub(super) const FOUND_BG: Color32 = Color32::from_rgb(0xff, 0xe5, 0x6b);
+pub(super) const FOUND_AT_BG: Color32 = Color32::from_rgb(0xff, 0x96, 0x32);
+const FOUND_TEXT: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
+
+/// Where `q` (lowercased) is in `text`, whatever the case of its letters:
+/// byte ranges of `text`, one after another, not overlapping.
+pub(super) fn find_spans(text: &str, q: &str) -> Vec<(usize, usize)> {
+    if q.is_empty() {
+        return vec![];
+    }
+    // the text lowercased, and for each of its bytes the letter of `text`
+    // it came from (a letter can lowercase to more bytes, or to two letters)
+    let mut lower = String::with_capacity(text.len());
+    let mut from: Vec<(usize, usize)> = Vec::with_capacity(text.len());
+    for (i, c) in text.char_indices() {
+        let end = i + c.len_utf8();
+        for l in c.to_lowercase() {
+            from.extend(std::iter::repeat_n((i, end), l.len_utf8()));
+            lower.push(l);
+        }
+    }
+    lower
+        .match_indices(q)
+        .map(|(a, s)| (from[a].0, from[a + s.len() - 1].1))
+        .collect()
+}
+
+/// `text` laid out with the words at `spans` lit up, the `at`th of them
+/// as the one the find box is at.
+fn found_job(
+    text: &str,
+    font: FontId,
+    color: Color32,
+    spans: &[(usize, usize)],
+    at: Option<usize>,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let plain = egui::TextFormat::simple(font.clone(), color);
+    let mut done = 0;
+    for (k, &(a, b)) in spans.iter().enumerate() {
+        job.append(&text[done..a], 0.0, plain.clone());
+        let mut f = egui::TextFormat::simple(font.clone(), FOUND_TEXT);
+        f.background = if at == Some(k) { FOUND_AT_BG } else { FOUND_BG };
+        job.append(&text[a..b], 0.0, f);
+        done = b;
+    }
+    job.append(&text[done..], 0.0, plain);
+    job
+}
+
+/// A conversation's find bar, at the right of the row it is in as in a web
+/// browser: the box, where it is among the matches ("3/10"), the arrows to
+/// the match above and the next one, and × to close it. Enter goes to the
+/// next match and Shift+Enter to the one above; Escape closes it. `count` is
+/// (the match it is at, how many) once something is typed. Gives back the
+/// step asked for (-1 up, 1 down) and whether it was closed.
+fn find_bar(
+    ui: &mut Ui,
+    t: &Theme,
+    id: egui::Id,
+    q: &mut String,
+    count: Option<(Option<usize>, usize)>,
+) -> (Option<isize>, bool) {
+    const BTN: f32 = 24.0;
+    let w = (ui.available_width() - 14.0).clamp(200.0, 340.0);
+    ui.add_space((ui.available_width() - w - 14.0).max(0.0));
+    let (bar, _) = ui.allocate_exact_size(vec2(w, CONTROL_H), Sense::hover());
+    let focused = ui.memory(|m| m.has_focus(id));
+    let line = if focused { t.primary } else { t.border };
+    ui.painter().rect(
+        bar,
+        8.0,
+        t.bg,
+        Stroke::new(1.0_f32, line),
+        egui::StrokeKind::Inside,
+    );
+    line_icon(
+        ui.painter(),
+        Icon::Search,
+        bar.left_center() + vec2(15.0, 0.0),
+        t.text3,
+    );
+    let mut step = None;
+    let mut close = false;
+    let found = count.is_some_and(|(_, n)| n > 0);
+    // the buttons, from the right: ×, down, up
+    let slot = |k: f32| {
+        Rect::from_center_size(
+            bar.right_center() - vec2(3.0 + BTN / 2.0 + k * BTN, 0.0),
+            vec2(BTN, BTN),
+        )
+    };
+    let buttons: [(&str, &str, Option<isize>); 3] = [
+        ("Close find", "Close", None),
+        ("Next match", "Next match", Some(1)),
+        ("Previous match", "Previous match", Some(-1)),
+    ];
+    for (k, (name, tip, go)) in buttons.into_iter().enumerate() {
+        let r = slot(k as f32);
+        let resp = ui.interact(r, id.with(name), Sense::click());
+        hover_bg(ui, &resp, r, 6.0);
+        let c = r.center();
+        let color = if go.is_none() || found {
+            t.text2
+        } else {
+            t.text3
+        };
+        let s = Stroke::new(1.5_f32, color);
+        let p = ui.painter();
+        match go {
+            None => {
+                p.line_segment([c + vec2(-3.5, -3.5), c + vec2(3.5, 3.5)], s);
+                p.line_segment([c + vec2(3.5, -3.5), c + vec2(-3.5, 3.5)], s);
+            }
+            Some(d) => {
+                let d = d as f32 * 2.5;
+                p.line(
+                    vec![c + vec2(-4.5, -d), c + vec2(0.0, d), c + vec2(4.5, -d)],
+                    s,
+                );
+            }
+        }
+        name_it(&resp, name);
+        if resp.on_hover_text(tr(tip)).clicked() {
+            match go {
+                None => close = true,
+                Some(_) => step = go,
+            }
+        }
+    }
+    // where the box is among the matches, after a line
+    let sep = slot(2.0).left() - 4.0;
+    ui.painter().vline(
+        sep,
+        bar.y_range().shrink(6.0),
+        Stroke::new(1.0_f32, t.border),
+    );
+    let counter = match count {
+        Some((Some(i), n)) => format!("{}/{}", i + 1, n),
+        Some((None, _)) => "0/0".to_string(),
+        None => String::new(),
+    };
+    let g = ui
+        .painter()
+        .layout_no_wrap(counter, FontId::proportional(12.5), t.text3);
+    let right = sep - 8.0;
+    ui.painter().galley(
+        egui::pos2(right - g.size().x, bar.center().y - g.size().y / 2.0),
+        g.clone(),
+        t.text3,
+    );
+    let field = Rect::from_x_y_ranges(bar.left() + 26.0..=right - g.size().x - 6.0, bar.y_range());
+    let r = ui
+        .put(
+            field,
+            egui::TextEdit::singleline(q)
+                .id(id)
+                .frame(false)
+                .hint_text(tr("Find in channel"))
+                .desired_width(f32::INFINITY)
+                .vertical_align(Align::Center)
+                .margin(egui::Margin::symmetric(2, 4))
+                // Enter stays in it: it goes to the next match
+                .return_key(None),
+        )
+        .on_hover_text(tr("Narrow messages with has:file, has:link or from:name"));
+    // an arrow clicked: the cursor goes back in the box, so Enter goes on
+    // from there (after the box, which lets go of it on a click elsewhere)
+    if step.is_some() {
+        ui.memory_mut(|m| m.request_focus(id));
+    } else if r.has_focus() {
+        // (Shift as pressed with that Enter)
+        let enter = ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => Some(modifiers.shift),
+                _ => None,
+            })
+        });
+        if let Some(shift) = enter {
+            step = Some(if shift { -1 } else { 1 });
+        }
+    }
+    // Escape in it closes it
+    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        close = true;
+    }
+    (step, close)
+}
+
 /// A row of the panel beside a channel's messages.
 #[derive(Clone, Copy, PartialEq)]
 enum PanelRow {
@@ -1019,15 +1239,69 @@ impl App {
     /// marked and links clickable. A workboard:// link clicked comes back
     /// to be opened here; a web address opens in the browser.
     pub(super) fn message_text(&self, ui: &mut Ui, src: &str, size: f32) -> Option<String> {
+        self.message_text_found(ui, src, size, None)
+    }
+
+    /// The words the find box found in a message's text, as shown: byte
+    /// ranges of `ShownText::r`'s text.
+    pub(super) fn found_in_text(&self, src: &str, q: &str) -> Vec<(usize, usize)> {
+        find_spans(&self.shown_text(src).r.text, q)
+    }
+
+    /// How many times the find box's words `q` (lowercased) are in what
+    /// message `m` shows: its post title as typed, then its text (as
+    /// `message_row_c` lights them up). 1 when there are no words to find
+    /// (only `has:` or `from:` typed): the message itself is the match.
+    fn found_count(&self, m: &Message, q: &str) -> usize {
+        if q.is_empty() {
+            return 1;
+        }
+        let title = typed_post_title(m)
+            .and_then(|_| shown_post_title(m))
+            .map_or(0, |t| find_spans(&t, q).len());
+        let text = shown_text(m);
+        // only a text that has the words is laid out as shown to count them
+        // (most don't, and every message is looked in)
+        let body = if text.to_lowercase().contains(q) {
+            self.found_in_text(&text, q).len()
+        } else {
+            0
+        };
+        title + body
+    }
+
+    /// `message_text`, with `found` = (the words looked for, which of them
+    /// the find box is at) lit up.
+    fn message_text_found(
+        &self,
+        ui: &mut Ui,
+        src: &str,
+        size: f32,
+        found: Option<(&str, Option<usize>)>,
+    ) -> Option<String> {
         let t = self.t();
         // parsed once per text (kept.rs): this runs for every message drawn
         let shown = self.shown_text(src);
-        let (r, mentions, links, cuts) = (&shown.r, &shown.mentions, &shown.links, &shown.cuts);
+        let (r, mentions, links) = (&shown.r, &shown.mentions, &shown.links);
         let bold = crate::app::bold_font(ui.ctx(), size);
         let code_bg = if t.dark {
             Color32::from_white_alpha(18)
         } else {
             Color32::from_black_alpha(12)
+        };
+        let (spans, at) = match found {
+            Some((q, at)) => (find_spans(&r.text, q), at),
+            None => (vec![], None),
+        };
+        // the words found start and end pieces of their own
+        let cuts: std::borrow::Cow<[usize]> = if spans.is_empty() {
+            std::borrow::Cow::Borrowed(&shown.cuts)
+        } else {
+            let mut c = shown.cuts.clone();
+            c.extend(spans.iter().flat_map(|&(a, b)| [a, b]));
+            c.sort_unstable();
+            c.dedup();
+            std::borrow::Cow::Owned(c)
         };
         let mut job = egui::text::LayoutJob::default();
         for w in cuts.windows(2) {
@@ -1062,6 +1336,10 @@ impl App {
             }
             if mention && !look.code && !look.block {
                 (f.color, f.background) = t.mention();
+            }
+            if let Some(k) = spans.iter().position(|(x, y)| *x <= a && b <= *y) {
+                f.color = FOUND_TEXT;
+                f.background = if at == Some(k) { FOUND_AT_BG } else { FOUND_BG };
             }
             job.append(&r.text[a..b], 0.0, f);
         }
@@ -1247,9 +1525,12 @@ impl App {
                                                 self.modal = Some(Modal::ChannelSettings(cid))
                                             }
                                             PanelRow::Find => {
+                                                // opened with the cursor in it, as Cmd+F
                                                 self.channel_find = if self.channel_find.is_some() {
                                                     None
                                                 } else {
+                                                    let id = egui::Id::new(("chan_find", cid));
+                                                    ui.memory_mut(|m| m.request_focus(id));
                                                     Some(String::new())
                                                 }
                                             }
@@ -1268,10 +1549,18 @@ impl App {
             });
     }
 
-    /// The row over a channel's messages: bookmarks, the find box and the
-    /// kind of messages shown.
-    fn channel_chips(&mut self, ui: &mut Ui, find_id: egui::Id) {
+    /// The row over a channel's messages: bookmarks, the kind of messages
+    /// shown, and the find bar at its right. `count` is (the match the find
+    /// box is at, how many it found) once something is typed in it. Gives
+    /// back a step from that match: -1 to the one above, 1 to the next.
+    fn channel_chips(
+        &mut self,
+        ui: &mut Ui,
+        find_id: egui::Id,
+        count: Option<(Option<usize>, usize)>,
+    ) -> Option<isize> {
         let t = self.t();
+        let mut step = None;
         // the chips start under the Channel tab and clear the line above,
         // level with the box on the right
         ui.add_space(10.0);
@@ -1293,37 +1582,36 @@ impl App {
                     url: String::new(),
                 });
             }
+            self.panel_chip(ui);
             if let Some(mut q) = self.channel_find.take() {
-                let r = ui
-                    .add(
-                        field(&mut q)
-                            .id(find_id)
-                            .hint_text(tr("Find in channel"))
-                            .desired_width(200.0),
-                    )
-                    .on_hover_text(tr("Narrow messages with has:file, has:link or from:name"));
-                // Escape in it closes it, and every message shows again
-                if !(r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+                let (s, close) = find_bar(ui, &t, find_id, &mut q, count);
+                step = s;
+                if !close {
                     self.channel_find = Some(q);
                 }
             }
-            if self.channel_panel != ChannelPanel::All {
-                let label = match self.channel_panel {
-                    ChannelPanel::Pinned => tr("Pinned messages"),
-                    ChannelPanel::Replies => tr("Messages with replies"),
-                    ChannelPanel::Saved => tr("Saved messages"),
-                    ChannelPanel::Files => tr("Messages with files"),
-                    ChannelPanel::Links => tr("Messages with links"),
-                    ChannelPanel::Tasks | ChannelPanel::All => tr("Messages turned into tasks"),
-                };
-                if ui
-                    .add(egui::Button::new(format!("{}  \u{00D7}", label)).corner_radius(14))
-                    .clicked()
-                {
-                    self.channel_panel = ChannelPanel::All;
-                }
-            }
         });
+        step
+    }
+
+    /// The chip naming the kind of messages picked in the panel beside them
+    /// (all of them show again on clicking it).
+    fn panel_chip(&mut self, ui: &mut Ui) {
+        let label = match self.channel_panel {
+            ChannelPanel::All => return,
+            ChannelPanel::Pinned => tr("Pinned messages"),
+            ChannelPanel::Replies => tr("Messages with replies"),
+            ChannelPanel::Saved => tr("Saved messages"),
+            ChannelPanel::Files => tr("Messages with files"),
+            ChannelPanel::Links => tr("Messages with links"),
+            ChannelPanel::Tasks => tr("Messages turned into tasks"),
+        };
+        if ui
+            .add(egui::Button::new(format!("{}  \u{00D7}", label)).corner_radius(14))
+            .clicked()
+        {
+            self.channel_panel = ChannelPanel::All;
+        }
     }
 
     /// Chat with no conversation yet: what channels and direct messages
@@ -1860,7 +2148,69 @@ impl App {
             let r = ui.available_rect_before_wrap();
             ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
             self.channel_side_panel(ui, cid, &channel);
-            self.channel_chips(ui, find_id);
+            // the find box finds without hiding anything, as a web browser's
+            // does: every message shows, the words found lit up, and it goes
+            // from one to the next. "has:file", "has:link" and "from:name"
+            // say which messages it looks in (msgquery.rs)
+            let find_text = self.channel_find.clone().unwrap_or_default();
+            let find = MsgQuery::parse(&find_text);
+            let q = find.text.clone();
+            let finding = !q.is_empty() || find.narrows();
+            let panel = self.channel_panel;
+            // worked out again only when the messages, the find box or the
+            // panel change (finding lowercases every message)
+            let key = self.inbox_key();
+            let kept = match (key, &*self.kept.matching.borrow()) {
+                (Some(k), Some((kk, kc, kf, kp, v))) if k == *kk && *kc == cid && *kf == find_text && *kp == panel => Some(v.clone()),
+                _ => None,
+            };
+            let found = kept.unwrap_or_else(|| {
+                let msg = |&(c, m): &(usize, usize)| self.data.channels.get(c)?.messages.get(m);
+                let places: Vec<(usize, usize)> = at
+                    .iter()
+                    .filter(|p| {
+                        msg(p).is_some_and(|m| match panel {
+                            ChannelPanel::Pinned => m.pinned,
+                            ChannelPanel::Replies => !m.replies.is_empty(),
+                            ChannelPanel::Tasks => m.task.is_some(),
+                            ChannelPanel::Saved => m.saved || m.replies.iter().any(|r| r.saved),
+                            ChannelPanel::Files => in_thread(m, has_files),
+                            ChannelPanel::Links => in_thread(m, has_links),
+                            ChannelPanel::All => true,
+                        })
+                    })
+                    .copied()
+                    .collect();
+                let hits = if finding {
+                    places.iter().filter_map(msg).filter(|m| find.fits(m, &self.data)).flat_map(|m| (0..self.found_count(m, &q)).map(move |k| (m.id, k))).collect()
+                } else {
+                    vec![]
+                };
+                let v = std::rc::Rc::new(Found { places, hits });
+                if let Some(k) = key {
+                    *self.kept.matching.borrow_mut() = Some((k, cid, find_text.clone(), panel, v.clone()));
+                }
+                v
+            });
+            let hits = &found.hits;
+            // the match the box is at: the one it was at while that's still
+            // found, else the newest (the list starts at its bottom, and a
+            // browser starts from where the page is)
+            let before = self.chat.find_at.as_ref().filter(|(c, _, _)| *c == cid).map(|(_, f, h)| (f.clone(), *h));
+            let mut cur = before.as_ref().filter(|(f, _)| *f == find_text).and_then(|(_, h)| hits.iter().position(|x| x == h)).or(hits.len().checked_sub(1));
+            let step = self.channel_chips(ui, find_id, finding.then_some((cur, hits.len())));
+            if let (Some(s), Some(i)) = (step, cur) {
+                cur = Some((i as isize + s).rem_euclid(hits.len() as isize) as usize);
+            }
+            let find_at = cur.map(|i| hits[i]);
+            // a match in another message (or the arrows pressed) comes into
+            // sight, however far back it is; not in Files, which shows the
+            // files instead of the messages
+            if let Some(h) = find_at.filter(|h| (step.is_some() || before.as_ref().map(|b| b.1 .0) != Some(h.0)) && panel != ChannelPanel::Files) {
+                self.chat.jump_to = Some(h.0);
+            }
+            self.chat.find_at = find_at.map(|h| (cid, find_text.clone(), h));
+            self.chat.find_lit = finding.then(|| FindLit { cid, q: q.clone(), ids: hits.iter().map(|h| h.0).collect(), at: find_at });
             // a gap and a hairline under the chips, so a message scrolled up
             // under them reads as cut off by the list, not covered by a chip
             ui.add_space(4.0);
@@ -1868,41 +2218,8 @@ impl App {
             ui.painter().hline(line.left() + 14.0..=line.right() - 14.0, line.top(), Stroke::new(0.5_f32, t.border));
             ui.add_space(2.0);
             let composer_h = (140.0_f32 + if self.chat.channel.files.is_empty() { 0.0 } else { 76.0 }).max(composer_seen(ui, ("chat_composer_h", cid)));
-            // "has:file", "has:link" and "from:name" narrow it (msgquery.rs)
-            let find_text = self.channel_find.clone().unwrap_or_default();
-            let find = MsgQuery::parse(&find_text);
-            let q = find.text.clone();
-            let panel = self.channel_panel;
-            // worked out again only when the messages, the find box or the
-            // panel change (a search lowercases every message)
-            let key = self.inbox_key();
-            let kept = match (key, &*self.kept.matching.borrow()) {
-                (Some(k), Some((kk, kc, kf, kp, v))) if k == *kk && *kc == cid && *kf == find_text && *kp == panel => Some(v.clone()),
-                _ => None,
-            };
-            let places = kept.unwrap_or_else(|| {
-                let v: std::rc::Rc<Vec<(usize, usize)>> = std::rc::Rc::new(at
-                .iter()
-                .filter_map(|&(c, m)| Some(((c, m), self.data.channels.get(c)?.messages.get(m)?)))
-                .filter(|(_, m)| q.is_empty() || m.text.to_lowercase().contains(&q) || typed_post_title(m).is_some_and(|t| t.to_lowercase().contains(&q)))
-                .filter(|(_, m)| find.fits(m, &self.data))
-                .filter(|(_, m)| match panel {
-                    ChannelPanel::Pinned => m.pinned,
-                    ChannelPanel::Replies => !m.replies.is_empty(),
-                    ChannelPanel::Tasks => m.task.is_some(),
-                    ChannelPanel::Saved => m.saved || m.replies.iter().any(|r| r.saved),
-                    ChannelPanel::Files => in_thread(m, has_files),
-                    ChannelPanel::Links => in_thread(m, has_links),
-                    ChannelPanel::All => true,
-                })
-                .map(|(at, _)| at)
-                .collect());
-                if let Some(k) = key {
-                    *self.kept.matching.borrow_mut() = Some((k, cid, find_text.clone(), panel, v.clone()));
-                }
-                v
-            });
-            let matching: Vec<((usize, usize), &Message)> = places
+            let matching: Vec<((usize, usize), &Message)> = found
+                .places
                 .iter()
                 .filter_map(|&(c, m)| Some(((c, m), self.data.channels.get(c)?.messages.get(m)?)))
                 .collect();
@@ -1928,10 +2245,16 @@ impl App {
             if self.chat.flash.is_some_and(|(_, _, at)| now - at >= FLASH_SECS) {
                 self.chat.flash = None;
             }
-            let going = self.chat.jump_to.is_some() || self.chat.flash.is_some_and(|(c, _, _)| c == cid);
+            // (nor while the find box is at a match: the list scrolls to it a
+            // frame later, and would be pulled back down)
+            let going = self.chat.jump_to.is_some() || self.chat.flash.is_some_and(|(c, _, _)| c == cid) || find_at.is_some();
             // Files: the files themselves in place of their messages
+            // (there the find box narrows them: no words to light up)
             let gallery = (panel == ChannelPanel::Files).then(|| {
-                let ids: std::collections::HashSet<u64> = matching.iter().map(|(_, m)| m.id).collect();
+                let ids: std::collections::HashSet<u64> = match &self.chat.find_lit {
+                    Some(l) => l.ids.clone(),
+                    None => matching.iter().map(|(_, m)| m.id).collect(),
+                };
                 let msgs = at.iter().filter_map(|&(c, m)| {
                     let ch = self.data.channels.get(c)?;
                     Some((ch.id, ch.messages.get(m)?)).filter(|(_, m)| ids.contains(&m.id))
@@ -2075,6 +2398,12 @@ impl App {
                         let light = ui.painter().add(egui::Shape::Noop);
                         self.message_row_c(ui, cid, &m, true, compact, &mut acts);
                         self.went_to(ui, cid, m.id, top, light);
+                        // found by "has:" or "from:" alone (no words to light
+                        // up): the message the find box is at is lit instead
+                        if self.chat.find_lit.as_ref().is_some_and(|l| l.q.is_empty() && l.at.is_some_and(|a| a.0 == m.id)) {
+                            let row = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
+                            ui.painter().set(light, egui::Shape::rect_filled(row.expand2(vec2(6.0, 2.0)), 6.0, FOUND_AT_BG.gamma_multiply(0.3)));
+                        }
                         let h = ui.cursor().top() - top;
                         ui.data_mut(|d| d.insert_temp(h_id, (h, key)));
                     }
@@ -2085,6 +2414,7 @@ impl App {
                 });
             });
             crate::widgets::redo_when_stuck_list_changes(ui.ctx(), &list);
+            self.chat.find_lit = None;
             // scrolled up while messages came in: a quiet note over the
             // composer that takes the list down to them
             let at_bottom = list.state.offset.y + list.inner_rect.height() >= list.content_size.y - 24.0;
@@ -2173,14 +2503,22 @@ impl App {
         let now = ui.input(|i| i.time);
         if self.chat.jump_to == Some(id) {
             self.chat.jump_to = None;
-            self.chat.flash = Some((cid, id, now));
+            // gone to by the find box: the words found in it are lit instead
+            let found = self
+                .chat
+                .find_lit
+                .as_ref()
+                .is_some_and(|l| l.cid == cid && l.at.is_some_and(|a| a.0 == id));
+            if !found {
+                self.chat.flash = Some((cid, id, now));
+            }
             ui.scroll_to_rect_animation(
                 row,
                 Some(Align::Center),
                 egui::style::ScrollAnimation::none(),
             );
         }
-        let Some((_, _, at)) = self.chat.flash else {
+        let Some((_, _, at)) = self.chat.flash.filter(|(c, f, _)| *c == cid && *f == id) else {
             return;
         };
         let left = 1.0 - ((now - at) / FLASH_SECS) as f32;
@@ -3367,20 +3705,43 @@ impl App {
                         }
                     });
                 }
+                // the words the find box found in it: (looked for, which of
+                // them it is at, counting the title's first)
+                let found = self
+                    .chat
+                    .find_lit
+                    .as_ref()
+                    .filter(|l| top_level && l.cid == cid && !l.q.is_empty())
+                    .filter(|l| l.ids.contains(&m.id))
+                    .map(|l| (l.q.clone(), l.at.filter(|a| a.0 == m.id).map(|a| a.1)));
+                let mut in_title = 0;
                 if let Some(pt) = shown_post_title(m) {
+                    // (the app's own default title isn't searched)
+                    let spans = match &found {
+                        Some((q, _)) if typed_post_title(m).is_some() => find_spans(&pt, q),
+                        _ => vec![],
+                    };
+                    in_title = spans.len();
+                    let at = found.as_ref().and_then(|f| f.1);
                     ui.horizontal_top(|ui| {
                         let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
                         line_icon(ui.painter(), Icon::Megaphone, r.center(), t.text2);
                         // wrapped: a long one (a web address) widened the
                         // whole conversation past the window
-                        ui.add(egui::Label::new(RichText::new(pt).size(16.0).color(t.text)).wrap());
+                        let mut job =
+                            found_job(&pt, FontId::proportional(16.0), t.text, &spans, at);
+                        job.wrap.max_width = f32::INFINITY;
+                        ui.add(egui::Label::new(job).wrap());
                     });
                 }
                 if editing {
                     self.edit_box(ui, cid, m.id, acts);
                 } else if !m.text.is_empty() {
                     let text = shown_text(m);
-                    if let Some(link) = self.message_text(ui, &text, 14.0) {
+                    let found = found
+                        .as_ref()
+                        .map(|(q, at)| (q.as_str(), at.and_then(|k| k.checked_sub(in_title))));
+                    if let Some(link) = self.message_text_found(ui, &text, 14.0, found) {
                         self.link_pending = Some(link);
                     }
                     if compact && m.edited.is_some() {

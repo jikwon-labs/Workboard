@@ -3814,38 +3814,163 @@ fn files_and_links_say_when_there_are_none() {
     assert!(shown(&h, "No links in this conversation yet"));
 }
 
+/// The words painted on `bg` in the last frame: the find bar's yellow
+/// (`FOUND_BG`) or the orange of the match it is at (`FOUND_AT_BG`).
+fn lit(h: &Ui1, bg: Color32) -> Vec<String> {
+    h.shapes_where(|s| match s {
+        egui::Shape::Text(ts) => Some(
+            ts.galley
+                .job
+                .sections
+                .iter()
+                .filter(|x| x.format.background == bg)
+                .map(|x| ts.galley.job.text[x.byte_range.clone()].to_string())
+                .collect::<Vec<_>>(),
+        ),
+        _ => None,
+    })
+    .concat()
+}
+
+/// The text of the message the channel's find bar is at.
+fn found_at(h: &Ui1) -> Option<String> {
+    let (cid, _, (mid, _)) = h.app.chat.find_at.clone()?;
+    let c = h.app.data.channels.iter().find(|c| c.id == cid)?;
+    Some(c.messages.iter().find(|m| m.id == mid)?.text.clone())
+}
+
 /// "has:file", "has:link" and "from:name" typed in the channel's Find box
-/// narrow its messages.
+/// say which messages it finds; every message keeps showing.
 #[test]
-fn find_in_channel_narrows_by_files_links_and_writer() {
+fn find_in_channel_counts_by_files_links_and_writer() {
+    use crate::app::chat::{FOUND_AT_BG, FOUND_BG};
     let mut h = Ui1::new();
     files_and_links_channel(&mut h);
+    // opened from the panel with the cursor in it
     panel_row(&mut h, "Find in channel");
-    let row = h.rect("Add bookmarks, notes, and more").center().y;
-    let find = h
-        .painted_text("Find in channel")
-        .into_iter()
-        .map(|(r, _)| r.center())
-        .find(|p| (p.y - row).abs() < 12.0)
-        .unwrap();
-    h.click_at(find);
     h.type_text("has:file");
     h.settle();
-    assert!(shown(&h, "Here is the plan") && shown(&h, "From the beach"));
-    assert!(!shown(&h, "Lunch at noon"));
+    assert_eq!(h.app.channel_find.as_deref(), Some("has:file"));
+    assert!(shown(&h, "2/2"), "two messages with files, at the newest");
+    assert_eq!(found_at(&h).as_deref(), Some("Here is the plan"));
+    assert!(
+        shown(&h, "Here is the plan") && shown(&h, "From the beach") && shown(&h, "Lunch at noon"),
+        "nothing is hidden"
+    );
     for _ in 0.."has:file".len() {
         h.key(egui::Key::Backspace);
     }
     h.type_text("has:link spec");
     h.settle();
+    // "spec" twice in the one message with a link: the words, then its address
+    assert!(shown(&h, "2/2"));
     assert!(shown(&h, "The spec is at https://example.com/spec"));
-    assert!(!shown(&h, "Here is the plan") && !shown(&h, "Lunch at noon"));
+    assert!(shown(&h, "Here is the plan") && shown(&h, "Lunch at noon"));
+    assert_eq!(lit(&h, FOUND_AT_BG), ["spec"]);
+    assert_eq!(lit(&h, FOUND_BG), ["spec"]);
     for _ in 0.."has:link spec".len() {
         h.key(egui::Key::Backspace);
     }
     h.type_text("from:nobody");
     h.settle();
-    assert!(!shown(&h, "Here is the plan") && !shown(&h, "Lunch at noon"));
+    assert!(shown(&h, "0/0"));
+    assert!(shown(&h, "Here is the plan") && shown(&h, "Lunch at noon"));
+    assert!(lit(&h, FOUND_AT_BG).is_empty() && lit(&h, FOUND_BG).is_empty());
+}
+
+/// The channel's find bar works as a web browser's: it sits at the right of
+/// the row over the messages, beside the panel. Every message keeps
+/// showing, the words found are lit up (the one it is at in orange) and
+/// "2/3" says where it is. The arrows, Enter and Shift+Enter go from one
+/// match to the next, round past either end, and a match far back in the
+/// conversation (before "Show earlier messages") comes into sight.
+#[test]
+fn find_bar_goes_through_the_matches_like_a_browser() {
+    use crate::app::chat::{FOUND_AT_BG, FOUND_BG};
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let me = h.app.data.me;
+    let now = now_ts();
+    let mut msg = |h: &mut Ui1, text: &str, ts: i64| {
+        crate::app::slack::new_message(h.app.data.new_id(), me, text.into(), ts)
+    };
+    // the first match, more than a page of other messages, then two more
+    let mut msgs = vec![msg(&mut h, "a quokka at the start", now - 1000)];
+    for i in 0..250 {
+        msgs.push(msg(&mut h, &format!("filler {i}"), now - 900 + i));
+    }
+    msgs.push(msg(&mut h, "two quokka sightings, QUOKKA again", now - 10));
+    msgs.push(msg(&mut h, "nothing here", now - 5));
+    let ch = h.app.data.channels.iter_mut().find(|c| c.id == cid);
+    ch.unwrap().messages.extend(msgs);
+    h.settle();
+
+    // at the right of the row with the bookmarks chip, before the panel
+    h.key_with(egui::Key::F, egui::Modifiers::COMMAND);
+    let close = h.rect("Close find");
+    let row = h.rect("Add bookmarks, notes, and more");
+    assert!(
+        (close.center().y - row.center().y).abs() < 6.0,
+        "in the chips' row: {close:?} {row:?}"
+    );
+    // (the panel's words start past its margins and the row's icon)
+    let panel = h.painted_text("Followers").first().expect("the panel").0;
+    assert!(
+        close.right() < panel.left() && close.right() > panel.left() - 80.0,
+        "at the row's right, beside the panel: {close:?} {panel:?}"
+    );
+
+    h.type_text("quokka");
+    h.settle();
+    assert!(shown(&h, "3/3"), "at the newest, where the list is");
+    assert!(
+        shown(&h, "nothing here") && shown(&h, "filler 249"),
+        "nothing is hidden"
+    );
+    assert_eq!(lit(&h, FOUND_AT_BG), ["QUOKKA"], "whatever the case");
+    assert!(lit(&h, FOUND_BG).contains(&"quokka".to_string()));
+
+    // up a match, in the same message
+    h.click("Previous match");
+    assert!(shown(&h, "2/3"));
+    assert_eq!(lit(&h, FOUND_AT_BG), ["quokka"]);
+    assert!(lit(&h, FOUND_BG).contains(&"QUOKKA".to_string()));
+
+    // Shift+Enter (the cursor stayed in the box): up to the first, far back
+    h.key_with(egui::Key::Enter, egui::Modifiers::SHIFT);
+    h.settle();
+    assert!(shown(&h, "1/3"));
+    assert_eq!(found_at(&h).as_deref(), Some("a quokka at the start"));
+    assert!(shown(&h, "a quokka at the start"), "brought into sight");
+    assert_eq!(lit(&h, FOUND_AT_BG), ["quokka"]);
+    assert_eq!(h.app.channel_find.as_deref(), Some("quokka"), "still open");
+
+    // Enter and the down arrow: on to the newest, then round to the first
+    h.key(egui::Key::Enter);
+    h.settle();
+    assert!(shown(&h, "2/3"));
+    assert!(shown(&h, "two quokka sightings, QUOKKA again"));
+    h.click("Next match");
+    assert!(shown(&h, "3/3"));
+    h.click("Next match");
+    h.settle();
+    assert!(shown(&h, "1/3"), "round past the end");
+    assert!(shown(&h, "a quokka at the start"));
+
+    // a match coming in doesn't move it
+    let late = msg(&mut h, "a late quokka", now);
+    let ch = h.app.data.channels.iter_mut().find(|c| c.id == cid);
+    ch.unwrap().messages.push(late);
+    h.settle();
+    assert!(shown(&h, "1/4"));
+    assert_eq!(found_at(&h).as_deref(), Some("a quokka at the start"));
+
+    // × closes it: nothing is lit any more
+    h.click("Close find");
+    h.settle();
+    assert_eq!(h.app.channel_find, None);
+    assert!(lit(&h, FOUND_AT_BG).is_empty() && lit(&h, FOUND_BG).is_empty());
 }
 
 /// Search finds messages by "has:file", "has:link" and "from:name" (thread
@@ -3898,9 +4023,9 @@ fn search_narrows_messages_and_opens_one() {
 }
 
 /// Cmd+F in a conversation opens its find box with the cursor in it: what is
-/// typed next narrows the messages. Pressed again (the box already open, the
-/// cursor elsewhere) it comes back to the box with its words selected, and
-/// Escape there closes it and shows every message again.
+/// typed next is found (every message still showing). Pressed again (the
+/// box already open, the cursor elsewhere) it comes back to the box with its
+/// words selected, and Escape there closes it.
 #[test]
 fn cmd_f_finds_in_the_open_conversation() {
     let shown = |h: &Ui1, text: &str| !h.painted_text(text).is_empty();
@@ -3924,8 +4049,11 @@ fn cmd_f_finds_in_the_open_conversation() {
         "typed into it"
     );
     assert_eq!(h.app.chat.channel.text, "", "not into the composer");
-    assert!(shown(&h, "apples for the team"));
-    assert!(!shown(&h, "bananas tomorrow"), "only what matches");
+    assert_eq!(found_at(&h).as_deref(), Some("apples for the team"));
+    assert!(
+        shown(&h, "bananas tomorrow"),
+        "the rest still shows, as in a browser"
+    );
 
     // again from the composer: back to the box, its words replaced by typing
     h.click("Message composer");
@@ -3933,8 +4061,8 @@ fn cmd_f_finds_in_the_open_conversation() {
     h.type_text("banana");
     assert_eq!(h.app.channel_find.as_deref(), Some("banana"));
     assert_eq!(h.app.chat.channel.text, "");
-    assert!(shown(&h, "bananas tomorrow"));
-    assert!(!shown(&h, "apples for the team"));
+    assert_eq!(found_at(&h).as_deref(), Some("bananas tomorrow"));
+    assert!(shown(&h, "apples for the team"));
 
     // Escape closes it, and the conversation stays open
     h.key(egui::Key::Escape);

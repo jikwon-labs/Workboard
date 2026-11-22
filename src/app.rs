@@ -842,6 +842,13 @@ struct ChatUi {
     /// The message just gone to (conversation, message) and when (egui
     /// time): lit up for a moment.
     flash: Option<(u64, u64, f64)>,
+    /// The match the channel's find box is at: (conversation, the words
+    /// in the box, the match as message and place in it, see
+    /// `chat::Found`). Kept by message, so messages coming in don't move it.
+    find_at: Option<(u64, String, (u64, usize))>,
+    /// While the open conversation's list is drawn: the words its find box
+    /// lights up, in which messages, and the match it is at.
+    find_lit: Option<chat::FindLit>,
     /// Whose profile shows at the right of Chat and the Posts page (in the
     /// thread's place), opened from a name or avatar.
     profile: Option<u64>,

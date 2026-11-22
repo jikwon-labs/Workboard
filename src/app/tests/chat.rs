@@ -1724,3 +1724,33 @@ fn the_bold_heading_font_is_the_bold_face_of_the_collection() {
     assert_eq!(crate::app::bold_face(&b), 6);
     assert_eq!(crate::app::bold_face(b"not a font"), 0);
 }
+
+/// The channel's find box finds its words whatever the case of their
+/// letters, in Korean too, one after another without overlapping, as byte
+/// ranges of the text as written.
+#[test]
+fn find_spans_ignore_case_and_keep_the_texts_places() {
+    use crate::app::chat::find_spans;
+    let text = "Quokka, QUOKKA and quokka";
+    let spans = find_spans(text, "quokka");
+    let words: Vec<&str> = spans.iter().map(|&(a, b)| &text[a..b]).collect();
+    assert_eq!(words, ["Quokka", "QUOKKA", "quokka"]);
+
+    let ko = "오늘 회의는 내일 회의로";
+    let words: Vec<&str> = find_spans(ko, "회의")
+        .iter()
+        .map(|&(a, b)| &ko[a..b])
+        .collect();
+    assert_eq!(words, ["회의", "회의"]);
+
+    // a letter that lowercases to more bytes keeps the text's own places
+    let odd = "İstanbul and istanbul";
+    let words: Vec<&str> = find_spans(odd, "stanbul")
+        .iter()
+        .map(|&(a, b)| &odd[a..b])
+        .collect();
+    assert_eq!(words, ["stanbul", "stanbul"]);
+
+    assert_eq!(find_spans("aaaa", "aa").len(), 2, "not overlapping");
+    assert!(find_spans("anything", "").is_empty());
+}

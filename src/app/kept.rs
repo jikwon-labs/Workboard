@@ -109,7 +109,7 @@ pub(super) struct Kept {
             u64,
             String,
             chat::ChannelPanel,
-            Rc<Vec<(usize, usize)>>,
+            Rc<chat::Found>,
         )>,
     >,
 }

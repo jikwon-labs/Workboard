@@ -29,6 +29,8 @@ pub const T: &[(&str, &str)] = &[
     // side panel
     ("Followers", "팔로워"),
     ("Find in channel", "채널에서 찾기"),
+    ("Previous match", "이전 결과"),
+    ("Next match", "다음 결과"),
     ("Pinned messages", "고정된 메시지"),
     ("Assigned", "할당됨"),
     ("Add bookmarks, notes, and more", "북마크, 메모 등 추가"),

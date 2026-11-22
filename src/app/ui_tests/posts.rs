@@ -928,11 +928,12 @@ fn search_leaves_out_the_default_post_title() {
     assert!(h.has("Lunch is here"), "found by what was written");
     h.key(egui::Key::Escape);
 
-    // nor finding in the channel
+    // nor finding in the channel: the post shows (nothing is hidden), its
+    // title not lit up and the find box not at it
     h.click("general");
     h.app.channel_find = Some(String::new());
     h.settle();
-    // the find box beside the bookmarks chip (a menu row has the same words)
+    // the find box in the bookmarks chip's row (a menu row has the same words)
     let row = h.rect("Add bookmarks, notes, and more").center().y;
     let find = h
         .painted_text("Find in channel")
@@ -944,11 +945,29 @@ fn search_leaves_out_the_default_post_title() {
     h.type_text("date");
     h.settle();
     assert_eq!(h.app.channel_find.as_deref(), Some("date"));
-    assert!(
-        h.painted_text("Lunch is here").is_empty(),
-        "not in the channel's finds: {:?}",
-        h.painted_text("Lunch is here")
-    );
+    assert!(!h.painted_text("Lunch is here").is_empty());
+    let lit_titles = h.shapes_where(|s| match s {
+        egui::Shape::Text(ts) if ts.galley.text() == "Update" => Some(
+            ts.galley
+                .job
+                .sections
+                .iter()
+                .any(|x| x.format.background != Color32::TRANSPARENT),
+        ),
+        _ => None,
+    });
+    assert!(!lit_titles.is_empty(), "the post's title shows");
+    assert!(!lit_titles.contains(&true), "not lit up");
+    let at = h.app.chat.find_at.as_ref().map(|a| (a.2).0);
+    let post = h
+        .app
+        .data
+        .channels
+        .iter()
+        .flat_map(|c| &c.messages)
+        .find(|m| m.text == "Lunch is here")
+        .map(|m| m.id);
+    assert!(post.is_some() && at != post, "not at the post");
 }
 
 /// Logging out of the team (another workspace opens, with the sign-in

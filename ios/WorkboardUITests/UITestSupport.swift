@@ -185,10 +185,15 @@ class WorkboardUITestCase: XCTestCase {
     /// Scrolls the form up until `e` is there (rows below the fold aren't made yet).
     func scrollTo(_ e: XCUIElement, in a: XCUIApplication) {
         var swiped = false
-        // until it is well clear of the comment box at the bottom; once it is
-        // on screen, small drags, so a whole swipe doesn't carry it past the top
-        for i in 0..<24 where !(e.exists && e.isHittable && e.frame.maxY < a.frame.height * 0.7) {
-            if e.exists && e.frame.maxY < a.frame.height * 0.15 {
+        // a row scrolled under the navigation bar still counts as hittable,
+        // but a tap on it lands on the bar (the Repeat menu never opened)
+        let bar = a.navigationBars.firstMatch
+        let top = bar.exists ? bar.frame.maxY : 0
+        // until it is below the bar and well clear of the comment box at the
+        // bottom; once it is on screen, small drags, so a whole swipe doesn't
+        // carry it past the top
+        for i in 0..<24 where !(e.exists && e.isHittable && e.frame.minY >= top && e.frame.maxY < a.frame.height * 0.7) {
+            if e.exists && (e.frame.minY < top || e.frame.maxY < a.frame.height * 0.15) {
                 // above: back down a little
                 let from = a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
                 from.press(forDuration: 0.05, thenDragTo: a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)))

@@ -131,8 +131,18 @@ final class AccountUITests: WorkboardUITestCase {
         let field = a.textFields["linkCodeField"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         XCTAssertTrue(a.buttons["scanButton"].exists, "the QR code can be scanned from here too")
-        type(field, "zzzzzz")
-        XCTAssertEqual(field.value as? String, "ZZZZZZ", "typed in capitals")
+        // a key at a time, as a keyboard sends them: each small letter shows
+        // as a capital. (typeText sends the whole word in one go, faster than
+        // SwiftUI gives a change made while typing back to the field, and the
+        // last letter could stay small on screen though the code was right.)
+        field.tap()
+        for n in 1...6 {
+            field.typeText("z")
+            let want = String(repeating: "Z", count: n)
+            let until = Date().addingTimeInterval(5)
+            while field.value as? String != want && Date() < until { usleep(50_000) }
+            XCTAssertEqual(field.value as? String, want, "typed in capitals")
+        }
         a.buttons["linkSignInButton"].tap()
         waitLabel(a.staticTexts["signInError"], contains: "That code doesn't work")
 

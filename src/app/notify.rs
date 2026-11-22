@@ -95,6 +95,13 @@ fn add(out: &mut Vec<(i64, Note)>, keys: &mut HashSet<String>, ts: i64, note: No
     }
 }
 
+/// Whether a notice with this key is still worth making: not one already
+/// made (`keys`), nor one known already (`skip`), which would be thrown
+/// away. Its text (names, previews) is only made when it is.
+fn wants(keys: &HashSet<String>, skip: &HashSet<String>, key: &str) -> bool {
+    !keys.contains(key) && !skip.contains(key)
+}
+
 /// A message's text cut to banner length (a picture, video or file says
 /// which it is).
 fn preview(m: &Message) -> String {
@@ -147,6 +154,18 @@ impl App {
         n: &NotifySettings,
         every_task: bool,
     ) -> Vec<(i64, Note)> {
+        self.notify_candidates_but(n, every_task, &HashSet::new())
+    }
+
+    /// `notify_candidates` without the ones whose key is in `skip` (known
+    /// already): after the first look most things are, and making their
+    /// text for every message on every change was most of the work.
+    pub(super) fn notify_candidates_but(
+        &self,
+        n: &NotifySettings,
+        every_task: bool,
+        skip: &HashSet<String>,
+    ) -> Vec<(i64, Note)> {
         let me = self.data.me;
         let mut out = vec![];
         let mut keys = HashSet::new();
@@ -165,7 +184,11 @@ impl App {
             for m in &c.messages {
                 let key = format!("chat:{}:{}", c.id, m.id);
                 // the channel's copy of a thread reply: the reply itself is told
-                if m.author != me && m.imported.is_none() && m.thread_of.is_none() {
+                if m.author != me
+                    && m.imported.is_none()
+                    && m.thread_of.is_none()
+                    && wants(&keys, skip, &key)
+                {
                     let who = self.who(m.author);
                     let target = format!("chat:{}", c.id);
                     if m.call.is_some() {
@@ -238,13 +261,17 @@ impl App {
                         .iter()
                         .filter(|r| r.author != me && r.imported.is_none())
                     {
+                        let key = format!("chat:{}:{}", c.id, r.id);
+                        if !wants(&keys, skip, &key) {
+                            continue;
+                        }
                         if let Some(word) = self.keyword_hit(r, &keywords) {
                             add(
                                 &mut out,
                                 &mut keys,
                                 r.ts,
                                 Note {
-                                    key: format!("chat:{}:{}", c.id, r.id),
+                                    key,
                                     kind: Kind::Mention,
                                     title: trf!(
                                         "{} said \"{}\" in {}",
@@ -266,6 +293,9 @@ impl App {
                         .filter(|r| r.author != me && r.imported.is_none())
                     {
                         let key = format!("chat:{}:{}", c.id, r.id);
+                        if !wants(&keys, skip, &key) {
+                            continue;
+                        }
                         add(
                             &mut out,
                             &mut keys,
@@ -290,6 +320,9 @@ impl App {
                         for re in &msg.reactions {
                             for u in re.users.iter().filter(|u| **u != me) {
                                 let key = format!("react:{}:{}:{}:{}", c.id, msg.id, re.emoji, u);
+                                if !wants(&keys, skip, &key) {
+                                    continue;
+                                }
                                 let target = thread
                                     .map(|t| format!("chat:{}:{}", c.id, t))
                                     .unwrap_or_else(|| format!("chat:{}", c.id));
@@ -345,6 +378,9 @@ impl App {
                     )
                 }
             };
+            if !wants(&keys, skip, &key) {
+                continue;
+            }
             let who = self.who(it.author);
             let task = match it.src {
                 InboxSrc::Task(id) => self.task(id),
@@ -425,13 +461,17 @@ impl App {
                 .iter()
                 .filter(|m| m.id != me && !m.invited)
             {
+                let key = format!("member:{}", m.id);
+                if !wants(&keys, skip, &key) {
+                    continue;
+                }
                 let title = trf!("{} joined {}", m.shown(), self.data.workspace);
                 add(
                     &mut out,
                     &mut keys,
                     i64::MAX,
                     Note {
-                        key: format!("member:{}", m.id),
+                        key,
                         kind: Kind::Member,
                         title,
                         body: tr("Say hello in a direct message").into(),
@@ -469,7 +509,8 @@ impl App {
                             // which (as before forms were told apart): any of mine
                             None => mine.iter().any(|f| f.name == name),
                         };
-                        if to_me {
+                        let key = format!("form:{}", t.id);
+                        if to_me && wants(&keys, skip, &key) {
                             let name = if name.trim().is_empty() {
                                 tr("Untitled form")
                             } else {
@@ -482,7 +523,7 @@ impl App {
                                 &mut keys,
                                 a.ts,
                                 Note {
-                                    key: format!("form:{}", t.id),
+                                    key,
                                     kind: Kind::Form,
                                     title,
                                     body,
@@ -520,11 +561,19 @@ impl App {
     pub(super) fn notify_scan(&mut self) {
         let now = now_ts();
         let mine = self.data.extra.notify.clone();
-        let found = self.notify_candidates(&mine, false);
+        // what is known already would be passed over below: not made at all
+        // (the first look remembers everything there is)
+        let empty = HashSet::new();
+        let known = if self.notify_rt.seeded {
+            &self.notify_rt.seen
+        } else {
+            &empty
+        };
+        let found = self.notify_candidates_but(&mine, false, known);
         // every key, whatever the settings and watched tasks: turning a kind
         // or a task's updates on later must not bring back old things as news
         let all: Vec<String> = self
-            .notify_candidates(&NotifySettings::everything(), true)
+            .notify_candidates_but(&NotifySettings::everything(), true, known)
             .into_iter()
             .map(|(_, n)| n.key)
             .collect();

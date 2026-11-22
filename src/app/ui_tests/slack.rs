@@ -259,8 +259,18 @@ fn a_slack_export_is_read_while_the_window_keeps_drawing() {
     let zip = root.join("slack.zip");
     crate::app::slack::zip_folder(&ex, &zip, false);
     crate::app::slack::PICKED.with(|p| *p.borrow_mut() = Some(zip));
+    // the export isn't read until the test lets it: meanwhile the window
+    // keeps drawing and says it's being read
+    let gate = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    crate::app::slack::READ_GATE.with(|g| *g.borrow_mut() = Some(gate.clone()));
     h.click("Import from Slack");
-    // the export is read on its own thread; frames alone open the dialog
+    for _ in 0..3 {
+        h.settle();
+        assert!(h.has("Reading the Slack export..."));
+        assert!(h.app.modal.is_none());
+    }
+    gate.store(true, std::sync::atomic::Ordering::SeqCst);
+    // read on its own thread; frames alone open the dialog
     let started = std::time::Instant::now();
     while !matches!(h.app.modal, Some(Modal::SlackImport(_))) {
         assert!(
@@ -270,6 +280,8 @@ fn a_slack_export_is_read_while_the_window_keeps_drawing() {
         std::thread::sleep(std::time::Duration::from_millis(20));
         h.settle();
     }
+    // the frame that opened it may have been drawn before it did
+    h.settle();
     // the "Reading" toast goes once the dialog is up
     assert!(!h.has("Reading the Slack export..."));
     assert!(h.has("Import"));

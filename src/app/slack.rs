@@ -592,6 +592,9 @@ fn reading() -> &'static str {
 thread_local! {
     /// What the file picker "chooses" in tests (the real one is a window).
     pub(super) static PICKED: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+    /// In tests: when set, an export is read only once this turns true, so
+    /// a test can see the window keep drawing while it is read.
+    pub(super) static READ_GATE: std::cell::RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn pick_export() -> Option<PathBuf> {
@@ -761,7 +764,16 @@ impl App {
         if self.slack_load.is_none() {
             let (tx, rx) = std::sync::mpsc::channel();
             let zip = zip.to_path_buf();
+            #[cfg(test)]
+            let gate = READ_GATE.with(|g| g.borrow().clone());
             std::thread::spawn(move || {
+                #[cfg(test)]
+                while gate
+                    .as_ref()
+                    .is_some_and(|g| !g.load(std::sync::atomic::Ordering::SeqCst))
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
                 let _ = tx.send(read_zip(&zip));
             });
             self.slack_load = Some(SlackLoad(rx));

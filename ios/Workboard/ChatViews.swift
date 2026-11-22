@@ -1396,8 +1396,12 @@ private struct SelectingField: View {
                     wrapped = false
                 } else if new.isEmpty {
                     selection = nil
-                } else if new.count - old.count > 1 {
-                    // filled in from outside (a name from the @ list): go on after it
+                } else if new.count - old.count > 1 && new.last != old.last {
+                    // filled in from outside (a name from the @ list, which
+                    // replaces the end and ends in a space): go on after it.
+                    // Several letters typed at once in the middle (between
+                    // the marks of the Bold button) keep the end as it was
+                    // and the cursor where it is.
                     selection = TextSelection(insertionPoint: new.endIndex)
                 }
             }

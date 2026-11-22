@@ -63,9 +63,9 @@ impl Hub {
                 let deletes: std::collections::HashSet<u64> =
                     wb_sync::json::meta_of(&data).tombs.into_keys().collect();
                 let written = spaces::written_marks_within(c, &deletes);
-                let changed = wb_sync::merge(c, &[data]);
+                // (the server keeps no fingerprints: make_shareable empties them)
+                let changed = wb_sync::merge_unhashed(c, &[data]);
                 if changed {
-                    // the merge's fingerprints are this server's own
                     wb_sync::make_shareable(c);
                 }
                 // what was turned down goes back to its sender with everyone's update

@@ -3,7 +3,7 @@
 // WorkboardKit.
 //
 // Launch arguments, for UI tests and screenshots (all optional):
-//   -wbReset YES         start from nothing (removes this app's saved copy and token)
+//   -wbReset YES         start from nothing (removes this app's saved copy, token and drafts)
 //   -wbServer ws://...   server address
 //   -wbMe 1              who I am (servers without sign-in)
 //   -wbOpen channel:301  a place (inbox, today, upcoming, chats, docs,
@@ -41,6 +41,8 @@ struct WorkboardApp: App {
             if let s = args.string(forKey: "wbServer") { tokens.setToken(nil, for: s) }
             for w in storage.loadSaved() { tokens.setToken(nil, for: w.server) }
             try? FileManager.default.removeItem(at: storage.folder)
+            // unsent messages are kept apart from the saved copy
+            ChatDrafts.removeAll()
         }
         // the saved copy is read after the first frame (openSaved), except
         // when launch arguments change things that need it at once

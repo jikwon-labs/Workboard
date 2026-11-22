@@ -78,6 +78,10 @@ final class ChatFormatUITests: WorkboardUITestCase {
         let bold = a.buttons["format-Bold"]
         XCTAssertTrue(bold.waitForExistence(timeout: 5), "the formatting buttons show")
         bold.tap()
+        // the marks go in on the next update: typing before then went in
+        // ahead of them
+        let marks = expectation(for: NSPredicate(format: "value == '****'"), evaluatedWith: box)
+        wait(for: [marks], timeout: 5)
         let word = "loud\(Int.random(in: 1000...9999))"
         box.typeText(word)
         XCTAssertEqual(box.value as? String, "**\(word)**", "typing goes between the marks")

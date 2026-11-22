@@ -95,6 +95,13 @@ enum ChatDrafts {
         UserDefaults.standard.string(forKey: prefix(server) + key) ?? ""
     }
 
+    /// Forget every draft on every server (starting from nothing).
+    static func removeAll() {
+        for k in UserDefaults.standard.dictionaryRepresentation().keys where k.hasPrefix("chatDraft|") {
+            UserDefaults.standard.removeObject(forKey: k)
+        }
+    }
+
     /// Every draft on `server`: (channel, thread or nil, text).
     static func all(server: String) -> [(UInt64, UInt64?, String)] {
         let p = prefix(server)

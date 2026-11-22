@@ -202,19 +202,36 @@ extension Sync {
 
     /// Fingerprint of an item's own fields (not the items inside it, not personal fields).
     static func ownHash(_ obj: [String: JSON]) -> UInt64 {
-        var own: [String: JSON] = [:]
+        // the fingerprint of an object of these fields, fed field by field
+        // (JSON+Hash.swift) rather than built and written out
+        var keys: [String] = []
+        keys.reserveCapacity(obj.count)
+        var loose: [String: JSON] = [:]
         for (k, v) in obj {
             if localKeys.contains(k) { continue }
             if let a = v.array, a.isEmpty { continue }
             if isIdArray(v) {
                 // entries without an id are the item's own
-                let loose = looseEntries(v)
-                if !loose.isEmpty { own[k] = .array(loose) }
+                let l = looseEntries(v)
+                if !l.isEmpty {
+                    loose[k] = .array(l)
+                    keys.append(k)
+                }
                 continue
             }
-            own[k] = v
+            keys.append(k)
         }
-        return fnv(JSON.object(own).serialized().utf8)
+        keys.sort()
+        var f = FNV()
+        f.byte(0x7B)
+        for (n, k) in keys.enumerated() {
+            if n > 0 { f.byte(0x2C) }
+            f.string(k)
+            f.byte(0x3A)
+            f.json(loose[k] ?? obj[k]!)
+        }
+        f.byte(0x7D)
+        return f.h
     }
 
     /// `parent` is the item this array sits in (nil at the top). With

@@ -97,7 +97,7 @@ extension Sync {
         return p
     }
 
-    static func partHash(_ v: JSON) -> UInt32 { UInt32(truncatingIfNeeded: fnv(v.serialized().utf8)) }
+    static func partHash(_ v: JSON) -> UInt32 { UInt32(truncatingIfNeeded: v.fingerprint) }
 
     /// Every shared item: id, the item it sits in, its fields.
     static func visit(_ data: JSON, _ f: (UInt64, UInt64?, [String: JSON]) -> Void) {
@@ -239,9 +239,9 @@ extension Sync {
     /// there is (wb_sync::value_hashes).
     static func valueHashes(_ data: JSON) -> [String: UInt64] {
         var out: [String: UInt64] = [:]
-        for p in sharedValues { out[p] = fnv((data.at(p) ?? .null).serialized().utf8) }
+        for p in sharedValues { out[p] = (data.at(p) ?? .null).fingerprint }
         for p in sharedMaps {
-            for (k, v) in data.at(p)?.object ?? [:] { out[mapPart(p, k)] = fnv(v.serialized().utf8) }
+            for (k, v) in data.at(p)?.object ?? [:] { out[mapPart(p, k)] = v.fingerprint }
         }
         return out
     }
@@ -250,7 +250,7 @@ extension Sync {
     /// decision: noted as saved already, without a stamp, so `stamp`
     /// doesn't take it as set now (wb_sync::carry_map_entry).
     public static func carryMapEntry(_ meta: inout SyncMeta, _ path: String, _ key: String, _ value: JSON) {
-        meta.valueHashes[mapPart(path, key)] = fnv(value.serialized().utf8)
+        meta.valueHashes[mapPart(path, key)] = value.fingerprint
     }
 
     /// After opening a saved copy: a shared setting or shared map entry with
@@ -268,8 +268,9 @@ extension Sync {
     /// `now` is in milliseconds. A new stamp is always later than the item's
     /// last one, so an edit made after seeing a version beats that version
     /// even when this device's clock runs behind.
-    public static func stamp(_ data: JSON, _ meta: inout SyncMeta, now: Int64) {
-        let cur = fingerprints(data)
+    public static func stamp(_ data: JSON, _ meta: inout SyncMeta, now: Int64, cache: FingerprintCache? = nil) {
+        let pr = prints(data, cache)
+        let cur = pr.hashes
         if meta.v < 1 {
             // fingerprints saved before an item's place counted: carry over the
             // unchanged ones so updating the app doesn't mark everything as edited
@@ -279,7 +280,7 @@ extension Sync {
             meta.v = 1
         }
         // places: an item now in another item than when last saved moved there
-        let places = parentsOf(data)
+        let places = pr.parents
         for (id, p) in places {
             if let old = meta.parents[id], old != p {
                 meta.moved[id] = meta.moved[id].map { max(now, $0 + 1) } ?? now
@@ -288,7 +289,7 @@ extension Sync {
         meta.parents = places
         shrinkMoved(&meta.moved, data)
         meta.v = metaV
-        let parts = partHashes(data)
+        let parts = pr.parts
         upgradeSplitHashes(&meta, data, parts)
         for (id, h) in cur {
             let next = meta.stamps[id].map { max(now, $0 + 1) } ?? now

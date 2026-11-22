@@ -77,7 +77,38 @@ extension Sync {
             guard let t = tombs[id] else { return true }
             return revived[id].map { $0 > t } ?? false
         }
+
+        /// Items of this device's copy whose subtree nothing else touches
+        /// stay as they are (see `quickMerge`); these are the ones that
+        /// can't: an item another copy has, one that is deleted, and every
+        /// item they sit in.
+        var dirty = Set<UInt64>()
+        var quick = false
+        /// This device's move times, when it keeps them.
+        var localMoved: [UInt64: Int64]?
+
+        /// An item of this device's copy kept as it is, with everything
+        /// inside it: its bookkeeping goes out as it was.
+        func keep(_ item: JSON) {
+            guard let id = idOf(item), let obj = item.object else { return }
+            out[id] = stamps[0][id] ?? 0
+            if let m = localMoved?[id], m > 0 { outMoved[id] = m }
+            if let f = fields.first?[id] { outFields[id] = f }
+            for (_, child) in obj where isIdArray(child) {
+                for c in child.array ?? [] { keep(c) }
+            }
+        }
     }
+
+    /// Items only this device's copy has, and nothing inside which another
+    /// copy has or deletes, are kept as they are instead of being merged
+    /// field by field: a delta from the server holds a few items, and the
+    /// rest of the copy needn't be taken apart for it. The result is the
+    /// same as the full merge's but for how the bookkeeping of those items
+    /// is written (field stamps equal to the item's own aren't dropped) and
+    /// the order of their inner items, which the full merge sorts by time.
+    /// Off in tests that compare the two.
+    nonisolated(unsafe) static var quickMerge = true
 
     /// Every item with an id in one source, with the item it sits in.
     private static func collect(_ src: Int, _ arr: [JSON], parent: UInt64?, _ out: inout [UInt64: [(src: Int, parent: UInt64?, value: JSON)]], _ order: inout [UInt64]) {
@@ -269,6 +300,11 @@ extension Sync {
             if !cx.alive(id) { continue }
             if parent != nil, let h = cx.home[id], h != parent { continue }
             guard let list = cx.cands[id], !list.isEmpty else { continue }
+            if cx.quick, list.count == 1, list[0].src == 0, !cx.dirty.contains(id) {
+                cx.keep(list[0].value)
+                out.append(list[0].value)
+                continue
+            }
             // newest own fields win; on a tie this device's version stays
             var best = list[0]
             var bestStamp = cx.stamps[best.src][id] ?? 0
@@ -334,7 +370,7 @@ extension Sync {
     /// Merge other copies into this one. Returns true when anything other
     /// than the bookkeeping changed.
     @discardableResult
-    public static func merge(_ local: inout JSON, _ others: [JSON]) -> Bool {
+    public static func merge(_ local: inout JSON, _ others: [JSON], cache: FingerprintCache? = nil) -> Bool {
         // copies from before activity had ids: give their entries the same ids
         // here as everywhere else, or their comments would not be matched up
         fillActivityIds(&local)
@@ -370,6 +406,19 @@ extension Sync {
         let keeps = { (m: SyncMeta) -> [UInt64: Int64]? in m.v >= 2 ? m.moved : nil }
         let cx = Ctx(stamps: [lmeta.stamps] + metas.map(\.stamps), moved: [keeps(lmeta)] + metas.map(keeps), tombs: tombs, revived: revived, all: all)
         cx.fields = [lmeta.fields] + metas.map(\.fields)
+        if quickMerge {
+            cx.quick = true
+            cx.localMoved = keeps(lmeta)
+            // where each item of this copy sits in it
+            var up: [UInt64: UInt64] = [:]
+            for (id, list) in all {
+                if let l = list.first(where: { $0.src == 0 }), let p = l.parent { up[id] = p }
+            }
+            for (id, list) in all where list.contains(where: { $0.src != 0 }) || !cx.alive(id) {
+                var at: UInt64? = id
+                while let a = at, cx.dirty.insert(a).inserted { at = up[a] }
+            }
+        }
         var merged: [(String, JSON)] = []
         for (path, sources) in perPath {
             // this device's entries without an id stay as they are
@@ -398,9 +447,10 @@ extension Sync {
         lmeta.moved = cx.outMoved
         shrinkMoved(&lmeta.moved, local)
         lmeta.fields = cx.outFields
-        lmeta.hashes = fingerprints(local)
-        lmeta.fieldHashes = partHashes(local)
-        lmeta.parents = parentsOf(local)
+        let pr = prints(local, cache)
+        lmeta.hashes = pr.hashes
+        lmeta.fieldHashes = pr.parts
+        lmeta.parents = pr.parents
         lmeta.valueHashes = valueHashes(local)
         lmeta.v = metaV
         local.set("extra.sync", lmeta.json)

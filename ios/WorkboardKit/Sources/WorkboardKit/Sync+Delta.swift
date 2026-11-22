@@ -10,9 +10,9 @@ extension Sync {
     /// the server has: changed items inside the items they sit in, their
     /// bookkeeping, new deletes and restores, changed shared settings.
     /// Merging it is the same as merging the whole copy. nil when nothing changed.
-    public static func delta(since: SyncSummary, _ data: JSON) -> JSON? {
-        let cur = fingerprints(data)
-        let meta = SyncMeta(of: data)
+    public static func delta(since: SyncSummary, _ data: JSON, cache: FingerprintCache? = nil, meta known: SyncMeta? = nil) -> JSON? {
+        let cur = cache.map { $0.update(data); return $0.hashes } ?? fingerprints(data)
+        let meta = known ?? SyncMeta(of: data)
         let changed = Set(cur.filter { id, h in
             since.hashes[id] != h || since.stamps[id] != meta.stamps[id] || since.fields[id] != meta.fields[id] || since.moved[id] != meta.moved[id]
         }.keys)

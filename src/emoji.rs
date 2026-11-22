@@ -195,8 +195,9 @@ struct Hit {
 fn find(galley: &Galley) -> Vec<Hit> {
     let mut out = Vec::new();
     for (row_i, row) in galley.rows.iter().enumerate() {
-        // quick skip: no emoji starts below U+00A9
-        if !row.glyphs.iter().any(|g| g.chr as u32 >= 0xA9) {
+        // quick skip: a row without a character only an emoji can hold
+        // (every row of Korean text used to get past a "below U+00A9" check)
+        if !row.glyphs.iter().any(|g| may_be_emoji(g.chr)) {
             continue;
         }
         let chars: Vec<char> = row.glyphs.iter().map(|g| g.chr).collect();
@@ -282,6 +283,13 @@ pub(crate) fn emoji_len(s: &[char]) -> Option<usize> {
     }
 }
 
+/// A character without which no emoji can be in a row (see `emoji_len`):
+/// one shown as emoji on its own, or the marks that make the one before it
+/// an emoji or a keycap.
+fn may_be_emoji(c: char) -> bool {
+    c == VS16 || c == KEYCAP || ALWAYS_EMOJI.contains(&c) || is_emoji_presentation(c)
+}
+
 fn is_regional(c: char) -> bool {
     ('\u{1F1E6}'..='\u{1F1FF}').contains(&c)
 }
@@ -294,7 +302,8 @@ const ALWAYS_EMOJI: [char; 2] = ['\u{2764}', '\u{270C}'];
 /// Emoji_Presentation, emoji-data.txt 16.0).
 fn is_emoji_presentation(c: char) -> bool {
     let c = c as u32;
-    if c < 0x231A {
+    // (Korean and the rest of the planes' letters fall between)
+    if c < 0x231A || (c > 0x2B55 && c < 0x1F004) {
         return false;
     }
     EMOJI_PRESENTATION
@@ -370,6 +379,33 @@ mod tests {
             Some(2),
             "a symbol asked for as emoji"
         );
+    }
+
+    #[test]
+    fn the_quick_check_lets_every_emoji_through() {
+        // whatever `emoji_len` finds starts or ends with a character the
+        // row check looks for
+        for s in [
+            "\u{1F44D}",
+            "\u{2764}",
+            "\u{2764}\u{FE0F}",
+            "\u{1F1F0}\u{1F1F7}",
+            "1\u{FE0F}\u{20E3}",
+            "#\u{20E3}",
+            "\u{21A9}\u{FE0F}",
+            "\u{231A}",
+            "\u{2B55}",
+            "\u{1F004}",
+        ] {
+            assert!(s.chars().any(may_be_emoji), "{s:?}");
+        }
+        for s in ["\u{D55C}\u{AE00} \u{3131}", "\u{2605}\u{2193}", "abc"] {
+            assert!(!s.chars().any(may_be_emoji), "{s:?}");
+        }
+        // nothing in the table between the planes' letters
+        assert!(!EMOJI_PRESENTATION
+            .iter()
+            .any(|&(a, b)| b > 0x2B55 && a < 0x1F004));
     }
 
     #[test]

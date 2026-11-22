@@ -199,6 +199,16 @@ extension Edits {
 extension SyncClient {
     /// The server sent my state: take it in and send back what this iPhone
     /// has that is newer (on a tie the server's stays).
+    /// The server sent only what changed in my reading state (mine_part):
+    /// the rest is as my devices last agreed, so the whole of it is that
+    /// with this in it (on a tie the server's stays).
+    func takeMinePart(_ part: JSON) {
+        guard let d = data else { return }
+        var theirs = part
+        Mine.merge(&theirs, d.at("extra.mine_sync") ?? [:])
+        takeMine(theirs)
+    }
+
     func takeMine(_ theirs: JSON) {
         mineOK = true
         guard var d = data else { return }

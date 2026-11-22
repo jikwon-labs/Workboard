@@ -145,6 +145,7 @@ extension SyncClient {
         view = data.map { WorkspaceView($0) } ?? .empty
         viewSource = data
         rev = 0
+        forgetServerCopy()
         settings = kept
         trash = place.loadTrash()
         storage.save(trash: trash)

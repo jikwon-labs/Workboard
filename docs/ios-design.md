@@ -158,6 +158,7 @@ ASC_ISSUER_ID=<발급자 ID, 같은 화면 위쪽>
 - 다시 연결되면 `welcome` 의 정본을 먼저 merge 한 뒤 사본 전체를 push 한다. 그래서 합치기를 안 하는 가짜 서버에서도 두 기기의 오프라인 편집이 모두 남는다(테스트 `testOfflineEditsFromTwoDevicesBothSurvive`). 실제 서버는 merge 를 하므로 더 안전하다.
 - 같은 항목을 둘이 오프라인으로 고쳐도 서로 다른 필드면 둘 다 남고, 같은 필드는 나중 변경이 이긴다(필드별 변경 시각 `SyncMeta.fields`, 맥 앱과 같은 규칙). 메시지, 댓글, 반응, 타이머는 각각 남는다.
 - 서버가 `deltas` 를 말하면 welcome 뒤로는 바뀐 부분만 올리고(`Sync.delta`, `SyncSummary`) `delta` 메시지로 받는다. `rev` 를 놓치면 `resync` 로 전체를 다시 받는다.
+- 앱이 켜진 채 다시 붙으면(잠깐 백그라운드, 네트워크 변경) hello 에 `have: {epoch, rev}` 를 넣는다. 같은 실행의 서버면 welcome 이 `snapshot` 없이 `since` 와 `part`(그 뒤로 바뀐 부분)로 답하고, 앱은 서버가 보낸 것만으로 만든 요약(`serverSummary`, 자기 push 는 뺀 것)에 `part` 를 합쳐 다음 push 의 기준으로 삼는다. 서버가 모르면 전체 사본이 온다. 다른 작업공간으로 바꾸거나 작업공간이 지워지면 이 요약을 잊는다(`forgetServerCopy`). 읽음 상태는 hello 의 `mine_parts` 로 바뀐 부분만(`mine_part`) 받는다(`takeMinePart`).
 
 ## 로그인 (실제 서버 프로토콜)
 
@@ -187,7 +188,7 @@ hello {device, tag?, token?, invite?, claim?, email?, password?, new_password?, 
 ### 서버 답
 
 ```
-welcome {tag, snapshot: {...} | null, rev, member, role: "member" | "admin" | "owner", token?, email?}
+welcome {tag, snapshot: {...} | null, rev, member, role: "member" | "admin" | "owner", token?, email?, deltas?, epoch?, since?, part?}
 error   {message, code?}
 ```
 

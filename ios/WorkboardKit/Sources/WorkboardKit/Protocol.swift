@@ -4,10 +4,15 @@
 //
 //   app -> server  hello        {device, tag?, token?, invite?, claim?,
 //                                email?, password?, new_password?, reset_code?,
-//                                link_code?, app?, sync?}   (app version and sync format;
-//                                the server takes no pushes from apps with
-//                                sync below wb_net::OLDEST_SYNC or none)
-//   server -> app  welcome      {tag, snapshot|null, rev, member, role, token?, email?}
+//                                link_code?, app?, sync?, deltas?, have?, mine_parts?}
+//                                (app version and sync format; the server takes no
+//                                pushes from apps with sync below wb_net::OLDEST_SYNC
+//                                or none. have: {epoch, rev} of the copy a reconnect
+//                                has from this run of the server)
+//   server -> app  welcome      {tag, snapshot|null, rev, member, role, token?, email?,
+//                                deltas?, epoch?, since?, part?}   (epoch: this run of
+//                                the server; since + part answer have: no snapshot,
+//                                the copy at revision since stands with part merged in)
 //   app -> server  push         {data}   (whole, or only what changed: Sync.delta)
 //   server -> all  update       {data, rev, hidden?}   (hidden also in welcome: ids
 //                                this person may not see; dropped without tombstones)
@@ -23,6 +28,8 @@
 //                                welcome and when another device of mine changes it,
 //                                only to my connections. The app sends it only after
 //                                hearing it on that connection.)
+//   server -> app  mine_part    {data}   (only what changed in it, to apps whose
+//                                hello said mine_parts)
 //   app -> server  push_token   {token, platform: "ios", env}   (ignored by servers that don't know it)
 //   app -> server  push_token   {token: ""}  stops notifications to this device
 //                                (sent on sign-out and before leaving for another server)
@@ -59,6 +66,18 @@
 
 import Foundation
 
+/// The team's copy an app has from a server already (wb_net::Have): from
+/// which run of it (Welcome.epoch) and at which revision.
+public struct Have: Equatable, Sendable {
+    public var epoch: Int64
+    public var rev: Int64
+
+    public init(epoch: Int64, rev: Int64) {
+        self.epoch = epoch
+        self.rev = rev
+    }
+}
+
 /// What the first message says about who this device is.
 public struct Hello: Equatable, Sendable {
     public var device: String
@@ -78,6 +97,11 @@ public struct Hello: Equatable, Sendable {
     public var sync: UInt64?
     /// This app takes `delta` messages.
     public var deltas = false
+    /// The copy a reconnect has from this run of the server (wb_net::Have):
+    /// the server may answer with only what changed since.
+    public var have: Have?
+    /// This app takes `mine_part` messages.
+    public var mineParts = false
 
     public init(device: String, tag: UInt64? = nil, token: String? = nil, invite: String? = nil, claim: UInt64? = nil,
                 email: String? = nil, password: String? = nil, newPassword: String? = nil, resetCode: String? = nil,
@@ -150,6 +174,8 @@ public enum ClientMessage: Equatable, Sendable {
             put("app", h.app)
             if let v = h.sync { o["sync"] = .id(v) }
             if h.deltas { o["deltas"] = true }
+            if let have = h.have { o["have"] = ["epoch": .int(have.epoch), "rev": .int(have.rev)] }
+            if h.mineParts { o["mine_parts"] = true }
             return .object(o)
         case let .push(data):
             return ["type": "push", "data": data]
@@ -210,6 +236,8 @@ public enum ClientMessage: Equatable, Sendable {
                           app: j["app"]?.string, sync: j["sync"]?.uint)
             h.deltas = j["deltas"]?.bool ?? false
             h.linkCode = j["link_code"]?.string
+            if let e = j["have"]?["epoch"]?.int, let r = j["have"]?["rev"]?.int { h.have = Have(epoch: e, rev: r) }
+            h.mineParts = j["mine_parts"]?.bool ?? false
             self = .hello(h)
         case "push":
             guard let s = j["data"], s.object != nil else { return nil }
@@ -282,6 +310,13 @@ public struct Welcome: Equatable, Sendable {
     public var hidden: [UInt64]
     /// The server sends deltas and takes pushes of only what changed.
     public var deltas = false
+    /// This run of the server (sent back in Hello.have); nil from servers
+    /// from before it.
+    public var epoch: Int64?
+    /// The answer to Hello.have: no snapshot; the copy at this revision
+    /// stands, with `part` (as a delta has it) merged in.
+    public var since: Int64?
+    public var part: JSON?
 
     public init(tag: UInt64, snapshot: JSON?, rev: Int64, member: UInt64? = nil, role: String? = nil, token: String? = nil, email: String? = nil, hidden: [UInt64] = []) {
         self.hidden = hidden
@@ -322,6 +357,8 @@ public enum ServerMessage: Equatable, Sendable {
     /// My reading state and notification choices as the server keeps them
     /// (after welcome, and when another device of mine changed them).
     case mine(JSON)
+    /// Only what changed in them (to apps whose hello said mine_parts).
+    case minePart(JSON)
     /// The webhooks (owners and admins) and slash commands.
     case integrationList(hooks: [JSON], commands: [JSON])
     case ping
@@ -343,6 +380,9 @@ public enum ServerMessage: Equatable, Sendable {
             if let e = w.email { o["email"] = .string(e) }
             if !w.hidden.isEmpty { o["hidden"] = .array(w.hidden.map(JSON.id)) }
             if w.deltas { o["deltas"] = true }
+            if let e = w.epoch { o["epoch"] = .int(e) }
+            if let s = w.since { o["since"] = .int(s) }
+            if let p = w.part { o["part"] = p }
             return .object(o)
         case let .update(data, rev, hidden):
             var o: [String: JSON] = ["type": "update", "data": data, "rev": .int(rev)]
@@ -379,6 +419,8 @@ public enum ServerMessage: Equatable, Sendable {
             return ["type": "scheduled", "items": .array(items)]
         case let .mine(data):
             return ["type": "mine", "data": data]
+        case let .minePart(data):
+            return ["type": "mine_part", "data": data]
         case let .integrationList(hooks, commands):
             return ["type": "integration_list", "hooks": .array(hooks), "commands": .array(commands)]
         case .ping: return ["type": "ping"]
@@ -408,6 +450,9 @@ public enum ServerMessage: Equatable, Sendable {
                             member: j["member"]?.uint, role: j["role"]?.string, token: j["token"]?.string, email: j["email"]?.string,
                             hidden: (j["hidden"]?.array ?? []).compactMap(\.uint))
             w.deltas = j["deltas"]?.bool ?? false
+            w.epoch = j["epoch"]?.int
+            w.since = j["since"]?.int
+            if let p = j["part"], p.object != nil { w.part = p }
             self = .welcome(w)
         case "update":
             if let s = j["data"], s.object != nil {
@@ -446,6 +491,8 @@ public enum ServerMessage: Equatable, Sendable {
             self = .scheduled(j["items"]?.array ?? [])
         case "mine":
             self = .mine(j["data"] ?? [:])
+        case "mine_part":
+            self = .minePart(j["data"] ?? [:])
         case "integration_list":
             self = .integrationList(hooks: j["hooks"]?.array ?? [], commands: j["commands"]?.array ?? [])
         case "ping": self = .ping

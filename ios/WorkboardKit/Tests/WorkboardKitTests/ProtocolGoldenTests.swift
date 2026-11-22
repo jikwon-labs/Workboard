@@ -66,6 +66,10 @@ final class ProtocolGoldenTests: XCTestCase {
             "hello_token": hello {
                 $0.tag = 5; $0.token = "tok-123"; $0.app = "0.1.23"; $0.sync = 3; $0.deltas = true
             },
+            "hello_reconnect": hello {
+                $0.tag = 5; $0.token = "tok-123"; $0.app = "0.1.23"; $0.sync = 5; $0.deltas = true
+                $0.have = Have(epoch: 4_503_599_627_370_497, rev: 12); $0.mineParts = true
+            },
             "hello_password": hello { $0.email = "sam@example.com"; $0.password = "secret-pass" },
             "hello_invite": hello { $0.invite = "ABCD-EFGH-JKLM"; $0.email = "sam@example.com"; $0.newPassword = "new-secret" },
             "hello_reset": hello { $0.resetCode = "RSET-CODE-0001"; $0.email = "sam@example.com"; $0.newPassword = "new-secret" },
@@ -125,8 +129,18 @@ final class ProtocolGoldenTests: XCTestCase {
         XCTAssertEqual(w.hidden, [9001])
         XCTAssertTrue(w.deltas)
         XCTAssertNotNil(w.snapshot?["channels"])
+        XCTAssertEqual(w.epoch, 4_503_599_627_370_497)
+        XCTAssertNil(w.since)
         guard case let .welcome(empty) = msg("welcome_empty") else { return XCTFail("welcome_empty") }
         XCTAssertNil(empty.snapshot)
+        XCTAssertNil(empty.epoch)
+        guard case let .welcome(caught) = msg("welcome_caught_up") else { return XCTFail("welcome_caught_up") }
+        XCTAssertNil(caught.snapshot)
+        XCTAssertEqual(caught.since, 12)
+        XCTAssertEqual(caught.rev, 15)
+        XCTAssertNotNil(caught.part?["channels"])
+        guard case let .minePart(part) = msg("mine_part") else { return XCTFail("mine_part") }
+        XCTAssertNotNil(part["read"]?["301"])
         XCTAssertEqual(msg("error_gone"), .error(code: "auth", message: WorkspaceAPI.goneMessage, gone: true))
         XCTAssertEqual(msg("error_put_back"), .error(code: "denied", message: "Some changes were turned down.", putBack: true))
         XCTAssertEqual(msg("error_call"), .error(code: "denied", message: "Huddles aren't set up.", channel: 301))

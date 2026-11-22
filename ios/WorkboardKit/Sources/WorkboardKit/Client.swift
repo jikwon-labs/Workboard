@@ -322,6 +322,14 @@ public final class SyncClient {
     /// session does the same): pushes send only what differs.
     @ObservationIgnored private var summary: SyncSummary?
     @ObservationIgnored private var serverDeltas = false
+    /// What the server has sent of the team's copy: `summary` without this
+    /// phone's pushes, which may not have reached it when the connection
+    /// broke. With `serverRun`, a reconnect asks for only what changed since
+    /// (Hello.have).
+    @ObservationIgnored private var serverSummary: SyncSummary?
+    /// The run of the server (Welcome.epoch) and its address, for
+    /// `serverSummary` and `rev`.
+    @ObservationIgnored private var serverRun: (epoch: Int64, server: String)?
     /// call_join requests waiting for the server's answer, by channel.
     @ObservationIgnored private var pendingCalls: [UInt64: [CheckedContinuation<CallGrant, Error>]] = [:]
     /// Servers whose push unregister is running now (Push.swift).
@@ -520,6 +528,7 @@ public final class SyncClient {
                 view = .empty
                 viewSource = nil
                 rev = 0
+                forgetServerCopy()
                 // people are numbered per workspace: pick again on the new one
                 settings.me = nil
                 settings.meFromServer = false
@@ -661,6 +670,12 @@ public final class SyncClient {
         h.app = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "ios"
         h.sync = UInt64(Sync.metaV)
         h.deltas = true
+        h.mineParts = true
+        // a reconnect to the same run of the server: only what changed
+        // since the copy this phone has
+        if let run = serverRun, serverSummary != nil, data != nil, ServerAddress.same(run.server, settings.server) {
+            h.have = Have(epoch: run.epoch, rev: rev)
+        }
         if let attempt = pendingSignIn {
             attempt.fill(&h)
             helloUsedToken = false
@@ -797,10 +812,29 @@ public final class SyncClient {
             }
             storage.save(settings)
             trashFollowsMe()
+            // only what changed since the copy this phone has (Hello.have):
+            // what the server had then, with that
+            let caughtUp: (part: JSON, summary: SyncSummary)? = {
+                guard w.deltas, let since = w.since, since == rev, let part = w.part, data != nil,
+                      let run = serverRun, run.epoch == w.epoch, ServerAddress.same(run.server, settings.server),
+                      var s = serverSummary else { return nil }
+                s.absorb(part)
+                return (part, s)
+            }()
             self.rev = w.rev
             serverDeltas = w.deltas
-            summary = w.deltas ? w.snapshot.map { summary(of: $0) } : nil
-            if let snapshot = w.snapshot { take(snapshot, announce: false, hidden: w.hidden) }
+            serverRun = w.epoch.map { ($0, settings.server) }
+            if let c = caughtUp {
+                summary = c.summary
+                serverSummary = c.summary
+                take(c.part, announce: false, hidden: w.hidden)
+            } else {
+                summary = w.deltas ? w.snapshot.map { summary(of: $0) } : nil
+                serverSummary = summary
+                if let snapshot = w.snapshot { take(snapshot, announce: false, hidden: w.hidden) }
+                // a part for a copy this phone didn't ask about: the whole copy instead
+                if w.since != nil { send(.resync, on: ws) }
+            }
             state = .connected
             // signed in here again: this welcome's registration replaces the old one
             if settings.pushUnregister.contains(where: { ServerAddress.same($0, settings.server) }) && !unregistering.contains(settings.server) {
@@ -815,13 +849,17 @@ public final class SyncClient {
             if data != nil { pushNow() }
         case let .update(snapshot, rev, hidden):
             self.rev = rev
-            if serverDeltas { summary = summary(of: snapshot) }
+            if serverDeltas {
+                summary = summary(of: snapshot)
+                serverSummary = summary
+            }
             take(snapshot, announce: true, hidden: hidden)
         case let .delta(part, rev, base, hidden):
             // a revision went missing (or there's no copy to merge into yet):
             // ask for the whole copy; this part still merges meanwhile
             if base > self.rev || data == nil { send(.resync, on: ws) }
             summary?.absorb(part)
+            serverSummary?.absorb(part)
             self.rev = max(self.rev, rev)
             if data != nil { take(part, announce: true, hidden: hidden) }
         case let .account(email):
@@ -844,6 +882,8 @@ public final class SyncClient {
             scheduled = items.compactMap(ScheduledItem.init).sorted { ($0.at, $0.id) < ($1.at, $1.id) }
         case let .mine(m):
             takeMine(m)
+        case let .minePart(m):
+            takeMinePart(m)
         case .ping:
             send(.pong, on: ws)
         case .pong:
@@ -1103,6 +1143,7 @@ public final class SyncClient {
         view = .empty
         viewSource = nil
         rev = 0
+        forgetServerCopy()
         dropSnapshot()
         storage.save(settings)
         setTrash([])
@@ -1244,6 +1285,13 @@ public final class SyncClient {
             guard let self, !Task.isCancelled else { return }
             self.pushNow()
         }
+    }
+
+    /// This phone's copy no longer comes from what the server sent (another
+    /// workspace, the workspace gone): the next connection gets the whole copy.
+    func forgetServerCopy() {
+        serverSummary = nil
+        serverRun = nil
     }
 
     private func pushNow() {

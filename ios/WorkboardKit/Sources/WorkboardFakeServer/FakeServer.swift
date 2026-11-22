@@ -3,7 +3,9 @@
 // keeps the last pushed copy as the snapshot and sends it straight back to
 // everyone as an `update`. Real merging is the server's job. With `deltas`
 // it behaves like the real server does with apps that take deltas: it
-// merges pushes (whole or partial) with Sync.merge and sends `delta`s.
+// merges pushes (whole or partial) with Sync.merge and sends `delta`s, and
+// answers a reconnect's hello `have` with only what changed since
+// (welcome `since` and `part`) when it still knows that revision.
 //
 // Like the real axum server, WebSocket and plain HTTP share one port:
 //   GET  /health       -> {"ok":true,"rev":N,"workspace":bool}
@@ -126,6 +128,24 @@ public final class FakeServer: @unchecked Sendable {
     var resyncCount = 0
     /// Tests: the next delta goes to nobody, as if it were lost.
     public func dropNextDelta() { queue.sync { loseNextDelta = true } }
+    /// This run of the server (Welcome.epoch; deltas mode). nil: a server
+    /// from before runs were told, which never catches a reconnect up.
+    public var epoch: Int64? = 4_503_599_627_370_497
+    /// What the snapshot held at each revision (deltas mode), to catch a
+    /// reconnect up from.
+    var summaries: [Int64: SyncSummary] = [:]
+    var caughtUp = 0
+    /// Tests: how many welcomes caught an app up with only what changed.
+    public var catchUps: Int { queue.sync { caughtUp } }
+    var awayUntil: [String: Date] = [:]
+    /// Tests: drop `device`'s connections and turn it away for `secs`
+    /// (that phone lost its network; everyone else stays).
+    public func dropDevice(_ device: String, for secs: TimeInterval) {
+        queue.sync {
+            awayUntil[device] = Date().addingTimeInterval(secs)
+            for p in peers.values where p.isWebSocket && p.device == device { drop(p) }
+        }
+    }
     var meddle: (member: UInt64, role: Role)?
     var lateAnswer: TimeInterval?
     /// Tests: another admin gives `member` this role just as the next
@@ -182,6 +202,8 @@ public final class FakeServer: @unchecked Sendable {
         var welcomed = false
         var fragments = Data()
         var deltas = false
+        /// The app takes `mine_part` messages.
+        var mineParts = false
         /// Messages held back while a late answer is being "worked out".
         var held: [ServerMessage]?
         init(_ c: NWConnection) { conn = c }
@@ -243,9 +265,18 @@ public final class FakeServer: @unchecked Sendable {
         queue.async {
             self.snapshot = s
             self.rev += 1
-            if self.deltas { self.summary = SyncSummary(of: s) }
+            self.wentWhole()
             self.broadcast(.update(data: s, rev: self.rev))
         }
+    }
+
+    /// The snapshot was replaced and went out whole: nothing from before
+    /// can be caught up from (deltas mode).
+    func wentWhole() {
+        summaries = [:]
+        guard deltas, let snap = snapshot else { return }
+        summary = SyncSummary(of: snap)
+        summaries[rev] = summary
     }
 
     public func role(of member: UInt64) -> Role { queue.sync { roleOf(member) } }
@@ -394,6 +425,7 @@ public final class FakeServer: @unchecked Sendable {
                 log("push from \(p.device?.prefix(8) ?? "?") merged -> rev \(rev)")
                 let part = summary.flatMap { Sync.delta(since: $0, snap) } ?? [:]
                 summary = SyncSummary(of: snap)
+                summaries[rev] = summary
                 let lost = loseNextDelta
                 loseNextDelta = false
                 for q in peers.values where q.welcomed && !(lost && q.deltas) {
@@ -436,7 +468,8 @@ public final class FakeServer: @unchecked Sendable {
             var kept = mines[who] ?? [:]
             if Mine.merge(&kept, data) {
                 mines[who] = kept
-                for q in peers.values where q.welcomed && (q.member ?? 0) == who { send(.mine(kept), to: q) }
+                // apps that take parts: what came in (it merges the same)
+                for q in peers.values where q.welcomed && (q.member ?? 0) == who { send(q.mineParts ? .minePart(data) : .mine(kept), to: q) }
             } else if kept != data {
                 send(.mine(kept), to: p)
             }
@@ -506,15 +539,31 @@ public final class FakeServer: @unchecked Sendable {
             if let t = newToken { p.token = t }
             p.member = member
         }
+        if let until = awayUntil[h.device], until > Date() {
+            drop(p)
+            return
+        }
         let tag = assignTag(device: h.device, wanted: h.tag)
         p.welcomed = true
         p.deltas = deltas && h.deltas
-        if deltas, summary == nil, let snap = snapshot { summary = SyncSummary(of: snap) }
+        p.mineParts = h.mineParts
+        if deltas, summary == nil, let snap = snapshot {
+            summary = SyncSummary(of: snap)
+            summaries[rev] = summary
+        }
         log("hello from \(h.device.prefix(8)) -> tag \(tag)" + (p.member.map { " as member \($0)" } ?? ""))
         let role = p.member.map { roleOf($0).rawValue }
         var w = Welcome(tag: tag, snapshot: snapshot, rev: rev, member: p.member, role: role, token: newToken,
                         email: p.member.flatMap { accounts[$0]?.email })
         w.deltas = deltas
+        if deltas { w.epoch = epoch }
+        // a reconnect: only what changed since the copy it has
+        if p.deltas, let have = h.have, let e = epoch, have.epoch == e, let then = summaries[have.rev], let snap = snapshot {
+            w.snapshot = nil
+            w.since = have.rev
+            w.part = Sync.delta(since: then, snap) ?? [:]
+            caughtUp += 1
+        }
         send(.welcome(w), to: p)
         send(.mine(mines[p.member ?? 0] ?? [:]), to: p)
     }
@@ -537,6 +586,7 @@ public final class FakeServer: @unchecked Sendable {
                 backupFiles.insert(("before-restore-20261116-120000.json", snapshot ?? [:]), at: 0)
                 snapshot = b.snapshot
                 rev += 1
+                wentWhole()
                 broadcast(.update(data: b.snapshot, rev: rev))
                 log("restored \(name)")
                 send(.restored(name: name), to: p)

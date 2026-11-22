@@ -104,6 +104,7 @@ extension FakeServer {
                 }
                 snapshot = snap
                 rev += 1
+                wentWhole()
                 broadcast(.update(data: snap, rev: rev))
                 log("admin: message in \(ch) from \(author)")
                 respond(p, 200, ["ok": true])

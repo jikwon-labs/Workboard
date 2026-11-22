@@ -97,4 +97,64 @@ final class DeltaTests: FakeServerTestCase {
         }
         XCTAssertGreaterThanOrEqual(server.resyncs, 1)
     }
+
+    /// Back after losing the network (the app kept running): the server
+    /// sends only what changed while away, and what this phone wrote
+    /// meanwhile still goes up.
+    func testAReconnectGetsOnlyWhatChangedWhileAway() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        server.deltas = true
+        let url = try await start(server)
+        defer { server.stop() }
+        let a = client(url, me: 1), b = client(url, me: 2)
+        await until("both connected") { a.canEdit && b.canEdit && a.state.isConnected && b.state.isConnected }
+        a.edit { d, _ in Edits.rename(&d, task: 201, to: "before", ts: nowTs()) }
+        await until("the rename at B") { b.view.tasks.first { $0.id == 201 }?.name == "before" }
+
+        server.dropDevice(b.settings.device, for: 0.8)
+        await until("B lost the server") { !b.state.isConnected }
+        a.edit { d, _ in Edits.rename(&d, task: 202, to: "while B was away", ts: nowTs()) }
+        b.edit { d, _ in Edits.rename(&d, task: 203, to: "B, offline", ts: nowTs()) }
+        await until("what A did while B was away") { b.view.tasks.first { $0.id == 202 }?.name == "while B was away" }
+        XCTAssertEqual(server.catchUps, 1, "only what changed came")
+        await until("B's offline edit at A") { a.view.tasks.first { $0.id == 203 }?.name == "B, offline" }
+        XCTAssertEqual(b.view.tasks.map(\.name), a.view.tasks.map(\.name))
+        // after that, changes come live as before
+        a.edit { d, _ in Edits.rename(&d, task: 204, to: "live again", ts: nowTs()) }
+        await until("live at B") { b.view.tasks.first { $0.id == 204 }?.name == "live again" }
+    }
+
+    /// A server that doesn't say which run it is (from before catching up)
+    /// is never asked; the whole copy comes as before.
+    func testAServerFromBeforeSendsTheWholeCopyOnAReconnect() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        server.deltas = true
+        server.epoch = nil
+        let url = try await start(server)
+        defer { server.stop() }
+        let a = client(url, me: 1), b = client(url, me: 2)
+        await until("both connected") { a.canEdit && b.canEdit && b.state.isConnected }
+        server.dropDevice(b.settings.device, for: 0.8)
+        await until("B lost the server") { !b.state.isConnected }
+        a.edit { d, _ in Edits.rename(&d, task: 202, to: "while B was away", ts: nowTs()) }
+        await until("the whole copy at B") { b.view.tasks.first { $0.id == 202 }?.name == "while B was away" }
+        XCTAssertEqual(server.catchUps, 0)
+    }
+
+    /// The hello of a reconnect says which copy it has; a part answering a
+    /// copy this phone didn't ask about is not merged (the whole copy is
+    /// asked for instead).
+    func testTheHelloAndWelcomeOfACatchUpRoundTrip() {
+        var h = Hello(device: "d")
+        h.have = Have(epoch: 7, rev: 12)
+        h.mineParts = true
+        XCTAssertEqual(ClientMessage.hello(h).json["have"], ["epoch": 7, "rev": 12])
+        XCTAssertEqual(ClientMessage(text: ClientMessage.hello(h).text), .hello(h))
+        guard case let .welcome(w) = ServerMessage(text: #"{"type":"welcome","tag":1,"snapshot":null,"rev":15,"deltas":true,"epoch":7,"since":12,"part":{"tasks":[]}}"#) else { return XCTFail() }
+        XCTAssertEqual(w.epoch, 7)
+        XCTAssertEqual(w.since, 12)
+        XCTAssertEqual(w.part, ["tasks": []])
+        XCTAssertNil(w.snapshot)
+        XCTAssertNil(ServerMessage(text: #"{"type":"welcome","tag":1,"snapshot":null,"rev":0}"#).wholeCopy)
+    }
 }

@@ -679,21 +679,35 @@ impl App {
                                 let filter = self.hub.docs;
                                 let mine_only = self.docs.mine;
                                 let sort = self.docs.sort;
-                                let mut docs: Vec<Doc> = self
-                                    .data
-                                    .docs
-                                    .iter()
-                                    .filter(|d| self.doc_listed(d, filter))
-                                    .filter(|d| q.is_empty() || d.title.to_lowercase().contains(&q))
-                                    .filter(|d| !mine_only || d.owner == me)
-                                    .filter(|d| tag.as_ref().is_none_or(|g| d.tags.contains(g)))
-                                    .cloned()
-                                    .collect();
-                                match sort {
-                                    1 => docs.sort_by_key(|d| d.title.to_lowercase()),
-                                    2 => docs.sort_by_key(|d| std::cmp::Reverse(d.created)),
-                                    _ => docs.sort_by_key(|d| std::cmp::Reverse(d.updated)),
-                                }
+                                // borrowed to sort, then by id: a doc (body and
+                                // all) is copied only for a row in sight
+                                let docs: Vec<u64> =
+                                    {
+                                        let mut docs: Vec<(usize, &Doc)> = self
+                                            .data
+                                            .docs
+                                            .iter()
+                                            .enumerate()
+                                            .filter(|(_, d)| self.doc_listed(d, filter))
+                                            .filter(|(_, d)| {
+                                                q.is_empty() || d.title.to_lowercase().contains(&q)
+                                            })
+                                            .filter(|(_, d)| !mine_only || d.owner == me)
+                                            .filter(|(_, d)| {
+                                                tag.as_ref().is_none_or(|g| d.tags.contains(g))
+                                            })
+                                            .collect();
+                                        match sort {
+                                            1 => docs.sort_by_cached_key(|(_, d)| {
+                                                d.title.to_lowercase()
+                                            }),
+                                            2 => docs
+                                                .sort_by_key(|(_, d)| std::cmp::Reverse(d.created)),
+                                            _ => docs
+                                                .sort_by_key(|(_, d)| std::cmp::Reverse(d.updated)),
+                                        }
+                                        docs.into_iter().map(|(_, d)| d.id).collect()
+                                    };
                                 if docs.is_empty() {
                                     ui.add_space(20.0);
                                     ui.vertical_centered(|ui| {
@@ -702,9 +716,17 @@ impl App {
                                         )
                                     });
                                 }
-                                for d in docs {
+                                for doc_id in docs {
                                     let (r, resp) =
                                         ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
+                                    if !ui.is_rect_visible(r) {
+                                        continue;
+                                    }
+                                    let Some(d) =
+                                        self.data.docs.iter().find(|d| d.id == doc_id).cloned()
+                                    else {
+                                        continue;
+                                    };
                                     if resp.hovered() {
                                         ui.painter().rect_filled(r, 0.0, t.hover);
                                     }

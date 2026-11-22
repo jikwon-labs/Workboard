@@ -649,8 +649,27 @@ impl App {
         } else {
             0..0
         };
+        // the layout job is made again only when the text, the width, the
+        // lines showing their markers or the colours change: building it
+        // reads every line of the doc, and egui asks on every frame
+        let job_id = body_id.with("job");
         let mut layouter = |ui: &Ui, s: &str, wrap: f32| {
-            ui.fonts(|f| f.layout_job(doc_layout_job_live(s, &t, wrap, shown.clone())))
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (s, wrap.to_bits(), shown.start, shown.end, t.dark).hash(&mut h);
+            (t.text, t.text2, t.text3, t.column_bg).hash(&mut h);
+            let key = h.finish();
+            let kept: Option<(u64, std::sync::Arc<egui::text::LayoutJob>)> =
+                ui.data(|m| m.get_temp(job_id));
+            let job = match kept {
+                Some((k, job)) if k == key => job,
+                _ => {
+                    let job = std::sync::Arc::new(doc_layout_job_live(s, &t, wrap, shown.clone()));
+                    ui.data_mut(|m| m.insert_temp(job_id, (key, job.clone())));
+                    job
+                }
+            };
+            ui.fonts(|f| f.layout_job((*job).clone()))
         };
         let out = egui::TextEdit::multiline(&mut d.body)
             .id(body_id)

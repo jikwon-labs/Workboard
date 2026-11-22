@@ -2053,7 +2053,7 @@ impl App {
                             || matches!(&self.chat.edit, Some((c, id, _)) if *c == cid && *id == mid);
                         if !busy {
                             let known: Option<(f32, ((u64, usize, u32), u32, bool))> = ui.data(|d| d.get_temp(h_id));
-                            if let Some((h, k)) = known.filter(|(_, k)| *k == key) {
+                            if let Some((h, _)) = known.filter(|(_, k)| *k == key) {
                                 let rect = Rect::from_min_size(ui.cursor().min, vec2(w, h));
                                 if !ui.is_rect_visible(rect) {
                                     // still read out (and found) by its text

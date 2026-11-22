@@ -134,6 +134,23 @@ cmd_verify() {
       for dev in $(xcrun simctl list devices booted | sed -n 's/.*(\([0-9A-F-]\{36\}\)) (Booted).*/\1/p'); do
         xcrun simctl terminate "$dev" com.seojigwon.workboard 2>/dev/null || true
       done
+      # fresh fake servers for this run: ones left running from an earlier
+      # run carry what its tests made (a channel's first message no longer
+      # among the newest the app shows, dozens of tasks in a list)
+      local fakes=() fake
+      if lsof -nP -iTCP:18787-18789 -sTCP:LISTEN >/dev/null 2>&1; then
+        say "fake servers already on 18787-18789: using them (what earlier runs made is still on them)"
+      else
+        swift build --package-path ios/WorkboardKit --product wb-fake-server >/dev/null \
+          || die "wb-fake-server didn't build"
+        fake="$(swift build --package-path ios/WorkboardKit --show-bin-path)/wb-fake-server"
+        "$fake" --port 18787 >/dev/null 2>&1 & fakes+=($!)
+        "$fake" --port 18788 --sign-in --admin-http --livekit-dev >/dev/null 2>&1 & fakes+=($!)
+        "$fake" --port 18789 --admin-http >/dev/null 2>&1 & fakes+=($!)
+        # shellcheck disable=SC2064
+        trap "kill ${fakes[*]} 2>/dev/null" EXIT
+        sleep 1
+      fi
       say "iOS UI tests on the simulator"
       xcodebuild -quiet -project ios/Workboard.xcodeproj -scheme Workboard \
         -destination "platform=iOS Simulator,name=${WB_IOS_SIM:-iPhone 17}" test

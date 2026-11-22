@@ -35,6 +35,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # the QR code that signs a phone in (src/app/together/phone.rs); drawn by egui
 qrcode = { version = "0.14", default-features = false }
+# the system fonts, mapped into memory instead of read (setup_fonts); the
+# version winit already uses on Linux
+memmap2 = "0.9"
 
 [dev-dependencies]
 # tests run the real server; it is not part of the app build

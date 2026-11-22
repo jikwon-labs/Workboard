@@ -6268,6 +6268,7 @@ dependencies = [
  "eframe",
  "egui",
  "image",
+ "memmap2",
  "objc",
  "qrcode",
  "raw-window-handle",

@@ -6129,10 +6129,10 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
             "C:\\Windows\\Fonts\\segoeui.ttf",
         ]);
     for p in ui_fonts {
-        if let Ok(bytes) = std::fs::read(p) {
+        if let Some(bytes) = font_file(p) {
             fonts.font_data.insert(
                 "system-ui".into(),
-                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+                std::sync::Arc::new(egui::FontData::from_static(bytes)),
             );
             fonts
                 .families
@@ -6176,34 +6176,21 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
         ])
         .collect();
     for p in candidates.iter().copied() {
-        // read once per run and shared: the Korean font is large (55 MB),
-        // and its Bold face also comes from it
-        static CJK: std::sync::OnceLock<Option<&'static [u8]>> = std::sync::OnceLock::new();
-        let bytes = if p.ends_with("AppleSDGothicNeo.ttc") {
-            *CJK.get_or_init(|| {
-                std::fs::read(p)
-                    .ok()
-                    .map(|b| &*Box::leak(b.into_boxed_slice()))
-            })
-        } else {
-            None
+        let Some(data) = font_file(p) else {
+            continue;
         };
-        let data = match bytes {
-            Some(b) => egui::FontData::from_static(b),
-            None => match std::fs::read(p) {
-                Ok(b) => egui::FontData::from_owned(b),
-                Err(_) => continue,
-            },
-        };
-        fonts
-            .font_data
-            .insert("cjk".into(), std::sync::Arc::new(data));
+        fonts.font_data.insert(
+            "cjk".into(),
+            std::sync::Arc::new(egui::FontData::from_static(data)),
+        );
         for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
             fonts.families.entry(fam).or_default().push("cjk".into());
         }
         // a bold family for big headings (the sign-in screen): Apple SD
-        // Gothic Neo's Bold face, with the usual fonts after it
-        if let Some(b) = bytes {
+        // Gothic Neo's Bold face (from the same file), with the usual fonts
+        // after it
+        if p.ends_with("AppleSDGothicNeo.ttc") {
+            let b = data;
             let mut bold = egui::FontData::from_static(b);
             bold.index = bold_face(b);
             fonts
@@ -6227,6 +6214,31 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
     // egui draws glyphs in one color; emoji get color pictures over them
     crate::emoji::install(ctx);
+}
+
+/// A font file's bytes for the rest of the run, mapped into memory rather
+/// than read: the system loads only the parts glyphs are drawn from (the
+/// Korean font is 55 MB, the system font 8 MB) and can drop them again,
+/// and egui borrows the bytes instead of copying them each time it makes
+/// its fonts again (it copies font data it owns). Mapped once per file.
+fn font_file(path: &str) -> Option<&'static [u8]> {
+    static MAPPED: std::sync::Mutex<std::collections::BTreeMap<String, &'static [u8]>> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
+    let mut mapped = MAPPED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(b) = mapped.get(path) {
+        return Some(b);
+    }
+    let file = std::fs::File::open(path).ok()?;
+    // SAFETY: these are the system's own font files, which nothing changes
+    // while the app runs (on macOS they're on the read-only system volume);
+    // the mapping is kept, never unmapped
+    let map = unsafe { memmap2::Mmap::map(&file) }.ok()?;
+    if map.is_empty() {
+        return None;
+    }
+    let bytes: &'static [u8] = Box::leak(Box::new(map));
+    mapped.insert(path.to_string(), bytes);
+    Some(bytes)
 }
 
 /// The Bold face in a font collection: Apple SD Gothic Neo keeps it at 6 on

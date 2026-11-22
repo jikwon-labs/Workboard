@@ -143,6 +143,28 @@ final class Notifier {
     /// each workspace's apart.
     @ObservationIgnored private var told = Notify.Told()
 
+    /// A scan asked for and not run yet (see `scanSoon`).
+    @ObservationIgnored private var pendingScan: Task<Void, Never>?
+
+    /// After the team's changes came in: scan a moment later, once for a
+    /// burst of updates (each scan looks over the whole workspace). A
+    /// welcome's changes (catching up) are scanned at once, so they aren't
+    /// taken for news when a later update comes in the same moment.
+    func scanSoon(client: SyncClient, nav: Nav) {
+        pendingScan?.cancel()
+        if client.catchingUp {
+            pendingScan = nil
+            scan(client: client, nav: nav)
+            return
+        }
+        pendingScan = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.pendingScan = nil
+            self.scan(client: client, nav: nav)
+        }
+    }
+
     /// After the team's changes came in (notify_scan): tell what is new, keep
     /// the icon's number and the clock notices up to date.
     func scan(client: SyncClient, nav: Nav) {
@@ -164,9 +186,13 @@ final class Notifier {
         let manager = ["owner", "admin"].contains(client.settings.role ?? "")
         // worked out once for both lists and the icon's number
         let inbox = client.inboxItems(me: me)
-        let found = Notify.candidates(data, prefs: prefs, me: me, manager: manager, inbox: inbox)
-        let all = Notify.candidates(data, prefs: .everything, me: me, manager: manager, inbox: inbox, everyTask: true).map(\.key)
-        var fresh = told.fresh(found, all: all, workspace: client.pushKey, now: nowTs())
+        // only the last day can be news (Notify.fresh); the list of
+        // everything needs only its keys
+        let now = nowTs()
+        let since = now - Notify.freshSecs
+        let found = Notify.candidates(data, prefs: prefs, me: me, manager: manager, inbox: inbox, since: since)
+        let all = Notify.candidates(data, prefs: .everything, me: me, manager: manager, inbox: inbox, everyTask: true, since: since, keysOnly: true).map(\.key)
+        var fresh = told.fresh(found, all: all, workspace: client.pushKey, now: now)
         let active = UIApplication.shared.applicationState == .active
         fresh.removeAll { active && visible($0.target, nav: nav) }
         // back after being away (opened, brought forward, reconnected): what
@@ -288,27 +314,54 @@ final class Notifier {
         }
     }
 
+    /// One clock notice to schedule.
+    struct ClockNote: Equatable {
+        let id: String
+        let title: String
+        let body: String
+        let when: Date
+    }
+
+    /// The clock notices last scheduled (nil: none yet in this run).
+    @ObservationIgnored private var scheduledClock: [ClockNote]?
+
+    /// Schedule the clock notices again, but only when they changed: after
+    /// most updates (a message) they are the same, and taking them all away
+    /// and adding them back each time was work for nothing.
     func scheduleClock(client: SyncClient) {
-        let center = UNUserNotificationCenter.current()
-        center.getPendingNotificationRequests { reqs in
+        let notes = clockNotes(client: client)
+        guard notes != scheduledClock else { return }
+        scheduledClock = notes
+        let sound = prefs.sound
+        // taken away and added in one go, after the list of what is pending
+        // comes back (adding first could see the new ones taken away)
+        UNUserNotificationCenter.current().getPendingNotificationRequests { reqs in
+            let center = UNUserNotificationCenter.current()
             let old = reqs.map(\.identifier).filter { $0.hasPrefix("clock-") }
             center.removePendingNotificationRequests(withIdentifiers: old)
+            let cal = Calendar.current
+            for n in notes {
+                let c = UNMutableNotificationContent()
+                c.title = n.title
+                c.body = n.body
+                if sound { c.sound = .default }
+                let trig = UNCalendarNotificationTrigger(dateMatching: cal.dateComponents([.year, .month, .day, .hour, .minute], from: n.when), repeats: false)
+                center.add(UNNotificationRequest(identifier: "clock-" + n.id, content: c, trigger: trig))
+            }
         }
-        guard permission == .allowed, let data = client.data, let me = client.me else { return }
+    }
+
+    func clockNotes(client: SyncClient) -> [ClockNote] {
+        guard permission == .allowed, let data = client.data, let me = client.me else { return [] }
+        var out: [ClockNote] = []
         let view = client.view
         let cal = Calendar.current
         let now = Date()
         let parts = prefs.dueTime.split(separator: ":").compactMap { Int($0) }
         func at(_ day: Date, _ h: Int, _ m: Int) -> Date? { cal.date(bySettingHour: h, minute: m, second: 0, of: day) }
-        func add(_ id: String, _ title: String, _ body: String, _ when: Date, _ info: [String: Any] = [:]) {
+        func add(_ id: String, _ title: String, _ body: String, _ when: Date) {
             guard when > now, !prefs.muted(now: Int64(when.timeIntervalSince1970)) else { return }
-            let c = UNMutableNotificationContent()
-            c.title = title
-            c.body = body
-            if prefs.sound { c.sound = .default }
-            c.userInfo = info
-            let trig = UNCalendarNotificationTrigger(dateMatching: cal.dateComponents([.year, .month, .day, .hour, .minute], from: when), repeats: false)
-            center.add(UNNotificationRequest(identifier: "clock-" + id, content: c, trigger: trig))
+            out.append(ClockNote(id: id, title: title, body: body, when: when))
         }
         // my tasks due today and overdue, once a day at the chosen time (the next two days)
         if prefs.due, parts.count == 2 {
@@ -332,6 +385,7 @@ final class Notifier {
                 add("goal-\(g.id)", String(localized: "Goal due today"), g.name, when)
             }
         }
+        return out
     }
 
     nonisolated static func channel(in info: [AnyHashable: Any]) -> UInt64? { number(info["channel"]) }

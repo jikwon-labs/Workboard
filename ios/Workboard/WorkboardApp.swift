@@ -80,7 +80,7 @@ struct WorkboardApp: App {
     func wire() {
         if client.state == .idle, !client.settings.server.isEmpty { client.connect() }
         let (c, n, nv) = (client, notifier, nav)
-        c.onUpdate = { n.scan(client: c, nav: nv) }
+        c.onUpdate = { n.scanSoon(client: c, nav: nv) }
         n.scan(client: c, nav: nv) // the first look only remembers what is there
         appDelegate.onOpenTask = { id in nv.open(task: id) }
         appDelegate.currentChannel = { nv.currentChannel }

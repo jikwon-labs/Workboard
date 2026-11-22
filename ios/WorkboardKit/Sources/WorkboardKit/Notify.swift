@@ -217,14 +217,27 @@ public enum Notify {
     /// Inbox rows when the caller has them already (SyncClient.inboxItems).
     /// `everyTask`: comments and changes on tasks I don't watch too (the
     /// keys that must not become news when I turn a task's updates on).
-    public static func candidates(_ data: JSON, prefs n: NotifyPrefs, me: UInt64, manager: Bool, inbox: [InboxItem]? = nil, everyTask: Bool = false) -> [Note] {
-        let all = data["members"]?.array ?? []
+    /// `since`: leave out what happened before then (seconds): `fresh`
+    /// drops it anyway, so a scan needn't build notes for all of history.
+    /// `keysOnly`: titles and texts left empty (only the keys are wanted).
+    public static func candidates(_ data: JSON, prefs n: NotifyPrefs, me: UInt64, manager: Bool, inbox: [InboxItem]? = nil, everyTask: Bool = false,
+                                  since: Int64? = nil, keysOnly: Bool = false) -> [Note] {
+        var names: [UInt64: (shown: String, full: String)] = [:]
+        for m in data["members"]?.array ?? [] {
+            guard let id = m["id"]?.uint, names[id] == nil else { continue }
+            names[id] = (Mentions.shownName(m), m["name"]?.string ?? "")
+        }
         let who = { (id: UInt64) -> String in
-            let n = all.first { $0["id"]?.uint == id }.map(Mentions.shownName) ?? ""
+            let n = names[id]?.shown ?? ""
             return n.isEmpty ? "Someone" : n
         }
         // entries written before ids were kept name me by my full name
-        let fullName = { (id: UInt64) in all.first { $0["id"]?.uint == id }?["name"]?.string ?? "" }
+        let fullName = { (id: UInt64) in names[id]?.full ?? "" }
+        let preview = { (m: JSON) -> String in keysOnly ? "" : Self.preview(m) }
+        func old(_ ts: Int64?) -> Bool {
+            guard let since, let ts else { return false }
+            return ts < since
+        }
         var out: [Note] = []
         var keys = Set<String>()
         func add(_ note: Note) { if keys.insert(note.key).inserted { out.append(note) } }
@@ -252,7 +265,7 @@ public enum Notify {
                 let key = "chat:\(cid):\(mid)"
                 let ts = m["ts"]?.int ?? 0
                 // the channel's copy of a thread reply: the reply itself is told
-                if author != me && !MessageView.isImported(m) && m["thread_of"]?.uint == nil {
+                if author != me && !old(ts) && !MessageView.isImported(m) && m["thread_of"]?.uint == nil {
                     if m["call"]?.string != nil {
                         if n.huddles {
                             add(Note(key: key, kind: .huddle, title: dm ? "\(who(author)) is calling you" : "\(who(author)) started a huddle in \(place)",
@@ -271,7 +284,7 @@ public enum Notify {
                 let replies = m["replies"]?.array ?? []
                 // keywords in a channel's threads
                 if !dm {
-                    for r in replies where (r["author"]?.uint ?? 0) != me && !MessageView.isImported(r) {
+                    for r in replies where (r["author"]?.uint ?? 0) != me && !old(r["ts"]?.int) && !MessageView.isImported(r) {
                         guard let rid = r["id"]?.uint, let word = keywordHit(r) else { continue }
                         let ra = r["author"]?.uint ?? 0
                         var note = Note(key: "chat:\(cid):\(rid)", kind: .keyword, title: "\(who(ra)) said \"\(word)\" in \(place)", body: preview(r), target: .channel(cid, thread: mid), ts: r["ts"]?.int, who: who(ra), subject: place)
@@ -280,7 +293,7 @@ public enum Notify {
                     }
                 }
                 if dm && n.direct {
-                    for r in replies where (r["author"]?.uint ?? 0) != me && !MessageView.isImported(r) {
+                    for r in replies where (r["author"]?.uint ?? 0) != me && !old(r["ts"]?.int) && !MessageView.isImported(r) {
                         guard let rid = r["id"]?.uint else { continue }
                         add(Note(key: "chat:\(cid):\(rid)", kind: .direct, title: who(r["author"]?.uint ?? 0), body: preview(r), target: .channel(cid, thread: mid), ts: r["ts"]?.int, who: who(r["author"]?.uint ?? 0)))
                     }
@@ -302,8 +315,9 @@ public enum Notify {
         // the Inbox: mentions, thread replies, assignments, comments and changes on my tasks
         let myName = fullName(me)
         let tasks = Dictionary((data["tasks"]?.array ?? []).compactMap { t in t["id"]?.uint.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
-        let channels = data["channels"]?.array ?? []
-        for it in inbox ?? Inbox.items(data, me: me) where it.author != me {
+        let plainChannels = Set((data["channels"]?.array ?? []).filter { $0["kind"]?.string == "Channel" }.compactMap { $0["id"]?.uint })
+        var looked = ImportedLookup(data)
+        for it in inbox ?? Inbox.items(data, me: me) where it.author != me && !old(it.ts) {
             let key: String, target: Note.Target
             var task: JSON?
             switch it.source {
@@ -313,8 +327,8 @@ public enum Notify {
                 target = .task(id)
                 task = tasks[id]
             case .chat(let ch, _, let thread):
-                if channels.contains(where: { $0["id"]?.uint == ch && $0["kind"]?.string == "Channel" }) && n.channelMode(ch) == "nothing" { continue }
-                if isImported(data, it) { continue }
+                if plainChannels.contains(ch) && n.channelMode(ch) == "nothing" { continue }
+                if looked.isImported(it) { continue }
                 key = it.key
                 target = .channel(ch, thread: thread)
             }
@@ -362,7 +376,7 @@ public enum Notify {
             if !mine.isEmpty {
                 for t in data["tasks"]?.array ?? [] {
                     guard let tid = t["id"]?.uint else { continue }
-                    for a in t["activity"]?.array ?? [] where a["author"]?.uint != me && a["comment"]?.bool != true {
+                    for a in t["activity"]?.array ?? [] where a["author"]?.uint != me && a["comment"]?.bool != true && !old(a["ts"]?.int) {
                         let text = a["text"]?.string ?? ""
                         guard text.hasPrefix("submitted the form ") else { continue }
                         let name = String(text.dropFirst("submitted the form ".count))
@@ -377,6 +391,29 @@ public enum Notify {
             }
         }
         return out
+    }
+
+    /// `isImported` for many rows: each conversation's messages are looked
+    /// up by id once.
+    struct ImportedLookup {
+        let channels: [UInt64: JSON]
+        var byId: [UInt64: [UInt64: JSON]] = [:]
+
+        init(_ data: JSON) {
+            channels = Dictionary((data["channels"]?.array ?? []).compactMap { c in c["id"]?.uint.map { ($0, c) } }, uniquingKeysWith: { a, _ in a })
+        }
+
+        mutating func isImported(_ it: InboxItem) -> Bool {
+            guard case .chat(let ch, let msg, let thread) = it.source, let c = channels[ch] else { return false }
+            if byId[ch] == nil {
+                var m: [UInt64: JSON] = [:]
+                for x in c["messages"]?.array ?? [] { if let id = x["id"]?.uint, m[id] == nil { m[id] = x } }
+                byId[ch] = m
+            }
+            let ms = byId[ch] ?? [:]
+            let m = thread == nil ? ms[msg] : ms[thread!]?["replies"]?.array?.first { $0["id"]?.uint == msg }
+            return m.map(MessageView.isImported) ?? false
+        }
     }
 
     /// An Inbox row from imported (Slack) history: old news, never announced.

@@ -192,4 +192,50 @@ final class NotifyTests: XCTestCase {
             "channel_modes": [["channel": 301, "mode": "all"]], "keywords": ["deploy"], "muted_until": 99,
         ])
     }
+
+    /// A scan builds notes only for the last day (and keys only for the
+    /// list of everything): what it tells is the same as from all of history.
+    func testAScanOfTheLastDayTellsWhatAFullScanTells() {
+        let now: Int64 = 1_800_000_000
+        var d = SampleWorkspace.make()
+        var id: UInt64 = 9_000
+        for (k, age) in [Int64(3 * 86_400), 90_000, 86_000, 3_600, 60].enumerated() {
+            id += 10
+            Edits.sendMessage(&d, channel: 303, text: "dm \(k)", me: 2, id: id, ts: now - age)
+            Edits.sendMessage(&d, channel: 301, text: "@Jamie Park look \(k) deploy", me: 3, id: id + 1, ts: now - age)
+            Edits.sendMessage(&d, channel: 302, text: "plain \(k) deploy", me: 2, id: id + 2, ts: now - age)
+            Edits.sendReply(&d, channel: 301, to: id + 1, text: "reply \(k) deploy", me: 2, id: id + 3, ts: now - age + 1)
+            Edits.addComment(&d, task: 201, text: "comment \(k)", me: 2, ts: now - age)
+        }
+        var prefs = [NotifyPrefs(), .everything]
+        var p = NotifyPrefs()
+        p.keywords = "deploy"
+        p.reactions = true
+        p.setChannelMode(302, "all")
+        prefs.append(p)
+        for pr in prefs {
+            let inbox = Inbox.items(d, me: 1)
+            let full = Notify.candidates(d, prefs: pr, me: 1, manager: true, inbox: inbox)
+            let fullAll = Notify.candidates(d, prefs: .everything, me: 1, manager: true, inbox: inbox, everyTask: true).map(\.key)
+            let since = now - Notify.freshSecs
+            let quick = Notify.candidates(d, prefs: pr, me: 1, manager: true, inbox: inbox, since: since)
+            let quickAll = Notify.candidates(d, prefs: .everything, me: 1, manager: true, inbox: inbox, everyTask: true, since: since, keysOnly: true).map(\.key)
+            var seenA = Set<String>(), seenB = Set<String>()
+            let a = Notify.fresh(full, all: fullAll, seen: &seenA, now: now)
+            let b = Notify.fresh(quick, all: quickAll, seen: &seenB, now: now)
+            XCTAssertEqual(a, b)
+            XCTAssertFalse(a.isEmpty)
+            // later, with new messages: still the same news
+            var d2 = d
+            Edits.sendMessage(&d2, channel: 303, text: "new dm", me: 2, id: 99_001, ts: now + 100)
+            Edits.sendMessage(&d2, channel: 302, text: "new deploy", me: 2, id: 99_002, ts: now + 100)
+            let inbox2 = Inbox.items(d2, me: 1)
+            let a2 = Notify.fresh(Notify.candidates(d2, prefs: pr, me: 1, manager: true, inbox: inbox2),
+                                  all: Notify.candidates(d2, prefs: .everything, me: 1, manager: true, inbox: inbox2, everyTask: true).map(\.key), seen: &seenA, now: now + 100)
+            let s2 = now + 100 - Notify.freshSecs
+            let b2 = Notify.fresh(Notify.candidates(d2, prefs: pr, me: 1, manager: true, inbox: inbox2, since: s2),
+                                  all: Notify.candidates(d2, prefs: .everything, me: 1, manager: true, inbox: inbox2, everyTask: true, since: s2, keysOnly: true).map(\.key), seen: &seenB, now: now + 100)
+            XCTAssertEqual(a2, b2)
+        }
+    }
 }

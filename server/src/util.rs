@@ -14,6 +14,14 @@ pub fn home_dir() -> PathBuf {
     Path::new(&home).join("Library/Application Support/WorkboardServer")
 }
 
+/// Whether this thread runs tokio's multi-thread runtime, where a wait can
+/// go through `block_in_place` (it panics on a current-thread runtime, as
+/// tests use; plain threads have no runtime at all).
+pub(crate) fn on_async_worker() -> bool {
+    tokio::runtime::Handle::try_current()
+        .is_ok_and(|h| h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
+}
+
 /// Taking a lock that a panicking thread left poisoned: what it guards is
 /// used as it is, instead of every later request for the workspace failing.
 /// (The real server ends on a panic anyway, see main.rs; this keeps a

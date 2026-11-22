@@ -1604,3 +1604,47 @@ fn a_broadcast_is_made_once_for_people_who_see_the_same() {
     let fresh = Canon::new(&canon, 5, Some(delta), &Saved::default());
     assert_eq!(fresh.delta_for(4, &[12]).unwrap(), back);
 }
+
+#[test]
+fn waiting_for_a_busy_workspace_leaves_the_other_connections_running() {
+    let home = std::env::temp_dir().join(format!("wb-busy-lock-{:x}", wb_sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    let hub = Arc::new(test_hub(&home, None, Saved::default()));
+    // one worker thread: a task stuck on the lock would stall every other one
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_time()
+        .build()
+        .unwrap();
+    // a long merge elsewhere holds the lock
+    let held = hub.clone();
+    let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+    let merge = std::thread::spawn(move || {
+        let _g = held.inner.locked();
+        locked_tx.send(()).unwrap();
+        std::thread::sleep(Duration::from_millis(600));
+    });
+    locked_rx.recv().unwrap();
+    let ran_while_waiting = rt.block_on(async {
+        let waiter = hub.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let waiting = tokio::spawn(async move {
+            started_tx.send(()).unwrap();
+            let _g = waiter.state();
+        });
+        started_rx.await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // a ping on another connection is answered meanwhile
+        let other = tokio::spawn(async { std::time::Instant::now() });
+        let answered = other.await.unwrap();
+        waiting.await.unwrap();
+        answered
+    });
+    let released = std::time::Instant::now();
+    merge.join().unwrap();
+    assert!(
+        released.duration_since(ran_while_waiting) > Duration::from_millis(200),
+        "the other task ran only after the lock was let go"
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}

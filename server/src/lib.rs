@@ -527,9 +527,19 @@ impl Hub {
         })
     }
 
-    /// The workspace's state, locked (see `Locked`).
+    /// The workspace's state, locked (see `Locked`). A merge on a big
+    /// workspace holds it for a while; a connection's task waiting for it
+    /// then hands its worker thread's other connections to another thread
+    /// (`block_in_place`) instead of stalling them all.
     fn state(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.locked()
+        match self.inner.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) if on_async_worker() => {
+                tokio::task::block_in_place(|| self.inner.locked())
+            }
+            Err(std::sync::TryLockError::WouldBlock) => self.inner.locked(),
+        }
     }
 
     /// Where apps reach this workspace below the server's address: "" for

@@ -86,7 +86,15 @@ pub(super) struct Kept {
     /// The search palette's results and archived count for a query:
     /// (key, query, kind, rows, archived).
     #[allow(clippy::type_complexity)]
-    search: RefCell<Option<(nav::InboxKey, String, u8, Rc<Vec<more::SearchRow>>, usize)>>,
+    search: RefCell<
+        Option<(
+            (nav::InboxKey, u64),
+            String,
+            u8,
+            Rc<Vec<more::SearchRow>>,
+            usize,
+        )>,
+    >,
     pub(super) filtered: RefCell<Option<(FilteredKey, Rc<Vec<u64>>)>>,
     /// Open top-level tasks by list, for the sidebar: (pass, change,
     /// tasks, counts). Only kept within one pass, like `filtered`.
@@ -346,7 +354,11 @@ impl App {
     /// on every frame it is open. An empty query lists recent things, which
     /// aren't kept.
     pub(super) fn kept_search(&self, q: &str, kind: u8) -> (Rc<Vec<more::SearchRow>>, usize) {
-        let key = self.inbox_key().filter(|_| !q.trim().is_empty());
+        // (docs are searched too: typing in one changes only `docs_gen`)
+        let key = self
+            .inbox_key()
+            .filter(|_| !q.trim().is_empty())
+            .map(|k| (k, self.docs_gen.get()));
         if let (Some(k), Some((kk, kq, kind2, rows, arch))) = (key, &*self.kept.search.borrow()) {
             if k == *kk && kq == q && *kind2 == kind {
                 return (rows.clone(), *arch);

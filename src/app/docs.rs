@@ -628,7 +628,9 @@ impl App {
         );
         if r1.changed() {
             d.updated = now_ts();
-            self.dirty = true;
+            // typing in a doc: saved and sent like any change, but what's
+            // worked out from tasks and chat stays (`doc_dirty`)
+            self.doc_dirty = true;
         }
         if self.data.docs[idx].parent.is_none() {
             self.doc_tags_row(ui, idx);
@@ -684,7 +686,7 @@ impl App {
         name_field(&out.response, "Doc body");
         if out.response.changed() {
             d.updated = now_ts();
-            self.dirty = true;
+            self.doc_dirty = true;
         }
         // painted marks over the hidden Markdown markers: bullets,
         // checkboxes (click to tick), quote bars and dividers

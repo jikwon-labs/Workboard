@@ -9,8 +9,16 @@ impl App {
     /// The bar along the bottom while tasks are selected.
     pub(crate) fn bulk_bar(&mut self, ctx: &egui::Context) {
         self.undo_bar(ctx);
-        self.selected
-            .retain(|id| self.data.tasks.iter().any(|t| t.id == *id));
+        // (looked up by id: this runs every frame)
+        let gone: Vec<u64> = self
+            .selected
+            .iter()
+            .filter(|id| self.task(**id).is_none())
+            .copied()
+            .collect();
+        for id in gone {
+            self.selected.remove(&id);
+        }
         self.bulk_delete_confirm(ctx);
         if self.selected.is_empty() || self.section != Section::Home {
             return;

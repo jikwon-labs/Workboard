@@ -500,11 +500,12 @@ impl App {
     /// The posts the filters let through, sorted, with their channel's name
     /// and id; and whether there are any posts at all.
     fn posts_shown(&self) -> (Vec<(String, u64, Message)>, bool) {
-        let mut posts: Vec<(String, u64, Message)> = vec![];
+        // borrowed while filtering and sorting; only those shown are copied
+        let mut posts: Vec<(&Channel, u64, &Message)> = vec![];
         for c in self.data.channels.iter().filter(|c| self.can_see(c)) {
             for m in &c.messages {
                 if m.post_title.is_some() {
-                    posts.push((self.channel_label(c), c.id, m.clone()));
+                    posts.push((c, c.id, m));
                 }
             }
         }
@@ -538,6 +539,10 @@ impl App {
         if !self.post.sort_old {
             posts.reverse();
         }
+        let posts = posts
+            .into_iter()
+            .map(|(c, id, m)| (self.channel_label(c), id, m.clone()))
+            .collect();
         (posts, any)
     }
 

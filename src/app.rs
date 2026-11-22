@@ -586,12 +586,19 @@ pub struct App {
     check_text: String,
     tag_text: String,
     dirty: bool,
+    /// Only a doc's title or text was typed in this frame: saved and sent
+    /// like `dirty`, but only what's worked out from docs is made again
+    /// (`docs_gen`), not the Inbox, unread counts and the rest.
+    doc_dirty: bool,
     persist: bool,
     /// Changes not saved yet: when the first and the latest of them were
     /// made (see `save_tick`).
     save_due: std::cell::Cell<Option<(std::time::Instant, std::time::Instant)>>,
     /// Goes up when the workspace changes (`data_changed`).
     data_gen: std::cell::Cell<u64>,
+    /// Goes up when a doc is typed in (`doc_dirty`), which leaves
+    /// `data_gen` as it was.
+    docs_gen: std::cell::Cell<u64>,
     /// The Inbox rows and counts asked for on every frame (nav.rs).
     inbox_cache: std::cell::RefCell<nav::InboxCache>,
     /// Tasks by id and by parent (`task_index`).
@@ -1199,9 +1206,11 @@ impl App {
             check_text: String::new(),
             tag_text: String::new(),
             dirty: false,
+            doc_dirty: false,
             persist,
             save_due: std::cell::Cell::new(None),
             data_gen: std::cell::Cell::new(0),
+            docs_gen: std::cell::Cell::new(0),
             inbox_cache: Default::default(),
             task_index: Default::default(),
             kept: Default::default(),
@@ -5651,13 +5660,21 @@ impl App {
         self.apply_actions();
         self.track_history();
         self.note_recent();
+        // typing in a doc and nothing else: the rest of what's kept stays
+        let docs_only = std::mem::take(&mut self.doc_dirty) && !self.dirty;
+        if docs_only {
+            self.docs_gen.set(self.docs_gen.get().wrapping_add(1));
+            self.dirty = true;
+        }
         if self.dirty {
             // lines logged with `..Default::default()` get their ids before saving
             self.data.fix_activity_ids();
             self.sync_note_change();
         }
         if self.dirty {
-            self.data_changed();
+            if !docs_only {
+                self.data_changed();
+            }
             self.save_soon();
         }
         self.dirty = false;

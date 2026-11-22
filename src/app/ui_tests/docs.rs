@@ -199,6 +199,31 @@ fn doc_typing_formatting_keeps_the_text() {
 }
 
 #[test]
+fn typing_in_a_doc_keeps_what_tasks_and_chat_worked_out() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    h.settle();
+    let id = h.app.doc_open.unwrap();
+    h.ctx
+        .memory_mut(|m| m.request_focus(egui::Id::new(("doc_body", id))));
+    h.settle();
+    let (data, docs) = (h.app.data_gen.get(), h.app.docs_gen.get());
+    h.type_text("quarterly zebra notes");
+    h.settle();
+    assert_eq!(h.app.data_gen.get(), data, "the Inbox and counts stay");
+    assert!(h.app.docs_gen.get() > docs);
+    assert!(h
+        .app
+        .data
+        .docs
+        .iter()
+        .any(|d| d.id == id && d.body == "quarterly zebra notes"));
+    // the search palette finds the new words (it searches docs)
+    let (rows, _) = h.app.kept_search("zebra", 0);
+    assert!(rows.iter().any(|r| r.4 == crate::app::more::Hit::Doc(id)));
+}
+
+#[test]
 fn doc_checkbox_toggles_and_new_page_opens_in_edit() {
     let mut h = Ui1::new();
     h.app.new_doc(None);

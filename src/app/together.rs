@@ -235,6 +235,8 @@ pub struct SyncRt {
     pub(super) mine_ok: bool,
     /// When my reading state was last looked at for changes (`ctx` time).
     mine_checked: f64,
+    /// What it was made of then (`mine_fingerprint`); None: look again.
+    mine_print: Option<u64>,
 }
 
 /// Asking a server which workspaces an email and password sign in to.

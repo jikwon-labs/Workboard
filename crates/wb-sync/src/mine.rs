@@ -213,6 +213,37 @@ pub fn collect(view: &MineView, known: &Value, now: i64) -> Value {
     Value::Object(out)
 }
 
+/// The part of `state` that `base` doesn't have: the read positions, rows
+/// and settings whose entry differs, `replies_seen` when it differs, and
+/// parts from a newer app that differ. Merging it into anything is the
+/// same as merging all of `state`, as far as `base` goes there already (a
+/// missing entry is never taken as a change), so a device sends only this
+/// instead of its whole state each time something changed.
+pub fn changes(state: &Value, base: &Value) -> Value {
+    let mut out = Map::new();
+    for (k, v) in state.as_object().into_iter().flatten() {
+        let had = base.get(k);
+        match (v.as_object(), had.and_then(|h| h.as_object())) {
+            (Some(entries), Some(old)) if k != "replies_seen" => {
+                let diff: Map<String, Value> = entries
+                    .iter()
+                    .filter(|(e, val)| old.get(*e) != Some(*val))
+                    .map(|(e, val)| (e.clone(), val.clone()))
+                    .collect();
+                if !diff.is_empty() {
+                    out.insert(k.clone(), Value::Object(diff));
+                }
+            }
+            _ => {
+                if had != Some(v) {
+                    out.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+    Value::Object(out)
+}
+
 /// Put `other` into `base`. On a tie `base` keeps its own. True when
 /// `base` changed.
 pub fn merge(base: &mut Value, other: &Value) -> bool {
@@ -353,6 +384,47 @@ mod tests {
         let got = resolve(&mine);
         assert!(got.inbox_cleared.contains("1:100:2"));
         assert_eq!(got.read.get(&10), Some(&500));
+    }
+
+    /// Sending only what changed since the last agreed state leaves the
+    /// server with what sending everything would.
+    #[test]
+    fn only_what_changed_merges_like_the_whole_state() {
+        let mut mac = view();
+        mac.inbox_cleared.insert("a".into());
+        mac.inbox_later.insert("b".into());
+        mac.replies_read.insert("r1".into());
+        mac.read.insert(10, 500);
+        mac.read.insert(11, 600);
+        mac.settings.insert("muted_until".into(), json!(0));
+        let known = collect(&mac, &agreed(), 1000);
+        let mut server = json!({});
+        merge(&mut server, &known);
+        // the phone changed some of it meanwhile, later
+        let mut phone = view();
+        phone.read.insert(11, 650);
+        phone.inbox_cleared.insert("b".into());
+        merge(&mut server, &collect(&phone, &known, 1500));
+        // then the Mac changes other things (and one the phone changed)
+        mac.inbox_cleared.remove("a");
+        mac.replies_read.insert("r2".into());
+        mac.read.insert(10, 550);
+        mac.settings.insert("muted_until".into(), json!(99));
+        mac.replies_seen = 7;
+        let state = collect(&mac, &known, 2000);
+        let part = changes(&state, &known);
+        assert!(part["read"].get("11").is_none(), "unchanged: {}", part);
+        assert!(part["inbox"].get("b").is_none());
+        assert_eq!(part["read"]["10"]["ts"], json!(550));
+        assert_eq!(part["replies_seen"], json!(7));
+        let (mut whole, mut partly) = (server.clone(), server.clone());
+        assert!(merge(&mut whole, &state));
+        assert!(merge(&mut partly, &part));
+        assert_eq!(whole, partly);
+        // nothing changed: nothing to send
+        assert_eq!(changes(&state, &state), json!({}));
+        // nothing agreed yet: everything
+        assert_eq!(changes(&state, &json!({})), state);
     }
 
     #[test]

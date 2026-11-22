@@ -33,6 +33,38 @@ impl App {
         v
     }
 
+    /// A fingerprint of what `mine_view` is made of, worked out without
+    /// copying any of it: when it is the same as last time, nothing changed
+    /// to send.
+    fn mine_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        /// Feeds JSON text straight into the hasher.
+        struct Feed<'a>(&'a mut std::collections::hash_map::DefaultHasher);
+        impl std::io::Write for Feed<'_> {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                self.0.write(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let e = &self.data.extra;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for c in &self.data.channels {
+            (c.id, c.last_read).hash(&mut h);
+        }
+        e.replies_seen.hash(&mut h);
+        e.inbox_cleared.hash(&mut h);
+        e.inbox_later.hash(&mut h);
+        e.replies_read.hash(&mut h);
+        e.muted_until.hash(&mut h);
+        // what my devices agreed on, started over (a workspace joined)
+        e.mine_sync.is_null().hash(&mut h);
+        let _ = serde_json::to_writer(Feed(&mut h), &e.notify);
+        h.finish()
+    }
+
     /// Once a second while connected: send my reading state when it
     /// changed here.
     pub(crate) fn mine_tick(&mut self, now: f64) {
@@ -40,7 +72,12 @@ impl App {
             return;
         }
         self.sync_rt.mine_checked = now;
+        let print = self.mine_fingerprint();
+        if self.sync_rt.mine_print == Some(print) {
+            return;
+        }
         self.send_mine();
+        self.sync_rt.mine_print = Some(print);
     }
 
     /// Send what changed here since my devices last agreed.
@@ -57,7 +94,11 @@ impl App {
         if &out == known {
             return;
         }
-        net.send(NetMsg::Mine { data: out.clone() });
+        // only what changed: the server merges entry by entry (and has the
+        // rest, or gets it back after the next welcome; see take_mine)
+        net.send(NetMsg::Mine {
+            data: mine::changes(&out, known),
+        });
         self.data.extra.mine_sync = out;
         self.save_soon();
     }
@@ -80,9 +121,15 @@ impl App {
         self.data.extra.mine_sync = merged.clone();
         if newer_here {
             if let Some(net) = &self.sync_rt.net {
-                net.send(NetMsg::Mine { data: merged });
+                // what the server lacks: also what a send that never
+                // arrived (the connection broke) had
+                net.send(NetMsg::Mine {
+                    data: mine::changes(&merged, &theirs),
+                });
             }
         }
+        // what the next look compares against moved: look again
+        self.sync_rt.mine_print = None;
         if changed {
             // what is worked out from it (the Inbox rows) is worked out
             // again: rows can move without any count changing

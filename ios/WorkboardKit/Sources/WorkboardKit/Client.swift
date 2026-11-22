@@ -349,6 +349,8 @@ public final class SyncClient {
     /// changes (Sync+Cache.swift).
     @ObservationIgnored var prints = FingerprintCache()
     @ObservationIgnored var outPrints = FingerprintCache()
+    /// The message being handled, merged off the main thread already.
+    @ObservationIgnored private var premerged: Premerged?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     /// When the oldest change not yet on disk was made (nil: all saved).
     @ObservationIgnored private var firstUnsaved: Date?
@@ -656,11 +658,26 @@ public final class SyncClient {
                 let msg = try await ws.receive()
                 guard generation == gen else { return }
                 lastHeard = Date()
+                let text: String
                 switch msg {
-                case .string(let s): handle(ServerMessage(text: s), ws)
-                case .data(let d): handle(ServerMessage(text: String(decoding: d, as: UTF8.self)), ws)
-                @unknown default: break
+                case .string(let s): text = s
+                case .data(let d): text = String(decoding: d, as: UTF8.self)
+                @unknown default: continue
                 }
+                // read off the main thread: a welcome carries the whole
+                // workspace, megabytes of JSON
+                let m = await Self.read(text)
+                guard generation == gen else { return }
+                // a whole copy (each welcome, an old server's update) is
+                // merged off the main thread too, into the copy as it is
+                // now; take() uses it unless the copy changed meanwhile
+                if let whole = m.wholeCopy {
+                    let pre = await Self.premerge(data, syncMeta, whole, revision: dataRevision)
+                    guard generation == gen else { return }
+                    premerged = pre
+                }
+                handle(m, ws)
+                premerged = nil
             } catch {
                 guard generation == gen else { return }
                 if (ws.response as? HTTPURLResponse)?.statusCode == 410 {
@@ -672,6 +689,38 @@ public final class SyncClient {
                 return
             }
         }
+    }
+
+    nonisolated private static func read(_ text: String) async -> ServerMessage { ServerMessage(text: text) }
+
+    /// A whole copy from the server merged into this device's, worked out
+    /// off the main thread for the copy at `revision` (dataRevision).
+    struct Premerged: Sendable {
+        let revision: Int
+        let whole: JSON
+        /// The merged copy (nil: there was no copy to merge into).
+        let tree: JSON?
+        let meta: SyncMeta
+        /// What the server has now (SyncSummary of the whole copy).
+        let summary: SyncSummary
+        /// The whole copy's bookkeeping.
+        let theirs: SyncMeta
+    }
+
+    nonisolated private static func premerge(_ base: JSON?, _ meta: SyncMeta, _ whole: JSON, revision: Int) async -> Premerged {
+        let summary = SyncSummary(of: whole)
+        let theirs = SyncMeta(of: whole)
+        guard var tree = base else { return Premerged(revision: revision, whole: whole, tree: nil, meta: meta, summary: summary, theirs: theirs) }
+        var m = meta
+        Sync.merge(&tree, meta: &m, [whole])
+        Sync.patchShared(&tree, old: meta, new: m)
+        return Premerged(revision: revision, whole: whole, tree: tree, meta: m, summary: summary, theirs: theirs)
+    }
+
+    /// What the server has of `whole`, worked out off the main thread when it could be.
+    private func summary(of whole: JSON) -> SyncSummary {
+        if let p = premerged, p.whole == whole { return p.summary }
+        return SyncSummary(of: whole)
     }
 
     private func handle(_ m: ServerMessage, _ ws: URLSessionWebSocketTask) {
@@ -700,7 +749,7 @@ public final class SyncClient {
             trashFollowsMe()
             self.rev = w.rev
             serverDeltas = w.deltas
-            summary = w.deltas ? w.snapshot.map { SyncSummary(of: $0) } : nil
+            summary = w.deltas ? w.snapshot.map { summary(of: $0) } : nil
             if let snapshot = w.snapshot { take(snapshot, announce: false, hidden: w.hidden) }
             state = .connected
             // signed in here again: this welcome's registration replaces the old one
@@ -716,7 +765,7 @@ public final class SyncClient {
             if data != nil { pushNow() }
         case let .update(snapshot, rev, hidden):
             self.rev = rev
-            if serverDeltas { summary = SyncSummary(of: snapshot) }
+            if serverDeltas { summary = summary(of: snapshot) }
             take(snapshot, announce: true, hidden: hidden)
         case let .delta(part, rev, base, hidden):
             // a revision went missing (or there's no copy to merge into yet):
@@ -810,8 +859,11 @@ public final class SyncClient {
     /// Merge a snapshot from the server into this device's copy.
     private func take(_ snapshot: JSON, announce: Bool, hidden: [UInt64] = []) {
         let before = data
-        let theirs = SyncMeta(of: snapshot)
-        if var local = data {
+        let theirs = premerged.flatMap { $0.whole == snapshot ? $0.theirs : nil } ?? SyncMeta(of: snapshot)
+        if let p = premerged, let tree = p.tree, p.revision == dataRevision, data != nil, p.whole == snapshot {
+            syncMeta = p.meta
+            data = tree
+        } else if var local = data {
             var meta = syncMeta
             let old = meta
             Sync.merge(&local, meta: &meta, [snapshot], cache: prints)

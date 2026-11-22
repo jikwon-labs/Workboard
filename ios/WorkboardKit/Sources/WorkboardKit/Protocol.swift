@@ -550,3 +550,14 @@ public struct Backup: Equatable, Identifiable, Sendable {
         return "\(date)\(time) (\(kind))"
     }
 }
+
+extension ServerMessage {
+    /// The whole copy this message carries (a welcome's, an update's).
+    public var wholeCopy: JSON? {
+        switch self {
+        case let .welcome(w): return w.snapshot
+        case let .update(data, _, _): return data
+        default: return nil
+        }
+    }
+}

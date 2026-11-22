@@ -123,7 +123,9 @@ struct ConversationFilesView: View {
                         .accessibilityIdentifier("filesPart")
                         if part == .media {
                             LazyVGrid(columns: Array(repeating: GridItem(.fixed(side), spacing: gap), count: 3), alignment: .leading, spacing: gap) {
-                                ForEach(media, id: \.offset) { _, f in
+                                // by the message and the file's sha, not the place in the
+                                // list: a new file at the top doesn't make every tile new
+                                ForEach(media, id: \.element.tileId) { _, f in
                                     Group {
                                         if f.attachment.isVideo {
                                             VideoTile(attachment: f.attachment, box: CGSize(width: side, height: side))
@@ -136,7 +138,7 @@ struct ConversationFilesView: View {
                             }
                         } else {
                             LazyVStack(alignment: .leading, spacing: 8) {
-                                ForEach(other, id: \.offset) { _, f in
+                                ForEach(other, id: \.element.tileId) { _, f in
                                     FileTile(attachment: f.attachment, detail: detail(f))
                                         .contextMenu { showButton(f) }
                                 }
@@ -158,4 +160,10 @@ struct ConversationFilesView: View {
         let who = f.message.bot ?? client.view.member(f.message.author)?.name ?? String(localized: "Someone")
         return "\(who) · \(Fmt.time(f.message.ts))"
     }
+}
+
+extension ConversationFile {
+    /// One tile per file of a message (the same file twice in one message
+    /// is one tile).
+    var tileId: String { "\(message.id)/\(attachment.file)/\(attachment.name)" }
 }

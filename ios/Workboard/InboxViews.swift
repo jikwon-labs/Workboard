@@ -165,21 +165,38 @@ private struct InboxRow: View {
 /// Quick find: the search field is open at once; the chips under it pick
 /// what to look in.
 struct SearchView: View {
+    @Environment(SyncClient.self) private var client
     @State private var query = ""
     @State private var active = true
     @State private var scope: SearchScope = .all
+    /// The results of the last search.
+    @State private var found: Found?
 
     var body: some View {
+        let empty = query.trimmingCharacters(in: .whitespaces).isEmpty
+        let v = client.view
+        let me = client.me ?? 0
+        let key = SearchResults.Key(query: query, scope: scope, revision: client.dataRevision)
         List {
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if empty {
                 Section {
                     Text("Search tasks, docs, messages, people").font(.subheadline).foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
                     SearchHint()
                 }
-            } else {
-                SearchResults(query: query, scope: scope)
+            } else if let found {
+                SearchResults(found: found)
             }
+        }
+        .task(id: key) {
+            guard !empty else { return }
+            // once typing pauses, and off the main thread: every task, doc
+            // and message is looked through
+            if found != nil { try? await Task.sleep(nanoseconds: 200_000_000) }
+            guard !Task.isCancelled else { return }
+            let f = await Task.detached(priority: .userInitiated) { Found(v, me: me, key: key) }.value
+            guard !Task.isCancelled else { return }
+            found = f
         }
         .calmList()
         .navigationTitle("Quick find")
@@ -217,16 +234,21 @@ enum SearchScope: Hashable, CaseIterable {
     }
 }
 
-/// What a search finds.
-struct SearchResults: View {
-    @Environment(SyncClient.self) private var client
-    let query: String
-    var scope: SearchScope = .all
+/// What a search finds, worked out off the main thread.
+struct Found: Sendable {
+    let key: SearchResults.Key
+    let raw: String
+    let tasks: [TaskView]
+    let docs: [DocView]
+    let convs: [ChannelView]
+    let messages: [(ChannelView, MessageView)]
+    let people: [MemberView]
 
-    var body: some View {
-        let v = client.view
-        let me = client.me ?? 0
-        let raw = query.trimmingCharacters(in: .whitespaces)
+    init(_ v: WorkspaceView, me: UInt64, key: SearchResults.Key) {
+        self.key = key
+        let raw = key.query.trimmingCharacters(in: .whitespaces)
+        self.raw = raw
+        let scope = key.scope
         // has:file, has:link and from:name narrow the messages; with any
         // of them only messages are searched (SearchQuery in WorkboardKit)
         let parsed = SearchQuery(raw)
@@ -234,12 +256,33 @@ struct SearchResults: View {
         let only = parsed.hasOperators
         let has = { (s: String) in s.localizedCaseInsensitiveContains(q) }
         let on = { (s: SearchScope) in (scope == .all || scope == s) && (!only || s == .messages) }
-        let tasks = on(.tasks) ? Array(v.tasks.filter { has($0.name) || has($0.description) || $0.tags.contains(where: has) }.prefix(30)) : []
-        let docs = on(.docs) ? Array(v.visibleDocs(me: me).filter { has($0.title) || has($0.body) }.prefix(20)) : []
+        tasks = on(.tasks) ? Array(v.tasks.filter { has($0.name) || has($0.description) || $0.tags.contains(where: has) }.prefix(30)) : []
+        docs = on(.docs) ? Array(v.visibleDocs(me: me).filter { has($0.title) || has($0.body) }.prefix(20)) : []
         let channels = v.visibleChannels(me: me)
-        let convs = on(.messages) && !only ? channels.filter { has(v.title(of: $0, me: me)) } : []
-        let messages = on(.messages) ? Array(channels.flatMap { c in (c.messages + c.messages.flatMap(\.replies)).filter { parsed.matches($0, members: v.members, me: me) }.map { (c, $0) } }.suffix(30).reversed()) : []
-        let people = on(.people) ? v.members.filter { has($0.name) || has($0.email) } : []
+        convs = on(.messages) && !only ? channels.filter { has(v.title(of: $0, me: me)) } : []
+        messages = on(.messages) ? Array(channels.flatMap { c in (c.messages + c.messages.flatMap(\.replies)).filter { parsed.matches($0, members: v.members, me: me) }.map { (c, $0) } }.suffix(30).reversed()) : []
+        people = on(.people) ? v.members.filter { has($0.name) || has($0.email) } : []
+    }
+}
+
+/// What a search finds.
+struct SearchResults: View {
+    @Environment(SyncClient.self) private var client
+    let found: Found
+
+    struct Key: Hashable, Sendable {
+        let query: String
+        let scope: SearchScope
+        let revision: Int
+    }
+
+    var body: some View {
+        results(found, v: client.view, me: client.me ?? 0)
+    }
+
+    @ViewBuilder func results(_ f: Found, v: WorkspaceView, me: UInt64) -> some View {
+        let raw = f.raw
+        let (tasks, docs, convs, messages, people) = (f.tasks, f.docs, f.convs, f.messages, f.people)
         if tasks.isEmpty && docs.isEmpty && convs.isEmpty && messages.isEmpty && people.isEmpty {
             Section {
                 Text("No results for \"\(raw)\"").foregroundStyle(.secondary).accessibilityIdentifier("noResults")

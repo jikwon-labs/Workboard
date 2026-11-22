@@ -269,12 +269,18 @@ struct ConversationView: View {
     @State private var filter: MessageFilter = .all
     /// A message to scroll to once the list is back ("Show in conversation").
     @State private var jump: UInt64?
+    /// How many of the newest messages the list holds; scrolling to its
+    /// top brings in older ones. A long history isn't laid out at once.
+    @State private var window = ConversationView.page
+
+    static let page = 200
 
     var body: some View {
         let me = client.me ?? 0
         let v = client.view
         if let c = v.channels.first(where: { $0.id == channelId }) {
-            let shown = filter == .all ? c.messages : c.messages.filter(filter.keeps)
+            let all = filter == .all ? c.messages : c.messages.filter(filter.keeps)
+            let shown = all.count > window ? Array(all.suffix(window)) : all
             let atBottom = position == nil || position == shown.last?.id
             Group {
                 if filter == .files {
@@ -287,7 +293,7 @@ struct ConversationView: View {
                         }
                     }
                 } else {
-                    messageList(c, shown: shown, atBottom: atBottom, me: me)
+                    messageList(c, shown: shown, earlier: all.count - shown.count, atBottom: atBottom, me: me)
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -295,6 +301,10 @@ struct ConversationView: View {
             }
             .onAppear {
                 readLine = c.firstUnread(me: me)
+                // the "New" line is in the list, however far back it is
+                if let r = readLine, let i = c.messages.firstIndex(where: { $0.id == r }) {
+                    window = max(window, c.messages.count - i + 20)
+                }
                 bottomSeen = c.messages.last?.ts ?? 0
                 markRead(c)
             }
@@ -368,10 +378,20 @@ struct ConversationView: View {
     }
 
     /// The messages the filter keeps (all of them when it is off).
-    func messageList(_ c: ChannelView, shown: [MessageView], atBottom: Bool, me: UInt64) -> some View {
+    /// `earlier`: how many older messages aren't in the list yet.
+    func messageList(_ c: ChannelView, shown: [MessageView], earlier: Int, atBottom: Bool, me: UInt64) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if !c.topic.isEmpty && filter == .all {
+                if earlier > 0 {
+                    // at the top of the list: the next older page comes in
+                    // (the list stays where it is, anchored at the bottom)
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .onAppear { window += ConversationView.page }
+                        .accessibilityIdentifier("olderMessages")
+                }
+                if !c.topic.isEmpty && filter == .all && earlier == 0 {
                     Text(c.topic).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
                 }
                 if shown.isEmpty && filter == .links {
@@ -416,6 +436,10 @@ struct ConversationView: View {
         .task(id: jump) {
             // back from the files: once the list is laid out
             guard let id = jump else { return }
+            // with the message in the list, however far back it is
+            if let i = c.messages.firstIndex(where: { $0.id == id }) {
+                window = max(window, c.messages.count - i + 20)
+            }
             try? await Task.sleep(for: .milliseconds(200))
             withAnimation { position = id }
             jump = nil
@@ -1060,26 +1084,35 @@ struct TypingLine: View {
     var thread: UInt64? = nil
 
     var body: some View {
-        // looked at again every second, so it goes away when they stop
-        TimelineView(.periodic(from: .now, by: 1)) { tl in
-            let who = client.typing(in: channelId, thread: thread, at: tl.date)
-            if !who.isEmpty {
-                let name = { (m: UInt64) in client.view.members.first { $0.id == m }?.name ?? String(localized: "Someone") }
-                Group {
-                    switch who.count {
-                    case 1: Text("\(name(who[0])) is typing...")
-                    case 2: Text("\(name(who[0])) and \(name(who[1])) are typing...")
-                    default: Text("Several people are typing...")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 4)
-                .background(.bar)
-                .accessibilityIdentifier("typingLine")
+        // looked at again every second while someone may be typing, so it
+        // goes away when they stop; with nobody typing, nothing ticks
+        let now = Date()
+        let until = client.typists.filter { $0.channel == channelId && $0.thread == thread }.map { $0.heard.addingTimeInterval(TypingAPI.shows) }.max()
+        if let until, until > now {
+            TimelineView(.explicit(Array(stride(from: now, to: until, by: 1)) + [until])) { tl in
+                line(at: tl.date)
             }
+        }
+    }
+
+    @ViewBuilder func line(at date: Date) -> some View {
+        let who = client.typing(in: channelId, thread: thread, at: date)
+        if !who.isEmpty {
+            let name = { (m: UInt64) in client.view.member(m)?.name ?? String(localized: "Someone") }
+            Group {
+                switch who.count {
+                case 1: Text("\(name(who[0])) is typing...")
+                case 2: Text("\(name(who[0])) and \(name(who[1])) are typing...")
+                default: Text("Several people are typing...")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 4)
+            .background(.bar)
+            .accessibilityIdentifier("typingLine")
         }
     }
 }

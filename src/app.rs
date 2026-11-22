@@ -32,6 +32,7 @@ mod icons;
 use icons::Icon;
 mod ime;
 mod integrations;
+mod kept;
 mod listview;
 mod login;
 mod menus;
@@ -575,6 +576,8 @@ pub struct App {
     inbox_cache: std::cell::RefCell<nav::InboxCache>,
     /// Tasks by id and by parent (`task_index`).
     task_index: std::cell::RefCell<TaskIndex>,
+    /// Unread counts and the like, worked out once per change (kept.rs).
+    kept: kept::Kept,
     actions: Vec<Action>,
     home_collapsed: HashSet<&'static str>,
     /// Home "My Work" sections showing every task instead of the first few.
@@ -848,6 +851,9 @@ struct ChatUi {
     /// the next one (drawn in the app's own window, as in the click tests,
     /// both would be the same reply box).
     thread_panel_pass: u64,
+    /// The thread last marked read, as (conversation, thread, replies,
+    /// replies read then, `data_gen`): marked again once one changes.
+    thread_marked: Option<(u64, u64, usize, usize, u64)>,
     /// The reply box was just typed in (this frame), with words in it: the
     /// others in the thread are told.
     thread_typed: bool,
@@ -1178,6 +1184,7 @@ impl App {
             data_gen: std::cell::Cell::new(0),
             inbox_cache: Default::default(),
             task_index: Default::default(),
+            kept: Default::default(),
             actions: vec![],
             home_collapsed: ["Done"].into_iter().collect(),
             home_all: HashSet::new(),
@@ -4768,8 +4775,14 @@ impl App {
     pub(super) fn unread_replies(&self) -> usize {
         self.kept_unread_replies(|| {
             let seen = self.data.extra.replies_seen;
-            let read = &self.data.extra.replies_read;
-            let unread = |k: String| !read.contains(&k);
+            let read: HashSet<&str> = self
+                .data
+                .extra
+                .replies_read
+                .iter()
+                .map(String::as_str)
+                .collect();
+            let unread = |k: String| !read.contains(k.as_str());
             let me = self.data.me;
             let on_tasks = self
                 .data
@@ -4841,8 +4854,9 @@ impl App {
                 let seen = self.data.extra.replies_seen;
                 ui.add_space(10.0);
                 // a reply marked read on its own counts as read too
-                let read_list = self.data.extra.replies_read.clone();
-                let read_one = |k: &str| read_list.iter().any(|x| x == k);
+                let read_list: HashSet<String> =
+                    self.data.extra.replies_read.iter().cloned().collect();
+                let read_one = |k: &str| read_list.contains(k);
                 let mut items: Vec<(i64, nav::InboxSrc, String, Activity)> = vec![];
                 let me = self.data.me;
                 // "@" and either of my names (full or display)
@@ -5431,7 +5445,9 @@ impl App {
 
     /// One frame of the whole interface (everything except the native window buttons).
     pub(crate) fn ui_frame(&mut self, ctx: &egui::Context) {
+        self.kept.start_pass(ctx.cumulative_pass_nr());
         self.ui_frame_inner(ctx);
+        self.kept.end_pass();
         crate::widgets::pointer_over_clickables(ctx);
     }
 

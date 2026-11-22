@@ -795,6 +795,31 @@ fn the_dock_count_follows_the_sidebar_seen_rule() {
 }
 
 #[test]
+fn kept_unread_counts_follow_new_messages_and_reading_within_frames() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    a.mark_read(dm);
+    a.kept.start_pass(1);
+    let base = a.dock_count();
+    let total = a.chat_unread_total();
+    // a teammate's message taken in (a merge says the workspace changed)
+    post(&mut a, dm, 2, "new one");
+    a.data_changed();
+    assert_eq!(a.dock_count(), base + 1);
+    assert_eq!(a.chat_unread_total(), total + 1);
+    // read in the same pass, without a change being noted
+    a.mark_read(dm);
+    assert_eq!(a.dock_count(), base);
+    assert_eq!(a.chat_unread_total(), total);
+    a.kept.end_pass();
+    // the next pass, a message pushed without a word: the counts check
+    a.kept.start_pass(2);
+    post(&mut a, dm, 2, "another");
+    assert_eq!(a.dock_count(), base + 1);
+    a.kept.end_pass();
+}
+
+#[test]
 fn keywords_notify_like_a_mention_but_not_in_quiet_channels() {
     let mut a = app();
     let g = channel_id(&a, "general");

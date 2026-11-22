@@ -645,6 +645,9 @@ impl App {
     }
 
     pub(super) fn unread_here(&self, c: &Channel) -> usize {
+        if let Some(n) = self.kept_unread_here(c) {
+            return n;
+        }
         c.messages.iter().filter(|m| self.is_unread(c, m)).count()
     }
 
@@ -690,6 +693,7 @@ impl App {
             return;
         };
         let ids: Vec<u64> = self.conversation(c).iter().map(|d| d.id).collect();
+        self.kept.forget_seen();
         let now = now_ts();
         for id in ids {
             if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == id) {
@@ -706,15 +710,35 @@ impl App {
     /// Mark the replies in thread `parent` of channel `cid` read, as
     /// "Mark read" in Replies does (`replies_read`).
     pub(super) fn mark_thread_read(&mut self, cid: u64, parent: &Message) {
+        // asked for on every frame the thread shows: nothing to do until a
+        // reply comes or one is marked unread again
+        let mark = (
+            cid,
+            parent.id,
+            parent.replies.len(),
+            self.data.extra.replies_read.len(),
+            self.data_gen.get(),
+        );
+        if self.chat.thread_marked == Some(mark) {
+            return;
+        }
         let me = self.data.me;
         let mut added = false;
+        let read: HashSet<String> = self.data.extra.replies_read.iter().cloned().collect();
         for r in parent.replies.iter().filter(|r| r.author != me) {
             let k = format!("chat:{}:{}", cid, r.id);
-            if !self.data.extra.replies_read.contains(&k) {
+            if !read.contains(&k) {
                 self.data.extra.replies_read.push(k);
                 added = true;
             }
         }
+        self.chat.thread_marked = Some((
+            cid,
+            parent.id,
+            parent.replies.len(),
+            self.data.extra.replies_read.len(),
+            self.data_gen.get(),
+        ));
         if added && self.persist {
             self.dirty = true;
         }
@@ -725,6 +749,9 @@ impl App {
     pub(super) fn conversation<'a>(&'a self, c: &'a Channel) -> Vec<&'a Channel> {
         if c.kind != ChannelKind::Direct || self.dm_duplicate(c) {
             return vec![c];
+        }
+        if let Some(v) = self.kept_conversation(c) {
+            return v;
         }
         let mine = dm_people(c);
         std::iter::once(c)
@@ -740,6 +767,9 @@ impl App {
     pub(super) fn dm_primary(&self, c: &Channel) -> u64 {
         if c.kind != ChannelKind::Direct {
             return c.id;
+        }
+        if let Some(id) = self.kept_dm_primary(c) {
+            return id;
         }
         let mine = dm_people(c);
         self.data
@@ -863,6 +893,9 @@ impl App {
     pub(super) fn dm_duplicate(&self, c: &Channel) -> bool {
         if c.kind != ChannelKind::Direct {
             return false;
+        }
+        if let Some(dup) = self.kept_dm_duplicate(c) {
+            return dup;
         }
         let mine = dm_people(c);
         self.data.channels.iter().any(|d| {

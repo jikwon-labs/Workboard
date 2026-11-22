@@ -201,6 +201,10 @@ pub(super) struct InboxKey {
 pub(super) struct InboxCache {
     rows: Option<(InboxKey, std::rc::Rc<Vec<InboxItem>>)>,
     unread_replies: Option<(InboxKey, usize)>,
+    /// The Primary rows not read yet (`inbox_badge`, without reminders).
+    badge: Option<(InboxKey, usize)>,
+    /// The key itself, for the pass (`kept`) and change it was worked out in.
+    key: Option<(u64, u64, InboxKey)>,
 }
 
 impl App {
@@ -218,13 +222,29 @@ impl App {
 
     /// The key the Inbox rows are kept under; none while a change is
     /// waiting to be taken in (`dirty`), when they're built fresh.
-    fn inbox_key(&self) -> Option<InboxKey> {
+    pub(super) fn inbox_key(&self) -> Option<InboxKey> {
         if self.dirty {
             return None;
         }
+        // worked out once per pass: it walks every message
+        let pass = self.kept.pass();
+        let gen = self.data_gen.get();
+        if let (Some(p), Some((kp, kg, k))) = (pass, self.inbox_cache.borrow().key) {
+            if p == kp && gen == kg {
+                return Some(k);
+            }
+        }
+        let k = self.count_inbox_key();
+        if let Some(p) = pass {
+            self.inbox_cache.borrow_mut().key = Some((p, gen, k));
+        }
+        Some(k)
+    }
+
+    fn count_inbox_key(&self) -> InboxKey {
         let d = &self.data;
         let n = &d.extra.notify;
-        Some(InboxKey {
+        InboxKey {
             gen: self.data_gen.get(),
             me: d.me,
             tasks: d.tasks.len(),
@@ -245,7 +265,7 @@ impl App {
             replies_read: d.extra.replies_read.len(),
             replies_seen: d.extra.replies_seen,
             settings: [n.comments, n.mentions, n.assigned, n.replies],
-        })
+        }
     }
 
     /// The Inbox rows (all four tabs, see `build_inbox_items`), built again
@@ -456,12 +476,27 @@ impl App {
     /// not yet read (a thread opened, or "Mark read" in Replies), plus
     /// reminders that are due, when reminders are turned on.
     pub(super) fn inbox_badge(&self) -> usize {
-        let read = &self.data.extra.replies_read;
-        let rows = self
-            .inbox_items()
-            .iter()
-            .filter(|i| i.tab == InboxTab::Primary && !read.contains(&i.key))
-            .count();
+        let key = self.inbox_key();
+        let kept = match (key, self.inbox_cache.borrow().badge) {
+            (Some(k), Some((kept, n))) if k == kept => Some(n),
+            _ => None,
+        };
+        let rows = kept.unwrap_or_else(|| {
+            let read: HashSet<&str> = self
+                .data
+                .extra
+                .replies_read
+                .iter()
+                .map(String::as_str)
+                .collect();
+            let n = self
+                .inbox_items()
+                .iter()
+                .filter(|i| i.tab == InboxTab::Primary && !read.contains(i.key.as_str()))
+                .count();
+            self.inbox_cache.borrow_mut().badge = key.map(|k| (k, n));
+            n
+        });
         rows + if self.data.extra.notify.reminders {
             self.due_reminders()
         } else {

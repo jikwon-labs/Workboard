@@ -108,6 +108,9 @@ impl App {
                 groups.push(g);
             }
         }
+        // looked up by id for every bar (not a search of all of them each)
+        let by_id: std::collections::HashMap<u64, &Task> =
+            dated.iter().rev().map(|x| (x.id, *x)).collect();
         groups
             .into_iter()
             .map(|group| {
@@ -115,7 +118,7 @@ impl App {
                 let ranges: Vec<(u64, (NaiveDate, NaiveDate))> = group
                     .tasks
                     .iter()
-                    .filter_map(|id| dated.iter().find(|x| x.id == *id))
+                    .filter_map(|id| by_id.get(id).copied())
                     .filter_map(|x| {
                         let r = bar_range(x.start, x.due)?;
                         taken.push((r.0, reach(x, r).max(r.1)));

@@ -45,6 +45,27 @@ pub(super) struct ShownText {
 /// Texts kept at most; past this they're all worked out again.
 const TEXTS_KEPT: usize = 4000;
 
+/// What `App::filtered` depends on besides the tasks themselves.
+#[derive(Clone, PartialEq)]
+pub(super) struct FilteredKey {
+    /// The pass it was worked out in: tasks are changed in place in many
+    /// ways, so this is only kept within one pass (Board, the sidebar and
+    /// the List's counts ask several times in one).
+    pub pass: u64,
+    pub gen: u64,
+    pub tasks: usize,
+    pub me: u64,
+    pub loc: Location,
+    pub search: String,
+    pub me_mode: bool,
+    pub assignee: Option<u64>,
+    pub show_closed: bool,
+    pub filter: parity::TaskFilter,
+    pub sort: (SortBy, bool),
+    /// Today, and the minute: what's overdue changes with the time.
+    pub minute: i64,
+}
+
 #[derive(Default)]
 pub(super) struct Kept {
     /// Inside a pass of `ui_frame`: its number plus one; 0 outside, when
@@ -66,6 +87,14 @@ pub(super) struct Kept {
     /// (key, query, kind, rows, archived).
     #[allow(clippy::type_complexity)]
     search: RefCell<Option<(nav::InboxKey, String, u8, Rc<Vec<more::SearchRow>>, usize)>>,
+    pub(super) filtered: RefCell<Option<(FilteredKey, Rc<Vec<u64>>)>>,
+    /// Open top-level tasks by list, for the sidebar: (pass, change,
+    /// tasks, counts). Only kept within one pass, like `filtered`.
+    #[allow(clippy::type_complexity)]
+    /// Every tag in use (`App::all_tags`): (change, tasks, tags, them).
+    #[allow(clippy::type_complexity)]
+    pub(super) tags: RefCell<Option<((u64, usize, usize), Vec<String>)>>,
+    pub(super) open_counts: RefCell<Option<((u64, u64, usize), Rc<HashMap<u64, usize>>)>>,
     pub(super) matching: RefCell<
         Option<(
             nav::InboxKey,

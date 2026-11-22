@@ -513,15 +513,18 @@ fn closed_in(info: &HashMap<u64, ListInfo>, t: &Task) -> bool {
 /// The kind of a task's status (`Data::status_of`) with the lists looked up
 /// already.
 fn status_kind_in(info: &HashMap<u64, ListInfo>, t: &Task) -> StatusKind {
+    status_in(info, t).kind
+}
+
+/// A task's status (`Data::status_ref`) with the lists looked up already.
+fn status_in<'a>(info: &HashMap<u64, ListInfo<'a>>, t: &Task) -> &'a Status {
     let sts = info
         .get(&t.list_id)
         .map_or(default_statuses_ref(), |l| l.statuses);
-    let st = sts
-        .iter()
+    sts.iter()
         .find(|s| s.name == t.status)
         .or(sts.first())
-        .unwrap_or(&default_statuses_ref()[0]);
-    st.kind
+        .unwrap_or(&default_statuses_ref()[0])
 }
 
 /// See `App::task_index`.
@@ -1431,6 +1434,42 @@ impl App {
     /// Tasks matching the current location and filters (top level only,
     /// plus the subtasks a search finds).
     fn filtered(&self) -> Vec<&Task> {
+        // several views ask for these in one pass (Board twice, the
+        // sidebar, the List's counts): worked out once per pass
+        let pass = self.kept.pass().filter(|_| !self.dirty);
+        let key = pass.map(|pass| kept::FilteredKey {
+            pass,
+            gen: self.data_gen.get(),
+            tasks: self.data.tasks.len(),
+            me: self.data.me,
+            loc: self.loc,
+            search: self.search.clone(),
+            me_mode: self.me_mode,
+            assignee: self.assignee_filter,
+            show_closed: self.prefs.show_closed,
+            filter: self.prefs.filter.clone(),
+            sort: (self.prefs.sort_by, self.prefs.sort_desc),
+            minute: now_ts().div_euclid(60),
+        });
+        let kept = match (&key, &*self.kept.filtered.borrow()) {
+            (Some(k), Some((kk, ids))) if k == kk => Some(ids.clone()),
+            _ => None,
+        };
+        if let Some(ids) = kept {
+            let found: Vec<&Task> = ids.iter().filter_map(|id| self.task(*id)).collect();
+            if found.len() == ids.len() {
+                return found;
+            }
+        }
+        let v = self.filter_tasks();
+        if let Some(k) = key {
+            *self.kept.filtered.borrow_mut() =
+                Some((k, std::rc::Rc::new(v.iter().map(|t| t.id).collect())));
+        }
+        v
+    }
+
+    fn filter_tasks(&self) -> Vec<&Task> {
         let lists = self.data.lists_in(self.loc);
         let q = self.search.to_lowercase();
         // each list's space and statuses, found once instead of per task
@@ -1576,6 +1615,16 @@ impl App {
         let mut out: Vec<Group> = vec![];
         match by {
             GroupBy::Status => {
+                // each task's status found once (not once per status, each
+                // time walking the spaces for its list)
+                let info = list_infos(&self.data);
+                let mut by_status: HashMap<&str, Vec<u64>> = HashMap::new();
+                for x in tasks {
+                    by_status
+                        .entry(status_in(&info, x).name.as_str())
+                        .or_default()
+                        .push(x.id);
+                }
                 for st in self.location_statuses() {
                     if !self.prefs.show_closed
                         && matches!(st.kind, StatusKind::Closed | StatusKind::Done)
@@ -1583,11 +1632,8 @@ impl App {
                     {
                         continue;
                     }
-                    let ids: Vec<u64> = tasks
-                        .iter()
-                        .filter(|x| self.data.status_ref(x).name == st.name)
-                        .map(|x| x.id)
-                        .collect();
+                    let ids: Vec<u64> =
+                        by_status.get(st.name.as_str()).cloned().unwrap_or_default();
                     if ids.is_empty() && !include_empty {
                         continue;
                     }

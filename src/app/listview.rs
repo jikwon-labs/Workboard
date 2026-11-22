@@ -601,14 +601,32 @@ impl App {
     }
 
     pub(super) fn all_tags(&self) -> Vec<String> {
+        // asked for on every frame a task or the bulk bar is open: kept
+        // until the workspace changes (or, as a check, the number of tags),
+        // each tag lowered once
+        let key = (!self.dirty).then(|| {
+            (
+                self.data_gen.get(),
+                self.data.tasks.len(),
+                self.data.tasks.iter().map(|t| t.tags.len()).sum::<usize>(),
+            )
+        });
+        if let (Some(k), Some((kk, tags))) = (key, &*self.kept.tags.borrow()) {
+            if k == *kk {
+                return tags.clone();
+            }
+        }
         let mut tags: Vec<String> = self
             .data
             .tasks
             .iter()
             .flat_map(|t| t.tags.iter().cloned())
             .collect();
-        tags.sort_by_key(|g| g.to_lowercase());
+        tags.sort_by_cached_key(|g| g.to_lowercase());
         tags.dedup();
+        if let Some(k) = key {
+            *self.kept.tags.borrow_mut() = Some((k, tags.clone()));
+        }
         tags
     }
 

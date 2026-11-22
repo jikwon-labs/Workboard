@@ -7,13 +7,31 @@ use super::*;
 
 impl App {
     pub(crate) fn count_open(&self, list: u64) -> usize {
-        self.data
-            .tasks
-            .iter()
-            .filter(|t| {
-                t.list_id == list && t.parent.is_none() && !t.archived && !self.data.is_closed(t)
-            })
-            .count()
+        // every List row asks: all Lists counted in one go, once a pass
+        let key = self
+            .kept
+            .pass()
+            .filter(|_| !self.dirty)
+            .map(|p| (p, self.data_gen.get(), self.data.tasks.len()));
+        let kept = match (key, &*self.kept.open_counts.borrow()) {
+            (Some(k), Some((kk, counts))) if k == *kk => Some(counts.clone()),
+            _ => None,
+        };
+        let counts = kept.unwrap_or_else(|| {
+            let info = list_infos(&self.data);
+            let mut counts: HashMap<u64, usize> = HashMap::new();
+            for t in &self.data.tasks {
+                if t.parent.is_none() && !t.archived && !closed_in(&info, t) {
+                    *counts.entry(t.list_id).or_default() += 1;
+                }
+            }
+            let counts = std::rc::Rc::new(counts);
+            if let Some(k) = key {
+                *self.kept.open_counts.borrow_mut() = Some((k, counts.clone()));
+            }
+            counts
+        });
+        counts.get(&list).copied().unwrap_or(0)
     }
 
     /// The thin strip a closed sidebar leaves (Home and the app hubs alike):

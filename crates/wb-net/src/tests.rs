@@ -517,3 +517,229 @@ fn a_failed_send_is_repeated_only_when_twice_does_no_harm() {
     assert_eq!(send_failed(Msg::Ping, &mut q), None);
     assert_eq!(q.len(), before);
 }
+
+#[test]
+fn tries_to_reach_the_server_wait_longer_each_time_with_some_chance() {
+    use crate::client::{retry_wait, MAX_RETRY_SECS};
+    use std::time::Duration;
+    // the step doubles: 1, 2, 4... seconds, up to a minute
+    for (tries, step) in [(1, 1), (2, 2), (3, 4), (4, 8), (6, 32), (7, 60), (40, 60)] {
+        let step = Duration::from_secs(step);
+        let least = retry_wait(tries, 0);
+        let most = retry_wait(tries, u64::MAX - 1);
+        assert_eq!(least, step / 2, "try {}", tries);
+        assert!(most <= step && most >= least, "try {}: {:?}", tries, most);
+        // lucks differ, waits differ
+        assert!(retry_wait(tries, 12_345) >= least && retry_wait(tries, 12_345) <= step);
+    }
+    assert!(retry_wait(u64::MAX, u64::MAX) <= Duration::from_secs(MAX_RETRY_SECS));
+}
+
+/// A server on this computer that welcomes one app and records what it
+/// sends, with when it arrived. `then` runs with the connection after the
+/// welcome (to send to the app).
+fn fake_server(
+    then: impl FnOnce(&mut tungstenite::WebSocket<std::net::TcpStream>) + Send + 'static,
+) -> (u16, std::sync::mpsc::Receiver<(Msg, std::time::Instant)>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (sock, _) = listener.accept().unwrap();
+        let mut ws = tungstenite::accept(sock).unwrap();
+        let mut then = Some(then);
+        loop {
+            let m = match ws.read() {
+                Ok(tungstenite::Message::Text(t)) => Msg::parse(t.as_str()),
+                Ok(_) => continue,
+                Err(_) => return,
+            };
+            let Some(m) = m else { continue };
+            let at = std::time::Instant::now();
+            match &m {
+                Msg::Hello { watch: true, .. } => {
+                    ws.send(tungstenite::Message::text(Msg::Watching.to_json()))
+                        .unwrap();
+                }
+                Msg::Hello { .. } => {
+                    let welcome = Msg::Welcome {
+                        tag: 1,
+                        snapshot: None,
+                        rev: 1,
+                        member: 1,
+                        role: Role::Member,
+                        token: None,
+                        email: None,
+                        hidden: vec![],
+                        deltas: true,
+                    };
+                    ws.send(tungstenite::Message::text(welcome.to_json()))
+                        .unwrap();
+                }
+                _ => {}
+            }
+            if let (Msg::Hello { .. }, Some(f)) = (&m, then.take()) {
+                f(&mut ws);
+            }
+            if tx.send((m, at)).is_err() {
+                return;
+            }
+        }
+    });
+    (port, rx)
+}
+
+/// Requests go out the moment the app makes them (the connection thread
+/// sleeps until there is something to send or read, not in 100 ms naps).
+#[test]
+fn requests_reach_the_server_at_once() {
+    use std::time::{Duration, Instant};
+    let (port, got) = fake_server(|_| {});
+    let (wtx, wrx) = std::sync::mpsc::channel();
+    let client = Client::start(
+        &format!("ws://127.0.0.1:{}", port),
+        SignIn {
+            device: "d".into(),
+            token: Some("t".into()),
+            ..Default::default()
+        },
+        std::sync::Arc::new(move || {
+            let _ = wtx.send(());
+        }),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !client
+        .events()
+        .iter()
+        .any(|e| matches!(e, Event::Status(Status::Connected)))
+    {
+        assert!(Instant::now() < deadline, "never welcomed");
+        let _ = wrx.recv_timeout(Duration::from_millis(50));
+    }
+    assert!(matches!(got.recv().unwrap().0, Msg::Hello { .. }));
+    let mut late = vec![];
+    for i in 0..9u64 {
+        // between the old 100 ms looks, at a different point each time
+        std::thread::sleep(Duration::from_millis(37));
+        let sent = Instant::now();
+        client.send(Msg::Typing {
+            channel: i,
+            member: None,
+            thread: None,
+        });
+        let (m, at) = got.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(m, Msg::Typing { channel, .. } if channel == i));
+        late.push(at.duration_since(sent));
+    }
+    late.sort();
+    assert!(
+        late[late.len() / 2] < Duration::from_millis(30),
+        "requests waited: {:?}",
+        late
+    );
+}
+
+/// What the server sends reaches the app at once too, and after a quiet
+/// spell (the bell is waiting on the socket by then).
+#[test]
+fn what_the_server_sends_reaches_the_app_at_once() {
+    use std::time::{Duration, Instant};
+    let (sent_tx, sent_rx) = std::sync::mpsc::channel::<Instant>();
+    let (port, _got) = fake_server(move |ws| {
+        for i in 0..5u64 {
+            std::thread::sleep(Duration::from_millis(if i == 0 { 300 } else { 41 }));
+            let _ = sent_tx.send(Instant::now());
+            ws.send(tungstenite::Message::text(
+                Msg::Typing {
+                    channel: i,
+                    member: Some(2),
+                    thread: None,
+                }
+                .to_json(),
+            ))
+            .unwrap();
+        }
+        // keep the connection while the app reads
+        std::thread::sleep(Duration::from_secs(3));
+    });
+    let (wtx, wrx) = std::sync::mpsc::channel();
+    let client = Client::start(
+        &format!("ws://127.0.0.1:{}", port),
+        SignIn {
+            device: "d".into(),
+            token: Some("t".into()),
+            ..Default::default()
+        },
+        std::sync::Arc::new(move || {
+            let _ = wtx.send(Instant::now());
+        }),
+    );
+    let mut late = vec![];
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while late.len() < 5 {
+        assert!(Instant::now() < deadline, "heard {} of 5", late.len());
+        let Ok(woke) = wrx.recv_timeout(Duration::from_millis(100)) else {
+            continue;
+        };
+        for e in client.events() {
+            if let Event::Typing { .. } = e {
+                late.push(woke.duration_since(sent_rx.recv().unwrap()));
+            }
+        }
+    }
+    late.sort();
+    assert!(
+        late[late.len() / 2] < Duration::from_millis(30),
+        "messages waited: {:?}",
+        late
+    );
+}
+
+/// A watcher hears a note at once, and lets go when dropped.
+#[test]
+fn a_watcher_hears_at_once() {
+    use std::time::{Duration, Instant};
+    let (sent_tx, sent_rx) = std::sync::mpsc::channel::<Instant>();
+    let (port, got) = fake_server(move |ws| {
+        std::thread::sleep(Duration::from_millis(200));
+        let _ = sent_tx.send(Instant::now());
+        ws.send(tungstenite::Message::text(
+            Msg::Note {
+                title: "Ann".into(),
+                body: "hi".into(),
+                channel: Some(1),
+                parent: None,
+            }
+            .to_json(),
+        ))
+        .unwrap();
+        std::thread::sleep(Duration::from_secs(3));
+    });
+    let (wtx, wrx) = std::sync::mpsc::channel();
+    let w = Watcher::start(
+        &format!("ws://127.0.0.1:{}", port),
+        "d",
+        "t",
+        None,
+        std::sync::Arc::new(move || {
+            let _ = wtx.send(Instant::now());
+        }),
+    );
+    assert!(matches!(
+        got.recv().unwrap().0,
+        Msg::Hello { watch: true, .. }
+    ));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(Instant::now() < deadline, "no note");
+        let Ok(woke) = wrx.recv_timeout(Duration::from_millis(100)) else {
+            continue;
+        };
+        if w.events().iter().any(|e| matches!(e, Watch::Note { .. })) {
+            let late = woke.duration_since(sent_rx.recv().unwrap());
+            assert!(late < Duration::from_millis(100), "{:?}", late);
+            break;
+        }
+    }
+    drop(w);
+}

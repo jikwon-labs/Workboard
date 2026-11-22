@@ -27,6 +27,7 @@
 // password is reset with a code the server emails (POST /auth/forgot).
 
 mod addr;
+mod bell;
 mod client;
 mod conn;
 mod http;

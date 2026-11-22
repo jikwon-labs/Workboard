@@ -1,6 +1,7 @@
 // The app's side of the connection: a thread that signs in, keeps the
 // line alive, sends what the app queues and hands back what the server says.
 
+use crate::bell::Bell;
 use crate::*;
 use serde_json::Value;
 use std::io::ErrorKind;
@@ -217,6 +218,8 @@ enum Cmd {
     Push(Value),
     Send(Msg),
     Stop,
+    /// The server sent something on the connection of this bell (bell.rs).
+    Readable(u64),
 }
 
 /// The app's connection. Dropping it closes the connection and ends the thread.
@@ -234,9 +237,10 @@ impl Client {
         let (tx, crx) = mpsc::channel();
         let (etx, rx) = mpsc::channel();
         let addr = addr.to_string();
+        let ring = tx.clone();
         std::thread::Builder::new()
             .name("workboard-net".into())
-            .spawn(move || run(addr, sign_in, crx, etx, wake))
+            .spawn(move || run(addr, sign_in, crx, ring, etx, wake))
             .expect("start network thread");
         Client { tx, rx }
     }
@@ -343,23 +347,63 @@ pub(crate) fn send_failed(m: Msg, queued: &mut Vec<Msg>) -> Option<Event> {
     }
 }
 
+/// The longest wait between tries to reach the server.
+pub(crate) const MAX_RETRY_SECS: u64 = 60;
+
+/// How long to wait before try number `tries` + 1 (`tries` failed in a
+/// row): twice as long each time, up to MAX_RETRY_SECS, and a random part
+/// of that, so the computers of a team that lost the server at the same
+/// moment (it restarted) don't all come back at the same moment. `luck` is
+/// any number (random); the wait is between half and all of the step.
+pub(crate) fn retry_wait(tries: u64, luck: u64) -> Duration {
+    let step_ms = (1000u64 << tries.saturating_sub(1).min(16)).min(MAX_RETRY_SECS * 1000);
+    let half = step_ms / 2;
+    Duration::from_millis(half + luck % (half + 1))
+}
+
+/// A random number (for retry_wait).
+fn luck() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    );
+    h.finish()
+}
+
 /// Wait before trying again; false when the app asked to stop.
 fn wait(
     crx: &Receiver<Cmd>,
     pending: &mut Option<Value>,
     queued: &mut Vec<Msg>,
-    secs: u64,
+    pause: Duration,
 ) -> bool {
-    let until = Instant::now() + Duration::from_secs(secs);
-    while Instant::now() < until {
-        match crx.recv_timeout(Duration::from_millis(100)) {
+    wait_until(crx, pending, queued, Instant::now() + pause)
+}
+
+fn wait_until(
+    crx: &Receiver<Cmd>,
+    pending: &mut Option<Value>,
+    queued: &mut Vec<Msg>,
+    until: Instant,
+) -> bool {
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return true;
+        }
+        match crx.recv_timeout(left) {
             Ok(Cmd::Push(v)) => *pending = Some(v),
             Ok(Cmd::Send(m)) => queue(queued, m),
+            // the bell of a connection that is over
+            Ok(Cmd::Readable(_)) => {}
             Ok(Cmd::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return false,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => return true,
         }
     }
-    true
 }
 
 pub(crate) enum End {
@@ -369,7 +413,14 @@ pub(crate) enum End {
     Gone(String),
 }
 
-fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>, wake: Wake) {
+fn run(
+    addr: String,
+    mut sign_in: SignIn,
+    crx: Receiver<Cmd>,
+    ring: Sender<Cmd>,
+    etx: Sender<Event>,
+    wake: Wake,
+) {
     let line = Line { tx: etx, wake };
     let mut pending: Option<Value> = None;
     let mut queued: Vec<Msg> = vec![];
@@ -382,6 +433,7 @@ fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>
                     &mut ws,
                     &line,
                     &crx,
+                    &ring,
                     &mut sign_in,
                     &mut pending,
                     &mut queued,
@@ -414,9 +466,9 @@ fn run(addr: String, mut sign_in: SignIn, crx: Receiver<Cmd>, etx: Sender<Event>
             }
             return;
         }
-        // 1, 2, 3, 4, 5, 5... seconds
+        // about 1, 2, 4, 8... seconds, up to a minute
         tries += 1;
-        if !wait(&crx, &mut pending, &mut queued, tries.min(5)) {
+        if !wait(&crx, &mut pending, &mut queued, retry_wait(tries, luck())) {
             return;
         }
     }
@@ -426,11 +478,16 @@ fn session(
     ws: &mut WebSocket<Conn>,
     line: &Line,
     crx: &Receiver<Cmd>,
+    ring: &Sender<Cmd>,
     sign_in: &mut SignIn,
     pending: &mut Option<Value>,
     queued: &mut Vec<Msg>,
     tries: &mut u64,
 ) -> End {
+    let bell = match Bell::start(ws.get_ref(), ring.clone(), Cmd::Readable) {
+        Ok(b) => b,
+        Err(e) => return End::Lost(e.to_string()),
+    };
     let hello = Msg::from(&*sign_in);
     if let Err(e) = send(ws, &hello) {
         return End::Lost(e);
@@ -441,17 +498,46 @@ fn session(
     // the app let go: what it pushed or sent just before still goes, then the
     // connection closes (logging out or quitting right after a change)
     let mut stopping = false;
+    // the server may have sent something not read yet (the bell rang)
+    let mut readable = true;
     loop {
-        loop {
-            match crx.try_recv() {
-                Ok(Cmd::Push(v)) => *pending = Some(v),
-                Ok(Cmd::Send(m)) if st.welcomed => queued.push(m),
-                Ok(Cmd::Send(m)) => queue(queued, m),
-                Ok(Cmd::Stop) | Err(TryRecvError::Disconnected) => {
-                    stopping = true;
-                    break;
+        // with nothing to read or send: sleep until the server or the app
+        // has something, or a ping is due
+        let to_send = st.welcomed && (pending.is_some() || !queued.is_empty());
+        let mut first = None;
+        if !readable && !to_send {
+            let due = (last_ping + Duration::from_secs(PING_SECS))
+                .min(last_heard + Duration::from_secs(SILENT_SECS));
+            match crx.recv_timeout(due.saturating_duration_since(Instant::now())) {
+                Ok(c) => first = Some(c),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => stopping = true,
+            }
+        }
+        let mut next = first;
+        while !stopping {
+            let c = match next.take() {
+                Some(c) => c,
+                None => match crx.try_recv() {
+                    Ok(c) => c,
+                    Err(TryRecvError::Disconnected) => {
+                        stopping = true;
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                },
+            };
+            match c {
+                Cmd::Push(v) => *pending = Some(v),
+                Cmd::Send(m) if st.welcomed => queued.push(m),
+                Cmd::Send(m) => queue(queued, m),
+                Cmd::Stop => stopping = true,
+                Cmd::Readable(id) if id == bell.id && !readable => {
+                    readable = true;
+                    bell.reading();
                 }
-                Err(TryRecvError::Empty) => break,
+                // an old bell's, or rung twice
+                Cmd::Readable(_) => {}
             }
         }
         if stopping && !st.welcomed {
@@ -499,6 +585,9 @@ fn session(
         if last_heard.elapsed() >= Duration::from_secs(SILENT_SECS) {
             return End::Lost("The server stopped answering.".into());
         }
+        if !readable {
+            continue;
+        }
         let res: Result<(), End> = match ws.read() {
             Ok(Message::Text(t)) => {
                 last_heard = Instant::now();
@@ -509,9 +598,12 @@ fn session(
                 last_heard = Instant::now();
                 Ok(())
             }
+            // nothing more there for now: the bell waits for the next
             Err(tungstenite::Error::Io(e))
                 if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
             {
+                readable = false;
+                bell.idle();
                 Ok(())
             }
             Err(e) => Err(End::Lost(e.to_string())),

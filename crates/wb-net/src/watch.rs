@@ -14,6 +14,7 @@
 // says so once and stops.
 
 use super::*;
+use crate::bell::Bell;
 use crate::client::{connect, send, End};
 use std::io::ErrorKind;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -43,9 +44,16 @@ pub enum Watch {
     Gone(String),
 }
 
+/// What the watch thread is told.
+enum Ctl {
+    Stop,
+    /// The server sent something on the connection of this bell (bell.rs).
+    Readable(u64),
+}
+
 /// A watch connection on its own thread. Dropping it hangs up.
 pub struct Watcher {
-    stop: Sender<()>,
+    stop: Sender<Ctl>,
     rx: Receiver<Watch>,
 }
 
@@ -69,9 +77,10 @@ impl Watcher {
             watch: true,
             ..Default::default()
         };
+        let ring = stop.clone();
         std::thread::Builder::new()
             .name("workboard-watch".into())
-            .spawn(move || watch_run(addr, sign_in, srx, Heard { tx: etx, wake }))
+            .spawn(move || watch_run(addr, sign_in, srx, ring, Heard { tx: etx, wake }))
             .expect("start watch thread");
         Watcher { stop, rx }
     }
@@ -84,7 +93,7 @@ impl Watcher {
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        let _ = self.stop.send(());
+        let _ = self.stop.send(Ctl::Stop);
     }
 }
 
@@ -112,23 +121,24 @@ enum Ended {
 }
 
 /// Wait `secs`; false when asked to stop.
-fn pause(srx: &Receiver<()>, secs: u64) -> bool {
-    matches!(
-        srx.recv_timeout(Duration::from_secs(secs)),
-        Err(mpsc::RecvTimeoutError::Timeout)
-    )
+fn pause(srx: &Receiver<Ctl>, secs: u64) -> bool {
+    let until = Instant::now() + Duration::from_secs(secs);
+    loop {
+        match srx.recv_timeout(until.saturating_duration_since(Instant::now())) {
+            Err(mpsc::RecvTimeoutError::Timeout) => return true,
+            // the bell of a connection that is over
+            Ok(Ctl::Readable(_)) => {}
+            Ok(Ctl::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return false,
+        }
+    }
 }
 
-fn stopped(srx: &Receiver<()>) -> bool {
-    !matches!(srx.try_recv(), Err(TryRecvError::Empty))
-}
-
-fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<()>, line: Heard) {
+fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<Ctl>, ring: Sender<Ctl>, line: Heard) {
     let mut tries: u32 = 0;
     loop {
         let ended = match connect(&addr) {
             Ok(mut ws) => {
-                let e = watch_session(&mut ws, &sign_in, &srx, &line, &mut tries);
+                let e = watch_session(&mut ws, &sign_in, &srx, &ring, &line, &mut tries);
                 let _ = ws.close(None);
                 let _ = ws.flush();
                 e
@@ -141,7 +151,7 @@ fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<()>, line: Heard) {
             Ended::Done(w) => {
                 line.emit(w);
                 // stay until let go
-                let _ = srx.recv();
+                while let Ok(Ctl::Readable(_)) = srx.recv() {}
                 return;
             }
             Ended::Again(Some(s)) => s,
@@ -159,19 +169,55 @@ fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<()>, line: Heard) {
 fn watch_session(
     ws: &mut WebSocket<Conn>,
     sign_in: &SignIn,
-    srx: &Receiver<()>,
+    srx: &Receiver<Ctl>,
+    ring: &Sender<Ctl>,
     line: &Heard,
     tries: &mut u32,
 ) -> Ended {
+    let Ok(bell) = Bell::start(ws.get_ref(), ring.clone(), Ctl::Readable) else {
+        return Ended::Again(None);
+    };
     if send(ws, &Msg::from(sign_in)).is_err() {
         return Ended::Again(None);
     }
     let mut watching = false;
     let mut last_heard = Instant::now();
     let mut last_ping = Instant::now();
+    // the server may have sent something not read yet (the bell rang)
+    let mut readable = true;
     loop {
-        if stopped(srx) {
-            return Ended::Stop;
+        // with nothing to read: sleep until the server sends something, a
+        // ping is due or the app lets go
+        let mut first = None;
+        if !readable {
+            let mut due = last_heard + Duration::from_secs(SILENT_SECS);
+            if watching {
+                due = due.min(last_ping + Duration::from_secs(PING_SECS));
+            }
+            match srx.recv_timeout(due.saturating_duration_since(Instant::now())) {
+                Ok(c) => first = Some(c),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Ended::Stop,
+            }
+        }
+        let mut next = first;
+        loop {
+            let c = match next.take() {
+                Some(c) => c,
+                None => match srx.try_recv() {
+                    Ok(c) => c,
+                    Err(TryRecvError::Disconnected) => return Ended::Stop,
+                    Err(TryRecvError::Empty) => break,
+                },
+            };
+            match c {
+                Ctl::Stop => return Ended::Stop,
+                Ctl::Readable(id) if id == bell.id && !readable => {
+                    readable = true;
+                    bell.reading();
+                }
+                Ctl::Readable(_) => {}
+            }
         }
         if watching && last_ping.elapsed() >= Duration::from_secs(PING_SECS) {
             last_ping = Instant::now();
@@ -182,6 +228,9 @@ fn watch_session(
         if last_heard.elapsed() >= Duration::from_secs(SILENT_SECS) {
             return Ended::Again(None);
         }
+        if !readable {
+            continue;
+        }
         let text = match ws.read() {
             Ok(Message::Text(t)) => t,
             Ok(Message::Close(_)) => return Ended::Again(None),
@@ -189,9 +238,12 @@ fn watch_session(
                 last_heard = Instant::now();
                 continue;
             }
+            // nothing more there for now: the bell waits for the next
             Err(tungstenite::Error::Io(e))
                 if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
             {
+                readable = false;
+                bell.idle();
                 continue;
             }
             Err(_) => return Ended::Again(None),

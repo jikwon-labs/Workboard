@@ -1930,3 +1930,77 @@ fn only_changes_to_what_hiding_goes_by_need_the_trial_merge() {
         json!({"docs": [], "channels": [{"id": 8, "kind": "Channel", "private": true, "members": [9]}]})
     ));
 }
+
+#[test]
+fn a_posted_message_merges_as_if_the_whole_copy_came_with_it() {
+    let mut canon = json!({
+        "workspace": "Team",
+        "members": [{"id": 1, "name": "Ann"}],
+        "channels": [
+            {"id": 10, "kind": "Channel", "name": "general", "topic": "", "members": [], "messages": [
+                {"id": 11, "author": 1, "text": "hi", "ts": 5, "replies": [{"id": 12, "author": 1, "text": "yo", "ts": 6}]},
+                {"id": 13, "author": 1, "text": "no thread yet", "ts": 7}
+            ]},
+            {"id": 20, "kind": "Channel", "name": "other", "members": [], "messages": [{"id": 21, "text": "x"}]}
+        ],
+        "tasks": [{"id": 30, "name": "T"}],
+        "extra": {"sync": {}}
+    });
+    let mut meta = wb_sync::json::meta_of(&canon);
+    wb_sync::stamp(&canon, &mut meta, 1_000);
+    wb_sync::touch_fields(&mut meta, 10, &["topic"], 2_000);
+    wb_sync::json::set_meta(&mut canon, &meta);
+    wb_sync::make_shareable(&mut canon);
+    let now = 1_795_000_000;
+    for parent in [None, Some(11), Some(13)] {
+        let w = schedule::Waiting {
+            member: 1,
+            item: wb_net::ScheduledMsg {
+                id: 99,
+                channel: 10,
+                parent,
+                text: "later".into(),
+                at: now,
+                mentions: vec![3],
+            },
+        };
+        let part = schedule::with_message(&canon, &w, now).unwrap();
+        assert!(
+            !part.to_string().contains("\"other\""),
+            "only its conversation: {part}"
+        );
+        let stamp = part["extra"]["sync"]["stamps"]["99"].as_i64().unwrap();
+        // what posting it used to merge: the whole copy with it added
+        let mut whole = canon.clone();
+        let msg = part["channels"][0]["messages"][0].clone();
+        let list = &mut whole["channels"][0]["messages"];
+        match parent {
+            None => list.as_array_mut().unwrap().push(msg),
+            Some(p) => {
+                let at = list
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .position(|m| m["id"] == p)
+                    .unwrap();
+                let reply = msg["replies"].as_array().unwrap().last().unwrap().clone();
+                if !list[at]["replies"].is_array() {
+                    list[at]["replies"] = json!([]);
+                }
+                list[at]["replies"].as_array_mut().unwrap().push(reply);
+            }
+        }
+        let mut m = wb_sync::json::meta_of(&whole);
+        m.stamps.insert(99, stamp);
+        wb_sync::json::set_meta(&mut whole, &m);
+        let (mut a, mut b) = (canon.clone(), canon.clone());
+        assert!(wb_sync::merge(&mut a, &[whole]));
+        assert!(wb_sync::merge(&mut b, &[part]));
+        wb_sync::make_shareable(&mut a);
+        wb_sync::make_shareable(&mut b);
+        assert_eq!(a, b, "parent {parent:?}");
+        assert!(b.to_string().contains("later"));
+        // posted twice: nothing the second time
+        assert!(schedule::with_message(&b, &w, now).is_none());
+    }
+}

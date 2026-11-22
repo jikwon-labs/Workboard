@@ -137,13 +137,28 @@ fn list_of(all: &[Waiting], member: u64) -> Vec<ScheduledMsg> {
     v
 }
 
-/// The team's copy with `w`'s message posted (at `now`, seconds) and
-/// stamped as new, or None when its conversation (or thread) is gone or
-/// the message is there already.
+/// `w`'s message posted (at `now`, seconds), as an app sends a new message:
+/// only what changed (`wb_sync::delta`'s shape), its conversation (and the
+/// message it answers) with their own fields and bookkeeping and only the
+/// new message inside, stamped as new. Merging it is the same as merging
+/// the whole copy with the message added, without copying the workspace.
+/// None when its conversation (or thread) is gone or the message is there
+/// already.
 pub(crate) fn with_message(canon: &Value, w: &Waiting, now: i64) -> Option<Value> {
-    let mut c = canon.clone();
     let item = &w.item;
-    if wb_sync::fingerprints(&c).contains_key(&item.id) {
+    let ch = wb_sync::json::array_at(canon, "channels")
+        .iter()
+        .find(|x| x.get("id").and_then(|i| i.as_u64()) == Some(item.channel))?;
+    let messages = wb_sync::json::array_at(ch, "messages");
+    let has = |list: &[Value]| {
+        list.iter().any(|m| {
+            wb_sync::json::id_of(m) == Some(item.id)
+                || wb_sync::json::array_at(m, "replies")
+                    .iter()
+                    .any(|r| wb_sync::json::id_of(r) == Some(item.id))
+        })
+    };
+    if has(messages) {
         return None;
     }
     let mut m = json!({
@@ -163,27 +178,69 @@ pub(crate) fn with_message(canon: &Value, w: &Waiting, now: i64) -> Option<Value
     if !item.mentions.is_empty() {
         m["mentions"] = json!(item.mentions);
     }
-    let ch = c
-        .get_mut("channels")?
-        .as_array_mut()?
-        .iter_mut()
-        .find(|x| x.get("id").and_then(|i| i.as_u64()) == Some(item.channel))?;
-    let msgs = ch.get_mut("messages")?.as_array_mut()?;
-    match item.parent {
-        None => msgs.push(m),
-        Some(p) => {
-            let parent = msgs
-                .iter_mut()
-                .find(|x| x.get("id").and_then(|i| i.as_u64()) == Some(p))?;
-            if !parent.get("replies").is_some_and(|r| r.is_array()) {
-                parent["replies"] = json!([]);
+    // an item with its own fields and, of the items inside it, only `inner`
+    // (`wb_sync::delta`'s `prune`)
+    let shell = |x: &Value, key: &str, inner: Value| -> Value {
+        let mut o = serde_json::Map::new();
+        for (k, v) in x.as_object().into_iter().flatten() {
+            if is_items(v) {
+                let loose: Vec<Value> = v
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|e| wb_sync::json::id_of(e).is_none())
+                    .cloned()
+                    .collect();
+                if !loose.is_empty() {
+                    o.insert(k.clone(), Value::Array(loose));
+                }
+            } else {
+                o.insert(k.clone(), v.clone());
             }
-            parent["replies"].as_array_mut()?.push(m);
         }
-    }
-    let mut meta = wb_sync::json::meta_of(&c);
-    let at = now_ms();
-    meta.stamps.insert(item.id, at);
-    wb_sync::json::set_meta(&mut c, &meta);
-    Some(c)
+        o.insert(key.into(), json!([inner]));
+        Value::Object(o)
+    };
+    let (part, holders) = match item.parent {
+        None => (shell(ch, "messages", m), vec![item.channel]),
+        Some(p) => {
+            let parent = messages
+                .iter()
+                .find(|x| x.get("id").and_then(|i| i.as_u64()) == Some(p))?;
+            let parent = shell(parent, "replies", m);
+            (shell(ch, "messages", parent), vec![item.channel, p])
+        }
+    };
+    // the bookkeeping of the items it sits in, as the team's copy has it
+    let sync = canon.get("extra").and_then(|e| e.get("sync"));
+    let pick = |key: &str| -> serde_json::Map<String, Value> {
+        holders
+            .iter()
+            .filter_map(|id| {
+                let k = id.to_string();
+                Some((k.clone(), sync?.get(key)?.get(&k)?.clone()))
+            })
+            .collect()
+    };
+    let mut stamps = pick("stamps");
+    stamps.insert(item.id.to_string(), json!(now_ms()));
+    Some(json!({
+        "channels": [part],
+        "extra": {"sync": {
+            "v": sync.and_then(|s| s.get("v")).cloned().unwrap_or(json!(0)),
+            "stamps": stamps,
+            "moved": pick("moved"),
+            "fields": pick("fields"),
+        }}
+    }))
+}
+
+/// A non-empty array of objects of which at least one has an id: items
+/// (`wb_sync`'s `is_id_array`).
+fn is_items(v: &Value) -> bool {
+    v.as_array().is_some_and(|a| {
+        !a.is_empty()
+            && a.iter().all(|x| x.is_object())
+            && a.iter().any(|x| wb_sync::json::id_of(x).is_some())
+    })
 }

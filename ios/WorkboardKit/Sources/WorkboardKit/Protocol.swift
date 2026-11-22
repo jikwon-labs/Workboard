@@ -1,4 +1,4 @@
-// The workboard-server protocol (wb_net::Msg in crates/wb-net/src/lib.rs):
+// The workboard-server protocol (wb_net::Msg in crates/wb-net/src/protocol.rs):
 // JSON text messages over a WebSocket at ws://host:port/ws, each with a
 // snake_case "type".
 //

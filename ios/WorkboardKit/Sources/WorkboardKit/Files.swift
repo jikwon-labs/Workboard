@@ -1,4 +1,4 @@
-// Pictures and videos in chat (server/src/files.rs, crates/wb-net/src/files.rs).
+// Pictures and videos in chat (server/src/files.rs, crates/wb-net/src/http.rs).
 // A message only names its files by the sha256 of their contents; the files
 // live on the team server:
 //

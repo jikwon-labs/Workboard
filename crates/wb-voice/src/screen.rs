@@ -9,7 +9,7 @@
 // own capturer (CGDisplayStream) is used instead.
 //
 // A screen only sends frames when something on it changes, so the last
-// picture is sent again at the frame rate: someone who joins later, or a
+// picture is sent again every STILL_AGAIN: someone who joins later, or a
 // layer the server switches to, still gets a picture of a still screen.
 //
 // Capturing needs the Screen Recording permission (System Settings > Privacy
@@ -29,7 +29,7 @@ use livekit::webrtc::prelude::I420Buffer;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// What to share.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -243,8 +243,18 @@ pub fn start_screen(
     feed
 }
 
-/// Send the newest picture (or the last one again) at the frame rate until
-/// stopped or capture ends; `each` runs once a round (to ask for a frame).
+/// How often the last picture of a still screen is sent again.
+pub(crate) const STILL_AGAIN: Duration = Duration::from_secs(1);
+
+/// Whether to send the last picture now: a new one came, or the screen has
+/// been still for STILL_AGAIN since the last one was sent.
+pub(crate) fn send_now(new: bool, last_sent: Option<Instant>, now: Instant) -> bool {
+    new || last_sent.is_some_and(|t| now.duration_since(t) >= STILL_AGAIN)
+}
+
+/// Send each new picture at most at the frame rate (and the last one again
+/// while the screen is still) until stopped or capture ends; `each` runs
+/// once a round (to ask for a frame).
 fn pump(
     source: &NativeVideoSource,
     limits: &Limits,
@@ -254,16 +264,23 @@ fn pump(
 ) -> Result<(), ScreenTrouble> {
     let started = Instant::now();
     let mut last: Option<Planes> = None;
+    let mut last_sent: Option<Instant> = None;
     while !stop.load(Ordering::Relaxed) {
         each();
-        if let Some(p) = shared.latest.lock().unwrap().take() {
-            last = Some(p);
-        }
+        let new = match shared.latest.lock().unwrap().take() {
+            Some(p) => {
+                last = Some(p);
+                true
+            }
+            None => false,
+        };
         if let Some(why) = shared.ended.lock().unwrap().take() {
             return why.map_or(Ok(()), Err);
         }
-        if let Some(p) = &last {
+        let now = Instant::now();
+        if let Some(p) = last.as_ref().filter(|_| send_now(new, last_sent, now)) {
             video::push(source, p.to_buffer(limits.width()), started);
+            last_sent = Some(now);
         }
         std::thread::sleep(limits.gap());
     }
@@ -463,6 +480,20 @@ mod imp;
 mod tests {
     use super::*;
     use crate::quality::Kind;
+
+    #[test]
+    fn a_still_screen_is_sent_again_once_a_second_not_at_the_frame_rate() {
+        let t0 = Instant::now();
+        // a new picture goes at once
+        assert!(send_now(true, None, t0));
+        assert!(send_now(true, Some(t0), t0));
+        // nothing new: not again within the second
+        assert!(!send_now(false, None, t0));
+        assert!(!send_now(false, Some(t0), t0 + Duration::from_millis(100)));
+        assert!(!send_now(false, Some(t0), t0 + Duration::from_millis(999)));
+        // then again
+        assert!(send_now(false, Some(t0), t0 + STILL_AGAIN));
+    }
 
     #[test]
     fn frames_convert_and_scale_to_the_limit() {

@@ -5,9 +5,10 @@
 // becomes the top simulcast layer; when the connection is poor the feed sends
 // smaller pictures, fewer a second (`Limits`, set from quality::limits).
 // Camera colors are converted here (BT.601, the usual for webcams) rather
-// than through libwebrtc's helpers, so the byte order is never a guess;
-// received pictures go through libyuv (I420 to RGBA bytes, checked by the
-// round-trip test below).
+// than through libwebrtc's helpers, so the byte order is never a guess,
+// except NV12, which libyuv takes apart; making the picture smaller and
+// received pictures (I420 to RGBA bytes, checked by the round-trip test
+// below) go through libyuv too.
 
 use crate::quality::{self, Kind};
 use livekit::webrtc::native::yuv_helper;
@@ -109,60 +110,92 @@ pub fn fit_size(w: u32, h: u32, max_w: u32, max_h: u32) -> (u32, u32) {
     send_size(w, h, max_w.min(by_h.max(2)))
 }
 
-/// Build an I420 frame of size `ow` x `oh` by sampling `pixel(x, y)` on the
-/// source grid `w` x `h` (nearest neighbour).
-fn build_i420(
+/// `buf` made at most `max` wide (libyuv's scaler, which averages: smoother
+/// than picking pixels, and much faster than doing it here).
+fn fit(mut buf: I420Buffer, max: u32) -> I420Buffer {
+    let (w, h) = (buf.width(), buf.height());
+    let (ow, oh) = send_size(w, h, max);
+    if (ow, oh) == (w, h) {
+        buf
+    } else {
+        buf.scale(ow as i32, oh as i32)
+    }
+}
+
+/// An I420 frame `w` x `h` (made even) filled row by row: `row(y, ys, us,
+/// vs)` fills row `y` of Y and, on even rows, the row of U and V.
+fn fill_i420(
     w: u32,
     h: u32,
-    ow: u32,
-    oh: u32,
-    pixel: impl Fn(u32, u32) -> (u8, u8, u8),
+    mut row: impl FnMut(usize, &mut [u8], &mut [u8], &mut [u8]),
 ) -> I420Buffer {
-    let mut buf = I420Buffer::new(ow, oh);
+    let (w, h) = (w.max(2) & !1, h.max(2) & !1);
+    let mut buf = I420Buffer::new(w, h);
     let (sy, su, sv) = buf.strides();
+    let (sy, su, sv) = (sy as usize, su as usize, sv as usize);
     let (dy, du, dv) = buf.data_mut();
-    for oy in 0..oh {
-        let y = oy * h / oh;
-        for ox in 0..ow {
-            let x = ox * w / ow;
-            let (yy, uu, vv) = pixel(x, y);
-            dy[(oy * sy + ox) as usize] = yy;
-            if oy % 2 == 0 && ox % 2 == 0 {
-                du[((oy / 2) * su + ox / 2) as usize] = uu;
-                dv[((oy / 2) * sv + ox / 2) as usize] = vv;
-            }
-        }
+    let (w, cw) = (w as usize, w as usize / 2);
+    for y in 0..h as usize {
+        let c = y / 2;
+        row(
+            y,
+            &mut dy[y * sy..y * sy + w],
+            &mut du[c * su..c * su + cw],
+            &mut dv[c * sv..c * sv + cw],
+        );
     }
     buf
 }
 
-/// I420 from packed RGB (3 bytes a pixel).
+/// I420 from packed RGB (3 bytes a pixel), at most `max` wide.
 pub fn rgb_to_i420(rgb: &[u8], w: u32, h: u32, max: u32) -> I420Buffer {
-    let (ow, oh) = send_size(w, h, max);
-    build_i420(w, h, ow, oh, |x, y| {
-        let i = ((y * w + x) * 3) as usize;
-        rgb_to_yuv(rgb[i], rgb[i + 1], rgb[i + 2])
-    })
+    let stride = w as usize * 3;
+    let buf = fill_i420(w, h, |y, ys, us, vs| {
+        let src = &rgb[y * stride..];
+        for (x, out) in ys.iter_mut().enumerate() {
+            let p = &src[x * 3..x * 3 + 3];
+            let (yy, uu, vv) = rgb_to_yuv(p[0], p[1], p[2]);
+            *out = yy;
+            // U and V from the top left pixel of each 2 x 2
+            if y % 2 == 0 && x % 2 == 0 {
+                us[x / 2] = uu;
+                vs[x / 2] = vv;
+            }
+        }
+    });
+    fit(buf, max)
 }
 
-/// I420 from YUYV (YUY2), what many cameras send.
+/// I420 from YUYV (YUY2), what many cameras send, at most `max` wide.
 pub fn yuyv_to_i420(src: &[u8], w: u32, h: u32, max: u32) -> I420Buffer {
-    let (ow, oh) = send_size(w, h, max);
-    build_i420(w, h, ow, oh, |x, y| {
-        let i = ((y * w + (x & !1)) * 2) as usize;
-        let yy = if x % 2 == 0 { src[i] } else { src[i + 2] };
-        (yy, src[i + 1], src[i + 3])
-    })
+    let stride = w as usize * 2;
+    let buf = fill_i420(w, h, |y, ys, us, vs| {
+        let row = &src[y * stride..];
+        // two pixels share U and V: Y0 U Y1 V
+        for (i, px) in row.chunks_exact(4).take(ys.len() / 2).enumerate() {
+            ys[2 * i] = px[0];
+            ys[2 * i + 1] = px[2];
+            if y % 2 == 0 {
+                us[i] = px[1];
+                vs[i] = px[3];
+            }
+        }
+    });
+    fit(buf, max)
 }
 
-/// I420 from NV12 (a Y plane, then interleaved U and V at half size).
+/// I420 from NV12 (a Y plane, then interleaved U and V at half size), at
+/// most `max` wide.
 pub fn nv12_to_i420(src: &[u8], w: u32, h: u32, max: u32) -> I420Buffer {
-    let (ow, oh) = send_size(w, h, max);
-    let uv0 = (w * h) as usize;
-    build_i420(w, h, ow, oh, |x, y| {
-        let c = uv0 + ((y / 2) * w + (x & !1)) as usize;
-        (src[(y * w + x) as usize], src[c], src[c + 1])
-    })
+    let (ew, eh) = (w.max(2) & !1, h.max(2) & !1);
+    let mut buf = I420Buffer::new(ew, eh);
+    let (sy, su, sv) = buf.strides();
+    let (dy, du, dv) = buf.data_mut();
+    let (y_plane, uv) = src.split_at((w * h) as usize);
+    yuv_helper::nv12_to_i420(
+        y_plane, w, uv, w, dy, sy, du, su, dv, sv, ew as i32, eh as i32,
+    );
+    fit(buf, max)
 }
 
 /// RGBA from an I420 frame. (libyuv's "ABGR" is R, G, B, A in memory.)
@@ -383,8 +416,10 @@ fn run_camera(
     let want = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
     let mut cam = nokhwa::Camera::new(first.index().clone(), want)
         .map_err(|e| format!("Couldn't open the camera: {}{}", e, PRIVACY_HINT))?;
-    // the smallest picture at least as wide as the top layer, at a usual
-    // frame rate (else the widest there is): it's scaled to fit anyway
+    // the smallest picture at least as wide as the top layer (else the
+    // widest there is), at the fewest frames a second that still covers
+    // what is sent: it's scaled to fit, and frames beyond CAMERA_FPS would
+    // only be read and thrown away
     if let Ok(formats) = cam.compatible_camera_formats() {
         let usual: Vec<_> = formats
             .iter()
@@ -393,8 +428,12 @@ fn run_camera(
         let pick = usual
             .iter()
             .filter(|f| f.resolution().width() >= quality::CAMERA_WIDTH)
-            .min_by_key(|f| (f.resolution().width(), u32::MAX - f.frame_rate()))
-            .or_else(|| usual.iter().max_by_key(|f| f.resolution().width()));
+            .min_by_key(|f| (f.resolution().width(), f.frame_rate()))
+            .or_else(|| {
+                usual
+                    .iter()
+                    .max_by_key(|f| (f.resolution().width(), u32::MAX - f.frame_rate()))
+            });
         if let Some(f) = pick {
             let _ = cam.set_camera_requset(RequestedFormat::new::<RgbFormat>(
                 RequestedFormatType::Exact(**f),

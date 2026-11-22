@@ -2315,3 +2315,27 @@ fn a_shape_being_typed_in_moves_with_a_drag() {
         [s2.pos[0], s2.pos[1] + 80.0]
     );
 }
+
+#[test]
+fn undo_keeps_the_newest_steps_of_each_board() {
+    use crate::app::more::{WbUndo, WhiteboardUi};
+    let mut wb = WhiteboardUi::default();
+    for i in 0..250 {
+        wb.did(1, WbUndo::Stroke(i));
+    }
+    for i in 0..3 {
+        wb.did(2, WbUndo::Stroke(1000 + i));
+    }
+    let of = |w: u64| wb.undo.iter().filter(|u| u.0 == w).count();
+    assert_eq!(of(1), crate::app::more::WB_UNDO_MAX);
+    assert_eq!(of(2), 3, "another board's steps stay");
+    // the oldest went; the newest is still the next to undo
+    assert!(matches!(
+        wb.undo.iter().find(|u| u.0 == 1),
+        Some((_, WbUndo::Stroke(50)))
+    ));
+    assert!(matches!(
+        wb.undo.iter().rev().find(|u| u.0 == 1),
+        Some((_, WbUndo::Stroke(249)))
+    ));
+}

@@ -160,12 +160,22 @@ impl Default for WhiteboardUi {
     }
 }
 
+/// The Undo steps kept for each whiteboard.
+pub const WB_UNDO_MAX: usize = 200;
+
 impl WhiteboardUi {
     /// Keeps a step I took on board `wid` for Undo. Redo can no longer
     /// put back what Undo took there, as in any editor.
     pub fn did(&mut self, wid: u64, op: WbUndo) {
         self.undo.push((wid, op));
         self.redo.retain(|u| u.0 != wid);
+        // the oldest steps go past WB_UNDO_MAX (they hold erased strokes
+        // and shapes, kept for as long as the app runs)
+        if self.undo.iter().filter(|u| u.0 == wid).count() > WB_UNDO_MAX {
+            if let Some(i) = self.undo.iter().position(|u| u.0 == wid) {
+                self.undo.remove(i);
+            }
+        }
     }
 }
 
@@ -395,7 +405,22 @@ fn paint_dot_grid(p: &egui::Painter, t: &Theme, rect: Rect, view: WbView) {
 
 fn paint_strokes(p: &egui::Painter, t: &Theme, wb: &Whiteboard, origin: egui::Pos2, view: WbView) {
     let z = view.zoom;
+    let clip = p.clip_rect();
     for s in &wb.strokes {
+        // a stroke wholly out of sight isn't drawn
+        let Some(&first) = s.points.first() else {
+            continue;
+        };
+        let (mut lo, mut hi) = (first, first);
+        for q in &s.points {
+            lo = [lo[0].min(q[0]), lo[1].min(q[1])];
+            hi = [hi[0].max(q[0]), hi[1].max(q[1])];
+        }
+        let reach = Rect::from_two_pos(view.to_screen(origin, lo), view.to_screen(origin, hi))
+            .expand(s.width * z + 2.0);
+        if !clip.intersects(reach) {
+            continue;
+        }
         let pts: Vec<egui::Pos2> = s
             .points
             .iter()
@@ -1012,7 +1037,15 @@ impl App {
                             .iter_mut()
                             .find(|s| s.id == sid)
                     }) {
-                        s.points.push([local.x, local.y]);
+                        // a point only where the pen moved (half a pixel or
+                        // more): a held drag asks on every frame
+                        let far = s
+                            .points
+                            .last()
+                            .is_none_or(|q| (vec2(q[0], q[1]) - local).length() * z >= 0.5);
+                        if far {
+                            s.points.push([local.x, local.y]);
+                        }
                     }
                 }
                 if resp.drag_stopped() {

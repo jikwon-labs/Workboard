@@ -45,6 +45,8 @@ pub(crate) use whiteboard::note_fill;
 #[cfg(test)]
 pub(crate) use whiteboard::GUIDE as WB_GUIDE;
 #[cfg(test)]
+pub use whiteboard::WB_UNDO_MAX;
+#[cfg(test)]
 pub use whiteboard::{WB_COLORS, WB_ORIGIN};
 
 /// A destructive button on an app page waiting for "Yes".

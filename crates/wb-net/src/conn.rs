@@ -63,6 +63,24 @@ static EXTRA_ROOTS: Mutex<Vec<CertificateDer<'static>>> = Mutex::new(Vec::new())
 /// server; the app itself only trusts what macOS trusts.
 pub fn trust_certificate(der: Vec<u8>) {
     EXTRA_ROOTS.lock().unwrap().push(CertificateDer::from(der));
+    // made again with it on the next connection
+    *CONFIG.lock().unwrap() = None;
+}
+
+/// The TLS setup every connection shares, made on the first secure
+/// connection. One setup for all also keeps its session cache, so a
+/// connection to a server talked to before resumes the TLS session instead
+/// of a full handshake (each file request is a connection of its own).
+static CONFIG: Mutex<Option<Arc<rustls::ClientConfig>>> = Mutex::new(None);
+
+fn shared_tls_config() -> Result<Arc<rustls::ClientConfig>, String> {
+    let mut c = CONFIG.lock().unwrap();
+    if let Some(cfg) = &*c {
+        return Ok(cfg.clone());
+    }
+    let cfg = tls_config()?;
+    *c = Some(cfg.clone());
+    Ok(cfg)
 }
 
 fn system_roots() -> &'static [CertificateDer<'static>] {
@@ -107,7 +125,7 @@ pub fn dial(host: &str, port: u16, tls: bool, timeout: Duration) -> Result<Conn,
                 }
                 let name = ServerName::try_from(host.to_string())
                     .map_err(|_| format!("{} isn't a name a certificate can be for.", host))?;
-                let c = rustls::ClientConnection::new(tls_config()?, name)
+                let c = rustls::ClientConnection::new(shared_tls_config()?, name)
                     .map_err(|e| e.to_string())?;
                 return Ok(Conn::Tls(Box::new(rustls::StreamOwned::new(c, s))));
             }

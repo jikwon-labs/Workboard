@@ -1982,12 +1982,9 @@ mod tests {
         assert_eq!(r, Err(AI_FAILED.to_string()));
         server.join().unwrap();
 
-        // nobody there
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        // nobody there (a port from below the system's range: one from
+        // bind(0) could be given to another test's socket meanwhile)
+        let port = crate::testing::free_port();
         let r = local(format!("http://127.0.0.1:{}/v1/messages", port)).stream(
             &body,
             &mut |_| {},

@@ -133,14 +133,20 @@ impl TestServer {
         let thread = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                // the same port again after a restart (it can take a moment to free up)
+                // "a free port" is one from below the range the system hands
+                // out (free_port), not bind(0): tests restart the server on
+                // the port it had, and a port from that range could be given
+                // to another socket while the server was stopped. The same
+                // port again after a restart can take a moment to free up.
                 let mut tries = 0;
                 let listener = loop {
-                    match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+                    let p = if port == 0 { free_port() } else { port };
+                    match tokio::net::TcpListener::bind(("127.0.0.1", p)).await {
                         Ok(l) => break l,
-                        Err(e) if tries < 50 => {
+                        // another test took the one just chosen: choose again
+                        Err(_) if port == 0 && tries < 50 => tries += 1,
+                        Err(_) if tries < 50 => {
                             tries += 1;
-                            let _ = e;
                             tokio::time::sleep(Duration::from_millis(100)).await;
                         }
                         Err(e) => panic!("bind: {}", e),

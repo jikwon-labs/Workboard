@@ -100,6 +100,8 @@
 **파일 (Mac mini, `~/Library/Application Support/WorkboardServer/`)**
 
 - `workspace.json` 정본, `server.json` 기기(토큰은 sha256)·역할·초대 코드·계정(이메일, 솔트, PBKDF2 해시)(권한 600)
+- `mine.json` 사람마다의 읽음 상태·알림 설정(`mine`). 예전 서버는 `server.json` 안에 두었다. 새 서버는 시작할 때 그것을 읽어 `mine.json` 으로 옮기고(둘 다 있으면 항목마다 최신이 이기게 합친다), `server.json` 은 압축 JSON 으로 쓴다. 예전 서버로 되돌리면 `mine.json` 을 읽지 않지만 앱이 붙을 때 자기 읽음 상태를 다시 보내므로 잃는 것은 없다.
+- 저장 주기: `server.json` 은 사람·기기·설정이 바뀔 때 바로(정본을 쓸 때도 `rev` 때문에 같이), `mine.json` 은 읽음 상태가 바뀐 다음 틱에 그 파일만, 정본은 변경이 3초 멈추면, 계속되면 첫 변경 뒤 최대 60초(`SAVE_AT_MOST`, 예전 15초). 정본·백업 직렬화는 잠금 밖에서 한다. 1분마다 도는 백업 확인은 지난 확인 뒤 `rev` 와 시간대가 그대로면 아무것도 읽지 않는다.
 - `mail.json` 메일 설정(선택, 아래 "계정과 메일"). `outbox/` 는 `"transport": "folder"` 일 때 메일 대신 쓰는 곳
 
 **HTTP (같은 host:port)**
@@ -261,7 +263,7 @@ iPhone 앱이 연결돼 있지 않을 때도 새 메시지·멘션·DM 을 알�
 
 팀 서버 하나(Mac mini)에 워크스페이스를 여러 개 둔다. 전에는 서버 하나에 워크스페이스 하나라 둘째 팀 워크스페이스를 쓰려면 서버를 하나 더 띄워야 했다. 코드: `server/src/registry.rs`(맨 위에 규칙), 앱 `src/app/together.rs`(`make_workspace_on_server`, `listing_tick`, `open_or_join`, `local_workspace_on`), `wb_net::{workspace_prefix, workspace_addr, same_workspace, create_workspace, list_workspaces}`.
 
-- **저장.** 서버 폴더의 파일 = 첫 워크스페이스(옮기지 않음. 지금 Mac mini 데이터 그대로). 다른 워크스페이스는 `workspaces/<id>/` 에 같은 구성(`workspace.json`, `server.json`, `backups/`, `files/`)으로 둔다. 워크스페이스마다 Hub 가 하나씩 따로 돈다: 사람·계정·역할·초대·백업·첨부가 모두 따로다. 함께 쓰는 것은 서버 폴더의 설정 파일(`mail.json`, `apns.json`, `livekit.json`)뿐이고, 하위 폴더에 같은 파일을 두면 그것이 이긴다. 앱 업데이트(`/updates`)는 서버에 하나.
+- **저장.** 서버 폴더의 파일 = 첫 워크스페이스(옮기지 않음. 지금 Mac mini 데이터 그대로). 다른 워크스페이스는 `workspaces/<id>/` 에 같은 구성(`workspace.json`, `server.json`, `mine.json`, `backups/`, `files/`)으로 둔다. 워크스페이스마다 Hub 가 하나씩 따로 돈다: 사람·계정·역할·초대·백업·첨부가 모두 따로다. 함께 쓰는 것은 서버 폴더의 설정 파일(`mail.json`, `apns.json`, `livekit.json`)뿐이고, 하위 폴더에 같은 파일을 두면 그것이 이긴다. 앱 업데이트(`/updates`)는 서버에 하나.
 - **주소.** 워크스페이스의 주소 = 서버 주소 + `/w/<id>`(id 는 무작위 16자리 16진수). 그 아래 `/ws`, `/files/<sha>`, `/auth/forgot`, `/join`, `/health`. `/w/` 가 없는 주소는 첫 워크스페이스라 예전 앱·iPhone·초대 링크가 그대로 된다. 주소에 id 가 들어 있으므로 앱이 저장하는 `SharedCfg.server`, 토큰 키, 초대 링크, `last-server` 가 따로 필드 없이 워크스페이스까지 가리킨다. 초대 메일·`/join` 페이지 링크에 `/w/<id>` 가 붙고, 허들 방 이름은 `wb-<id>-<채널>`(첫 워크스페이스는 그대로 `wb-<채널>`. LiveKit 하나를 같이 쓰므로 채널 번호가 겹치지 않게).
 - **만들기.** `POST /workspaces` 에 이 서버 어느 워크스페이스든 유효한 기기 토큰(`Bearer device:token`)을 보내면 빈 워크스페이스를 만들고 `{id}` 를 준다. 그 사람 계정(이메일+비밀번호 해시)을 새 `server.json` 의 `seed` 로 복사해 두고, 그 이메일로 claim 하는 앱만 owner 가 된다(비밀번호를 새로 정하지 않으면 그 계정이 그대로 owner 의 계정이 된다). 다른 이메일의 claim 은 "This workspace is being set up by someone else." 로 거절. 서버당 첫 워크스페이스 말고 50개까지(`MAX_WORKSPACES`). 하루 안에 아무도 설정하지 않은 것은 지운다(`Registry::clean_up`, 한 시간마다). 계정은 워크스페이스마다 따로라, 나중에 한 곳에서 비밀번호를 바꾸면 다른 곳은 그대로다.
 - **목록.** `POST /auth/workspaces {email, password}` → 그 계정이 있는 워크스페이스 `[{id, name}]`(첫 워크스페이스는 id ""). 틀린 시도는 그 이메일 계정이 있는 각 워크스페이스에 로그인할 때처럼 센다(`Hub::check_password` 를 같이 쓴다. 계정이 어디에도 없으면 첫 워크스페이스에 센다).

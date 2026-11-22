@@ -17,7 +17,7 @@ again after pulling new code.
 
 - Status: `launchctl print gui/$(id -u)/com.jikwon-labs.workboard-server | grep state`
 - Log: `~/Library/Logs/workboard-server.log`
-- Data: `~/Library/Application Support/WorkboardServer/` (`workspace.json`, `server.json`)
+- Data: `~/Library/Application Support/WorkboardServer/` (`workspace.json`, `server.json`, `mine.json`)
 - Stop and remove: `deploy/install-launchd.sh uninstall`
 
 ## Follow main by itself

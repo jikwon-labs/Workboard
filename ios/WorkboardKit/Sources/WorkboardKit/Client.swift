@@ -160,6 +160,9 @@ final class SnapshotWriter: Sendable {
 
     /// Returns once every write asked for so far is on disk.
     func wait() { queue.sync {} }
+
+    /// `f` runs once every write asked for so far is on disk.
+    func then(_ f: @escaping @Sendable () -> Void) { queue.async(execute: f) }
 }
 
 /// Why the sign-in screen is up.
@@ -339,8 +342,8 @@ public final class SyncClient {
     /// snapshot.json is written this long after the last change, and at
     /// most `saveMaxDelay` after the first one not yet written: each write
     /// encodes the whole workspace, so not on every message that comes in.
-    @ObservationIgnored public var saveDelay: TimeInterval = 1
-    @ObservationIgnored public var saveMaxDelay: TimeInterval = 5
+    @ObservationIgnored public var saveDelay: TimeInterval = 2
+    @ObservationIgnored public var saveMaxDelay: TimeInterval = 15
     @ObservationIgnored let snapshots: SnapshotWriter
     /// The bookkeeping of `data`, kept parsed: `data` holds only its shared
     /// parts, written back entry by entry as they change (Sync+Kept.swift).
@@ -357,7 +360,14 @@ public final class SyncClient {
     /// When the oldest change not yet on disk was made (nil: all saved).
     @ObservationIgnored private var firstUnsaved: Date?
 
-    public init(storage: Storage = .standard, tokens: TokenStore = KeychainTokenStore()) {
+    /// The saved copy is being read (`openSaved`): screens wait, and the
+    /// connection starts once it is open.
+    public private(set) var opening = false
+    @ObservationIgnored private var connectWhenOpen = false
+
+    /// `openLater`: don't read the saved copy here but in `openSaved`, off
+    /// the main thread, so the app's first screen doesn't wait for it.
+    public init(storage: Storage = .standard, tokens: TokenStore = KeychainTokenStore(), openLater: Bool = false) {
         self.storage = storage
         self.snapshots = SnapshotWriter(storage: storage)
         self.tokens = tokens
@@ -366,7 +376,9 @@ public final class SyncClient {
         cfg.waitsForConnectivity = false
         cfg.timeoutIntervalForRequest = 15
         self.session = URLSession(configuration: cfg)
-        if let snap = storage.loadSnapshot() {
+        if openLater {
+            opening = true
+        } else if let snap = storage.loadSnapshot() {
             let (tree, meta) = Self.opened(snap)
             self.syncMeta = meta
             self.data = tree
@@ -380,8 +392,38 @@ public final class SyncClient {
         storage.save(settings)
     }
 
-    /// A saved copy made ready to open: one saved by an older build gets
-    /// what later builds keep in it.
+    /// Read the saved copy off the main thread (with `openLater`), with
+    /// its fingerprints worked out ahead of the first edit; then connect,
+    /// if that was asked for meanwhile.
+    public func openSaved() async {
+        guard opening else { return }
+        let s = storage
+        let server = settings.server
+        let opened = await Task.detached(priority: .userInitiated) { () -> (JSON, SyncMeta, FingerprintCache, WorkspaceView)? in
+            guard let snap = s.loadSnapshot() else { return nil }
+            let (tree, meta) = SyncClient.opened(snap)
+            let prints = FingerprintCache()
+            prints.update(tree)
+            return (tree, meta, prints, WorkspaceView(tree))
+        }.value
+        // (an invite link may have switched servers meanwhile: that copy
+        // was put aside, not this one's to open)
+        if let (tree, meta, warm, v) = opened, data == nil, settings.server == server {
+            syncMeta = meta
+            prints = warm
+            data = tree
+            view = v
+            viewSource = tree
+        }
+        opening = false
+        trimFiles()
+        if connectWhenOpen {
+            connectWhenOpen = false
+            connect()
+        }
+        onUpdate()
+    }
+
     /// A saved copy made ready to open, taken apart: the copy with the
     /// shared parts of its bookkeeping, and all of the bookkeeping parsed.
     nonisolated static func opened(_ saved: JSON) -> (JSON, SyncMeta) {
@@ -576,6 +618,10 @@ public final class SyncClient {
     // MARK: connection
 
     public func connect() {
+        if opening {
+            connectWhenOpen = true
+            return
+        }
         retryTask?.cancel()
         retryTask = nil
         guard let url = Self.url(from: settings.server) else {
@@ -1264,6 +1310,29 @@ public final class SyncClient {
             firstUnsaved = nil
             snapshots.wait()
         }
+    }
+
+    /// Keep the downloaded files under FileAPI.cacheLimit, in the
+    /// background: the files in Trash and those waiting to go back up stay.
+    func trimFiles() {
+        var keep = Set(settings.reuploads)
+        for t in trash { keep.formUnion(FileAPI.files(inPayload: t.payload)) }
+        let folder = fileCache
+        Task.detached(priority: .background) { FileAPI.trimCache(folder: folder, keep: keep) }
+    }
+
+    /// Put the newest copy on disk without waiting for it (the app going
+    /// to the background): `done` is called once it is written, on the
+    /// writer's queue.
+    public func flushSoon(done: @escaping @Sendable () -> Void) {
+        saveTask?.cancel()
+        saveTask = nil
+        if firstUnsaved != nil, let d = data {
+            firstUnsaved = nil
+            snapshots.write(d, meta: syncMeta)
+        }
+        firstUnsaved = nil
+        snapshots.then(done)
     }
 
     /// Forget the saved copy. Goes through the writer so a write already on

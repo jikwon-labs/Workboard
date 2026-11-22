@@ -80,4 +80,85 @@ final class KeptBookkeepingTests: FakeServerTestCase {
         d.set("extra.sync", m2.json)
         XCTAssertEqual(Sync.joined(t, m2), d)
     }
+
+    // MARK: opening after the first frame, saving in the background
+
+    func testACopyOpenedLaterIsTheCopyOpenedAtOnce() async throws {
+        let s = storage()
+        var saved = SampleWorkspace.make()
+        var meta = SyncMeta()
+        Sync.stamp(saved, &meta, now: 1_800_000_000_000)
+        saved.set("extra.sync", meta.json)
+        s.save(snapshot: saved)
+        let atOnce = SyncClient(storage: s, tokens: MemoryTokenStore())
+        let later = SyncClient(storage: s, tokens: MemoryTokenStore(), openLater: true)
+        XCTAssertTrue(later.opening)
+        XCTAssertNil(later.data, "nothing read yet")
+        var updates = 0
+        later.onUpdate = { updates += 1 }
+        await later.openSaved()
+        XCTAssertFalse(later.opening)
+        XCTAssertEqual(later.data, atOnce.data)
+        XCTAssertEqual(later.syncMeta, atOnce.syncMeta)
+        XCTAssertEqual(later.view.tasks, atOnce.view.tasks)
+        XCTAssertEqual(updates, 1, "the screens and notifications take their first look")
+        // its fingerprints were worked out already: an edit stamps as usual
+        later.setMe(1)
+        XCTAssertTrue(later.edit { d, me in Edits.rename(&d, task: 201, to: "Later", me: me, ts: nowTs()) })
+        try assertKeptRight(later)
+    }
+
+    func testConnectingWhileOpeningWaitsForTheCopy() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make())
+        let port = try await server.start(port: 0)
+        defer { server.stop() }
+        let s = storage()
+        let first = client("ws://127.0.0.1:\(port)", me: 1, storage: s)
+        await until("connected") { first.canEdit }
+        XCTAssertTrue(first.edit { d, me in Edits.rename(&d, task: 201, to: "Saved here", me: me, ts: nowTs()) })
+        first.flushSnapshot()
+        first.disconnect()
+
+        let c = SyncClient(storage: s, tokens: MemoryTokenStore(), openLater: true)
+        c.connect()
+        XCTAssertEqual(c.state, .idle, "not before the copy is open")
+        await c.openSaved()
+        await until("connected after opening") { c.state.isConnected }
+        XCTAssertEqual(c.view.tasks.first { $0.id == 201 }?.name, "Saved here")
+    }
+
+    func testSavingInTheBackgroundWritesTheCopyAndSaysSo() async throws {
+        let s = storage()
+        s.save(snapshot: SampleWorkspace.make())
+        let c = SyncClient(storage: s, tokens: MemoryTokenStore())
+        c.saveDelay = 60
+        c.setMe(1)
+        XCTAssertTrue(c.edit { d, me in Edits.rename(&d, task: 201, to: "Backgrounded", me: me, ts: nowTs()) })
+        await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in c.flushSoon { k.resume() } }
+        XCTAssertEqual(s.loadSnapshot().flatMap { WorkspaceView($0).tasks.first { $0.id == 201 }?.name }, "Backgrounded")
+    }
+
+    func testTheFileCacheLetsGoOfTheFilesUsedLongestAgo() throws {
+        let dir = folder()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let mb = Data(count: 1_000_000)
+        let names = ["a1", "b2.mov", "c3", "d4"]
+        for (i, n) in names.enumerated() {
+            let u = dir.appendingPathComponent(n)
+            try mb.write(to: u)
+            // a1 used longest ago, d4 last
+            let when = Date(timeIntervalSince1970: 1_700_000_000 + Double(i) * 100)
+            try FileManager.default.setAttributes([.modificationDate: when], ofItemAtPath: u.path)
+            var url = u
+            var rv = URLResourceValues()
+            rv.contentAccessDate = when
+            try url.setResourceValues(rv)
+        }
+        // room for two; a1 is in Trash and stays
+        let freed = FileAPI.trimCache(folder: dir, limit: 2_000_000, keep: ["a1"])
+        XCTAssertEqual(freed, 2_000_000)
+        let left = Set(try FileManager.default.contentsOfDirectory(atPath: dir.path))
+        XCTAssertEqual(left, ["a1", "d4"])
+        XCTAssertEqual(FileAPI.trimCache(folder: dir, limit: 2_000_000), 0, "nothing more to do")
+    }
 }

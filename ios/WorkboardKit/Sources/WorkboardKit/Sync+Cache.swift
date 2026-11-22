@@ -12,7 +12,9 @@
 
 import Foundation
 
-public final class FingerprintCache {
+/// Not to be used from two threads at once; handed from one to another
+/// (made off the main thread when a copy is opened) it is fine.
+public final class FingerprintCache: @unchecked Sendable {
     private struct Node {
         var value: JSON
         var parent: UInt64?

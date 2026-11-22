@@ -42,7 +42,10 @@ struct WorkboardApp: App {
             for w in storage.loadSaved() { tokens.setToken(nil, for: w.server) }
             try? FileManager.default.removeItem(at: storage.folder)
         }
-        let c = SyncClient(storage: storage, tokens: tokens)
+        // the saved copy is read after the first frame (openSaved), except
+        // when launch arguments change things that need it at once
+        let now = args.bool(forKey: "wbReset") || args.string(forKey: "wbServer") != nil
+        let c = SyncClient(storage: storage, tokens: tokens, openLater: !now)
         if let me = args.string(forKey: "wbMe"), let id = UInt64(me) { c.setMe(id) }
         if let server = args.string(forKey: "wbServer") { c.setServer(server) }
         if args.double(forKey: "wbAskTimeout") > 0 { c.askTimeout = args.double(forKey: "wbAskTimeout") }
@@ -69,12 +72,21 @@ struct WorkboardApp: App {
                 .onOpenURL { url in
                     if let link = InviteLink.parse(url.absoluteString) { nav.openedLink = link }
                 }
+                .task { await client.openSaved() }
                 .task { await notifier.refresh() }
-                // the copy is saved a moment after changes; leaving the app
-                // writes it now, since iOS may stop the app before that
-                .onChange(of: scenePhase) { _, p in if p != .active { client.flushSnapshot() } }
+                // the copy is saved a moment after changes; going to the
+                // background writes it now, since iOS may stop the app before
+                // that (off the main thread, with time asked for to finish;
+                // not for a moment of Control Center or a notification)
+                .onChange(of: scenePhase) { _, p in if p == .background { saveInBackground() } }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in client.flushSnapshot() }
         }
+    }
+
+    func saveInBackground() {
+        let task = BackgroundTask()
+        task.id = UIApplication.shared.beginBackgroundTask(withName: "Save the workspace") { task.end() }
+        client.flushSoon { DispatchQueue.main.async { task.end() } }
     }
 
     func wire() {
@@ -189,5 +201,17 @@ final class Nav {
         case .thread(let c, _)?: return c
         default: return nil
         }
+    }
+}
+
+/// Time asked of iOS to finish something after the app left the screen.
+final class BackgroundTask: @unchecked Sendable {
+    var id = UIBackgroundTaskIdentifier.invalid
+
+    /// Done (or out of time): give the time back, once.
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }

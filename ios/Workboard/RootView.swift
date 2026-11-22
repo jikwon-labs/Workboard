@@ -11,7 +11,10 @@ struct RootView: View {
         @Bindable var nav = nav
         @Bindable var calls = calls
         Group {
-            if client.needsSignIn {
+            if client.opening {
+                // the saved copy is being read (a moment)
+                Color(.systemBackground).ignoresSafeArea()
+            } else if client.needsSignIn {
                 SignInView()
             } else if client.data == nil {
                 if nav.openingWorkspace { OpeningWorkspaceView() } else { SetupView() }

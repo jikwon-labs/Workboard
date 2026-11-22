@@ -206,6 +206,40 @@ public enum FileAPI {
         try? FileManager.default.copyItem(at: file, to: dest)
     }
 
+    /// How much the downloaded files may take on this device before the
+    /// ones looked at longest ago are let go of (they come down again when
+    /// needed). iOS clears Caches too when space runs out, but only then.
+    public static let cacheLimit = 1_000_000_000
+
+    /// Take the files used longest ago out of the cache until it holds at
+    /// most `limit` bytes. Files whose sha is in `keep` (in this iPhone's
+    /// Trash, or waiting to go back to the server) stay. Returns how many
+    /// bytes were let go of.
+    @discardableResult
+    public static func trimCache(folder: URL = defaultCache, limit: Int = cacheLimit, keep: Set<String> = []) -> Int {
+        let keys: [URLResourceKey] = [.fileSizeKey, .contentAccessDateKey, .contentModificationDateKey, .isRegularFileKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys) else { return 0 }
+        var files: [(url: URL, size: Int, used: Date)] = []
+        var total = 0
+        for u in urls {
+            guard let v = try? u.resourceValues(forKeys: Set(keys)), v.isRegularFile == true else { continue }
+            let size = v.fileSize ?? 0
+            total += size
+            files.append((u, size, v.contentAccessDate ?? v.contentModificationDate ?? .distantPast))
+        }
+        guard total > limit else { return 0 }
+        var freed = 0
+        for f in files.sorted(by: { $0.used < $1.used }) where total > limit {
+            let sha = String(f.url.lastPathComponent.prefix { $0 != "." })
+            if keep.contains(sha) { continue }
+            if (try? FileManager.default.removeItem(at: f.url)) != nil {
+                total -= f.size
+                freed += f.size
+            }
+        }
+        return freed
+    }
+
     /// This device's copy of a file, whatever extension it was kept with.
     public static func localCopy(_ sha: String, folder: URL = defaultCache) -> URL? {
         guard isFileName(sha) else { return nil }

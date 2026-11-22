@@ -1,10 +1,15 @@
 # LiveKit's WebRTC library (wb-voice) uses Objective-C categories on macOS;
 # without -ObjC the linker drops them and the first call crashes.
+# cargo run / cargo test sign what they built with this Mac's Developer ID
+# before running it, so the firewall doesn't hold back the huddle tests'
+# calls (scripts/run-signed; the path is relative to this folder's parent).
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "link-args=-ObjC"]
+runner = "scripts/run-signed"
 
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-args=-ObjC"]
+runner = "scripts/run-signed"
 
 # LiveKit's prebuilt WebRTC library is built against the static C runtime
 # (/MT); everything else must use it too or linking fails with "mismatch

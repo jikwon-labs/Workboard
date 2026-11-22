@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Signs a program cargo built with this Mac's Developer ID, then runs it.
+#
+#   scripts/run-signed <program> [args...]   sign, then run (cargo's runner
+#                                            on macOS, see .cargo/config.toml)
+#   scripts/run-signed --sign-only <program>...
+#                                            sign only (scripts/wt verify,
+#                                            which starts the programs itself)
+#
+# Why: the macOS firewall holds back incoming network traffic to a program
+# it hasn't seen before and asks whether to allow it. Every build of a test
+# program is a new program to it, so the huddle tests (whose calls take
+# packets on this Mac's network addresses) waited for that question: the
+# call didn't connect in time ("timed out waiting for: Ann joined") until
+# someone clicked Allow. Programs signed with a Developer ID are let
+# through without asking.
+#
+# The identity is the first "Developer ID Application" in the keychain, or
+# WB_SIGN_IDENTITY ("-" or empty to skip signing). Without one, or when
+# signing fails, the program runs unsigned as before.
+set -u
+
+identity() {
+  if [ -n "${WB_SIGN_IDENTITY+x}" ]; then
+    [ "$WB_SIGN_IDENTITY" = - ] || printf '%s' "$WB_SIGN_IDENTITY"
+    return
+  fi
+  security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*\([0-9A-F]\{40\}\) "Developer ID Application:.*/\1/p' | head -1
+}
+
+sign() {
+  local id=$1 exe=$2
+  [ -n "$id" ] && [ -f "$exe" ] || return 0
+  # already signed by a Developer ID (a program that wasn't built again)
+  codesign -dv "$exe" 2>&1 | grep -q '^Authority=Developer ID Application' && return 0
+  codesign --force --sign "$id" "$exe" >/dev/null 2>&1 || true
+}
+
+[ "$(uname)" = Darwin ] || { [ "${1:-}" = --sign-only ] && exit 0; exec "$@"; }
+
+if [ "${1:-}" = --sign-only ]; then
+  shift
+  id=$(identity)
+  for exe in "$@"; do sign "$id" "$exe"; done
+  exit 0
+fi
+
+[ $# -ge 1 ] || { echo "usage: scripts/run-signed <program> [args...]" >&2; exit 2; }
+sign "$(identity)" "$1"
+exec "$@"

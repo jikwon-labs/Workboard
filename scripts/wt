@@ -148,7 +148,8 @@ cmd_verify() {
 # app's alone takes as long as the rest together). Each runs in its
 # package's folder, as under cargo test. The output of a program that fails
 # is shown whole; the others show their result line. Without jq it is plain
-# cargo test.
+# cargo test. On macOS the programs are signed first so the firewall doesn't
+# hold back the huddle tests' calls (see scripts/run-signed).
 cargo_tests() {
   command -v jq >/dev/null || { cargo test "$@"; return; }
   local logs list exe dir n=0 failed=0 i
@@ -157,6 +158,12 @@ cargo_tests() {
     || { rm -rf "$logs"; die "the tests didn't build"; }
   list=$(jq -r 'select(.reason == "compiler-artifact" and .executable != null and .profile.test)
       | "\(.executable)\t\(.manifest_path)"' "$logs/build.json")
+  local signer exes=()
+  signer="$(git rev-parse --show-toplevel)/scripts/run-signed"
+  if [ -x "$signer" ]; then
+    while IFS=$'\t' read -r exe dir; do [ -n "$exe" ] && exes+=("$exe"); done <<<"$list"
+    [ ${#exes[@]} = 0 ] || "$signer" --sign-only "${exes[@]}"
+  fi
   while IFS=$'\t' read -r exe dir; do
     [ -n "$exe" ] || continue
     n=$((n + 1))

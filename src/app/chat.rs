@@ -4453,7 +4453,7 @@ impl App {
                 }
                 ChatAction::OpenGoal(id) => {
                     self.section = Section::Goals;
-                    self.goal_open = Some(id);
+                    self.goal.open = Some(id);
                 }
                 ChatAction::Forward { ch, msg } => {
                     self.modal = Some(Modal::Forward {

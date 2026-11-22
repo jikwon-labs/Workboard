@@ -668,7 +668,7 @@ impl App {
             }
             ("goal", Some(id)) => {
                 self.section = Section::Goals;
-                self.goal_open = Some(id);
+                self.goal.open = Some(id);
             }
             ("reminder", Some(id)) => match self
                 .data

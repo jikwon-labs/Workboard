@@ -544,9 +544,9 @@ impl App {
         }
         // a milestone's banner goes when the goal drops back below it
         let gid = g.id;
-        if let Some((bg, bm, _)) = self.goal_banner {
+        if let Some((bg, bm, _)) = self.goal.banner {
             if bg == gid && pct < bm {
-                self.goal_banner = None;
+                self.goal.banner = None;
             }
         }
         if changed {
@@ -617,10 +617,10 @@ impl App {
         let me = self.data.me;
         let reached = self.goal_settle(gi, me, now);
         if before < 100 && pct >= 100 {
-            self.goal_banner = None;
+            self.goal.banner = None;
             self.modal = Some(Modal::GoalAchieved { id: gid });
         } else if let Some(m) = reached.filter(|m| *m < 100) {
-            self.goal_banner = Some((gid, m, now));
+            self.goal.banner = Some((gid, m, now));
         }
     }
 
@@ -649,19 +649,19 @@ impl App {
         let pct = pct_of(self.goal_progress(&self.data.extra.goals[gi]));
         self.data.extra.goals[gi].log[0].pct = pct;
         self.goal_settle(gi, me, now);
-        self.goal_open = Some(id);
+        self.goal.open = Some(id);
         self.dirty = true;
         id
     }
 
     /// The Goals page: goals in progress as cards or rows, achieved ones below.
     pub(crate) fn goals_page(&mut self, ui: &mut Ui) {
-        if let Some(id) = self.goal_open {
+        if let Some(id) = self.goal.open {
             if self.data.extra.goals.iter().any(|g| g.id == id) {
                 self.goal_page(ui, id);
                 return;
             }
-            self.goal_open = None;
+            self.goal.open = None;
         }
         let t = self.t();
         let day = today();
@@ -677,7 +677,7 @@ impl App {
         let n_all = rows.len();
         let n_mine = rows.iter().filter(mine).count();
         let n_done = rows.iter().filter(|r| r.pct >= 100).count();
-        let filter = self.goal_filter;
+        let filter = self.goal.filter;
         let shown: Vec<&GoalRow> = rows
             .iter()
             .filter(|r| filter != GoalFilter::Mine || r.g.owner == me)
@@ -1403,7 +1403,7 @@ impl App {
                 let legend = rows.iter().any(|r| plan_mark(r).is_some());
                 for (ri, r) in rows.iter().enumerate() {
                     let g = &r.g;
-                    let open = self.goal_list_open == Some(g.id);
+                    let open = self.goal.list_open == Some(g.id);
                     let (rr, _) = ui.allocate_exact_size(vec2(w, 58.0), Sense::hover());
                     let click = ui.interact(rr, ui.id().with(("goal row", g.id)), Sense::click());
                     name_it(&click, &format!("Goal row {}", g.name));
@@ -1626,12 +1626,12 @@ impl App {
     pub(crate) fn goal_apply(&mut self, a: GoalAct) {
         match a {
             GoalAct::Open(id) => {
-                self.goal_open = Some(id);
-                self.goal_banner = None;
+                self.goal.open = Some(id);
+                self.goal.banner = None;
             }
             GoalAct::Back => {
-                self.goal_open = None;
-                self.goal_banner = None;
+                self.goal.open = None;
+                self.goal.banner = None;
             }
             // in the next colour, as from the empty page and Goal achieved
             GoalAct::NewGoal => self.open_new_goal(None),
@@ -1639,8 +1639,8 @@ impl App {
                 self.data.extra.goals_view = v.key().into();
                 self.dirty = true;
             }
-            GoalAct::Filter(f) => self.goal_filter = f,
-            GoalAct::ExpandRow(id) => self.goal_list_open = id,
+            GoalAct::Filter(f) => self.goal.filter = f,
+            GoalAct::ExpandRow(id) => self.goal.list_open = id,
             GoalAct::ToggleDone { g, i } => {
                 let Some(goal) = self.data.extra.goals.iter().find(|x| x.id == g) else {
                     return;

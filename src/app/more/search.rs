@@ -443,7 +443,7 @@ impl App {
                 self.section = Section::Dashboards;
             }
             Hit::Goal(id) => {
-                self.goal_open = Some(id);
+                self.goal.open = Some(id);
                 self.section = Section::Goals;
             }
             Hit::Person(_) => self.section = Section::People,

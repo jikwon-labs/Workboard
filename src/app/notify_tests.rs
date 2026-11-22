@@ -974,7 +974,7 @@ fn a_goal_due_today_is_announced_once_unless_turned_off_and_opens_the_goal() {
     // clicking it opens the goal
     a.open_target(&a.notify_rt.sent[0].target.clone());
     assert_eq!(a.section, Section::Goals);
-    assert_eq!(a.goal_open, Some(id));
+    assert_eq!(a.goal.open, Some(id));
     // another due today with "Goal deadlines" turned off: nothing
     a.data.extra.notify.goals = false;
     let other = a.data.new_id();

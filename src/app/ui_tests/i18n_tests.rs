@@ -836,7 +836,7 @@ fn goal_screens_have_no_english_left() {
     h.settle();
     shown.extend(h.texts());
     // a milestone floating over the page, and the settings dialog
-    h.app.goal_banner = Some((801, 50, now_ts()));
+    h.app.goal.banner = Some((801, 50, now_ts()));
     h.settle();
     shown.extend(h.texts());
     h.app.modal = Some(Modal::GoalSettings { id: 801 });
@@ -861,7 +861,7 @@ fn goal_screens_have_no_english_left() {
     shown.extend(h.texts());
     h.app.section = Section::Goals;
     h.app.modal = None;
-    h.app.goal_open = None;
+    h.app.goal.open = None;
     h.app.data.extra.goals.clear();
     h.settle();
     shown.extend(h.texts());

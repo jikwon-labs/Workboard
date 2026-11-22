@@ -1051,8 +1051,8 @@ impl App {
             }
             "goal" => {
                 x.goals.retain(|g| g.id != id);
-                if self.goal_open == Some(id) {
-                    self.goal_open = None;
+                if self.goal.open == Some(id) {
+                    self.goal.open = None;
                 }
             }
             "meeting" => {

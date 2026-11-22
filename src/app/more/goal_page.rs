@@ -151,9 +151,9 @@ impl App {
         if head_act.is_some() {
             page_act = head_act;
         }
-        if let Some((_, m, at)) = self.goal_banner.filter(|b| b.0 == gid) {
+        if let Some((_, m, at)) = self.goal.banner.filter(|b| b.0 == gid) {
             if now_ts() - at > MILESTONE_SECS {
-                self.goal_banner = None;
+                self.goal.banner = None;
             } else if self.modal.is_none() {
                 // (not over a dialog: the goal's settings, say)
                 let left: Vec<&str> = views
@@ -166,7 +166,7 @@ impl App {
                 match milestone_float(ui.ctx(), &t, page, lift, m, &left) {
                     Float::Closed => page_act = Some(PageAct::DismissBanner),
                     // read while the pointer is on it: it stays
-                    Float::Held => self.goal_banner = Some((gid, m, now_ts())),
+                    Float::Held => self.goal.banner = Some((gid, m, now_ts())),
                     Float::Shown => {}
                 }
                 ui.ctx()
@@ -827,7 +827,7 @@ impl App {
             return act;
         }
         // tasks: the open ones to tick off, the closed ones on request
-        let show_done = self.goal_show_done == Some((gid, i));
+        let show_done = self.goal.show_done == Some((gid, i));
         let open: Vec<_> = v.tasks.iter().filter(|x| !x.2).collect();
         let closed: Vec<_> = v.tasks.iter().filter(|x| x.2).collect();
         if !open.is_empty() {
@@ -1148,8 +1148,8 @@ impl App {
                     }
                 }
             }),
-            PageAct::DismissBanner => self.goal_banner = None,
-            PageAct::ShowDone(v) => self.goal_show_done = v,
+            PageAct::DismissBanner => self.goal.banner = None,
+            PageAct::ShowDone(v) => self.goal.show_done = v,
             PageAct::NextGoal => self.goal_apply(GoalAct::NewGoal),
             PageAct::Share => self.open_goal_share(gid),
             PageAct::Settings => self.modal = Some(Modal::GoalSettings { id: gid }),

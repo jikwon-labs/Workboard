@@ -88,17 +88,17 @@ fn goals_show_as_cards_or_rows_and_open_their_own_page() {
     assert_eq!(h.app.data.extra.goals_view, "list");
     assert!(h.has("Goal row Beta launch"));
     h.click("Show targets of Beta launch");
-    assert_eq!(h.app.goal_list_open, Some(a), "the arrow shows the targets");
+    assert_eq!(h.app.goal.list_open, Some(a), "the arrow shows the targets");
 
     h.click("Goal row Beta launch");
-    assert_eq!(h.app.goal_open, Some(a));
+    assert_eq!(h.app.goal.open, Some(a));
     assert!(h.has("Plus 10 Beta testers") && h.has("Done Store review"));
     assert!(
         h.has("Progress bar") && h.has("Time bar"),
         "progress against time"
     );
     h.click("Back to goals");
-    assert_eq!(h.app.goal_open, None);
+    assert_eq!(h.app.goal.open, None);
 
     h.click("Show as cards");
     assert_eq!(h.app.data.extra.goals_view, "");
@@ -161,7 +161,7 @@ fn far_behind_goals_come_first_with_their_pace() {
 fn recording_a_number_moves_the_goal_and_shows_the_milestone() {
     let (mut h, a, _) = two_goals();
     h.click("Goal Beta launch");
-    assert_eq!(h.app.goal_open, Some(a));
+    assert_eq!(h.app.goal.open, Some(a));
     let row = h.rect("Minus 1 Beta testers");
     h.click("Plus 10 Beta testers");
     h.click("Plus 1 Beta testers");
@@ -174,7 +174,7 @@ fn recording_a_number_moves_the_goal_and_shows_the_milestone() {
     // the number full and the review not done: halfway
     assert_eq!((h.app.goal_progress(&g) * 100.0).round() as u8, 50);
     assert_eq!(
-        h.app.goal_banner.map(|b| (b.0, b.1)),
+        h.app.goal.banner.map(|b| (b.0, b.1)),
         Some((a, 50)),
         "the 50% banner shows"
     );
@@ -197,7 +197,7 @@ fn recording_a_number_moves_the_goal_and_shows_the_milestone() {
         g.log
     );
     h.click("Close milestone");
-    assert_eq!(h.app.goal_banner, None);
+    assert_eq!(h.app.goal.banner, None);
 
     h.click("Minus 1 Beta testers");
     let TargetKind::Number { current, .. } = goal(&h, a).targets[0].kind else {
@@ -223,7 +223,7 @@ fn undoing_a_target_takes_back_the_milestone_it_passed() {
     let button = h.rect("Done Store review");
     // 38 of 50 people and the review done: 88%
     h.click("Done Store review");
-    assert_eq!(h.app.goal_banner.map(|b| (b.0, b.1)), Some((a, 75)));
+    assert_eq!(h.app.goal.banner.map(|b| (b.0, b.1)), Some((a, 75)));
     assert_eq!(milestones(&h), [75]);
     assert_eq!(
         h.rect("Done Store review").size(),
@@ -233,7 +233,7 @@ fn undoing_a_target_takes_back_the_milestone_it_passed() {
     // undone: back to 38%, the 75% milestone goes from the banner and the
     // history, and the milestones show it as still to reach
     h.click("Done Store review");
-    assert_eq!(h.app.goal_banner, None);
+    assert_eq!(h.app.goal.banner, None);
     assert!(milestones(&h).is_empty(), "{:?}", goal(&h, a).log);
     assert_eq!(goal(&h, a).reached, 25);
     // done again: the milestone comes back once
@@ -241,10 +241,10 @@ fn undoing_a_target_takes_back_the_milestone_it_passed() {
     assert_eq!(milestones(&h), [75]);
     assert!(h.has("Close milestone"));
     // it floats a few seconds, then goes by itself
-    let (g, m, _) = h.app.goal_banner.unwrap();
-    h.app.goal_banner = Some((g, m, now_ts() - 60));
+    let (g, m, _) = h.app.goal.banner.unwrap();
+    h.app.goal.banner = Some((g, m, now_ts() - 60));
     h.settle();
-    assert_eq!(h.app.goal_banner, None);
+    assert_eq!(h.app.goal.banner, None);
     assert!(!h.has("Close milestone"));
 }
 
@@ -356,7 +356,7 @@ fn new_goal_dialog_creates_a_goal_with_its_targets() {
         g.log.first().map(|e| e.what.clone()),
         Some(GoalChange::Created)
     );
-    assert_eq!(h.app.goal_open, Some(g.id), "the new goal's page opens");
+    assert_eq!(h.app.goal.open, Some(g.id), "the new goal's page opens");
 }
 
 #[test]
@@ -477,7 +477,7 @@ fn an_achieved_goal_is_shared_to_chat_as_a_card_that_opens_it() {
     );
     h.click("Open goal Office move");
     assert_eq!(h.app.section, Section::Goals);
-    assert_eq!(h.app.goal_open, Some(b));
+    assert_eq!(h.app.goal.open, Some(b));
     assert!(
         h.has("Share to team chat"),
         "the achieved goal's page offers sharing too"
@@ -599,7 +599,7 @@ fn the_list_view_shows_achieved_goals_as_rows_too() {
     let when = format!("Achieved {}", today().text("%b %-d"));
     assert_eq!(h.painted_text(&when).len(), 2, "when, for the days left");
     h.click("Goal row Office move");
-    assert_eq!(h.app.goal_open, Some(b));
+    assert_eq!(h.app.goal.open, Some(b));
     h.click("Back to goals");
 
     h.click("Show as cards");
@@ -926,23 +926,23 @@ fn every_new_goal_button_starts_in_the_next_colour() {
 fn the_controls_on_a_card_work_without_opening_it() {
     let (mut h, a, _) = two_goals();
     h.click("Done Store review");
-    assert_eq!(h.app.goal_open, None, "ticking doesn't open the goal");
+    assert_eq!(h.app.goal.open, None, "ticking doesn't open the goal");
     assert!(matches!(
         goal(&h, a).targets[1].kind,
         TargetKind::TrueFalse { done: true }
     ));
     h.click("Record Beta testers");
-    assert_eq!(h.app.goal_open, None, "+ Record doesn't open the goal");
+    assert_eq!(h.app.goal.open, None, "+ Record doesn't open the goal");
     assert!(h.has("Save value"), "its popup does");
     // the popup lies over the card: pressing in it stays in it
     h.click("Value now");
     h.type_text("40");
     h.click("Save value");
-    assert_eq!(h.app.goal_open, None);
+    assert_eq!(h.app.goal.open, None);
     assert_eq!(current_of(&h, a, 0), 40.0);
     // the rest of the card opens it
     h.click("Goal Beta launch");
-    assert_eq!(h.app.goal_open, Some(a));
+    assert_eq!(h.app.goal.open, Some(a));
 }
 
 #[test]
@@ -950,11 +950,11 @@ fn a_rows_arrow_shows_its_targets_without_opening_it() {
     let (mut h, a, _) = two_goals();
     h.click("Show as list");
     h.click("Show targets of Beta launch");
-    assert_eq!(h.app.goal_open, None);
-    assert_eq!(h.app.goal_list_open, Some(a));
+    assert_eq!(h.app.goal.open, None);
+    assert_eq!(h.app.goal.list_open, Some(a));
     assert!(!h.painted_text("38 / 50 people").is_empty(), "its targets");
     h.click("Show targets of Beta launch");
-    assert_eq!(h.app.goal_list_open, None, "the arrow folds them again");
+    assert_eq!(h.app.goal.list_open, None, "the arrow folds them again");
     assert!(h.painted_text("38 / 50 people").is_empty());
 }
 
@@ -978,7 +978,7 @@ fn deleting_a_goal_closes_its_page_and_unlinks_its_chat_card() {
     h.click_at(at);
     assert!(h.app.modal.is_none());
     assert!(h.app.data.extra.goals.iter().all(|g| g.id != b), "gone");
-    assert_eq!(h.app.goal_open, None, "back on the Goals page");
+    assert_eq!(h.app.goal.open, None, "back on the Goals page");
     assert!(h.has("Goal Beta launch"));
     assert!(h.app.data.extra.trash.iter().any(|x| x.kind == "Goal"));
 
@@ -995,7 +995,7 @@ fn deleting_a_goal_closes_its_page_and_unlinks_its_chat_card() {
     h.settle();
     assert_eq!(h.app.section, Section::Goals);
     assert!(h.has("Goal Beta launch"));
-    assert_eq!(h.app.goal_open, None);
+    assert_eq!(h.app.goal.open, None);
 
     // Trash brings it back as it was, achieved, with its history
     let j = h
@@ -1111,7 +1111,7 @@ fn a_goals_page_fits_the_narrowest_window_with_big_numbers() {
     );
     h.hover(pos2(450.0, 450.0));
     h.app.section = Section::Goals;
-    h.app.goal_open = Some(id);
+    h.app.goal.open = Some(id);
     h.settle();
     let window = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 900.0));
     for name in [
@@ -1342,7 +1342,7 @@ fn passing_several_milestones_at_once_notes_the_highest() {
         .collect();
     assert_eq!(ms, [75], "one line for the highest");
     assert_eq!(g.reached, 75);
-    assert_eq!(h.app.goal_banner.map(|b| (b.0, b.1)), Some((id, 75)));
+    assert_eq!(h.app.goal.banner.map(|b| (b.0, b.1)), Some((id, 75)));
     // the page shows the ones below as reached too, without a day
     assert!(!h.painted_text("Reached").is_empty());
     // back to 30%: 75 leaves, 25 stays; a later 100% opens Goal achieved
@@ -1464,7 +1464,7 @@ fn search_finds_a_goal_and_opens_it() {
     h.settle();
     h.click("Beta launch");
     assert_eq!(h.app.section, Section::Goals);
-    assert_eq!(h.app.goal_open, Some(a));
+    assert_eq!(h.app.goal.open, Some(a));
     assert!(h.has("Goal overview"), "its own page");
 }
 
@@ -1510,7 +1510,7 @@ fn long_target_chips_wrap_inside_the_dialog() {
 #[test]
 fn goal_header_slash_follows_the_hub_name() {
     let (mut h, a, _) = two_goals();
-    h.app.goal_open = Some(a);
+    h.app.goal.open = Some(a);
     h.settle();
     let crumb = h.rect("Goals crumb");
     let hub = h
@@ -1531,7 +1531,7 @@ fn goal_header_slash_follows_the_hub_name() {
         slash.left() - hub.right()
     );
     h.click("Goals crumb");
-    assert!(h.app.goal_open.is_none());
+    assert!(h.app.goal.open.is_none());
 }
 
 #[test]
@@ -1568,7 +1568,7 @@ fn a_number_target_cant_start_where_it_ends() {
 
     // on a goal's page: a target value equal to the start isn't taken
     let id = add_goal_with(&mut h, "Signups", vec![number("People", 10.0, 50.0, 20.0)]);
-    h.app.goal_open = Some(id);
+    h.app.goal.open = Some(id);
     h.settle();
     h.click("Edit People");
     h.click("Number target");

@@ -608,16 +608,7 @@ pub struct App {
     new_message_open: bool,
     dash_open: Option<u64>,
     meeting_open: Option<u64>,
-    goal_open: Option<u64>,
-    /// Goals page: 0 all, 1 mine, 2 achieved
-    goal_filter: more::GoalFilter,
-    /// the goal whose targets show under its row in the rows view
-    goal_list_open: Option<u64>,
-    /// a milestone just reached on a goal's page: (goal, 25/50/75, when);
-    /// it floats over the page for a few seconds
-    goal_banner: Option<(u64, u8, i64)>,
-    /// the tasks target showing its closed tasks too: (goal, target)
-    goal_show_done: Option<(u64, usize)>,
+    goal: GoalPage,
     ws_file: String,
     sidebar_collapsed: bool,
     force_menu: Option<String>,
@@ -768,6 +759,21 @@ struct GanttUi {
     /// Scroll to today on the next draw (on opening, and after the scale
     /// changes or Today is pressed).
     jump: bool,
+}
+
+/// The Goals page and the open goal.
+#[derive(Default)]
+struct GoalPage {
+    open: Option<u64>,
+    /// Which goals the page lists.
+    filter: more::GoalFilter,
+    /// The goal whose targets show under its row in the rows view.
+    list_open: Option<u64>,
+    /// A milestone just reached on a goal's page: (goal, 25/50/75, when);
+    /// it floats over the page for a few seconds.
+    banner: Option<(u64, u8, i64)>,
+    /// The tasks target showing its closed tasks too: (goal, target).
+    show_done: Option<(u64, usize)>,
 }
 
 /// The open form.
@@ -1216,11 +1222,7 @@ impl App {
             new_message_open: false,
             dash_open: None,
             meeting_open: None,
-            goal_open: None,
-            goal_filter: more::GoalFilter::All,
-            goal_list_open: None,
-            goal_banner: None,
-            goal_show_done: None,
+            goal: GoalPage::default(),
             ws_file,
             sidebar_collapsed: false,
             force_menu: arg("--menu"),

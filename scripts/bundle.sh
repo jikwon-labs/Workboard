@@ -21,6 +21,12 @@ APP=build/Workboard.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/workboard "$APP/Contents/MacOS/Workboard"
+# 배포본은 심볼을 뺀다(51MB -> 39MB, 업데이트 zip 도 2MB 쯤 작아진다). 앱은 심볼을 쓰지 않는다
+# (패닉 기록은 메시지만 남긴다). 충돌 보고서를 읽을 때 쓰도록 심볼 있는 원본을
+# build/symbols/ 에 버전·빌드 번호로 남긴다. UUID 가 같아 atos -o <그 파일> 로 주소를 읽는다.
+mkdir -p build/symbols
+cp target/release/workboard "build/symbols/Workboard-$VERSION-$BUILD"
+strip "$APP/Contents/MacOS/Workboard"
 if [ -f Resources/AppIcon.icns ]; then cp Resources/AppIcon.icns "$APP/Contents/Resources/"; fi
 
 # Sparkle: 앱이 실행 중에 불러 쓴다(src/updater.rs). 샌드박스 앱이 아니라 XPC 서비스는 필요 없어 뺀다.

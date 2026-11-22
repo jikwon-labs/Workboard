@@ -27,6 +27,7 @@ Sparkle 은 `scripts/fetch-sparkle.sh` 가 `vendor/Sparkle` 에 받는다(버전
        NOTARIZE=1 scripts/bundle.sh
 
    `build/Workboard-<버전>-arm64.zip` 이 생긴다. 공증에 몇 분 걸린다.
+   앱 안의 실행 파일은 심볼을 뺀 것이다(51MB -> 39MB). 심볼 있는 원본은 `build/symbols/Workboard-<버전>-<빌드>` 에 남는다. 충돌 보고서의 주소는 `atos -o build/symbols/Workboard-<버전>-<빌드> -l <load address> <주소>` 로 읽는다. 지우지 않는다.
 3. 업데이트로 올린다.
 
        UPDATES_DEST='seojigwon@macmini:Library/Application Support/WorkboardServer/updates' scripts/publish-update.sh

@@ -1708,3 +1708,102 @@ fn posts_reach_the_team_through_a_server() {
     };
     assert_eq!((copies(&a), copies(&b)), (1, 1), "once on each computer");
 }
+
+/// A change made on a frame isn't stamped then (stamping fingerprints the
+/// whole workspace, too slow for every key press): it is stamped when the
+/// copy goes out, as made at the last change, not at the moment it went
+/// out. So a teammate's edit made after it, and taken in before ours went
+/// out, still wins over it, and one made before it still loses.
+#[test]
+fn a_change_is_stamped_when_it_goes_out_as_made_then() {
+    let dir = temp_home("share-late-stamp");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.share_here(&folder).unwrap();
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
+    b.join_shared(&folder).unwrap();
+    b.become_member(None, "Bora", "bora@team.kr");
+    b.sync_note_change();
+    b.write_shared();
+    a.sync_pull();
+    let t = a.data.tasks[0].id;
+    let wait = || std::thread::sleep(std::time::Duration::from_millis(5));
+
+    // A renames the task: noted, not stamped yet
+    let before = a.data.extra.sync.stamps.get(&t).copied();
+    a.data.tasks[0].name = "A's name".into();
+    a.sync_mark_change();
+    let at = a.sync_rt.unstamped.expect("noted");
+    assert_eq!(a.data.extra.sync.stamps.get(&t).copied(), before);
+    wait();
+    // B renames it after that, and A takes B's copy in first
+    b.sync_pull();
+    b.data.tasks.iter_mut().find(|x| x.id == t).unwrap().name = "B's later name".into();
+    b.sync_note_change();
+    b.write_shared();
+    wait();
+    a.sync_pull();
+    assert_eq!(a.sync_rt.unstamped, None, "stamped before the merge");
+    assert_eq!(
+        a.task(t).unwrap().name,
+        "B's later name",
+        "the later edit wins, though A's was stamped after it"
+    );
+
+    // an edit stamped as it goes out carries the time it was made
+    a.data.tasks[0].name = "A again".into();
+    a.sync_mark_change();
+    let at2 = a.sync_rt.unstamped.unwrap();
+    assert!(at2 > at);
+    wait();
+    a.write_shared();
+    let id0 = a.data.tasks[0].id;
+    assert_eq!(a.data.extra.sync.stamps.get(&id0).copied(), Some(at2));
+    // B's older edit of it (made before A's, sent after) loses
+    b.sync_pull();
+    assert_eq!(b.task(id0).unwrap().name, "A again");
+}
+
+/// Taking in the team's copy when nothing in it is new keeps this copy as
+/// it is (nothing to read again, nothing redrawn), but its bookkeeping
+/// still learns what the team's copy knew; and when something is new, the
+/// fingerprints come out just as working them all out again would give.
+#[test]
+fn taking_in_a_copy_with_nothing_new_keeps_this_one() {
+    let dir = temp_home("share-nothing-new");
+    let folder = dir.to_str().unwrap().to_string();
+    let mut a = app();
+    a.share_here(&folder).unwrap();
+    let mut b = App::build(None, Some(blank_as("Theirs", 1, "B")));
+    b.join_shared(&folder).unwrap();
+    b.become_member(None, "Bora", "bora@team.kr");
+    b.sync_note_change();
+    b.write_shared();
+    assert!(a.sync_pull());
+    let gen = a.data_gen.get();
+    assert!(!a.merge_in(
+        &[crate::sync::shareable(
+            &serde_json::to_value(&b.data).unwrap()
+        )],
+        &[]
+    ));
+    assert_eq!(a.data_gen.get(), gen, "nothing to redraw");
+
+    // something new: fingerprints as if all worked out again
+    let ch = channel_id(&b, "general");
+    b.apply_chat(vec![ChatAction::Send {
+        ch,
+        text: "new".into(),
+        parent: None,
+        files: vec![],
+    }]);
+    b.sync_note_change();
+    b.write_shared();
+    assert!(a.sync_pull());
+    assert_ne!(a.data_gen.get(), gen);
+    let mut v = serde_json::to_value(&a.data).unwrap();
+    v["extra"]["sync"] = serde_json::json!({});
+    assert_eq!(a.data.extra.sync.hashes, crate::sync::fingerprints(&v));
+    assert_eq!(a.data.extra.sync.field_hashes, crate::sync::part_hashes(&v));
+    assert_eq!(a.data.extra.sync.parents, crate::sync::parents_of(&v));
+}

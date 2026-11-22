@@ -169,6 +169,11 @@ pub struct SyncRt {
     seen: Vec<(PathBuf, SystemTime)>,
     last_write: f64,
     pending: bool,
+    /// Changes not stamped yet (`stamp_now`), and when the last of them was
+    /// made (milliseconds). Stamping fingerprints the whole workspace, so
+    /// it waits until the copy goes out, is merged with the team's or is
+    /// saved, instead of happening on every key press.
+    pub(super) unstamped: Option<i64>,
     /// The server connection, while this workspace uses a server.
     pub(super) net: Option<wb_net::Client>,
     pub(super) net_status: Option<NetStatus>,

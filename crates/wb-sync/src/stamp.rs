@@ -34,7 +34,12 @@ pub fn carry_hashes(meta: &mut SyncMeta, legacy: &Value, current: &Value) {
 /// then stays empty) instead of as a change to the whole item. Items
 /// changed since stay as they were. True when anything was filled in.
 pub fn fill_field_hashes(meta: &mut SyncMeta, data: &Value) -> bool {
-    if meta.hashes.is_empty() {
+    // only items with a fingerprint and without field fingerprints get them
+    if meta
+        .hashes
+        .keys()
+        .all(|id| meta.field_hashes.contains_key(id))
+    {
         return false;
     }
     let cur = fingerprints(data);
@@ -245,7 +250,11 @@ pub fn shrink_moved(moved: &mut BTreeMap<u64, i64>, data: &Value) {
 /// tombstones for removed ones, revivals for restored ones. `now` is in
 /// milliseconds. A new stamp is always later than the item's last one, so a
 /// second edit made within the same moment still wins over the first.
-pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
+/// True when anything was noted: a change, delete, restore or move (not
+/// only this computer's fingerprints of an item moving into place).
+pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) -> bool {
+    let v_before = meta.v;
+    let mut noted = false;
     let AllHashes {
         hashes: cur,
         parts,
@@ -268,10 +277,13 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
         if meta.parents.get(id).is_some_and(|old| old != p) {
             let next = meta.moved.get(id).map_or(now, |s| now.max(s + 1));
             meta.moved.insert(*id, next);
+            noted = true;
         }
     }
     meta.parents = places;
+    let moves = meta.moved.len();
     shrink_moved(&mut meta.moved, data);
+    noted |= meta.moved.len() != moves;
     meta.v = META_V;
     upgrade_split_hashes(meta, data, &parts);
     for (id, h) in &cur {
@@ -282,9 +294,11 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
                 let before = meta.stamps.get(id).copied().unwrap_or(0);
                 note_fields(meta, *id, before, parts.get(id), next);
                 meta.stamps.insert(*id, next);
+                noted = true;
             }
             None => {
                 meta.stamps.insert(*id, next);
+                noted = true;
                 // new (or back): every field changed now
                 meta.fields.insert(*id, BTreeMap::new());
                 if let Some(t) = meta.tombs.get(id) {
@@ -307,6 +321,7 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
                 t = t.max(r + 1);
             }
             meta.tombs.insert(*id, t);
+            noted = true;
             meta.stamps.remove(id);
             meta.moved.remove(id);
             meta.fields.remove(id);
@@ -323,9 +338,10 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
     let stamped_before = SHARED_VALUES
         .iter()
         .any(|p| meta.value_hashes.contains_key(*p));
-    let bump = |values: &mut BTreeMap<String, i64>, part: &str| {
+    let mut bump = |values: &mut BTreeMap<String, i64>, part: &str| {
         let next = values.get(part).map_or(now, |s| now.max(s + 1));
         values.insert(part.to_string(), next);
+        noted = true;
     };
     for (part, h) in &vh {
         let changed = match meta.value_hashes.get(part) {
@@ -345,6 +361,8 @@ pub fn stamp(data: &Value, meta: &mut SyncMeta, now: i64) {
     for part in gone {
         bump(&mut meta.values, &part);
     }
+    let value_hashes_before = meta.value_hashes.clone();
     meta.value_hashes.retain(|p, _| map_entry(p).is_none());
     meta.value_hashes.extend(vh);
+    noted || meta.v != v_before || meta.value_hashes != value_hashes_before
 }

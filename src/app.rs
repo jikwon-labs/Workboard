@@ -5669,7 +5669,7 @@ impl App {
         if self.dirty {
             // lines logged with `..Default::default()` get their ids before saving
             self.data.fix_activity_ids();
-            self.sync_note_change();
+            self.sync_mark_change();
         }
         if self.dirty {
             if !docs_only {
@@ -5924,6 +5924,9 @@ impl App {
             .min(SAVE_AT_MOST.saturating_sub(first.elapsed()));
         if wait.is_zero() {
             self.save_due.set(None);
+            // the file keeps the changes' stamps: opening it after a crash
+            // mustn't take them as made then
+            self.stamp_pending();
             self.data_to_save()
                 .save_later(Data::file_path(&self.ws_file));
         } else if let Some(ctx) = ctx {
@@ -5935,6 +5938,11 @@ impl App {
     fn data_to_save(&self) -> Data {
         let mut d = self.data.clone();
         d.extra.chat_drafts = self.chat_drafts();
+        // changes not stamped yet (saved right away, not by `save_tick`):
+        // stamped in the copy saved, as they will be in this one
+        if let (Some(at), Some(_)) = (self.sync_rt.unstamped, &d.extra.shared) {
+            together::stamp_data(&mut d, at);
+        }
         d
     }
 

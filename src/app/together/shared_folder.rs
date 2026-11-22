@@ -36,6 +36,36 @@ pub(crate) fn legacy_shape(v: &serde_json::Value) -> serde_json::Value {
     v
 }
 
+/// `App::stamp_now` for a workspace, as of `at` (milliseconds).
+pub(crate) fn stamp_data(data: &mut Data, at: i64) -> bool {
+    let mut meta = std::mem::take(&mut data.extra.sync);
+    // stamping reads the shared items, not the bookkeeping
+    let v = serde_json::to_value(&*data).unwrap_or_default();
+    if meta.v == 1 {
+        // fingerprints from before fields left at their default were
+        // left out of the file: the new shape alone isn't an edit
+        sync::carry_hashes(&mut meta, &legacy_shape(&v), &v);
+    }
+    let changed = sync::stamp(&v, &mut meta, at);
+    data.extra.sync = meta;
+    changed
+}
+
+/// Whether two workspaces are the same apart from their change bookkeeping.
+fn same_but_sync(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    fn parts(x: &serde_json::Value) -> Option<Vec<(&String, &serde_json::Value)>> {
+        let o = x.as_object()?;
+        let extra = o.get("extra").and_then(|e| e.as_object());
+        Some(
+            o.iter()
+                .filter(|(k, _)| *k != "extra")
+                .chain(extra.into_iter().flatten().filter(|(k, _)| *k != "sync"))
+                .collect(),
+        )
+    }
+    parts(a) == parts(b)
+}
+
 /// After opening a workspace: a copy saved before field fingerprints were
 /// kept gets them for every item unchanged since its last save, so changes
 /// made before the next sync are noted field by field (as the iPhone does
@@ -46,23 +76,57 @@ pub(crate) fn fill_sync_baseline(data: &mut Data) {
     if data.extra.shared.is_none() || data.extra.sync.hashes.is_empty() {
         return;
     }
+    // the shared items, without the bookkeeping (most of a synced workspace)
+    let mut meta = std::mem::take(&mut data.extra.sync);
     let v = serde_json::to_value(&*data).unwrap_or_default();
-    let meta = &mut data.extra.sync;
+    fill_baseline(&mut meta, &v);
+    data.extra.sync = meta;
+}
+
+fn fill_baseline(meta: &mut sync::SyncMeta, v: &serde_json::Value) {
     if meta.v == 1 {
         // fingerprints from before fields at their default were left out
         // of the file: the new shape alone isn't an edit
-        sync::carry_hashes(meta, &legacy_shape(&v), &v);
+        sync::carry_hashes(meta, &legacy_shape(v), v);
     }
-    sync::fill_field_hashes(meta, &v);
+    sync::fill_field_hashes(meta, v);
     // a shared setting or Slack match never fingerprinted (every save since
     // shared maps came in fingerprints them all) is as it is now, so the
     // next change doesn't take it as set then, as the iPhone does
-    sync::fill_value_hashes(meta, &v);
+    sync::fill_value_hashes(meta, v);
 }
 
 impl App {
     fn data_value(&self) -> serde_json::Value {
         serde_json::to_value(&self.data).unwrap_or_default()
+    }
+
+    /// The workspace as JSON without its change bookkeeping (empty), for
+    /// reading the shared items: the bookkeeping is most of a synced
+    /// workspace and nothing that reads the items looks at it.
+    fn data_value_bare(&mut self) -> serde_json::Value {
+        let meta = std::mem::take(&mut self.data.extra.sync);
+        let v = self.data_value();
+        self.data.extra.sync = meta;
+        v
+    }
+
+    /// The workspace as JSON without this computer's fingerprints (the
+    /// stamps and the rest of the bookkeeping stay): what goes to the team
+    /// keeps none of them (`sync::make_shareable`), and they are most of a
+    /// synced workspace's bookkeeping.
+    fn data_value_unhashed(&mut self) -> serde_json::Value {
+        let s = &mut self.data.extra.sync;
+        let kept = (
+            std::mem::take(&mut s.hashes),
+            std::mem::take(&mut s.field_hashes),
+            std::mem::take(&mut s.parents),
+            std::mem::take(&mut s.value_hashes),
+        );
+        let v = self.data_value();
+        let s = &mut self.data.extra.sync;
+        (s.hashes, s.field_hashes, s.parents, s.value_hashes) = kept;
+        v
     }
 
     /// After a change: note what changed so teammates' copies merge correctly.
@@ -74,21 +138,35 @@ impl App {
         self.sync_rt.pending = true;
     }
 
-    /// Record what changed since the last save in the change bookkeeping.
-    /// True when anything did.
-    fn stamp_now(&mut self) -> bool {
-        let v = self.data_value();
-        let mut meta = std::mem::take(&mut self.data.extra.sync);
-        let before = meta.clone();
-        if meta.v == 1 {
-            // fingerprints from before fields left at their default were
-            // left out of the file: the new shape alone isn't an edit
-            sync::carry_hashes(&mut meta, &legacy_shape(&v), &v);
+    /// On every frame that changed something: the change is stamped later
+    /// (`stamp_pending`), as made now, and the copy goes out soon.
+    pub(crate) fn sync_mark_change(&mut self) {
+        if self.data.extra.shared.is_none() {
+            return;
         }
-        sync::stamp(&v, &mut meta, chrono::Utc::now().timestamp_millis());
-        let changed = meta != before;
-        self.data.extra.sync = meta;
-        changed
+        self.sync_rt.unstamped = Some(chrono::Utc::now().timestamp_millis());
+        self.sync_rt.pending = true;
+    }
+
+    /// Stamp the changes `sync_mark_change` noted, if there are any.
+    pub(crate) fn stamp_pending(&mut self) {
+        if self.sync_rt.unstamped.is_some() && self.data.extra.shared.is_some() {
+            self.stamp_now();
+        }
+    }
+
+    /// Record what changed since the last save in the change bookkeeping.
+    /// True when anything did. Changes `sync_mark_change` noted are stamped
+    /// as made when the last of them was: a few keystrokes stamped
+    /// together count as made at the last one, which is never before any
+    /// of them, so they still win over what they replaced.
+    fn stamp_now(&mut self) -> bool {
+        let at = self
+            .sync_rt
+            .unstamped
+            .take()
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        stamp_data(&mut self.data, at)
     }
 
     pub(crate) fn write_shared(&mut self) {
@@ -96,15 +174,20 @@ impl App {
             return;
         };
         self.data.fix_activity_ids();
-        let v = self.data_value();
+        self.stamp_pending();
         if cfg.server.is_some() {
             // sent when connected; after a reconnect the whole copy goes again anyway
-            if let Some(net) = &self.sync_rt.net {
-                net.push(sync::shareable(&v));
+            if self.sync_rt.net.is_some() {
+                let mut v = self.data_value_unhashed();
+                sync::make_shareable(&mut v);
+                if let Some(net) = &self.sync_rt.net {
+                    net.push(v);
+                }
             }
             self.sync_rt.pending = false;
             return;
         }
+        let v = self.data_value();
         if sync::write_mine(Path::new(&cfg.folder), &cfg.device, &v, APP_VERSION).is_err() {
             self.toast(tr(
                 "Couldn't write to the shared folder. Is it still there?",
@@ -153,10 +236,8 @@ impl App {
         }
         // changes not recorded yet (made just before quitting, say) are
         // recorded first, or the merge would take them as already known
-        if self.data.extra.shared.is_some()
-            && !self.data.extra.sync.hashes.is_empty()
-            && self.stamp_now()
-        {
+        let stamped = self.data.extra.shared.is_some() && !self.data.extra.sync.hashes.is_empty();
+        if stamped && self.stamp_now() {
             self.sync_rt.pending = true;
         }
         let me = self.data.me;
@@ -169,8 +250,28 @@ impl App {
             .collect();
         let slack_before: std::collections::BTreeSet<String> =
             self.data.extra.slack_map.keys().cloned().collect();
+        // the bookkeeping is merged as it is, not through JSON; what the
+        // merge reads of it is kept in case the team's copy can't be read
+        let mut meta = std::mem::take(&mut self.data.extra.sync);
+        let kept = if stamped {
+            // all but the fingerprints of every item, which can be worked
+            // out again
+            let h = std::mem::take(&mut meta.hashes);
+            let fh = std::mem::take(&mut meta.field_hashes);
+            let kept = meta.clone();
+            (meta.hashes, meta.field_hashes) = (h, fh);
+            kept
+        } else {
+            meta.clone()
+        };
         let mut v = self.data_value();
-        let mut changed = sync::merge(&mut v, others);
+        // ids worked out for lines without one change what was stamped
+        let filled = sync::fill_activity_ids(&mut v)
+            | sync::fill_board_ids(&mut v)
+            | sync::fill_goal_ids(&mut v);
+        // fingerprints are as stamping just left them: the items the merge
+        // leaves alone keep theirs
+        let mut changed = sync::merge_apart(&mut v, &mut meta, others, stamped && !filled);
         let on_server = self.on_server();
         let gone = if on_server {
             // the server says what our role keeps from us (spaces shared
@@ -185,9 +286,16 @@ impl App {
             vec![]
         };
         changed |= !gone.is_empty();
-        match serde_json::from_value::<Data>(v) {
+        if !changed && !filled {
+            // nothing new to show: the copy stays, with the merged bookkeeping
+            self.data.extra.sync = meta;
+            self.data.note_carried_slack(&slack_before);
+            return false;
+        }
+        match <Data as serde::Deserialize>::deserialize(&v) {
             Ok(d) => {
                 self.data = d;
+                self.data.extra.sync = meta;
                 self.data_changed();
                 // goals the team's changes moved are settled now, credited
                 // to nobody, before anything I do next could be taken for it
@@ -195,12 +303,23 @@ impl App {
                 self.data.note_carried_slack(&slack_before);
                 // fingerprints of what the app writes, which can differ a
                 // little from what came in (fields an older app left out)
-                let v = self.data_value();
-                self.data.extra.sync.hashes = sync::fingerprints(&v);
-                self.data.extra.sync.field_hashes = sync::part_hashes(&v);
+                let mine = self.data_value_bare();
+                // hidden items were taken out after the merge fingerprinted them
+                if !gone.is_empty() || !same_but_sync(&mine, &v) {
+                    self.data.extra.sync.hashes = sync::fingerprints(&mine);
+                    self.data.extra.sync.field_hashes = sync::part_hashes(&mine);
+                }
             }
             Err(e) => {
-                // most likely saved by a newer version of the app
+                // most likely saved by a newer version of the app: our copy
+                // stays as it was, and so does its bookkeeping (its
+                // fingerprints worked out again from it)
+                self.data.extra.sync = kept;
+                if stamped {
+                    let v = self.data_value_bare();
+                    self.data.extra.sync.hashes = sync::fingerprints(&v);
+                    self.data.extra.sync.field_hashes = sync::part_hashes(&v);
+                }
                 if !self.sync_rt.told_unreadable {
                     eprintln!("workboard: couldn't take in the team's changes: {}", e);
                     self.toast(tr("Your team's changes couldn't be read. Someone may be using a newer version of the app, so update Workboard."));

@@ -465,6 +465,7 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
             links: Default::default(),
             link_fails: (0, 0),
             summary: None,
+            backed_up: None,
         }),
         updates: broadcast::channel(64).0,
         kicks: broadcast::channel(16).0,
@@ -509,6 +510,7 @@ fn wrong_tries_are_forgotten_and_never_pile_up() {
         links: Default::default(),
         link_fails: (0, 0),
         summary: None,
+        backed_up: None,
     };
     let now = now_ms();
     // old tries no longer count and go
@@ -1381,16 +1383,18 @@ fn the_team_copy_is_written_once_changes_settle() {
     hub.save_tick();
     assert_eq!(on_disk().as_deref(), Some("three"));
 
-    // a change to people or devices goes at once, with the copy
+    // a change to people or devices goes at once, without the copy
     change("four");
+    hub.inner.lock().unwrap().saved.roles.insert(7, Role::Admin);
     hub.inner.lock().unwrap().dirty = true;
     hub.save_tick();
-    assert_eq!(on_disk().as_deref(), Some("four"));
+    assert_eq!(on_disk().as_deref(), Some("three"));
+    assert_eq!(load_saved(&home).unwrap().role_of(7), Role::Admin);
 
     // stopping writes what is left, and the revision with it
     change("five");
     hub.save_tick();
-    assert_eq!(on_disk().as_deref(), Some("four"));
+    assert_eq!(on_disk().as_deref(), Some("three"));
     hub.flush();
     assert_eq!(on_disk().as_deref(), Some("five"));
     assert_eq!(
@@ -1727,4 +1731,115 @@ fn what_is_left_out_is_every_id_inside_the_hidden_items() {
             hidden
         );
     }
+}
+
+#[test]
+fn reading_state_is_written_on_its_own_and_moved_out_of_an_older_server_json() {
+    let home = std::env::temp_dir().join(format!("wb-mine-file-{:x}", wb_sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join(WORKSPACE_FILE), r#"{"workspace": "one"}"#).unwrap();
+    // an older server kept reading state in server.json, pretty printed
+    let old_mine = json!({"read": {"10": {"ts": 5, "at": 100}}});
+    std::fs::write(
+        home.join(STATE_FILE),
+        serde_json::to_string_pretty(&json!({"rev": 4, "mine": {"1": old_mine}})).unwrap(),
+    )
+    .unwrap();
+    let (_stop, stop) = watch::channel(false);
+    let hub = Hub::open(
+        home.clone(),
+        home.clone(),
+        None,
+        &Options::default(),
+        None,
+        stop,
+    )
+    .unwrap();
+    assert_eq!(*hub.state().saved.mine[&1], old_mine);
+    hub.save_tick();
+    let state = std::fs::read_to_string(home.join(STATE_FILE)).unwrap();
+    assert!(!state.contains("\"read\""), "moved out: {state}");
+    assert!(!state.contains('\n'), "written compact: {state}");
+    let file: Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join(MINE_FILE)).unwrap()).unwrap();
+    assert_eq!(file, json!({"1": old_mine}));
+    assert_eq!(load_saved(&home).unwrap().rev, 4);
+
+    // someone opens a conversation: mine.json alone
+    let before = std::fs::metadata(home.join(STATE_FILE))
+        .unwrap()
+        .modified()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    let newer = json!({"read": {"10": {"ts": 9, "at": 200}}});
+    assert_eq!(hub.take_mine(1, &newer), None);
+    hub.save_tick();
+    assert_eq!(
+        std::fs::metadata(home.join(STATE_FILE))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        before,
+        "server.json isn't written again"
+    );
+    assert_eq!(
+        *load_saved(&home).unwrap().mine[&1],
+        *hub.state().saved.mine[&1]
+    );
+    assert!(!std::fs::read_to_string(home.join(WORKSPACE_FILE))
+        .unwrap()
+        .contains("\"read\""));
+
+    // back on an older server for a while, which wrote it in server.json
+    // again: both are merged, the newest entry winning
+    let mut both =
+        serde_json::from_str::<Value>(&std::fs::read_to_string(home.join(STATE_FILE)).unwrap())
+            .unwrap();
+    both["mine"] = json!({"1": {"read": {"10": {"ts": 7, "at": 150}, "11": {"ts": 2, "at": 300}}}, "2": {"x": 1}});
+    std::fs::write(home.join(STATE_FILE), both.to_string()).unwrap();
+    let loaded = load_saved(&home).unwrap();
+    assert_eq!(
+        loaded.mine[&1]["read"]["10"],
+        json!({"ts": 9, "at": 200}),
+        "the newer from mine.json"
+    );
+    assert_eq!(
+        loaded.mine[&1]["read"]["11"],
+        json!({"ts": 2, "at": 300}),
+        "only in server.json"
+    );
+    assert_eq!(*loaded.mine[&2], json!({"x": 1}));
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_backup_check_with_nothing_new_reads_and_writes_nothing() {
+    let home = std::env::temp_dir().join(format!("wb-backup-skip-{:x}", wb_sync::random_u64()));
+    std::fs::create_dir_all(&home).unwrap();
+    let hub = test_hub(&home, Some(json!({"workspace": "one"})), Saved::default());
+    hub.backup_now();
+    let dir = home.join(BACKUP_DIR);
+    assert_eq!(backup_files(&dir, "hourly").len(), 1);
+    assert_eq!(backup_files(&dir, "daily").len(), 1);
+    assert!(hub.state().backed_up.is_some());
+    // the files are gone, but nothing changed: the next check doesn't look
+    for f in backup_files(&dir, "hourly")
+        .into_iter()
+        .chain(backup_files(&dir, "daily"))
+    {
+        std::fs::remove_file(f).unwrap();
+    }
+    hub.backup_now();
+    assert!(backup_files(&dir, "hourly").is_empty());
+    // a change: the next check writes it
+    {
+        let mut g = hub.state();
+        g.canon.as_mut().map(Arc::make_mut).unwrap()["workspace"] = json!("two");
+        hub.broadcast_canon(&mut g, false);
+    }
+    hub.backup_now();
+    let hourly = backup_files(&dir, "hourly");
+    assert_eq!(hourly.len(), 1);
+    assert!(std::fs::read_to_string(&hourly[0]).unwrap().contains("two"));
+    let _ = std::fs::remove_dir_all(&home);
 }

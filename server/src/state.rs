@@ -98,9 +98,20 @@ pub struct Saved {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<crate::hooks::Slash>,
     /// member -> their own reading state and notification choices, kept in
-    /// step between their devices (mine.rs, `wb_sync::mine`)
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub mine: BTreeMap<u64, Value>,
+    /// step between their devices (mine.rs, `wb_sync::mine`). Saved in
+    /// mine.json, on its own: it changes whenever someone opens a
+    /// conversation. Older servers kept it here, so it is still read from
+    /// server.json (see `load_saved`).
+    #[serde(skip_serializing, deserialize_with = "shared_values")]
+    pub mine: BTreeMap<u64, Arc<Value>>,
+}
+
+/// Values read from JSON, each behind an Arc (serde's own needs its "rc" feature).
+fn shared_values<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<u64, Arc<Value>>, D::Error> {
+    let plain: BTreeMap<u64, Value> = Deserialize::deserialize(d)?;
+    Ok(plain.into_iter().map(|(k, v)| (k, Arc::new(v))).collect())
 }
 
 impl Saved {

@@ -747,7 +747,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
             }
             m = mines.recv() => {
                 let data = match m {
-                    Ok((who, data)) if who == member => (*data).clone(),
+                    Ok((who, data)) if who == member => data,
                     Ok(_) => continue,
                     // fell behind: what the server keeps now says it all
                     Err(broadcast::error::RecvError::Lagged(_)) => {
@@ -758,7 +758,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                if !send(&mut socket, &Msg::Mine { data }.to_json()).await {
+                if !send(&mut socket, &mine::mine_json(&data)).await {
                     break;
                 }
             }

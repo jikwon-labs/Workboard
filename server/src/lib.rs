@@ -7,6 +7,8 @@
 //   server.json           devices (hashed tokens, member, id tag), roles,
 //                         open invites, accounts (email, salted password
 //                         hash), iPhone push tokens, revision number
+//   mine.json             each person's reading state and notification
+//                         choices (older servers kept it in server.json)
 //   mail.json             how to send email (see mail.rs); optional
 //   apns.json             how to reach Apple's push service, for
 //                         notifications on iPhones (see push.rs); optional
@@ -77,6 +79,8 @@ pub mod testing;
 
 pub const WORKSPACE_FILE: &str = "workspace.json";
 pub const STATE_FILE: &str = "server.json";
+/// Each member's reading state (`Saved::mine`); older servers kept it in server.json.
+pub const MINE_FILE: &str = "mine.json";
 pub const BACKUP_DIR: &str = "backups";
 pub const UPDATES_DIR: &str = "updates";
 pub const REQUEST_FILE: &str = "admin-request.json";
@@ -169,6 +173,9 @@ struct Inner {
     /// what the team's copy held at the last broadcast, to send apps only
     /// what changed since (`wb_sync::delta`)
     summary: Option<wb_sync::Summary>,
+    /// the revision and hour of the last backup check (`backup_now`), which
+    /// found the backups up to date
+    backed_up: Option<(u64, String)>,
 }
 
 impl Inner {
@@ -289,7 +296,9 @@ enum Reply {
 /// The team's copy is written once its changes stop for this long...
 const SAVE_QUIET: Duration = Duration::from_secs(3);
 /// ...or this long after the first change not written, while they go on.
-const SAVE_AT_MOST: Duration = Duration::from_secs(15);
+/// Each write is the whole copy (megabytes, flushed to disk), and what a
+/// crash loses comes back from the apps' own copies, so not more often.
+const SAVE_AT_MOST: Duration = Duration::from_secs(60);
 
 /// What an app hears when changes in its copy were turned down: a space
 /// shared with its person at a level that doesn't allow them (spaces.rs).
@@ -546,6 +555,9 @@ impl Hub {
         std::fs::create_dir_all(&home)?;
         let canon = read_json(&home.join(WORKSPACE_FILE))?;
         let saved = load_saved(&home)?;
+        // reading state read from an older server's server.json (or merged
+        // from both files) goes to mine.json, and out of server.json, now
+        let moved = !saved.mine.is_empty();
         Ok(Hub {
             home,
             root,
@@ -554,8 +566,8 @@ impl Hub {
             inner: Mutex::new(Inner {
                 canon: canon.map(Arc::new),
                 saved,
-                dirty: false,
-                mine_dirty: false,
+                dirty: moved,
+                mine_dirty: moved,
                 canon_due: None,
                 resets: Default::default(),
                 mailed: Default::default(),
@@ -563,6 +575,7 @@ impl Hub {
                 links: Default::default(),
                 link_fails: (0, 0),
                 summary: None,
+                backed_up: None,
             }),
             updates: broadcast::channel(64).0,
             kicks: broadcast::channel(16).0,
@@ -655,52 +668,68 @@ impl Hub {
         self.save(false);
     }
 
-    /// Write the team's copy and server.json. A change to people, devices or
-    /// settings (`dirty`) is written at once. Changes to the team's copy
-    /// come several a second while people work and each write is the whole
-    /// copy, so it waits until they stop for SAVE_QUIET (or SAVE_AT_MOST
-    /// after the first one), unless `now`; the very first copy goes at once.
-    /// Apps keep their own copy, so changes a crash loses meanwhile come
-    /// back with their next push.
+    /// Write what changed, each file on its own: server.json when people,
+    /// devices or settings changed (`dirty`), at once; mine.json when only
+    /// someone's reading state did (`mine_dirty`); the team's copy once its
+    /// changes settle. Those come several a second while people work and
+    /// each write is the whole copy, so it waits until they stop for
+    /// SAVE_QUIET (or SAVE_AT_MOST after the first one), unless `now`; the
+    /// very first copy goes at once. server.json goes with it, for its
+    /// revision number. Apps keep their own copy, so changes a crash loses
+    /// meanwhile come back with their next push. The files are made after
+    /// the lock is let go (but for server.json, which is small).
     fn save(&self, now: bool) {
         let _persistence = self.persistence.locked();
         if *self.closed.borrow() {
             return;
         }
         let first_copy = !self.home.join(WORKSPACE_FILE).exists();
-        let (canon, saved) = {
+        let (canon, saved, mine) = {
             let mut g = self.state();
             let settled = g.canon_due.is_some_and(|(first, last)| {
                 now || first_copy || last.elapsed() >= SAVE_QUIET || first.elapsed() >= SAVE_AT_MOST
             });
-            if !g.dirty && !settled && !g.mine_dirty {
+            let canon_too = settled || (g.dirty && first_copy);
+            if !g.dirty && !canon_too && !g.mine_dirty {
                 return;
             }
-            // only someone's reading state: server.json alone
-            let canon_too = g.dirty || settled;
+            let saved =
+                (g.dirty || canon_too).then(|| serde_json::to_string(&g.saved).unwrap_or_default());
+            let mine = g.mine_dirty.then(|| g.saved.mine.clone());
             g.dirty = false;
             g.mine_dirty = false;
-            if canon_too {
-                g.canon_due = None;
-            }
-            (
-                // written out after the lock is let go
-                g.canon.clone().filter(|_| canon_too),
-                serde_json::to_string_pretty(&g.saved).unwrap_or_default(),
-            )
+            let canon = if canon_too {
+                g.canon_due.take().map(|due| (g.canon.clone(), due))
+            } else {
+                None
+            };
+            (canon, saved, mine)
         };
-        let mut ok = true;
-        if let Some(c) = canon.map(|c| serde_json::to_string(&*c).unwrap_or_default()) {
-            ok &= write_atomic(&self.home.join(WORKSPACE_FILE), &c)
-                .map_err(|e| eprintln!("couldn't save {}: {}", WORKSPACE_FILE, e))
-                .is_ok();
+        let write = |file: &str, bytes: &str| {
+            write_atomic(&self.home.join(file), bytes)
+                .map_err(|e| eprintln!("couldn't save {}: {}", file, e))
+                .is_ok()
+        };
+        if let Some((Some(c), due)) = canon {
+            if !write(
+                WORKSPACE_FILE,
+                &serde_json::to_string(&*c).unwrap_or_default(),
+            ) {
+                // tried again on the next tick
+                let mut g = self.state();
+                let first = g.canon_due.map_or(due.0, |(f, _)| f.min(due.0));
+                g.canon_due = Some((first, std::time::Instant::now() - SAVE_QUIET));
+            }
         }
-        let state = self.home.join(STATE_FILE);
-        ok &= write_atomic(&state, &saved)
-            .map_err(|e| eprintln!("couldn't save {}: {}", STATE_FILE, e))
-            .is_ok();
-        if !ok {
-            self.state().dirty = true;
+        if let Some(saved) = saved {
+            if !write(STATE_FILE, &saved) {
+                self.state().dirty = true;
+            }
+        }
+        if let Some(mine) = mine {
+            if !write(MINE_FILE, &mine_file_json(&mine)) {
+                self.state().mine_dirty = true;
+            }
         }
     }
 
@@ -708,11 +737,22 @@ impl Hub {
         if *self.closed.borrow() {
             return;
         }
-        let canon = self.state().canon.clone();
-        if let Some(c) = canon.map(|c| serde_json::to_string(&*c).unwrap_or_default()) {
-            if let Err(e) = backup(&self.home, &c, chrono::Local::now().naive_local()) {
-                eprintln!("couldn't make a backup: {}", e);
+        let now = chrono::Local::now().naive_local();
+        let hour = now.format("%Y%m%d-%H").to_string();
+        let (canon, rev) = {
+            let g = self.state();
+            // nothing changed since the last one this hour: nothing to write
+            if g.backed_up.as_ref() == Some(&(g.saved.rev, hour.clone())) {
+                return;
             }
+            (g.canon.clone(), g.saved.rev)
+        };
+        let Some(c) = canon.map(|c| serde_json::to_string(&*c).unwrap_or_default()) else {
+            return;
+        };
+        match backup(&self.home, &c, now) {
+            Ok(_) => self.state().backed_up = Some((rev, hour)),
+            Err(e) => eprintln!("couldn't make a backup: {}", e),
         }
     }
 
@@ -853,9 +893,14 @@ pub async fn serve_on(
                         if tick % 60 == 1 {
                             hub.backup_now();
                         }
-                        // ten minutes after starting (after a backup), then daily
+                        // ten minutes after starting (after a backup), then
+                        // daily; on its own thread: it reads every backup,
+                        // which would hold up the saves and posts of this tick
                         if tick % 86_400 == 600 {
-                            hub.clean_up();
+                            let hub = hub.clone();
+                            let _ = std::thread::Builder::new()
+                                .name("wb-clean-up".into())
+                                .spawn(move || hub.clean_up());
                         }
                     }
                     registry.admin_file();

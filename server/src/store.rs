@@ -29,7 +29,7 @@ pub(crate) fn persist_email_invite(
             _ => {}
         }
         write_private(&workspace_tmp, &serde_json::to_vec(canon)?)?;
-        write_private(&state_tmp, &serde_json::to_vec_pretty(saved)?)?;
+        write_private(&state_tmp, &serde_json::to_vec(saved)?)?;
         commit_email_invite(&workspace, &state, before.as_deref())?;
         sync_folder(&workspace);
         Ok(())
@@ -125,14 +125,42 @@ pub(crate) fn read_json(path: &Path) -> std::io::Result<Option<Value>> {
 
 /// Load server.json; one from stage 1 (devices without tokens) keeps only its
 /// revision, so those computers have to be invited again.
+///
+/// Reading state comes from mine.json; one older servers kept in
+/// server.json is merged in (`wb_sync::mine::merge`, newest wins per
+/// entry), so nothing is lost moving from an older server, or back to one
+/// and forward again. (An older server doesn't read mine.json: there apps
+/// send their own state again when they connect.)
 pub fn load_saved(home: &Path) -> std::io::Result<Saved> {
-    Ok(match read_json(&home.join(STATE_FILE))? {
+    let mut saved = match read_json(&home.join(STATE_FILE))? {
         None => Saved::default(),
         Some(v) => serde_json::from_value(v.clone()).unwrap_or_else(|_| Saved {
             rev: v.get("rev").and_then(|r| r.as_u64()).unwrap_or(0),
             ..Default::default()
         }),
-    })
+    };
+    if let Some(Value::Object(m)) = read_json(&home.join(MINE_FILE))? {
+        for (k, v) in m {
+            let Ok(member) = k.parse::<u64>() else {
+                continue;
+            };
+            match saved.mine.get_mut(&member) {
+                Some(old) => {
+                    wb_sync::mine::merge(Arc::make_mut(old), &v);
+                }
+                None => {
+                    saved.mine.insert(member, Arc::new(v));
+                }
+            }
+        }
+    }
+    Ok(saved)
+}
+
+/// mine.json for `mine` (see `Saved::mine`).
+pub(crate) fn mine_file_json(mine: &BTreeMap<u64, Arc<Value>>) -> String {
+    let plain: BTreeMap<u64, &Value> = mine.iter().map(|(k, v)| (*k, &**v)).collect();
+    serde_json::to_string(&plain).unwrap_or_default()
 }
 
 // ------------------------------------------------------------------ backups
@@ -162,11 +190,14 @@ pub fn backup(
     ] {
         let mut files = backup_files(&dir, kind);
         let path = dir.join(&name);
-        let same_as_newest = files
-            .last()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .is_some_and(|s| s == canon_json);
-        if !path.exists() && !same_as_newest {
+        // (the newest is read only when this hour's or day's isn't there yet)
+        let same_as_newest = || {
+            files
+                .last()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .is_some_and(|s| s == canon_json)
+        };
+        if !path.exists() && !same_as_newest() {
             write_atomic(&path, canon_json)?;
             written.push(path.clone());
             files.push(path);

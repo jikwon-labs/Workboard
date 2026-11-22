@@ -14,8 +14,9 @@ impl Hub {
     /// `mine` message sent after welcome.
     pub(crate) fn mine_for(&self, member: u64) -> String {
         let g = self.state();
-        let data = g.saved.mine.get(&member).cloned().unwrap_or(json!({}));
-        Msg::Mine { data }.to_json()
+        let data = g.saved.mine.get(&member).cloned();
+        drop(g);
+        mine_json(data.as_deref().unwrap_or(&json!({})))
     }
 
     /// `member`'s app sent its state: merge it into what the server keeps
@@ -28,11 +29,16 @@ impl Hub {
         }
         let merged = {
             let mut g = self.state();
-            let kept = g.saved.mine.entry(member).or_insert_with(|| json!({}));
-            if !wb_sync::mine::merge(kept, data) {
-                return (kept != data).then(|| Msg::Mine { data: kept.clone() }.to_json());
+            let kept = g
+                .saved
+                .mine
+                .entry(member)
+                .or_insert_with(|| Arc::new(json!({})));
+            // (copied only when a connection still holds the last one)
+            if !wb_sync::mine::merge(Arc::make_mut(kept), data) {
+                return (**kept != *data).then(|| mine_json(kept));
             }
-            let merged = Arc::new(kept.clone());
+            let merged = kept.clone();
             g.mine_dirty = true;
             merged
         };
@@ -40,4 +46,14 @@ impl Hub {
         let _ = self.mines.send((member, merged));
         None
     }
+}
+
+/// `Msg::Mine` for `data`, written from a borrowed copy.
+pub(crate) fn mine_json(data: &Value) -> String {
+    #[derive(Serialize)]
+    #[serde(tag = "type", rename = "mine")]
+    struct Mine<'a> {
+        data: &'a Value,
+    }
+    serde_json::to_string(&Mine { data }).unwrap_or_default()
 }

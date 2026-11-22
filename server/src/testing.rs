@@ -211,13 +211,30 @@ impl Drop for TestServer {
     }
 }
 
-/// A free local TCP port.
+/// A local port that is free for both TCP and UDP right now, picked at
+/// random below the range the system hands out by itself (49152 and up on
+/// macOS and Windows, 32768 and up on Linux).
+///
+/// A port from that range (bind to port 0) can be handed to another socket
+/// between this check and its use. livekit-server binds its RTC port for
+/// UDP on every address, and still starts when a socket on 127.0.0.1
+/// already has that port, which then gets the call's packets instead: the
+/// call never connected and `two_people_hear_each_other_in_a_huddle`
+/// timed out at "Ann joined". Call clients' own UDP sockets, outgoing
+/// connections and test servers all take ports from that range, so ports
+/// below it can't be taken that way; only another test choosing the same
+/// number at the same moment could, and `start_livekit` starts again then.
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    loop {
+        let port = 20_000 + (wb_sync::random_u64() % 12_000) as u16;
+        let free = ["127.0.0.1", "0.0.0.0"].iter().all(|a| {
+            std::net::TcpListener::bind((*a, port)).is_ok()
+                && std::net::UdpSocket::bind((*a, port)).is_ok()
+        });
+        if free {
+            return port;
+        }
+    }
 }
 
 /// A local livekit-server, stopped when dropped.
@@ -256,8 +273,32 @@ pub fn livekit_bin() -> Option<String> {
 /// Starts livekit-server `bin` on free local ports with one API key and
 /// waits until it takes connections. Err when it can't be started.
 pub fn start_livekit(bin: &str, key: &str, secret: &str) -> std::io::Result<LiveKit> {
-    let port = free_port();
-    let rtc = free_port();
+    // a port can still be taken between choosing it and livekit binding it
+    // (another test choosing the same one): livekit then quits, and it is
+    // started again on other ports
+    let mut last = None;
+    for _ in 0..5 {
+        match start_livekit_on(bin, key, secret, free_port(), free_port())? {
+            Ok(lk) => return Ok(lk),
+            Err(why) => last = Some(why),
+        }
+    }
+    Err(std::io::Error::other(format!(
+        "livekit-server didn't start: {}",
+        last.unwrap_or_default()
+    )))
+}
+
+/// Starts livekit-server on `port` (signalling) and `rtc` (media, TCP and
+/// UDP). Inner Err (with why) when it quit or another program answers on
+/// `port` instead.
+pub fn start_livekit_on(
+    bin: &str,
+    key: &str,
+    secret: &str,
+    port: u16,
+    rtc: u16,
+) -> std::io::Result<Result<LiveKit, String>> {
     let config = format!(
         "port: {port}\nbind_addresses: [\"127.0.0.1\"]\nrtc:\n  tcp_port: {rtc}\n  udp_port: {rtc}\n  use_external_ip: false\n  node_ip: 127.0.0.1\nkeys:\n  {key}: {secret}\nlogging:\n  level: warn\n"
     );
@@ -267,12 +308,48 @@ pub fn start_livekit(bin: &str, key: &str, secret: &str) -> std::io::Result<Live
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    let lk = LiveKit { child, port };
-    let up = wait_until(Duration::from_secs(15), Duration::from_millis(100), || {
-        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    let mut lk = LiveKit { child, port };
+    let mut quit = false;
+    // up when livekit itself answers: anything else listening on the port
+    // (a port taken after it was chosen) doesn't count
+    let up = wait_until(Duration::from_secs(15), Duration::from_millis(50), || {
+        if lk.child.try_wait().ok().flatten().is_some() {
+            quit = true;
+            return true;
+        }
+        livekit_answers(port)
     });
-    assert!(up, "livekit-server didn't start");
-    Ok(lk)
+    if quit {
+        return Ok(Err(format!("it quit (ports {} and {} taken?)", port, rtc)));
+    }
+    if !up {
+        return Ok(Err(format!(
+            "nothing answered on port {} like livekit",
+            port
+        )));
+    }
+    // it answered: still check it did not quit right after (its media port taken)
+    if lk.child.try_wait().ok().flatten().is_some() {
+        return Ok(Err(format!("it quit (port {} taken?)", rtc)));
+    }
+    Ok(Ok(lk))
+}
+
+/// True when a livekit-server answers on `port`: its "/" says OK.
+fn livekit_answers(port: u16) -> bool {
+    use std::io::{Read, Write};
+    let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", port)) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+    if s.write_all(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut answer = String::new();
+    let _ = s.read_to_string(&mut answer);
+    answer.starts_with("HTTP/1.") && answer.contains(" 200 ") && answer.ends_with("\r\n\r\nOK")
 }
 
 /// An AI for tests: it keeps every request and answers each with `answer`,

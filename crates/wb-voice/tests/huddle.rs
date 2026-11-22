@@ -9,7 +9,9 @@ use wb_net::{Client, Event, Msg, Role, SignIn, Status};
 use wb_voice::{
     screen_key, Audio, Call, Event as VoiceEvent, Join, Person, Picture, Share, Video, ME,
 };
-use workboard_server::testing::{livekit_bin, start_livekit, wait_until, TestServer};
+use workboard_server::testing::{
+    free_port, livekit_bin, start_livekit, start_livekit_on, wait_until, TestServer,
+};
 
 const SECRET: &str = "test-secret-test-secret-test-secret-0123";
 
@@ -163,6 +165,34 @@ impl Talker {
     fn other(&self) -> Option<&Person> {
         self.people.iter().find(|p| !p.me)
     }
+}
+
+// Ports for livekit-server come from below the range the system hands out
+// itself, so a call client's socket can't be given the same port later.
+#[test]
+fn livekit_ports_are_outside_the_system_range() {
+    for _ in 0..50 {
+        let p = free_port();
+        assert!((20_000..32_768).contains(&p), "port {}", p);
+    }
+}
+
+// A port someone else took after it was chosen isn't taken for livekit:
+// before, anything that accepted connections on the port counted as
+// livekit up, and the call then waited for a server that wasn't there.
+#[test]
+fn something_else_on_the_port_is_not_livekit() {
+    let Some(bin) = livekit_bin() else {
+        eprintln!("skipped: livekit-server isn't installed (brew install livekit)");
+        return;
+    };
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = taken.local_addr().unwrap().port();
+    let started = start_livekit_on(&bin, "testkey", SECRET, port, free_port()).unwrap();
+    assert!(started.is_err(), "a taken port counted as livekit");
+    // the usual start picks other ports and gets a real one
+    let lk = start_livekit(&bin, "testkey", SECRET).unwrap();
+    assert_ne!(lk.port, port);
 }
 
 #[test]

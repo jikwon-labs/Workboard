@@ -33,14 +33,27 @@ dir_for() { echo "$wt_root/${1//\//-}"; }
 # Clone target/debug from the main checkout (APFS clonefile: no extra disk
 # until a file changes). Crates from crates.io stay fresh, so only the
 # workspace crates build again: about 15 s instead of a full cold build.
-# incremental/ is per path and would not be reused.
+# incremental/ is per path and would not be reused. Neither would the
+# workspace crates' own folders in build/ (cargo keeps them per checkout
+# path, and they hold most of the files): they are left out.
 warm_cache() {
-  local src="$main_root/target/debug" dst="$1/target/debug" e
+  local src="$main_root/target/debug" dst="$1/target/debug" e b own
   [ -d "$src" ] || return 0
+  own=" $(cd "$1" && cargo metadata --no-deps --format-version 1 2>/dev/null \
+    | jq -r '.packages[].name' 2>/dev/null | tr '\n' ' ') "
   mkdir -p "$dst"
   shopt -s dotglob nullglob
   for e in "$src"/*; do
-    [ "$(basename "$e")" = incremental ] && continue
+    case $(basename "$e") in
+      incremental) continue ;;
+      build)
+        mkdir -p "$dst/build"
+        for b in "$src"/build/*; do
+          case $own in *" $(basename "$b") "*) continue ;; esac
+          cp -cR "$b" "$dst/build/" 2>/dev/null || cp -R "$b" "$dst/build/"
+        done
+        continue ;;
+    esac
     cp -cR "$e" "$dst/" 2>/dev/null || cp -R "$e" "$dst/"
   done
   shopt -u dotglob nullglob
@@ -59,7 +72,7 @@ cmd_new() {
   git -C "$main_root" show-ref -q --verify "refs/heads/$name" && die "branch $name already exists"
   git -C "$main_root" fetch -q origin main || say "fetch failed; using the cached origin/main"
   git -C "$main_root" worktree add -q -b "$name" "$dir" origin/main >&2
-  say "copying the build cache (about a minute)"
+  say "copying the build cache (about half a minute)"
   warm_cache "$dir"
   say "ready: $dir (branch $name, from origin/main $(git -C "$dir" rev-parse --short HEAD))"
   echo "$dir"

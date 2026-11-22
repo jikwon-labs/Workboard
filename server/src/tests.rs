@@ -1878,3 +1878,55 @@ fn marks_of_what_a_delete_takes_away_are_the_same_as_all_marks() {
     ids.sort();
     assert_eq!(ids, want);
 }
+
+#[test]
+fn only_changes_to_what_hiding_goes_by_need_the_trial_merge() {
+    let canon = json!({
+        "spaces": [
+            {"id": 1, "name": "Team", "lists": [{"id": 2, "name": "L"}]},
+            {"id": 3, "name": "Mine", "private_owner": 9, "lists": []}
+        ],
+        "docs": [{"id": 5, "title": "Doc", "body": "a", "private": false, "owner": 7, "parent": null}],
+        "tasks": [{"id": 6, "name": "T", "list_id": 2}],
+        "channels": [{"id": 8, "kind": "Channel", "members": []}]
+    });
+    let team = wb_sync::fingerprints(&canon);
+    let may = |data: Value| spaces::may_hide(&canon, &data, &team);
+    // typing in a doc, renaming a space or task: no
+    assert!(!may(
+        json!({"docs": [{"id": 5, "title": "Doc", "body": "ab", "owner": 7}]})
+    ));
+    assert!(!may(
+        json!({"spaces": [{"id": 1, "name": "Renamed", "lists": [{"id": 2, "name": "L"}]}]})
+    ));
+    assert!(!may(
+        json!({"spaces": [{"id": 1, "name": "Team"}], "tasks": [{"id": 6, "name": "T2", "list_id": 2}]})
+    ));
+    // a new list in a space, a new private doc: nothing the team has
+    assert!(!may(
+        json!({"spaces": [{"id": 1, "lists": [{"id": 2}, {"id": 40}]}]})
+    ));
+    assert!(!may(
+        json!({"docs": [{"id": 41, "private": true, "owner": 9}]})
+    ));
+    // what hiding goes by: yes
+    assert!(may(
+        json!({"docs": [{"id": 5, "private": true, "owner": 7}]})
+    ));
+    assert!(may(json!({"docs": [{"id": 5, "owner": 7, "parent": 41}]})));
+    assert!(may(json!({"spaces": [{"id": 1, "private_owner": 9}]})));
+    assert!(
+        may(json!({"spaces": [{"id": 3, "private_owner": 9, "lists": [{"id": 2}]}]})),
+        "a team list moved into a Personal space"
+    );
+    assert!(
+        may(json!({"spaces": [{"id": 50, "private_owner": 9, "lists": [{"id": 2}]}]})),
+        "into a new one"
+    );
+    assert!(may(
+        json!({"docs": [], "tasks": [{"id": 6, "list_id": 99}]})
+    ));
+    assert!(may(
+        json!({"docs": [], "channels": [{"id": 8, "kind": "Channel", "private": true, "members": [9]}]})
+    ));
+}

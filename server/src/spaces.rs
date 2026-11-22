@@ -534,7 +534,9 @@ impl Cx {
                 .get("extra")
                 .and_then(|e| e.get("dashboards"))
                 .is_some();
-        if !touches {
+        // (the trial merge below is a second merge of the whole workspace:
+        // only when the copy changes what hiding goes by)
+        if !touches || !may_hide(canon, data, &self.cfp) {
             return;
         }
         // an admin who owns nothing: hidden from them is private to someone
@@ -578,6 +580,63 @@ impl Cx {
         let gone: HashSet<u64> = newly.into_iter().collect();
         drop_items(data, &gone);
     }
+}
+
+/// Whether merging `data` into `canon` could newly hide something the
+/// team has (`team`: its fingerprints) from owners and admins
+/// (`wb_sync::hidden_from` with `manages`): it changes what that goes by
+/// for an item the team has (a space's owner, a doc's or dashboard's
+/// owner, privacy, space or parent page, a task's or form's list, a
+/// channel's kind, privacy or members), or moves a folder or list the
+/// team has into another space. Editing a doc's text does none of that.
+/// A "yes" that turns out to hide nothing only costs the trial merge.
+pub fn may_hide(canon: &Value, data: &Value, team: &BTreeMap<u64, u64>) -> bool {
+    const GOES_BY: &[(&str, &[&str])] = &[
+        ("spaces", &["private_owner"]),
+        ("docs", &["private", "owner", "space", "parent"]),
+        ("extra.dashboards", &["private", "owner", "space"]),
+        ("extra.forms", &["list_id"]),
+        ("tasks", &["list_id"]),
+        ("channels", &["kind", "private", "members"]),
+    ];
+    // as hidden_from reads them: left out, null, false, 0 and [] are all "not set"
+    fn unset(v: Option<&Value>) -> Option<&Value> {
+        v.filter(|v| match v {
+            Value::Null | Value::Bool(false) => false,
+            Value::Number(n) => n.as_u64() != Some(0),
+            Value::Array(a) => !a.is_empty(),
+            _ => true,
+        })
+    }
+    for (path, keys) in GOES_BY {
+        let theirs = array_at(data, path);
+        if theirs.is_empty() {
+            continue;
+        }
+        let ours: HashMap<u64, &Value> = array_at(canon, path)
+            .iter()
+            .filter_map(|x| Some((written_id(x)?, x)))
+            .collect();
+        for item in theirs {
+            let Some(id) = written_id(item) else { continue };
+            let had = ours.get(&id);
+            if had.is_some_and(|t| keys.iter().any(|k| unset(t.get(*k)) != unset(item.get(*k)))) {
+                return true;
+            }
+            if *path == "spaces" {
+                let inside: HashSet<u64> = had
+                    .map(|t| wb_sync::ids_within(t).into_iter().collect())
+                    .unwrap_or_default();
+                if wb_sync::ids_within(item)
+                    .into_iter()
+                    .any(|i| i != id && team.contains_key(&i) && !inside.contains(&i))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Take the items with these ids out of every list of items in `v`.

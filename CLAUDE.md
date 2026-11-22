@@ -15,7 +15,7 @@ Rust + egui 데스크톱 업무 앱(작업·채팅·문서·허들)과 팀 서�
 - cargo 가 PATH 에 없으면 `export PATH="$HOME/.cargo/bin:$PATH"`.
 - `livekit-server` 가 없으면 음성·영상 테스트는 "skipped" 를 찍고 넘어간다.
 - iPhone 앱(`ios/`)의 시뮬레이터 UI 테스트와 구조는 `docs/ios-design.md`.
-- Windows 판은 이 Mac 에서 빌드할 수 없다. GitHub Actions(`.github/workflows/windows.yml`)가 Windows 에서 빌드·실행 스크린샷·`cargo test --workspace` 를 돌린다(20분쯤). main push 로는 돌지 않는다. 직접 `gh workflow run windows.yml --ref main` 으로 돌리거나 `windows-*` 브랜치에 push 하면 돈다. 같은 브랜치에서 새 실행이 시작되면 이전 실행은 취소된다. Mac 전용 기능(`src/media.rs` 의 사진, `src/notifier.rs` 등)을 쓰는 새 테스트는 Windows 에서 실패하니 `#[cfg_attr(not(target_os = "macos"), ignore = "...")]` 로 이유를 적어 둔다. OS 마다 다른 코드는 `src/os.rs` 에 둔다.
+- Windows 판은 이 Mac 에서 빌드할 수 없다. GitHub Actions(`.github/workflows/windows.yml`)가 Windows 에서 빌드·실행 스크린샷·`cargo test --workspace` 를 돌린다(캐시가 있으면 7~8분, 없으면 그보다 길다). main push 로는 돌지 않는다. 직접 `gh workflow run windows.yml --ref main` 으로 돌리거나 `windows-*` 브랜치에 push 하면 돈다. 같은 브랜치에서 새 실행이 시작되면 이전 실행은 취소된다. Mac 전용 기능(`src/media.rs` 의 사진, `src/notifier.rs` 등)을 쓰는 새 테스트는 Windows 에서 실패하니 `#[cfg_attr(not(target_os = "macos"), ignore = "...")]` 로 이유를 적어 둔다. OS 마다 다른 코드는 `src/os.rs` 에 둔다.
 
 ## 작업 흐름: 워크트리에서 작업하고 main 에 바로 push
 

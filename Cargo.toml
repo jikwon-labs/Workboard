@@ -138,6 +138,22 @@ name = "player"
 test = true
 harness = false
 
+# Debug builds of this workspace's own crates keep line numbers only (enough
+# for panics and backtraces), not full debug info: they rebuild in every new
+# worktree, and the full info made that build and every test link slower.
+# Only these crates: settings for crates.io crates would change their build
+# hashes and throw away the build cache that scripts/wt copies.
+[profile.dev.package.workboard]
+debug = "line-tables-only"
+[profile.dev.package.workboard-server]
+debug = "line-tables-only"
+[profile.dev.package.wb-sync]
+debug = "line-tables-only"
+[profile.dev.package.wb-net]
+debug = "line-tables-only"
+[profile.dev.package.wb-voice]
+debug = "line-tables-only"
+
 # password hashing (PBKDF2) runs 100k rounds: keep it quick in test builds too
 [profile.dev.package.sha2]
 opt-level = 3

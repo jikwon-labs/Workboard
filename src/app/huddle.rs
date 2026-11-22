@@ -102,7 +102,7 @@ pub struct HuddleRt {
     pub(super) video: Video,
     /// Latest picture of everyone sending video (identity, or ME), and
     /// whether it still has to go to the screen.
-    pub(super) pictures: HashMap<String, (Picture, bool)>,
+    pub(super) pictures: HashMap<String, (std::sync::Arc<Picture>, bool)>,
     textures: HashMap<String, egui::TextureHandle>,
     /// The video shown large (clicked), if any.
     pub(super) focus: Option<String>,
@@ -463,7 +463,9 @@ impl App {
                 continue;
             }
             *fresh = false;
-            let img = egui::ColorImage::from_rgba_unmultiplied(
+            // every received picture is opaque (alpha 255), where
+            // premultiplied and not are the same, and this skips the divide
+            let img = egui::ColorImage::from_rgba_premultiplied(
                 [pic.width as usize, pic.height as usize],
                 &pic.rgba,
             );

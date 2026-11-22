@@ -128,8 +128,9 @@ fn picture_key(identity: &str, source: TrackSource) -> String {
 }
 
 /// The latest picture of everyone sending video, with a counter that moves
-/// when a new one arrives; a missing entry means no video.
-type Pictures = Arc<Mutex<HashMap<String, (u64, Picture)>>>;
+/// when a new one arrives; a missing entry means no video. Shared, so
+/// handing one to the window copies no pixels.
+type Pictures = Arc<Mutex<HashMap<String, (u64, Arc<Picture>)>>>;
 
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
@@ -192,8 +193,9 @@ impl Call {
     }
 
     /// Pictures that changed since the last call: (identity or ME, picture),
-    /// with None for someone whose video stopped.
-    pub fn new_pictures(&self) -> Vec<(String, Option<Picture>)> {
+    /// with None for someone whose video stopped. The window is woken (the
+    /// `wake` given to start) when one arrives.
+    pub fn new_pictures(&self) -> Vec<(String, Option<Arc<Picture>>)> {
         let pics = self.pictures.lock().unwrap();
         let mut seen = self.seen.lock().unwrap();
         let mut out = vec![];
@@ -288,7 +290,7 @@ async fn measure(
 fn put_picture(pictures: &Pictures, id: &str, p: Picture) {
     let mut g = pictures.lock().unwrap();
     let n = g.get(id).map_or(1, |(n, _)| n + 1);
-    g.insert(id.to_string(), (n, p));
+    g.insert(id.to_string(), (n, Arc::new(p)));
 }
 
 /// Who is being watched: a flag the watcher checks under the pictures lock,
@@ -307,14 +309,15 @@ fn unwatch(watchers: &mut Watchers, pictures: &Pictures, id: &str) {
     g.remove(id);
 }
 
-/// Turn received frames into pictures (at most `fps` a second), until the
-/// stream ends or `alive` is cleared.
+/// Turn received frames into pictures (at most `fps` a second, waking the
+/// window for each), until the stream ends or `alive` is cleared.
 async fn watch(
     track: RemoteVideoTrack,
     identity: String,
     pictures: Pictures,
     alive: Arc<AtomicBool>,
     fps: u64,
+    wake: Wake,
 ) {
     let mut stream = NativeVideoStream::new(track.rtc_track());
     let gap = Duration::from_millis(1000 / fps);
@@ -330,11 +333,16 @@ async fn watch(
             return;
         }
         let n = g.get(&identity).map_or(1, |(n, _)| n + 1);
-        g.insert(identity.clone(), (n, pic));
+        g.insert(identity.clone(), (n, Arc::new(pic)));
+        drop(g);
+        // the window draws it now, not whenever something else redraws
+        wake();
     }
     let mut g = pictures.lock().unwrap();
     if alive.load(Ordering::SeqCst) {
         g.remove(&identity);
+        drop(g);
+        wake();
     }
 }
 
@@ -505,7 +513,7 @@ async fn run(
                     unwatch(&mut watchers, &pictures, &key);
                     let alive = Arc::new(AtomicBool::new(true));
                     let fps = if source == TrackSource::Screenshare { quality::SCREEN_FPS as u64 } else { video::FPS };
-                    let task = tokio::spawn(watch(t, key.clone(), pictures.clone(), alive.clone(), fps));
+                    let task = tokio::spawn(watch(t, key.clone(), pictures.clone(), alive.clone(), fps, wake.clone()));
                     watchers.insert(key.clone(), (alive, task));
                     asked.remove(&key);
                     ask_layers(&room, &views, &mut asked);
@@ -540,12 +548,16 @@ async fn run(
                     match room.local_participant().publish_track(LocalTrack::Video(track), quality::camera_options()).await {
                         Ok(p) => {
                             let pics = pictures.clone();
-                            let (etx2, wake2) = (etx.clone(), wake.clone());
-                            let feed = video::start_feed(video, source, camera_limits.clone(), move |pic| match pic {
-                                Some(pic) => put_picture(&pics, ME, pic),
-                                None => {
-                                    pics.lock().unwrap().remove(ME);
+                            let (etx2, wake2, wake3) = (etx.clone(), wake.clone(), wake.clone());
+                            // (pictures come at the sending rate: a wake each)
+                            let feed = video::start_feed(video, source, camera_limits.clone(), move |pic| {
+                                match pic {
+                                    Some(pic) => put_picture(&pics, ME, pic),
+                                    None => {
+                                        pics.lock().unwrap().remove(ME);
+                                    }
                                 }
+                                wake3();
                             }, move |why| {
                                 let _ = etx2.send(Event::Trouble(why));
                                 wake2();

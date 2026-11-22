@@ -165,10 +165,10 @@ fn huddle_bar_shows_people_mute_and_leave() {
         height: 18,
         rgba: vec![200u8; 32 * 18 * 4],
     };
-    h.app
-        .huddle
-        .pictures
-        .insert(format!("{}-dev2", other.id), (pic.clone(), true));
+    h.app.huddle.pictures.insert(
+        format!("{}-dev2", other.id),
+        (std::sync::Arc::new(pic.clone()), true),
+    );
     h.settle();
     assert!(h.has(&format!("Video of {}", other.name)));
     // clicking a video makes it large, clicking again makes it small
@@ -192,7 +192,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     h.app
         .huddle
         .pictures
-        .insert(wb_voice::ME.to_string(), (pic, true));
+        .insert(wb_voice::ME.to_string(), (std::sync::Arc::new(pic), true));
     h.settle();
     assert!(h.has("Video of You") && h.has("Stop video"));
     h.click("Stop video");
@@ -284,11 +284,11 @@ fn huddle_shares_a_screen_and_shows_others_screens_large() {
     h.app
         .huddle
         .pictures
-        .insert(screen.clone(), (pic(192, 108), true));
-    h.app
-        .huddle
-        .pictures
-        .insert(them.identity.clone(), (pic(64, 36), true));
+        .insert(screen.clone(), (std::sync::Arc::new(pic(192, 108)), true));
+    h.app.huddle.pictures.insert(
+        them.identity.clone(),
+        (std::sync::Arc::new(pic(64, 36)), true),
+    );
     h.settle();
     assert!(h.has(&format!("Screen of {}", other.name)));
     assert!(h.has(&format!("{}'s screen", other.name)));

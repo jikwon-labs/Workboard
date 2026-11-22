@@ -98,7 +98,7 @@ struct Talker {
     people: Vec<Person>,
     joined: bool,
     left: Option<Option<String>>,
-    pictures: std::collections::HashMap<String, Picture>,
+    pictures: std::collections::HashMap<String, std::sync::Arc<Picture>>,
 }
 
 impl Talker {
@@ -124,7 +124,7 @@ impl Talker {
     /// The other person's latest picture.
     fn their_picture(&self) -> Option<&Picture> {
         let id = &self.other()?.identity;
-        self.pictures.get(id)
+        self.pictures.get(id).map(|p| &**p)
     }
 
     fn until(&mut self, what: &str, cond: impl Fn(&Talker) -> bool) {

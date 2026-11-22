@@ -1020,23 +1020,9 @@ impl App {
     /// to be opened here; a web address opens in the browser.
     pub(super) fn message_text(&self, ui: &mut Ui, src: &str, size: f32) -> Option<String> {
         let t = self.t();
-        let r = super::chatfmt::rich(src);
-        let mentions = self.mention_ranges(&r.text);
-        let mut links = r.links.clone();
-        for l in super::nav::find_links(&r.text) {
-            if !links.iter().any(|x| x.0 < l.1 && l.0 < x.1) {
-                links.push(l);
-            }
-        }
-        let mut cuts: Vec<usize> = vec![0, r.text.len()];
-        for (a, b, _) in &r.runs {
-            cuts.extend([*a, *b]);
-        }
-        for (a, b) in &mentions {
-            cuts.extend([*a, *b]);
-        }
-        cuts.sort_unstable();
-        cuts.dedup();
+        // parsed once per text (kept.rs): this runs for every message drawn
+        let shown = self.shown_text(src);
+        let (r, mentions, links, cuts) = (&shown.r, &shown.mentions, &shown.links, &shown.cuts);
         let bold = crate::app::bold_font(ui.ctx(), size);
         let code_bg = if t.dark {
             Color32::from_white_alpha(18)
@@ -1089,7 +1075,10 @@ impl App {
         }
         // colour the links (char ranges of the shown text)
         let full = job.text.clone();
-        let char_at = |byte: usize| full[..byte].chars().count();
+        let char_at = |byte: usize| match shown.cut_chars.get(&byte) {
+            Some(&c) => c,
+            None => full[..byte].chars().count(),
+        };
         for s in job.sections.iter_mut() {
             let (a, b) = (char_at(s.byte_range.start), char_at(s.byte_range.end));
             if links.iter().any(|(ls, le, _)| a < *le && b > *ls) {
@@ -1097,6 +1086,7 @@ impl App {
                 s.format.underline = Stroke::new(1.0_f32, t.primary);
             }
         }
+        let links = links.clone();
         let (pos, galley, resp) = egui::Label::new(job)
             .wrap()
             .sense(Sense::click())
@@ -1757,12 +1747,8 @@ impl App {
             .collect();
         // where each message is, in time order (the messages themselves are
         // copied below only for the rows drawn: a long channel's history
-        // isn't copied on every frame)
-        let mut at: Vec<(usize, usize)> = copies
-            .iter()
-            .flat_map(|&c| (0..self.data.channels[c].messages.len()).map(move |m| (c, m)))
-            .collect();
-        at.sort_by_key(|&(c, m)| self.data.channels[c].messages[m].ts);
+        // isn't copied on every frame; the order is kept until it changes)
+        let at = self.message_order(&copies);
         let no_messages = at.is_empty();
         // where I'd read up to (see ChatUi::read_line)
         let newest = self.update_read_line(ui.ctx(), cid, &at);
@@ -1883,15 +1869,24 @@ impl App {
             ui.add_space(2.0);
             let composer_h = (140.0_f32 + if self.chat.channel.files.is_empty() { 0.0 } else { 76.0 }).max(composer_seen(ui, ("chat_composer_h", cid)));
             // "has:file", "has:link" and "from:name" narrow it (msgquery.rs)
-            let find = MsgQuery::parse(&self.channel_find.clone().unwrap_or_default());
+            let find_text = self.channel_find.clone().unwrap_or_default();
+            let find = MsgQuery::parse(&find_text);
             let q = find.text.clone();
             let panel = self.channel_panel;
-            let matching: Vec<&Message> = at
+            // worked out again only when the messages, the find box or the
+            // panel change (a search lowercases every message)
+            let key = self.inbox_key();
+            let kept = match (key, &*self.kept.matching.borrow()) {
+                (Some(k), Some((kk, kc, kf, kp, v))) if k == *kk && *kc == cid && *kf == find_text && *kp == panel => Some(v.clone()),
+                _ => None,
+            };
+            let places = kept.unwrap_or_else(|| {
+                let v: std::rc::Rc<Vec<(usize, usize)>> = std::rc::Rc::new(at
                 .iter()
-                .filter_map(|&(c, m)| self.data.channels.get(c)?.messages.get(m))
-                .filter(|m| q.is_empty() || m.text.to_lowercase().contains(&q) || typed_post_title(m).is_some_and(|t| t.to_lowercase().contains(&q)))
-                .filter(|m| find.fits(m, &self.data))
-                .filter(|m| match panel {
+                .filter_map(|&(c, m)| Some(((c, m), self.data.channels.get(c)?.messages.get(m)?)))
+                .filter(|(_, m)| q.is_empty() || m.text.to_lowercase().contains(&q) || typed_post_title(m).is_some_and(|t| t.to_lowercase().contains(&q)))
+                .filter(|(_, m)| find.fits(m, &self.data))
+                .filter(|(_, m)| match panel {
                     ChannelPanel::Pinned => m.pinned,
                     ChannelPanel::Replies => !m.replies.is_empty(),
                     ChannelPanel::Tasks => m.task.is_some(),
@@ -1900,6 +1895,16 @@ impl App {
                     ChannelPanel::Links => in_thread(m, has_links),
                     ChannelPanel::All => true,
                 })
+                .map(|(at, _)| at)
+                .collect());
+                if let Some(k) = key {
+                    *self.kept.matching.borrow_mut() = Some((k, cid, find_text.clone(), panel, v.clone()));
+                }
+                v
+            });
+            let matching: Vec<((usize, usize), &Message)> = places
+                .iter()
+                .filter_map(|&(c, m)| Some(((c, m), self.data.channels.get(c)?.messages.get(m)?)))
                 .collect();
             // the newest messages; earlier ones a page at a time on asking
             let mut limit = match self.chat.window {
@@ -1908,7 +1913,7 @@ impl App {
             };
             // a message to go to is shown, however far back it is
             if let Some(id) = self.chat.jump_to {
-                match matching.iter().position(|m| m.id == id) {
+                match matching.iter().position(|(_, m)| m.id == id) {
                     Some(i) if matching.len() - i > limit => {
                         limit = matching.len() - i;
                         self.chat.window = Some((cid, limit));
@@ -1926,7 +1931,7 @@ impl App {
             let going = self.chat.jump_to.is_some() || self.chat.flash.is_some_and(|(c, _, _)| c == cid);
             // Files: the files themselves in place of their messages
             let gallery = (panel == ChannelPanel::Files).then(|| {
-                let ids: std::collections::HashSet<u64> = matching.iter().map(|m| m.id).collect();
+                let ids: std::collections::HashSet<u64> = matching.iter().map(|(_, m)| m.id).collect();
                 let msgs = at.iter().filter_map(|&(c, m)| {
                     let ch = self.data.channels.get(c)?;
                     Some((ch.id, ch.messages.get(m)?)).filter(|(_, m)| ids.contains(&m.id))
@@ -1935,7 +1940,11 @@ impl App {
             });
             let links_none = panel == ChannelPanel::Links && matching.is_empty();
             let earlier = if gallery.is_some() { 0 } else { matching.len().saturating_sub(limit) };
-            let shown: Vec<Message> = if gallery.is_some() { vec![] } else { matching[earlier..].iter().map(|m| (*m).clone()).collect() };
+            // where the rows to draw are; each is copied only when drawn (rows
+            // scrolled out of sight aren't, see below)
+            let shown: Vec<((usize, usize), u64, i64, u64, bool)> = if gallery.is_some() { vec![] } else { matching[earlier..].iter().map(|&(at, m)| (at, m.id, m.ts, m.author, m.post_title.is_none() && m.call.is_none())).collect() };
+            // what a row's remembered height depends on besides its message
+            let row_key = (self.data_gen.get(), self.files.loaded(), ui.ctx().pixels_per_point().to_bits());
             let list = egui::ScrollArea::vertical().id_salt(("chat_scroll", cid, gallery.is_some())).max_height(ui.available_height() - composer_h).auto_shrink([false, false]).stick_to_bottom(!going && gallery.is_none()).show(ui, |ui| {
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 10)).show(ui, |ui| {
                     if earlier > 0 {
@@ -2007,8 +2016,8 @@ impl App {
                     }
                     let mut last_day: Option<NaiveDate> = None;
                     let mut prev: Option<(u64, i64)> = None;
-                    for m in &shown {
-                        let d = local_date(m.ts);
+                    for &((c, i), mid, mts, author, plain) in &shown {
+                        let d = local_date(mts);
                         if last_day != Some(d) {
                             last_day = Some(d);
                             ui.add_space(6.0);
@@ -2027,16 +2036,47 @@ impl App {
                             ui.painter().galley(pill.center() - g.size() / 2.0, g, t.text2);
                             prev = None;
                         }
-                        if line_at == Some(m.id) {
+                        if line_at == Some(mid) {
                             read_line(ui, &t);
                             prev = None;
                         }
-                        let compact = prev.map_or(false, |(a, ts)| a == m.author && m.ts - ts < 300) && m.post_title.is_none() && m.call.is_none();
+                        let compact = prev.map_or(false, |(a, ts)| a == author && mts - ts < 300) && plain;
+                        prev = Some((author, mts));
+                        // a row out of sight whose height is known keeps its
+                        // place without being drawn (or copied)
+                        let h_id = egui::Id::new(("msg_h", cid, mid));
+                        let w = ui.available_width();
+                        let key = (row_key, w.to_bits(), compact);
+                        let busy = self.chat.jump_to == Some(mid)
+                            || self.chat.flash.is_some_and(|(c, f, _)| c == cid && f == mid)
+                            || self.chat.delete == Some(mid)
+                            || matches!(&self.chat.edit, Some((c, id, _)) if *c == cid && *id == mid);
+                        if !busy {
+                            let known: Option<(f32, ((u64, usize, u32), u32, bool))> = ui.data(|d| d.get_temp(h_id));
+                            if let Some((h, k)) = known.filter(|(_, k)| *k == key) {
+                                let rect = Rect::from_min_size(ui.cursor().min, vec2(w, h));
+                                if !ui.is_rect_visible(rect) {
+                                    // still read out (and found) by its text
+                                    if let Some(m) = self.data.channels.get(c).and_then(|ch| ch.messages.get(i)) {
+                                        let shown = self.shown_text(&m.text);
+                                        let resp = ui.interact(rect, h_id, Sense::hover());
+                                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, shown.r.text.as_str()));
+                                    }
+                                    ui.add_space(h);
+                                    continue;
+                                }
+                            }
+                        }
+                        // (checked: a row drawn before may have changed the list)
+                        let Some(m) = self.data.channels.get(c).and_then(|ch| ch.messages.get(i)).filter(|m| m.id == mid).cloned() else {
+                            continue;
+                        };
                         let top = ui.cursor().top();
                         let light = ui.painter().add(egui::Shape::Noop);
-                        self.message_row_c(ui, cid, m, true, compact, &mut acts);
+                        self.message_row_c(ui, cid, &m, true, compact, &mut acts);
                         self.went_to(ui, cid, m.id, top, light);
-                        prev = Some((m.author, m.ts));
+                        let h = ui.cursor().top() - top;
+                        ui.data_mut(|d| d.insert_temp(h_id, (h, key)));
                     }
                     // just sent: down to it, even from higher up the list
                     if std::mem::take(&mut self.chat.channel.to_bottom) {

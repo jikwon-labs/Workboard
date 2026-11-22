@@ -735,6 +735,12 @@ impl Files {
         Some(with_ext(&self.dir, &a.file, &ext_of(&a.name)))
     }
 
+    /// How many pictures have been loaded (or found broken): a row's
+    /// height may have changed when this did.
+    pub fn loaded(&self) -> usize {
+        self.textures.len()
+    }
+
     pub fn texture(&self, sha: &str, max: u32) -> Option<&egui::TextureHandle> {
         self.textures.get(&key(sha, max)).and_then(|t| t.as_ref())
     }

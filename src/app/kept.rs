@@ -31,6 +31,20 @@ pub(super) struct ChatIndex {
     unread: HashMap<u64, usize>,
 }
 
+/// A message's text worked out for showing (`App::message_text`): its
+/// formatting, where the mentions and links are, and where the text is cut
+/// into differently drawn pieces (byte offsets, with their char offsets).
+pub(super) struct ShownText {
+    pub r: super::chatfmt::Rich,
+    pub mentions: Vec<(usize, usize)>,
+    pub links: Vec<(usize, usize, String)>,
+    pub cuts: Vec<usize>,
+    pub cut_chars: HashMap<usize, usize>,
+}
+
+/// Texts kept at most; past this they're all worked out again.
+const TEXTS_KEPT: usize = 4000;
+
 #[derive(Default)]
 pub(super) struct Kept {
     /// Inside a pass of `ui_frame`: its number plus one; 0 outside, when
@@ -38,6 +52,25 @@ pub(super) struct Kept {
     pass: Cell<u64>,
     seen: Cell<Option<(u64, u64, SeenKey)>>,
     chat: RefCell<Option<(nav::InboxKey, SeenKey, Rc<ChatIndex>)>>,
+    /// The names an @ can stand for (`App::mention_names`).
+    names: RefCell<Option<(nav::InboxKey, Rc<Vec<String>>)>>,
+    /// Message texts as shown, for the names they were worked out with.
+    texts: RefCell<(Rc<Vec<String>>, HashMap<String, Rc<ShownText>>)>,
+    /// The open conversation's messages in time order: (key, the copies'
+    /// places in `data.channels`, (copy, message) places).
+    order: RefCell<Option<(nav::InboxKey, Vec<usize>, Rc<Vec<(usize, usize)>>)>>,
+    /// The open conversation's messages its find box and panel let through:
+    /// (key, conversation, what's in the find box, panel, places).
+    #[allow(clippy::type_complexity)]
+    pub(super) matching: RefCell<
+        Option<(
+            nav::InboxKey,
+            u64,
+            String,
+            chat::ChannelPanel,
+            Rc<Vec<(usize, usize)>>,
+        )>,
+    >,
 }
 
 impl Kept {
@@ -183,5 +216,94 @@ impl App {
         v.iter()
             .map(|&i| self.data.channels.get(i))
             .collect::<Option<Vec<_>>>()
+    }
+
+    /// `mention_names`, kept until the workspace changes.
+    pub(super) fn kept_mention_names(&self) -> Rc<Vec<String>> {
+        let key = self.inbox_key();
+        if let (Some(k), Some((kept, names))) = (key, &*self.kept.names.borrow()) {
+            if k == *kept {
+                return names.clone();
+            }
+        }
+        let names = Rc::new(self.mention_names());
+        if let Some(k) = key {
+            *self.kept.names.borrow_mut() = Some((k, names.clone()));
+        }
+        names
+    }
+
+    /// A message's text as shown (see `message_text`), worked out once for
+    /// the names an @ can stand for.
+    pub(super) fn shown_text(&self, src: &str) -> Rc<ShownText> {
+        let names = self.kept_mention_names();
+        {
+            let mut kept = self.kept.texts.borrow_mut();
+            if *kept.0 != *names || kept.1.len() > TEXTS_KEPT {
+                *kept = (names.clone(), HashMap::new());
+            }
+            if let Some(s) = kept.1.get(src) {
+                return s.clone();
+            }
+        }
+        let r = super::chatfmt::rich(src);
+        let mentions = chat::mention_spans(&r.text, &names);
+        let mut links = r.links.clone();
+        for l in super::nav::find_links(&r.text) {
+            if !links.iter().any(|x| x.0 < l.1 && l.0 < x.1) {
+                links.push(l);
+            }
+        }
+        let mut cuts: Vec<usize> = vec![0, r.text.len()];
+        for (a, b, _) in &r.runs {
+            cuts.extend([*a, *b]);
+        }
+        for (a, b) in &mentions {
+            cuts.extend([*a, *b]);
+        }
+        cuts.sort_unstable();
+        cuts.dedup();
+        let mut cut_chars = HashMap::new();
+        let (mut byte, mut chars) = (0, 0);
+        for &c in &cuts {
+            chars += r.text.get(byte..c).map_or(0, |s| s.chars().count());
+            byte = c;
+            cut_chars.insert(c, chars);
+        }
+        let s = Rc::new(ShownText {
+            r,
+            mentions,
+            links,
+            cuts,
+            cut_chars,
+        });
+        self.kept
+            .texts
+            .borrow_mut()
+            .1
+            .insert(src.to_string(), s.clone());
+        s
+    }
+
+    /// Where the open conversation's messages are (`copies` are their
+    /// channels' places), in time order.
+    pub(super) fn message_order(&self, copies: &[usize]) -> Rc<Vec<(usize, usize)>> {
+        let key = self.inbox_key();
+        if let (Some(k), Some((kept, c, at))) = (key, &*self.kept.order.borrow()) {
+            if k == *kept && c == copies {
+                return at.clone();
+            }
+        }
+        let chans = &self.data.channels;
+        let mut at: Vec<(usize, usize)> = copies
+            .iter()
+            .flat_map(|&c| (0..chans[c].messages.len()).map(move |m| (c, m)))
+            .collect();
+        at.sort_by_key(|&(c, m)| chans[c].messages[m].ts);
+        let at = Rc::new(at);
+        if let Some(k) = key {
+            *self.kept.order.borrow_mut() = Some((k, copies.to_vec(), at.clone()));
+        }
+        at
     }
 }

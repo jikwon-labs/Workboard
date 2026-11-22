@@ -2901,6 +2901,35 @@ fn opening_a_channel_draws_a_red_line_above_the_first_unread_message() {
 }
 
 #[test]
+fn messages_scrolled_far_out_of_sight_are_not_drawn_but_still_found() {
+    let (mut h, cid) = long_general_open();
+    // the oldest is far above the window: kept in place and named, not painted
+    assert!(h.has("older note 0"));
+    assert!(h.painted_text("older note 0").is_empty());
+    assert!(!h.painted_text("older note 29").is_empty());
+    let y29 = h.find("older note 29").unwrap().y;
+    // scrolled to the top, it is drawn where its place was kept
+    for _ in 0..30 {
+        let at = pos2(h.size.x / 2.0, h.size.y / 2.0);
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, 400.0),
+            modifiers: Default::default(),
+        }]);
+        h.settle();
+    }
+    let (r, _) = h.painted_text("older note 0")[0];
+    assert!((r.center().y - h.find("older note 0").unwrap().y).abs() < 30.0);
+    assert!(h.find("older note 29").unwrap().y > y29);
+    // a message coming in while up there keeps its place below the others
+    messages_from_others(&mut h, cid, &["one more".to_string()], 10);
+    h.settle();
+    assert!(h.painted_text("one more").is_empty());
+    assert!(h.find("older note 29").unwrap().y < h.find("one more").unwrap().y);
+}
+
+#[test]
 fn messages_that_come_in_while_scrolled_up_show_a_grey_note_that_goes_down() {
     let (mut h, cid) = long_general_open();
     assert!(!h.has("Read up to here"), "everything was read");

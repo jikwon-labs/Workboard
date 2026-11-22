@@ -212,4 +212,58 @@ final class QuickSyncTests: XCTestCase {
             XCTAssertEqual(ma, mb)
         }
     }
+
+    // MARK: views made from the last one
+
+    func assertSameView(_ a: WorkspaceView, _ b: WorkspaceView, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(a.channels, b.channels, "conversations", file: file, line: line)
+        XCTAssertEqual(a.tasks, b.tasks, "tasks", file: file, line: line)
+        XCTAssertEqual(a.allTasks, b.allTasks, "all tasks", file: file, line: line)
+        XCTAssertEqual(a.members, b.members, file: file, line: line)
+        XCTAssertEqual(a.topTasks, b.topTasks, "tasks by list", file: file, line: line)
+        XCTAssertEqual(a.subtasksOf, b.subtasksOf, "subtasks", file: file, line: line)
+        XCTAssertEqual(a.goalTaskClosed, b.goalTaskClosed, file: file, line: line)
+        for c in b.channels { XCTAssertEqual(c.afterRead, ChannelView.Later.list(c), file: file, line: line) }
+    }
+
+    func testAViewMadeFromTheLastOneIsTheSame() {
+        var d = bigWorkspace(tasks: 40, channels: 3, messages: 30)
+        var v = WorkspaceView(d)
+        for seed in UInt64(1)...5 {
+            let next = changed(d, seed: seed, now: 1_800_000_000_000 + Int64(seed))
+            // and reading: the read position moves
+            var n2 = next
+            n2.set("channels", .array(n2["channels"]!.array!.map { c in var c = c; c["last_read"] = .int(1_700_000_000 + Int64(seed) * 7); return c }))
+            for x in [next, n2] {
+                let reused = WorkspaceView(x, reusing: (d, v))
+                assertSameView(reused, WorkspaceView(x))
+                d = x
+                v = reused
+            }
+        }
+        // tasks and conversations in another order, some gone
+        var x = d
+        x["tasks"] = .array(Array(d["tasks"]!.array!.reversed().dropFirst(3)))
+        x["channels"] = .array(Array(d["channels"]!.array!.reversed().dropFirst()))
+        assertSameView(WorkspaceView(x, reusing: (d, v)), WorkspaceView(x))
+    }
+
+    func testUnreadCountsAreTheMessagesAfterTheReadLine() {
+        let d = bigWorkspace(tasks: 1, channels: 1, messages: 50)
+        var c = d["channels"]![0]!
+        c["last_read"] = .int(1_700_000_030)
+        let v = ChannelView(c)
+        for me in UInt64(1)...3 {
+            XCTAssertEqual(v.unread(me: me), v.messages.filter { $0.author != me && !$0.imported && $0.ts > v.lastRead }.count)
+            XCTAssertEqual(v.firstUnread(me: me), v.messages.first { $0.author != me && !$0.imported && $0.ts > v.lastRead }?.id)
+        }
+        XCTAssertGreaterThan(v.unread(me: 1), 0)
+    }
+}
+
+extension ChannelView.Later {
+    /// As ChannelView works it out, from scratch.
+    static func list(_ c: ChannelView) -> [ChannelView.Later] {
+        c.messages.filter { !$0.imported && $0.ts > c.lastRead }.map { .init(author: $0.author, id: $0.id) }
+    }
 }

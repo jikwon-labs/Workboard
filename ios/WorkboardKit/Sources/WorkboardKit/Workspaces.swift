@@ -143,6 +143,7 @@ extension SyncClient {
         storage.move(place.snapshotURL, to: storage.snapshotURL)
         setCopy(storage.loadSnapshot().map(Self.prepared))
         view = data.map { WorkspaceView($0) } ?? .empty
+        viewSource = data
         rev = 0
         settings = kept
         trash = place.loadTrash()

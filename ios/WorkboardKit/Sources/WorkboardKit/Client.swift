@@ -349,6 +349,8 @@ public final class SyncClient {
     /// changes (Sync+Cache.swift).
     @ObservationIgnored var prints = FingerprintCache()
     @ObservationIgnored var outPrints = FingerprintCache()
+    /// The copy `view` was made from (nil: `view` wasn't made from a copy).
+    @ObservationIgnored var viewSource: JSON?
     /// The message being handled, merged off the main thread already.
     @ObservationIgnored private var premerged: Premerged?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
@@ -369,6 +371,7 @@ public final class SyncClient {
             self.syncMeta = meta
             self.data = tree
             self.view = WorkspaceView(tree)
+            self.viewSource = tree
         }
         self.trash = storage.loadTrash()
         self.savedWorkspaces = storage.loadSaved()
@@ -473,6 +476,7 @@ public final class SyncClient {
             if freshCopy {
                 setCopy(nil)
                 view = .empty
+                viewSource = nil
                 rev = 0
                 // people are numbered per workspace: pick again on the new one
                 settings.me = nil
@@ -1051,6 +1055,7 @@ public final class SyncClient {
         settings.reuploads = []
         setCopy(nil)
         view = .empty
+        viewSource = nil
         rev = 0
         dropSnapshot()
         storage.save(settings)
@@ -1214,7 +1219,9 @@ public final class SyncClient {
 
     func refresh() {
         guard let d = data else { return }
-        view = WorkspaceView(d)
+        // tasks and conversations that didn't change keep their views
+        view = WorkspaceView(d, reusing: viewSource.map { ($0, view) })
+        viewSource = d
         // my reading state changed here: my other devices hear it
         sendMineIfChanged()
         scheduleSave()

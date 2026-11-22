@@ -18,10 +18,38 @@ public enum ChatBlock: Equatable, Sendable {
     case bullet(String)
 }
 
+/// One value kept in an NSCache.
+private final class Kept<T>: NSObject {
+    let value: T
+    init(_ value: T) { self.value = value }
+}
+
 public enum ChatFormat {
+    // Every message row reads its text again on every redraw of the list;
+    // reading Markdown is slow, so the results are kept (a few thousand,
+    // NSCache lets go of them when memory runs low).
+    nonisolated(unsafe) private static let blockCache: NSCache<NSString, Kept<[ChatBlock]>> = {
+        let c = NSCache<NSString, Kept<[ChatBlock]>>()
+        c.countLimit = 3000
+        return c
+    }()
+    nonisolated(unsafe) private static let inlineCache: NSCache<NSString, Kept<AttributedString>> = {
+        let c = NSCache<NSString, Kept<AttributedString>>()
+        c.countLimit = 3000
+        return c
+    }()
+
     /// The blocks a message is shown as, in order; neighbouring text lines
     /// stay together.
     public static func blocks(_ src: String) -> [ChatBlock] {
+        let key = src as NSString
+        if let k = blockCache.object(forKey: key) { return k.value }
+        let out = readBlocks(src)
+        blockCache.setObject(Kept(out), forKey: key)
+        return out
+    }
+
+    static func readBlocks(_ src: String) -> [ChatBlock] {
         var out: [ChatBlock] = []
         var code: [String]?
         func addText(_ line: String) {
@@ -67,6 +95,14 @@ public enum ChatFormat {
     /// One line's inline marks as an AttributedString: Apple's Markdown
     /// reading, with bare web addresses made links first.
     public static func inline(_ s: String) -> AttributedString {
+        let key = s as NSString
+        if let k = inlineCache.object(forKey: key) { return k.value }
+        let out = readInline(s)
+        inlineCache.setObject(Kept(out), forKey: key)
+        return out
+    }
+
+    static func readInline(_ s: String) -> AttributedString {
         let linked = autolinked(s)
         let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: linked, options: opts)) ?? AttributedString(s)

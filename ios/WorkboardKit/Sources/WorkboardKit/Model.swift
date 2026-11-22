@@ -522,27 +522,54 @@ public struct ChannelView: Identifiable, Hashable, Sendable {
     /// Made with "Make Private": only its members see it.
     public let isPrivate: Bool
 
-    init(_ j: JSON) {
+    /// A message after the read position (not imported): who wrote it.
+    struct Later: Hashable, Sendable {
+        let author: UInt64
+        let id: UInt64
+    }
+
+    /// Messages after `lastRead`, in order: few, so unread counts (asked
+    /// for by every row of the chat list, on every redraw) needn't go over
+    /// a long history.
+    let afterRead: [Later]
+
+    init(_ j: JSON) { self.init(j, reusing: nil) }
+
+    /// `prev`: this conversation as it was (its JSON and view); messages
+    /// that didn't change keep their views.
+    init(_ j: JSON, reusing prev: (json: JSON, view: ChannelView)?) {
         isPrivate = j["private"]?.bool ?? false
         id = j["id"]?.uint ?? 0
         name = j["name"]?.string ?? ""
         kind = ChannelKind(rawValue: j["kind"]?.string ?? "") ?? .channel
         topic = j["topic"]?.string ?? ""
         members = (j["members"]?.array ?? []).compactMap(\.uint)
-        messages = (j["messages"]?.array ?? []).map(MessageView.init)
-        lastRead = j["last_read"]?.int ?? 0
+        let msgs = j["messages"]?.array ?? []
+        if let prev, let old = prev.json["messages"]?.array, old.count == prev.view.messages.count {
+            var out: [MessageView] = []
+            out.reserveCapacity(msgs.count)
+            for (i, m) in msgs.enumerated() {
+                out.append(i < old.count && old[i] == m ? prev.view.messages[i] : MessageView(m))
+            }
+            messages = out
+        } else {
+            messages = msgs.map(MessageView.init)
+        }
+        let read = j["last_read"]?.int ?? 0
+        lastRead = read
+        afterRead = messages.filter { !$0.imported && $0.ts > read }.map { Later(author: $0.author, id: $0.id) }
     }
 
     /// Messages from others newer than this person's read position
     /// (imported history isn't new to anyone).
     public func unread(me: UInt64) -> Int {
-        messages.filter { $0.author != me && !$0.imported && $0.ts > lastRead }.count
+        afterRead.reduce(0) { $0 + ($1.author != me ? 1 : 0) }
     }
 
     /// The first message from others I haven't read: the red "New" line
     /// goes above it.
     public func firstUnread(me: UInt64) -> UInt64? {
-        messages.first { $0.author != me && !$0.imported && $0.ts > lastRead }?.id
+        afterRead.first { $0.author != me }?.id
     }
 
     /// Messages from others after `ts`: those that came in below where the
@@ -568,19 +595,81 @@ public struct WorkspaceView: Sendable {
     /// list's statuses (archived spaces and lists too): what a goal's tasks
     /// target counts, as goal_progress does on the Mac.
     let goalTaskClosed: [UInt64: Bool]
+    /// Every task, archived ones too, one per entry of `tasks` in the JSON
+    /// (kept to reuse on the next change).
+    let allTasks: [TaskView]
 
-    public init(_ data: JSON) {
+    // looked up by id instead of going through the lists
+    let memberAt: [UInt64: Int]
+    /// list id -> the space it is in (its index in `spaces`)
+    let spaceAt: [UInt64: Int]
+    /// list id -> its top-level tasks, in order
+    let topTasks: [UInt64: [TaskView]]
+    /// task id -> its subtasks, in order
+    let subtasksOf: [UInt64: [TaskView]]
+
+    public init(_ data: JSON) { self.init(data, reusing: nil) }
+
+    /// `prev`: the view made from an earlier copy, and that copy. Tasks and
+    /// conversations (and their messages) that didn't change keep their
+    /// views: most changes touch one of thousands.
+    public init(_ data: JSON, reusing prev: (data: JSON, view: WorkspaceView)?) {
         fields = (data.at("extra.fields")?.array ?? []).map(CustomFieldView.init)
         apps = AppsView(data.at("extra.apps"))
         automations = (data.at("extra.automations")?.array ?? []).map(AutomationView.init)
         name = data["workspace"]?.string ?? ""
         members = (data["members"]?.array ?? []).map(MemberView.init)
         spaces = (data["spaces"]?.array ?? []).map(SpaceView.init).filter { !$0.archived }
-        let allTasks = (data["tasks"]?.array ?? []).map(TaskView.init)
+        let taskJSON = data["tasks"]?.array ?? []
+        let allTasks: [TaskView]
+        if let prev, let old = prev.data["tasks"]?.array, old.count == prev.view.allTasks.count {
+            if old == taskJSON {
+                allTasks = prev.view.allTasks
+            } else {
+                var byId: [UInt64: Int] = [:]
+                for (i, t) in old.enumerated() { if let id = t["id"]?.uint, byId[id] == nil { byId[id] = i } }
+                allTasks = taskJSON.enumerated().map { i, t in
+                    if i < old.count, old[i] == t { return prev.view.allTasks[i] }
+                    if let id = t["id"]?.uint, let j = byId[id], old[j] == t { return prev.view.allTasks[j] }
+                    return TaskView(t)
+                }
+            }
+        } else {
+            allTasks = taskJSON.map(TaskView.init)
+        }
+        self.allTasks = allTasks
         tasks = allTasks.filter { !$0.archived }
         goalTaskClosed = WorkspaceView.closedTasks(allTasks, spaces: data["spaces"]?.array ?? [])
         docs = (data["docs"]?.array ?? []).map(DocView.init).filter { !$0.archived }
-        channels = (data["channels"]?.array ?? []).map(ChannelView.init)
+        let chJSON = data["channels"]?.array ?? []
+        if let prev, let old = prev.data["channels"]?.array, old.count == prev.view.channels.count {
+            var byId: [UInt64: Int] = [:]
+            for (i, c) in old.enumerated() { if let id = c["id"]?.uint, byId[id] == nil { byId[id] = i } }
+            channels = chJSON.enumerated().map { i, c in
+                let j = i < old.count && old[i]["id"] == c["id"] ? i : c["id"]?.uint.flatMap { byId[$0] }
+                guard let j else { return ChannelView(c) }
+                if old[j] == c { return prev.view.channels[j] }
+                return ChannelView(c, reusing: (old[j], prev.view.channels[j]))
+            }
+        } else {
+            channels = chJSON.map { ChannelView($0) }
+        }
+        var memberAt: [UInt64: Int] = [:]
+        for (i, m) in members.enumerated() where memberAt[m.id] == nil { memberAt[m.id] = i }
+        self.memberAt = memberAt
+        var spaceAt: [UInt64: Int] = [:]
+        for (i, s) in spaces.enumerated() {
+            for l in s.allListIds where spaceAt[l] == nil { spaceAt[l] = i }
+        }
+        self.spaceAt = spaceAt
+        // in the order of `tasks`, then sorted as tasks(inList:) sorts them
+        var top: [UInt64: [TaskView]] = [:]
+        var subs: [UInt64: [TaskView]] = [:]
+        for t in tasks {
+            if let p = t.parent { subs[p, default: []].append(t) } else { top[t.listId, default: []].append(t) }
+        }
+        topTasks = top.mapValues { $0.sorted { $0.order < $1.order } }
+        subtasksOf = subs.mapValues { $0.sorted { $0.order < $1.order } }
     }
 
     public static let empty = WorkspaceView(.object([:]))
@@ -607,7 +696,7 @@ public struct WorkspaceView: Sendable {
         return out
     }
 
-    public func member(_ id: UInt64) -> MemberView? { members.first { $0.id == id } }
+    public func member(_ id: UInt64) -> MemberView? { memberAt[id].map { members[$0] } }
 
     /// The workflows that start from messages in `channel`.
     public func workflows(in channel: UInt64) -> [AutomationView] {
@@ -617,7 +706,7 @@ public struct WorkspaceView: Sendable {
     /// The people who have joined (not those still invited).
     public var activeMembers: [MemberView] { members.filter { !$0.invited } }
 
-    public func space(ofList list: UInt64) -> SpaceView? { spaces.first { $0.allListIds.contains(list) } }
+    public func space(ofList list: UInt64) -> SpaceView? { spaceAt[list].map { spaces[$0] } }
 
     public func statuses(forList list: UInt64) -> [StatusView] { space(ofList: list)?.statuses ?? StatusView.defaults }
 
@@ -628,6 +717,11 @@ public struct WorkspaceView: Sendable {
     }
 
     public func list(_ id: UInt64) -> ListView? {
+        if let i = spaceAt[id] {
+            let s = spaces[i]
+            if let l = s.lists.first(where: { $0.id == id }) { return l }
+            for f in s.folders { if let l = f.lists.first(where: { $0.id == id }) { return l } }
+        }
         for s in spaces {
             if let l = s.lists.first(where: { $0.id == id }) { return l }
             for f in s.folders { if let l = f.lists.first(where: { $0.id == id }) { return l } }
@@ -635,13 +729,9 @@ public struct WorkspaceView: Sendable {
         return nil
     }
 
-    public func tasks(inList list: UInt64) -> [TaskView] {
-        tasks.filter { $0.listId == list && $0.parent == nil }.sorted { $0.order < $1.order }
-    }
+    public func tasks(inList list: UInt64) -> [TaskView] { topTasks[list] ?? [] }
 
-    public func subtasks(of id: UInt64) -> [TaskView] {
-        tasks.filter { $0.parent == id }.sorted { $0.order < $1.order }
-    }
+    public func subtasks(of id: UInt64) -> [TaskView] { subtasksOf[id] ?? [] }
 
     /// Spaces this person can see (another person's private space is hidden).
     public func visibleSpaces(me: UInt64) -> [SpaceView] {

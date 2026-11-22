@@ -8,6 +8,8 @@
 
 - 2026-11-16 기준 498개. 로직 테스트, 실제 화면 입력(포인터·스크롤·드래그·키보드)으로 누르는 UI 테스트, 실제 서버를 띄우는 통합 테스트가 들어 있다.
 - 음성·영상 테스트(`crates/wb-voice/tests/huddle.rs`, 앱의 허들 테스트)는 실제 `livekit-server` 를 임시 포트로 띄운다. 설치돼 있지 않으면(`brew install livekit`) 그 테스트들은 "skipped" 를 찍고 건너뛴다.
+- 이 Mac 에서는 `cargo test`·`cargo run`·`scripts/wt verify` 가 빌드한 프로그램을 키체인의 Developer ID 로 서명한 뒤 실행한다(`scripts/run-signed`, `.cargo/config.toml` 의 runner). macOS 방화벽은 처음 보는 프로그램으로 들어오는 연결을 "허용할까요?" 를 누를 때까지 막는데, 테스트 프로그램은 빌드할 때마다 새 프로그램이라 허들 테스트의 통화가 연결되지 않고 "timed out waiting for: Ann joined" 로 실패했다. 서명된 프로그램은 묻지 않고 통과한다. Developer ID 가 없거나 `WB_SIGN_IDENTITY=-` 면 예전처럼 서명 없이 실행한다.
+- 테스트 서버와 livekit-server 의 "빈 포트" 는 시스템이 알아서 나눠 주는 범위(49152 이상) 아래에서 고른다(`server/src/testing.rs` 의 `free_port`). 그 범위의 포트는 서버를 껐다 같은 포트로 다시 켜는 사이에 다른 테스트의 연결에 넘어갈 수 있었다.
 - 실제 마이크·카메라·화면은 쓰지 않는다. 테스트에서는 신호음과 색 패턴(화면 공유도 색 패턴)을 보내고, 받는 쪽에서 소리 크기와 색, 받은 영상 크기를 잰다.
 - 실제 화면 캡처는 손으로 돌리는 테스트로 따로 있다: `cargo test -p wb-voice real_ -- --ignored --nocapture`. 주 화면과 창 하나를 ScreenCaptureKit 으로 실제로 받아 본다. 터미널에 화면 기록 권한이 있어야 한다(없으면 "no Screen Recording permission" 으로 실패한다).
 - cargo 가 PATH 에 없으면 `export PATH="$HOME/.cargo/bin:$PATH"`.

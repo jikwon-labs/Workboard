@@ -2080,3 +2080,97 @@ fn untouched_items_merge_the_same_as_the_long_way() {
     assert!(changed > 50, "{changed}");
     assert!(merge::QUICK.with(|q| q.get()) > 1000);
 }
+
+/// The server's way: merging without fingerprints gives what merging and
+/// then `make_shareable` gives; `delta_advance` gives what `delta` and
+/// `Summary::of` give; and an app that missed some revisions, merging one
+/// part made with `delta_of` from what they changed, ends with what merging
+/// each revision's part one after the other gives.
+#[test]
+fn the_server_merges_and_catches_up_like_the_long_way() {
+    let mut caught = 0;
+    for seed in 1..=20u64 {
+        let mut r = Rng(seed.wrapping_mul(0xD1B54A32D192ED03) | 1);
+        let mut id = 10_000;
+        let mut start = busy_workspace(&mut r);
+        let mut m = SyncMeta::default();
+        stamp(&start, &mut m, 1);
+        json::set_meta(&mut start, &m);
+        let mut devs = vec![start.clone(), start.clone()];
+        let mut canon = shareable(&start);
+        let mut summary = Summary::of(&canon);
+        // what each revision's part carried, and an app's copy at each one
+        let mut changes: Vec<Changes> = vec![];
+        let mut parts: Vec<Value> = vec![];
+        let mut apps: Vec<Value> = vec![start.clone()];
+        for step in 0..30i64 {
+            let now = 100 + step * 10;
+            let d = r.n(2);
+            for _ in 0..1 + r.n(2) {
+                busy_edit(&mut r, &mut devs[d], &mut id);
+            }
+            let mut m = meta_of(&devs[d]);
+            stamp(&devs[d], &mut m, now);
+            json::set_meta(&mut devs[d], &m);
+            let push = if r.n(2) == 0 {
+                shareable(&devs[d])
+            } else {
+                match delta(&Summary::of(&canon), &shareable(&devs[d])) {
+                    Some(p) => p,
+                    None => continue,
+                }
+            };
+            let mut long = canon.clone();
+            let c_long = merge(&mut long, std::slice::from_ref(&push));
+            make_shareable(&mut long);
+            let c = merge_unhashed(&mut canon, std::slice::from_ref(&push));
+            make_shareable(&mut canon);
+            assert_eq!(c, c_long, "seed {seed} step {step}");
+            assert_eq!(canon, long, "seed {seed} step {step}");
+            if !c {
+                continue;
+            }
+            let old = summary.clone();
+            let (part, ch) = delta_advance(&mut summary, &canon);
+            assert_eq!(part, delta(&old, &canon), "seed {seed} step {step}");
+            assert_eq!(summary, Summary::of(&canon), "seed {seed} step {step}");
+            let part = part.unwrap_or_else(|| json!({}));
+            // the device merges what came back, as a connected app does
+            merge(&mut devs[d], std::slice::from_ref(&part));
+            let mut app = apps.last().unwrap().clone();
+            merge(&mut app, std::slice::from_ref(&part));
+            changes.push(ch);
+            parts.push(part);
+            apps.push(app);
+        }
+        // a merge can move bookkeeping alone, which goes with the next
+        // revision: one more, so the last revision has all of it
+        let (part, ch) = delta_advance(&mut summary, &canon);
+        if let Some(part) = part {
+            let mut app = apps.last().unwrap().clone();
+            merge(&mut app, std::slice::from_ref(&part));
+            changes.push(ch);
+            parts.push(part);
+            apps.push(app);
+        }
+        // an app that has revision `from` catches up to the newest at once
+        for from in 0..apps.len() {
+            let mut all = Changes::default();
+            for ch in &changes[from..] {
+                all.add(ch);
+            }
+            let mut at_once = apps[from].clone();
+            if let Some(p) = delta_of(&canon, &all) {
+                merge(&mut at_once, &[p]);
+            }
+            let mut one_by_one = apps[from].clone();
+            for p in &parts[from..] {
+                merge(&mut one_by_one, std::slice::from_ref(p));
+            }
+            assert_eq!(at_once, one_by_one, "seed {seed} from {from}");
+            assert_eq!(&at_once, apps.last().unwrap(), "seed {seed} from {from}");
+            caught += 1;
+        }
+    }
+    assert!(caught > 200, "{caught}");
+}

@@ -86,6 +86,40 @@ impl Summary {
     }
 }
 
+/// What a `delta` carries, by name: the items that changed, the deletes
+/// and restores, and the shared settings and map entries ("<path>/<key>").
+/// Those of several deltas added together (`add`) say what changed over
+/// all of them: `delta_of` makes one part with all of it, as it is now.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Changes {
+    ids: std::collections::HashSet<u64>,
+    tombs: std::collections::BTreeSet<u64>,
+    revived: std::collections::BTreeSet<u64>,
+    values: std::collections::BTreeSet<String>,
+}
+
+impl Changes {
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+            && self.tombs.is_empty()
+            && self.revived.is_empty()
+            && self.values.is_empty()
+    }
+
+    /// How many things it names (for keeping a list of them small).
+    pub fn len(&self) -> usize {
+        self.ids.len() + self.tombs.len() + self.revived.len() + self.values.len()
+    }
+
+    /// What `other` changed too.
+    pub fn add(&mut self, other: &Changes) {
+        self.ids.extend(other.ids.iter().copied());
+        self.tombs.extend(other.tombs.iter().copied());
+        self.revived.extend(other.revived.iter().copied());
+        self.values.extend(other.values.iter().cloned());
+    }
+}
+
 /// The part of `data` (a whole copy) that differs from what `since` says
 /// the other side has: the items that changed, each inside the items it
 /// sits in (with their own fields but only the changed items inside them),
@@ -96,7 +130,51 @@ impl Summary {
 pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
     let cur = fingerprints(data);
     let meta = stamps_of(data);
-    let changed: std::collections::HashSet<u64> = cur
+    let vh = value_hashes(data);
+    let changes = diff(since, &cur, &meta, &vh);
+    build(data, &meta, &changes)
+}
+
+/// `delta`, and `since` becomes what `data` holds (`Summary::of`), from
+/// the same fingerprints and bookkeeping instead of working them out a
+/// second time. Also says what the delta carries (`Changes`).
+pub fn delta_advance(since: &mut Summary, data: &Value) -> (Option<Value>, Changes) {
+    let cur = fingerprints(data);
+    let m = stamps_of(data);
+    let vh = value_hashes(data);
+    let changes = diff(since, &cur, &m, &vh);
+    let part = build(data, &m, &changes);
+    *since = Summary {
+        hashes: cur,
+        stamps: m.stamps,
+        fields: m.fields,
+        moved: m.moved,
+        tombs: m.tombs,
+        revived: m.revived,
+        values: m.values,
+        value_hashes: vh,
+    };
+    (part, changes)
+}
+
+/// One part with everything `changes` names, as `data` (a whole copy) has
+/// it now: what the deltas the changes came from bring, taken together.
+/// Merging it is the same as merging those deltas one after the other,
+/// since each brought its items as they were then and the later ones as
+/// they are now. None when it names nothing that is there.
+pub fn delta_of(data: &Value, changes: &Changes) -> Option<Value> {
+    build(data, &stamps_of(data), changes)
+}
+
+/// What differs between `since` and a copy with fingerprints `cur`,
+/// bookkeeping `meta` and shared setting fingerprints `vh`.
+fn diff(
+    since: &Summary,
+    cur: &BTreeMap<u64, u64>,
+    meta: &SyncMeta,
+    vh: &BTreeMap<String, u64>,
+) -> Changes {
+    let ids: std::collections::HashSet<u64> = cur
         .iter()
         .filter(|(id, h)| {
             since.hashes.get(id) != Some(h)
@@ -106,32 +184,62 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
         })
         .map(|(id, _)| *id)
         .collect();
-    let newer = |a: &BTreeMap<u64, i64>, b: &BTreeMap<u64, i64>| -> BTreeMap<u64, i64> {
-        a.iter()
-            .filter(|(k, v)| b.get(k).is_none_or(|o| o < v))
-            .map(|(k, v)| (*k, *v))
-            .collect()
-    };
-    let tombs = newer(&meta.tombs, &since.tombs);
-    let revived = newer(&meta.revived, &since.revived);
-    let vh = value_hashes(data);
+    let newer =
+        |a: &BTreeMap<u64, i64>, b: &BTreeMap<u64, i64>| -> std::collections::BTreeSet<u64> {
+            a.iter()
+                .filter(|(k, v)| b.get(k).is_none_or(|o| o < v))
+                .map(|(k, _)| *k)
+                .collect()
+        };
+    let mut values: std::collections::BTreeSet<String> = SHARED_VALUES
+        .iter()
+        .filter(|p| {
+            since.value_hashes.get(**p) != vh.get(**p)
+                || since.values.get(**p) != meta.values.get(**p)
+        })
+        .map(|p| p.to_string())
+        .collect();
+    // shared map entries set or taken away since
+    values.extend(
+        vh.keys()
+            .chain(meta.values.keys())
+            .filter(|p| map_entry(p).is_some())
+            .filter(|p| {
+                since.value_hashes.get(*p) != vh.get(*p)
+                    || since.values.get(*p) != meta.values.get(*p)
+            })
+            .cloned(),
+    );
+    Changes {
+        ids,
+        tombs: newer(&meta.tombs, &since.tombs),
+        revived: newer(&meta.revived, &since.revived),
+        values,
+    }
+}
+
+/// The part of `data` (bookkeeping `meta`) with what `changes` names.
+fn build(data: &Value, meta: &SyncMeta, changes: &Changes) -> Option<Value> {
+    let pick_at =
+        |m: &BTreeMap<u64, i64>, keys: &std::collections::BTreeSet<u64>| -> BTreeMap<u64, i64> {
+            keys.iter()
+                .filter_map(|k| m.get(k).map(|v| (*k, *v)))
+                .collect()
+        };
+    let changed = &changes.ids;
+    let tombs = pick_at(&meta.tombs, &changes.tombs);
+    let revived = pick_at(&meta.revived, &changes.revived);
     let values: Vec<&str> = SHARED_VALUES
         .iter()
         .copied()
-        .filter(|p| {
-            since.value_hashes.get(*p) != vh.get(*p) || since.values.get(*p) != meta.values.get(*p)
-        })
+        .filter(|p| changes.values.contains(*p))
         .collect();
-    // shared map entries set or taken away since
-    let mut entries: std::collections::BTreeSet<&str> = vh
-        .keys()
-        .chain(meta.values.keys())
+    let entries: std::collections::BTreeSet<&str> = changes
+        .values
+        .iter()
         .filter(|p| map_entry(p).is_some())
         .map(|p| p.as_str())
         .collect();
-    entries.retain(|p| {
-        since.value_hashes.get(*p) != vh.get(*p) || since.values.get(*p) != meta.values.get(*p)
-    });
     if changed.is_empty()
         && tombs.is_empty()
         && revived.is_empty()
@@ -190,7 +298,7 @@ pub fn delta(since: &Summary, data: &Value) -> Option<Value> {
     let mut kept = vec![];
     for path in SHARED {
         if let Some(a) = get_path(data, path).and_then(|v| v.as_array()) {
-            let sub = prune(a, &changed, &mut kept);
+            let sub = prune(a, changed, &mut kept);
             if !sub.is_empty() {
                 set_path(&mut out, path, Value::Array(sub));
             }

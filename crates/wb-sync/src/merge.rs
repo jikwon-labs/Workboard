@@ -858,6 +858,33 @@ pub fn merge_apart(
     others: &[Value],
     current: bool,
 ) -> bool {
+    merge_with(local, meta, others, current, true)
+}
+
+/// `merge` for a copy whose fingerprints are thrown away right after (the
+/// server's, which `make_shareable` empties): the same copy and stamps as
+/// `merge` and then `make_shareable`, without fingerprinting the whole
+/// copy for nothing. Its fingerprints are left empty.
+pub fn merge_unhashed(local: &mut Value, others: &[Value]) -> bool {
+    let mut meta = stamps_of(local);
+    let changed = merge_with(local, &mut meta, others, false, false);
+    set_path(
+        local,
+        "extra.sync",
+        serde_json::to_value(&meta).unwrap_or_default(),
+    );
+    changed
+}
+
+/// `merge_apart`; without `hashes`, the merged copy isn't fingerprinted
+/// (`merge_unhashed`).
+fn merge_with(
+    local: &mut Value,
+    meta: &mut SyncMeta,
+    others: &[Value],
+    current: bool,
+    hashes: bool,
+) -> bool {
     // copies from before activity had ids: give their entries the same ids
     // here as everywhere else, or their comments would not be matched up
     let filled_here = fill_activity_ids(local) | fill_board_ids(local) | fill_goal_ids(local);
@@ -991,15 +1018,22 @@ pub fn merge_apart(
     lmeta.moved = out_moved;
     shrink_moved(&mut lmeta.moved, local);
     lmeta.fields = out_fields;
-    if current {
-        rehash_changed(local, lmeta, &kept);
+    if !hashes {
+        lmeta.hashes = BTreeMap::new();
+        lmeta.field_hashes = BTreeMap::new();
+        lmeta.parents = BTreeMap::new();
+        lmeta.value_hashes = BTreeMap::new();
     } else {
-        let all = hash_all(local);
-        lmeta.hashes = all.hashes;
-        lmeta.field_hashes = all.parts;
-        lmeta.parents = all.parents;
+        if current {
+            rehash_changed(local, lmeta, &kept);
+        } else {
+            let all = hash_all(local);
+            lmeta.hashes = all.hashes;
+            lmeta.field_hashes = all.parts;
+            lmeta.parents = all.parents;
+        }
+        lmeta.value_hashes = value_hashes(local);
     }
-    lmeta.value_hashes = value_hashes(local);
     lmeta.v = META_V;
     changed
 }

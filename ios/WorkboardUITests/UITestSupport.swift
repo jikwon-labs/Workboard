@@ -22,18 +22,28 @@ let testArgs = ["-wbNoPasswordAutoFill", "YES", "-AppleLanguages", "(en)", "-App
 /// below the screen aren't made until they come into view.
 func reveal(_ e: XCUIElement, in a: XCUIApplication, timeout: TimeInterval = 5) -> Bool {
     // clear of the bars at the top and the bottom
+    let top = a.frame.height * 0.15, bottom = a.frame.height * 0.9
     func shown() -> Bool {
-        e.exists && e.isHittable && e.frame.minY > a.frame.height * 0.15 && e.frame.maxY < a.frame.height * 0.9
+        e.exists && e.isHittable && e.frame.minY > top && e.frame.maxY < bottom
     }
     if e.waitForExistence(timeout: timeout) && shown() { return true }
-    // above the screen: back up; otherwise further down
-    if e.exists && e.frame.minY <= a.frame.height * 0.15 {
-        for _ in 0..<6 where !shown() { a.swipeDown() }
-    } else {
-        for _ in 0..<8 where !shown() { a.swipeUp() }
-        for _ in 0..<10 where !shown() { a.swipeDown() }
+    // short drags: a whole swipe flung rows past the screen and the next
+    // one past it the other way (Settings' Sign out button)
+    func drag(_ from: CGFloat, _ to: CGFloat) {
+        a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+            .press(forDuration: 0.05, thenDragTo: a.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to)))
     }
-    usleep(500_000)
+    for i in 0..<30 where !shown() {
+        if e.exists && e.frame.minY <= top {
+            drag(0.4, 0.6) // above: back up
+        } else if e.exists || i < 15 {
+            drag(0.75, 0.45) // below, or not made yet: further down
+        } else {
+            drag(0.4, 0.7) // not found going down: further up
+        }
+    }
+    // let the scroll come to rest, or a tap lands where the row was
+    usleep(800_000)
     return shown()
 }
 

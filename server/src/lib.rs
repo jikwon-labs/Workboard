@@ -145,7 +145,7 @@ use ws::*;
 // --------------------------------------------------------------------- hub
 
 struct Inner {
-    canon: Option<Value>,
+    canon: Option<Arc<Value>>,
     saved: Saved,
     dirty: bool,
     /// Only someone's own reading state changed (mine.rs): server.json is
@@ -303,7 +303,9 @@ type Made = Arc<std::sync::OnceLock<(String, Vec<u64>)>>;
 
 /// A new team copy for every connection; each one sends what its person may see.
 struct Canon {
-    data: Value,
+    /// shared with the hub's state, not copied: the next change copies it
+    /// only if a connection still holds this revision (`Arc::make_mut`)
+    data: Arc<Value>,
     rev: u64,
     /// the whole copy as an update message, for people nothing is hidden
     /// from; made the first time one needs it (apps that take changes only
@@ -317,13 +319,16 @@ struct Canon {
     /// (a change?, what is hidden, what comes back whole): people who see
     /// the same get the same message, made once
     made: Mutex<std::collections::HashMap<(bool, Vec<u64>, Vec<u64>), Made>>,
+    /// what is left out for each set of hidden items (`left_out`), worked
+    /// out once for everyone who sees the same
+    gone: Mutex<std::collections::HashMap<Vec<u64>, Arc<std::sync::OnceLock<Vec<u64>>>>>,
 }
 
 impl Canon {
-    fn new(data: &Value, rev: u64, delta: Option<Value>, saved: &Saved) -> Canon {
+    fn new(data: Arc<Value>, rev: u64, delta: Option<Value>, saved: &Saved) -> Canon {
         Canon {
             json: std::sync::OnceLock::new(),
-            data: data.clone(),
+            data,
             rev,
             delta,
             managers: saved
@@ -333,6 +338,7 @@ impl Canon {
                 .map(|(m, _)| *m)
                 .collect(),
             made: Mutex::new(std::collections::HashMap::new()),
+            gone: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -348,6 +354,20 @@ impl Canon {
         cell.get_or_init(make).clone()
     }
 
+    /// What is left out for `hidden` (`left_out`), made once.
+    fn left_out(&self, hidden: &[u64]) -> Vec<u64> {
+        if hidden.is_empty() {
+            return vec![];
+        }
+        let cell = self
+            .gone
+            .locked()
+            .entry(hidden.to_vec())
+            .or_default()
+            .clone();
+        cell.get_or_init(|| left_out(&self.data, hidden)).clone()
+    }
+
     /// The whole copy `member` gets, and what is left out of it (`left_out`).
     fn update_for(&self, member: u64) -> (String, Vec<u64>) {
         // (copy_for, made once for each set of hidden items)
@@ -356,31 +376,17 @@ impl Canon {
             return (self.whole_json().to_string(), vec![]);
         }
         self.made((false, hidden.clone(), vec![]), || {
-            let mut data = self.data.clone();
+            let mut data = (*self.data).clone();
             wb_sync::hide(&mut data, &hidden);
-            let gone = left_out(&self.data, &hidden);
-            (
-                Msg::Update {
-                    data,
-                    rev: self.rev,
-                    hidden,
-                }
-                .to_json(),
-                gone,
-            )
+            let gone = self.left_out(&hidden);
+            (update_json(&data, self.rev, &hidden), gone)
         })
     }
 
     /// The whole copy as an update message (`json`).
     fn whole_json(&self) -> &str {
-        self.json.get_or_init(|| {
-            Msg::Update {
-                data: self.data.clone(),
-                rev: self.rev,
-                hidden: vec![],
-            }
-            .to_json()
-        })
+        self.json
+            .get_or_init(|| update_json(&self.data, self.rev, &[]))
     }
 
     /// What changed for `member`, whose last copy left out `was_hidden`
@@ -392,7 +398,7 @@ impl Canon {
     fn delta_for(&self, member: u64, was_hidden: &[u64]) -> Option<(String, Vec<u64>)> {
         let delta = self.delta.as_ref()?;
         let hidden = wb_sync::hidden_from(&self.data, member, self.managers.contains(&member));
-        let gone = left_out(&self.data, &hidden);
+        let gone = self.left_out(&hidden);
         let still: std::collections::HashSet<u64> = gone.iter().copied().collect();
         let back: Vec<u64> = was_hidden
             .iter()
@@ -415,6 +421,62 @@ impl Canon {
             )
         }))
     }
+}
+
+/// `Msg::Update` for `data`, written from a borrowed copy: the same message
+/// without copying the whole workspace first.
+fn update_json(data: &Value, rev: u64, hidden: &[u64]) -> String {
+    #[derive(Serialize)]
+    #[serde(tag = "type", rename = "update")]
+    struct Update<'a> {
+        data: &'a Value,
+        rev: u64,
+        #[serde(skip_serializing_if = "<[u64]>::is_empty")]
+        hidden: &'a [u64],
+    }
+    serde_json::to_string(&Update { data, rev, hidden }).unwrap_or_default()
+}
+
+/// `Msg::Welcome`, written from a borrowed copy (see `update_json`).
+#[allow(clippy::too_many_arguments)]
+fn welcome_json(
+    tag: u16,
+    snapshot: Option<&Value>,
+    rev: u64,
+    member: u64,
+    role: Role,
+    token: Option<String>,
+    email: Option<String>,
+    hidden: &[u64],
+) -> String {
+    #[derive(Serialize)]
+    #[serde(tag = "type", rename = "welcome")]
+    struct Welcome<'a> {
+        tag: u16,
+        snapshot: Option<&'a Value>,
+        rev: u64,
+        member: u64,
+        role: Role,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        email: Option<String>,
+        #[serde(skip_serializing_if = "<[u64]>::is_empty")]
+        hidden: &'a [u64],
+        deltas: bool,
+    }
+    serde_json::to_string(&Welcome {
+        tag,
+        snapshot,
+        rev,
+        member,
+        role,
+        token,
+        email,
+        hidden,
+        deltas: true,
+    })
+    .unwrap_or_default()
 }
 
 struct Hub {
@@ -490,7 +552,7 @@ impl Hub {
             id,
             persistence: Mutex::new(()),
             inner: Mutex::new(Inner {
-                canon,
+                canon: canon.map(Arc::new),
                 saved,
                 dirty: false,
                 mine_dirty: false,
@@ -574,7 +636,7 @@ impl Hub {
     fn name(&self) -> String {
         let g = self.state();
         g.canon
-            .as_ref()
+            .as_deref()
             .and_then(|c| c.get("workspace"))
             .and_then(|w| w.as_str())
             .unwrap_or("")
@@ -622,15 +684,13 @@ impl Hub {
                 g.canon_due = None;
             }
             (
-                g.canon
-                    .as_ref()
-                    .filter(|_| canon_too)
-                    .map(|c| serde_json::to_string(c).unwrap_or_default()),
+                // written out after the lock is let go
+                g.canon.clone().filter(|_| canon_too),
                 serde_json::to_string_pretty(&g.saved).unwrap_or_default(),
             )
         };
         let mut ok = true;
-        if let Some(c) = canon {
+        if let Some(c) = canon.map(|c| serde_json::to_string(&*c).unwrap_or_default()) {
             ok &= write_atomic(&self.home.join(WORKSPACE_FILE), &c)
                 .map_err(|e| eprintln!("couldn't save {}: {}", WORKSPACE_FILE, e))
                 .is_ok();
@@ -648,13 +708,8 @@ impl Hub {
         if *self.closed.borrow() {
             return;
         }
-        let canon = self
-            .inner
-            .locked()
-            .canon
-            .as_ref()
-            .map(|c| serde_json::to_string(c).unwrap_or_default());
-        if let Some(c) = canon {
+        let canon = self.state().canon.clone();
+        if let Some(c) = canon.map(|c| serde_json::to_string(&*c).unwrap_or_default()) {
             if let Err(e) = backup(&self.home, &c, chrono::Local::now().naive_local()) {
                 eprintln!("couldn't make a backup: {}", e);
             }
@@ -667,10 +722,9 @@ impl Hub {
         let canon = {
             let mut g = self.state();
             g.prune_fails(now_ms());
-            g.canon
-                .as_ref()
-                .map(|c| serde_json::to_string(c).unwrap_or_default())
-        };
+            g.canon.clone()
+        }
+        .map(|c| serde_json::to_string(&*c).unwrap_or_default());
         let gone = collect_garbage(&self.home, canon.as_deref(), std::time::SystemTime::now());
         if !gone.is_empty() {
             eprintln!("deleted {} file(s) no message names anymore", gone.len());
@@ -693,9 +747,12 @@ impl Hub {
                 _ => None,
             };
             g.summary = Some(wb_sync::Summary::of(c));
-            let _ = self
-                .updates
-                .send(Arc::new(Canon::new(c, g.saved.rev, delta, &g.saved)));
+            let _ = self.updates.send(Arc::new(Canon::new(
+                c.clone(),
+                g.saved.rev,
+                delta,
+                &g.saved,
+            )));
         }
     }
 }

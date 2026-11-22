@@ -169,7 +169,7 @@ impl Hub {
             let g = self.state();
             let Some(ch) = g
                 .canon
-                .as_ref()
+                .as_deref()
                 .and_then(|c| c.get("channels"))
                 .and_then(|c| c.as_array())
                 .and_then(|a| {

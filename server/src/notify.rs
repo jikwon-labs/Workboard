@@ -21,7 +21,7 @@ impl Hub {
         // only conversations this copy has can get new messages from it
         let chans = push::channel_ids(&data);
         let mut g = self.state();
-        let members_before = member_ids(g.canon.as_ref());
+        let members_before = member_ids(g.canon.as_deref());
         // the messages already there, to tell which ones are new (only when
         // someone could be notified: an iPhone, or a computer watching)
         let pushes = self.pusher.is_some() && !g.saved.push.is_empty();
@@ -37,7 +37,7 @@ impl Hub {
             None => spaces::PutBack::default(),
         };
         let claimer = g.saved.devices.contains_key(device);
-        let changed = match g.canon.as_mut() {
+        let changed = match g.canon.as_mut().map(Arc::make_mut) {
             // the workspace comes from the computer that claimed the server
             // (a claim taken over after claim_wait no longer counts)
             None if !claimer => false,
@@ -54,7 +54,7 @@ impl Hub {
                 for m in owners {
                     label_role(&mut data, m, Role::Owner);
                 }
-                g.canon = Some(data);
+                g.canon = Some(Arc::new(data));
                 true
             }
             Some(c) => {
@@ -97,7 +97,7 @@ impl Hub {
             }
             self.broadcast_canon(&mut g, false);
             // someone added or removed people: owners and admins see the new list
-            if member_ids(g.canon.as_ref()) != members_before {
+            if member_ids(g.canon.as_deref()) != members_before {
                 drop(g);
                 let _ = self.access.send(EVERYONE);
             }

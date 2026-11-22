@@ -73,7 +73,7 @@ fn email_invite_staging_failure_leaves_live_state_and_notifications_untouched() 
             assert!(res.get("code").is_none());
             let g = hub.inner.lock().unwrap();
             assert!(
-                g.canon.as_ref() == Some(&canon),
+                g.canon.as_deref() == Some(&canon),
                 "live canon must not change"
             );
             assert!(
@@ -454,7 +454,7 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         id: None,
         persistence: Mutex::new(()),
         inner: Mutex::new(Inner {
-            canon,
+            canon: canon.map(Arc::new),
             saved,
             dirty: false,
             mine_dirty: false,
@@ -789,7 +789,7 @@ fn admins_make_codes_only_for_new_members_and_codes_never_replace_a_password() {
     // admins don't see the codes they couldn't make
     let people = {
         let g = hub.inner.lock().unwrap();
-        g.saved.people(g.canon.as_ref(), Role::Admin)
+        g.saved.people(g.canon.as_deref(), Role::Admin)
     };
     let shown = |m: u64| {
         people
@@ -1352,7 +1352,7 @@ fn the_team_copy_is_written_once_changes_settle() {
     let hub = test_hub(&home, Some(json!({"workspace": "one"})), Saved::default());
     let change = |name: &str| {
         let mut g = hub.inner.lock().unwrap();
-        g.canon.as_mut().unwrap()["workspace"] = json!(name);
+        g.canon.as_mut().map(Arc::make_mut).unwrap()["workspace"] = json!(name);
         hub.broadcast_canon(&mut g, false);
     };
     let on_disk = || {
@@ -1572,7 +1572,12 @@ fn a_broadcast_is_made_once_for_people_who_see_the_same() {
         {"id": 12, "kind": "Channel", "private": true, "members": [1, 4]},
     ]});
     let delta = json!({"channels": [{"id": 12, "kind": "Channel", "private": true, "members": [1, 4], "name": "x"}]});
-    let c = Canon::new(&canon, 5, Some(delta.clone()), &Saved::default());
+    let c = Canon::new(
+        Arc::new(canon.clone()),
+        5,
+        Some(delta.clone()),
+        &Saved::default(),
+    );
     // 2 and 3 aren't in channel 12; 1 and 4 are
     let (two, gone) = c.update_for(2);
     assert_eq!(c.update_for(3), (two.clone(), gone.clone()));
@@ -1601,7 +1606,7 @@ fn a_broadcast_is_made_once_for_people_who_see_the_same() {
     // one whose last copy left channel 12 out gets it back whole: its own
     let back = c.delta_for(4, &[12]).unwrap();
     assert_eq!(c.made.locked().len(), 4);
-    let fresh = Canon::new(&canon, 5, Some(delta), &Saved::default());
+    let fresh = Canon::new(Arc::new(canon.clone()), 5, Some(delta), &Saved::default());
     assert_eq!(fresh.delta_for(4, &[12]).unwrap(), back);
 }
 
@@ -1647,4 +1652,79 @@ fn waiting_for_a_busy_workspace_leaves_the_other_connections_running() {
         "the other task ran only after the lock was let go"
     );
     let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn messages_written_from_a_borrowed_copy_are_the_same_as_wb_nets() {
+    let data = json!({"workspace": "Team", "channels": [{"id": 10, "messages": [{"id": 11, "text": "hi"}]}]});
+    for hidden in [vec![], vec![12, 13]] {
+        let msg = Msg::Update {
+            data: data.clone(),
+            rev: 7,
+            hidden: hidden.clone(),
+        };
+        assert_eq!(update_json(&data, 7, &hidden), msg.to_json());
+    }
+    for (snapshot, token, email, hidden) in [
+        (None, None, None, vec![]),
+        (
+            Some(data.clone()),
+            Some("tok".to_string()),
+            Some("a@b.c".to_string()),
+            vec![12],
+        ),
+        (Some(data.clone()), None, None, vec![]),
+    ] {
+        let msg = Msg::Welcome {
+            tag: 3,
+            snapshot: snapshot.clone(),
+            rev: 9,
+            member: 4,
+            role: Role::Admin,
+            token: token.clone(),
+            email: email.clone(),
+            hidden: hidden.clone(),
+            deltas: true,
+        };
+        let ours = welcome_json(
+            3,
+            snapshot.as_ref(),
+            9,
+            4,
+            Role::Admin,
+            token,
+            email,
+            &hidden,
+        );
+        assert_eq!(ours, msg.to_json());
+        assert_eq!(Msg::parse(&ours), Some(msg));
+    }
+}
+
+#[test]
+fn what_is_left_out_is_every_id_inside_the_hidden_items() {
+    let canon = json!({
+        "channels": [
+            {"id": 10, "messages": [{"id": 11, "replies": [{"id": 12}, {"text": "no id"}]}]},
+            {"id": 20, "messages": [{"id": 21}]}
+        ],
+        "spaces": [{"id": 30, "folders": [{"id": 31, "lists": [{"id": 32}]}], "lists": [{"id": 33}],
+                    "statuses": [{"name": "open"}]}],
+        "tasks": [{"id": 40, "activity": [{"id": 41}], "checklist": []}],
+        "docs": [{"id": 50}]
+    });
+    for hidden in [
+        vec![10],
+        vec![30, 40],
+        vec![10, 20, 30, 40, 50],
+        vec![99],
+        vec![],
+    ] {
+        assert_eq!(
+            left_out(&canon, &hidden),
+            wb_sync::ids_inside(&canon, &hidden),
+            "{:?}",
+            hidden
+        );
+    }
 }

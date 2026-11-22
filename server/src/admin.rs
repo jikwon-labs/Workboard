@@ -5,22 +5,19 @@ use super::*;
 
 impl Hub {
     /// The whole team's copy `member` gets, and what is hidden from them.
+    /// (The copy is taken under the lock and written out after.)
     pub(crate) fn latest(&self, member: u64) -> Option<(String, Vec<u64>)> {
-        let g = self.state();
-        g.canon.as_ref().map(|c| {
-            let manages = g.saved.role_of(member).manages();
-            let (data, hidden) =
-                copy_for(c, member, manages).unwrap_or_else(|| (c.clone(), vec![]));
-            let gone = left_out(c, &hidden);
+        let (canon, rev, manages) = {
+            let g = self.state();
             (
-                Msg::Update {
-                    data,
-                    rev: g.saved.rev,
-                    hidden,
-                }
-                .to_json(),
-                gone,
+                g.canon.clone()?,
+                g.saved.rev,
+                g.saved.role_of(member).manages(),
             )
+        };
+        Some(match copy_for(&canon, member, manages) {
+            Some((data, hidden)) => (update_json(&data, rev, &hidden), left_out(&canon, &hidden)),
+            None => (update_json(&canon, rev, &[]), vec![]),
         })
     }
 
@@ -29,7 +26,7 @@ impl Hub {
         let g = self.state();
         let role = g.saved.role_of(member);
         let people = if role.manages() {
-            g.saved.people(g.canon.as_ref(), role)
+            g.saved.people(g.canon.as_deref(), role)
         } else {
             vec![]
         };
@@ -112,7 +109,7 @@ impl Hub {
         if role == Role::Owner {
             return Err("There is one owner. Invite them as an admin instead.".into());
         }
-        if !member_exists(g.canon.as_ref(), who) {
+        if !member_exists(g.canon.as_deref(), who) {
             return Err(
                 "That person isn't in the workspace yet. Add them with Invite first.".into(),
             );
@@ -163,7 +160,11 @@ impl Hub {
         // their apps hear the new role before the copy it lets them
         // see (an app goes by its role for what it may see)
         let _ = self.access.send(from);
-        let relabeled = g.canon.as_mut().is_some_and(|c| label_role(c, who, role));
+        let relabeled = g
+            .canon
+            .as_mut()
+            .map(Arc::make_mut)
+            .is_some_and(|c| label_role(c, who, role));
         if relabeled {
             self.broadcast_canon(g, false);
         }
@@ -213,6 +214,7 @@ impl Hub {
         let _ = self.access.send(from);
         if g.canon
             .as_mut()
+            .map(Arc::make_mut)
             .is_some_and(|c| label_role(c, who, Role::Member))
         {
             self.broadcast_canon(g, false);
@@ -229,7 +231,7 @@ impl Hub {
         let mut g = self.state();
         let canon = g
             .canon
-            .as_ref()
+            .as_deref()
             .ok_or("Set up a workspace before inviting teammates.")?;
         if !copy_shape_ok(canon) {
             return Err("Workspace metadata is malformed; no invitation was created.".into());
@@ -333,7 +335,7 @@ impl Hub {
         saved.rev += 1;
         persist_email_invite(&self.home, &canon, &saved)?;
         saved.rev = g.saved.rev;
-        g.canon = Some(canon);
+        g.canon = Some(Arc::new(canon));
         g.saved = saved;
         self.broadcast_canon(&mut g, false);
         g.dirty = false;
@@ -370,7 +372,7 @@ impl Hub {
                 .and_then(|r| serde_json::from_value(r.clone()).ok())
                 .unwrap_or_default();
             let mut g = self.state();
-            if g.canon.is_some() && !member_exists(g.canon.as_ref(), member) {
+            if g.canon.is_some() && !member_exists(g.canon.as_deref(), member) {
                 return json!({"ok": false, "message": format!("No member with id {} in the workspace (see `workboard-server people`).", member)});
             }
             let code = g.saved.make_invite(member, role);

@@ -119,7 +119,7 @@ impl Hub {
             Some(pw) => {
                 let email = given(&h.email)
                     .map(|e| e.trim().to_string())
-                    .unwrap_or_else(|| member_field(g.canon.as_ref(), member, "email"));
+                    .unwrap_or_else(|| member_field(g.canon.as_deref(), member, "email"));
                 if email.is_empty() {
                     return Err("Type your email too: you sign in with it on your other computers and phones.".into());
                 }
@@ -515,7 +515,7 @@ impl Hub {
         };
         let (to, workspace, inviter) = {
             let g = self.state();
-            let c = g.canon.as_ref();
+            let c = g.canon.as_deref();
             (
                 member_field(c, who, "email"),
                 c.and_then(|c| c.get("workspace"))
@@ -544,7 +544,8 @@ impl Hub {
         }
     }
 
-    /// The welcome message, and what is hidden from `member`.
+    /// The welcome message, and what is hidden from `member`. The copy is
+    /// only taken (not copied) under the lock; the message is made after.
     pub(crate) fn welcome(
         &self,
         tag: u16,
@@ -552,36 +553,30 @@ impl Hub {
         role: Role,
         token: Option<String>,
     ) -> (String, Vec<u64>) {
-        let g = self.state();
-        let email = g.saved.accounts.get(&member).map(|a| a.email.clone());
-        let manages = g.saved.role_of(member).manages();
-        let (snapshot, hidden) = match g
-            .canon
-            .as_ref()
-            .map(|c| copy_for(c, member, manages).unwrap_or_else(|| (c.clone(), vec![])))
-        {
-            Some((s, h)) => (Some(s), h),
-            None => (None, vec![]),
+        let (canon, rev, email, manages) = {
+            let g = self.state();
+            (
+                g.canon.clone(),
+                g.saved.rev,
+                g.saved.accounts.get(&member).map(|a| a.email.clone()),
+                g.saved.role_of(member).manages(),
+            )
         };
-        let gone = g
-            .canon
-            .as_ref()
-            .map(|c| left_out(c, &hidden))
-            .unwrap_or_default();
-        (
-            Msg::Welcome {
-                tag,
-                snapshot,
-                rev: g.saved.rev,
-                member,
-                role,
-                token,
-                email,
-                hidden,
-                deltas: true,
-            }
-            .to_json(),
-            gone,
-        )
+        let Some(canon) = canon else {
+            return (
+                welcome_json(tag, None, rev, member, role, token, email, &[]),
+                vec![],
+            );
+        };
+        match copy_for(&canon, member, manages) {
+            Some((copy, hidden)) => (
+                welcome_json(tag, Some(&copy), rev, member, role, token, email, &hidden),
+                left_out(&canon, &hidden),
+            ),
+            None => (
+                welcome_json(tag, Some(&canon), rev, member, role, token, email, &[]),
+                vec![],
+            ),
+        }
     }
 }

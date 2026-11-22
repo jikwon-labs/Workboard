@@ -38,7 +38,7 @@ impl Hub {
             return Err("Pick a time from now to a year ahead.".into());
         }
         let mut g = self.state();
-        let Some(canon) = g.canon.as_ref() else {
+        let Some(canon) = g.canon.as_deref() else {
             return Err("The workspace isn't set up on this server yet.".into());
         };
         let ch = wb_sync::json::array_at(canon, "channels")
@@ -112,7 +112,7 @@ impl Hub {
         for w in due {
             let copy = {
                 let g = self.state();
-                g.canon.as_ref().and_then(|c| with_message(c, &w, now))
+                g.canon.as_deref().and_then(|c| with_message(c, &w, now))
             };
             match copy {
                 Some(c) => {

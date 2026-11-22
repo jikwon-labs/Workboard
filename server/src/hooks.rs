@@ -159,7 +159,7 @@ impl Hub {
             return Err("An outgoing webhook needs a web address (https://...).".into());
         }
         let mut g = self.state();
-        let exists = g.canon.as_ref().is_some_and(|c| {
+        let exists = g.canon.as_deref().is_some_and(|c| {
             wb_sync::json::array_at(c, "channels")
                 .iter()
                 .any(|x| wb_sync::json::u64_field(x, "id") == Some(hook.channel))
@@ -250,7 +250,7 @@ impl Hub {
         };
         let copy = {
             let g = self.state();
-            g.canon.as_ref().and_then(|c| {
+            g.canon.as_deref().and_then(|c| {
                 let mut c = schedule::with_message(c, &w, now)?;
                 set_bot(&mut c, channel, parent, id, bot);
                 Some(c)

@@ -72,7 +72,7 @@ impl Hub {
         let g = self.state();
         let canon = g
             .canon
-            .as_ref()
+            .as_deref()
             .ok_or("There's no workspace on the server yet.")?;
         let ch = canon
             .get("channels")

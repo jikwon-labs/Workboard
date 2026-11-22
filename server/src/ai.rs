@@ -1481,22 +1481,16 @@ impl crate::Hub {
         // any of them copies the workspace
         let ticket = self.ai_allowance.take(member, setup.per_hour)?;
         // copied out of the lock: building a question's context takes a moment
-        let copy = {
+        let (canon, manages) = {
             let g = self.state();
-            match g.canon.as_ref() {
-                Some(canon) => {
-                    let manages = g.saved.role_of(member).manages();
-                    Some(match crate::canon::copy_for(canon, member, manages) {
-                        Some((c, _)) => c,
-                        None => canon.clone(),
-                    })
-                }
-                None => None,
-            }
+            (g.canon.clone(), g.saved.role_of(member).manages())
         };
         let now = chrono::Utc::now().timestamp();
-        let built = match &copy {
-            Some(copy) => build(&setup.model, copy, member, ask, lang, now),
+        let built = match &canon {
+            Some(canon) => match crate::canon::copy_for(canon, member, manages) {
+                Some((copy, _)) => build(&setup.model, &copy, member, ask, lang, now),
+                None => build(&setup.model, canon, member, ask, lang, now),
+            },
             None => Err(AI_EMPTY.to_string()),
         };
         let (body, kind) = match built {

@@ -195,8 +195,45 @@ pub(crate) fn copy_for(canon: &Value, member: u64, manages: bool) -> Option<(Val
 /// hidden top-level items and everything inside them (a folder in a space
 /// closed to its person, with its lists), so whatever of it they may see
 /// later reaches them whole (see `Canon::delta_for`).
+/// (`wb_sync::ids_inside` without copying or fingerprinting what it walks:
+/// a hidden channel holds all its messages.)
 pub(crate) fn left_out(canon: &Value, hidden: &[u64]) -> Vec<u64> {
-    wb_sync::ids_inside(canon, hidden)
+    fn items(v: &Value) -> Option<&Vec<Value>> {
+        // as wb_sync::is_id_array: objects, at least one with an id
+        let a = v.as_array()?;
+        (!a.is_empty()
+            && a.iter().all(|x| x.is_object())
+            && a.iter().any(|x| wb_sync::json::id_of(x).is_some()))
+        .then_some(a)
+    }
+    fn walk(a: &[Value], out: &mut std::collections::BTreeSet<u64>) {
+        for item in a {
+            let (Some(id), Some(obj)) = (wb_sync::json::id_of(item), item.as_object()) else {
+                continue;
+            };
+            out.insert(id);
+            for child in obj.values() {
+                if let Some(inner) = items(child) {
+                    walk(inner, out);
+                }
+            }
+        }
+    }
+    if hidden.is_empty() {
+        return vec![];
+    }
+    let wanted: std::collections::HashSet<u64> = hidden.iter().copied().collect();
+    let mut out = std::collections::BTreeSet::new();
+    for path in wb_sync::SHARED {
+        let top = wb_sync::json::array_at(canon, path);
+        for item in top
+            .iter()
+            .filter(|x| wb_sync::json::id_of(x).is_some_and(|i| wanted.contains(&i)))
+        {
+            walk(std::slice::from_ref(item), &mut out);
+        }
+    }
+    out.into_iter().collect()
 }
 
 /// Whether `member` may delete a channel and change who else is in it: the

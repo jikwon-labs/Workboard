@@ -256,20 +256,20 @@ impl Hub {
                     chrono::Local::now().format("%Y%m%d-%H%M%S")
                 ));
                 let _ = std::fs::create_dir_all(self.home.join(BACKUP_DIR));
-                let _ = write_atomic(&keep, &serde_json::to_string(cur).unwrap_or_default());
+                let _ = write_atomic(&keep, &serde_json::to_string(&**cur).unwrap_or_default());
                 let mut kept = backup_files(&self.home.join(BACKUP_DIR), "before-restore");
                 while kept.len() > KEEP_BEFORE_RESTORE {
                     let _ = std::fs::remove_file(kept.remove(0));
                 }
             }
-            match g.canon.as_mut() {
+            match g.canon.as_mut().map(Arc::make_mut) {
                 Some(c) => {
                     // the restored items win; things made after the backup stay
                     let mut restored = data;
                     wb_sync::merge(&mut restored, &[c.clone()]);
                     *c = wb_sync::shareable(&restored);
                 }
-                None => g.canon = Some(data),
+                None => g.canon = Some(Arc::new(data)),
             }
             self.broadcast_canon(&mut g, true);
         }

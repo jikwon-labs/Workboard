@@ -742,6 +742,38 @@ pub(super) fn icon_button_ex(
     resp
 }
 
+/// A frameless toolbar button with `text` (a glyph, or a short mark such as
+/// "</>") in its middle, as big as an icon-only `icon_button` beside it and
+/// with the same hover fill. A frameless egui button is only as wide as its
+/// text, so the hover fill of a message box's "+" or "I" was a tall, thin
+/// bar next to the emoji button's square. `name` is its accessible name.
+pub(super) fn glyph_button(ui: &mut Ui, text: impl Into<egui::WidgetText>, name: &str) -> Response {
+    let g = text.into().into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let side = crate::widgets::CONTROL_H;
+    // a mark too wide for the square ("</>" in a larger font) gets 3 px
+    // each side
+    let w = (g.size().x + 6.0).max(side);
+    let (r, resp) = ui.allocate_exact_size(vec2(w, side), Sense::click());
+    name_it(&resp, name);
+    if resp.enabled() && (resp.hovered() || resp.is_pointer_button_down_on()) {
+        let fill = crate::widgets::hover_fill(ui);
+        let fill = if resp.is_pointer_button_down_on() {
+            fill.gamma_multiply(1.5)
+        } else {
+            fill
+        };
+        ui.painter().rect_filled(r, 6.0, fill);
+    }
+    let color = ui.style().interact(&resp).text_color();
+    ui.painter().galley(r.center() - g.size() / 2.0, g, color);
+    resp
+}
+
 /// A "+" drawn as two lines centred on `c`, about as big as the "+"
 /// character of a `size` px font. The character sits below the middle of
 /// its line (by about a tenth of the size in the system font), so in a box,

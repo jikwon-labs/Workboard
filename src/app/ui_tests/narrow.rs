@@ -389,6 +389,43 @@ fn compact_thread_is_laid_over_the_conversation() {
     assert!(h.past_right_edge().is_empty(), "{:?}", h.past_right_edge());
 }
 
+/// The message box's tools are squares as big as the emoji button. At the
+/// smallest window eight of them, the clock and Send are too wide for the
+/// row, so B, I, S and </> are left out (their shortcuts still work); a
+/// little wider, they are back and still clear of the clock.
+#[test]
+fn compact_message_box_tools_fit_beside_send() {
+    for (w, formats) in [(360.0, false), (400.0, true)] {
+        let mut h = Ui1::sized(w, 640.0);
+        go_home(&mut h);
+        h.click("general");
+        h.click("Message composer");
+        // with text in the box the clock shows too
+        h.type_text("Hello");
+        assert_eq!(h.has("Bold"), formats, "{w}");
+        assert_eq!(h.has("Code"), formats, "{w}");
+        let task = h.rect("Create task");
+        let clock = h.rect("Schedule message");
+        let send = h.rect("Send");
+        assert!(
+            task.right() + 4.0 <= clock.left(),
+            "{w}: {task:?} {clock:?}"
+        );
+        assert!(clock.right() < send.left(), "{w}: {clock:?} {send:?}");
+        for name in ["Add files", "Mention someone", "Emoji", "Create task"] {
+            let r = h.rect(name);
+            assert_eq!(r.width(), r.height(), "{w}: {name} {r:?}");
+        }
+        assert!(h.past_right_edge().is_empty(), "{:?}", h.past_right_edge());
+        // Cmd+B still makes the word bold
+        if !formats {
+            h.key_with(egui::Key::A, cmd());
+            h.key_with(egui::Key::B, cmd());
+            assert_eq!(h.app.chat.channel.text, "**Hello**", "{w}");
+        }
+    }
+}
+
 #[test]
 fn going_wide_from_the_home_screen_brings_back_rail_and_sidebar() {
     let mut h = Ui1::sized(360.0, 640.0);

@@ -3,7 +3,7 @@
 // reactions, saved messages and "Reply in thread", a thread panel on the
 // right, and turning a message into a task. Everything stays on this computer.
 
-use super::icons::{icon_button, icon_button_ex, line_icon};
+use super::icons::{glyph_button, icon_button, icon_button_ex, line_icon};
 use super::msgquery::{has_files, has_links, in_thread, MsgQuery};
 use super::*;
 
@@ -684,6 +684,13 @@ fn format_keys(ui: &mut Ui, id: egui::Id, text: &mut String) {
     }
 }
 
+/// The room between the square tools under a message box (+, @, emoji, B,
+/// I, S, </>, task): each square already keeps its glyph clear of the next.
+const TOOL_GAP: f32 = 4.0;
+
+/// How wide the message box's round Send button is.
+const SEND_D: f32 = 30.0;
+
 /// The B, I, S and </> buttons of a message box; `prefix` tells the
 /// boxes apart for the tests ("" or "reply ").
 fn format_buttons(ui: &mut Ui, t: &Theme, id: egui::Id, text: &mut String, prefix: &str) {
@@ -694,10 +701,8 @@ fn format_buttons(ui: &mut Ui, t: &Theme, id: egui::Id, text: &mut String, prefi
             "Strikethrough" => RichText::new("S").strikethrough(),
             _ => RichText::new("</>").monospace(),
         };
-        let b = ui
-            .add(ghost(egui::Button::new(glyph.color(t.text2))))
+        let b = glyph_button(ui, glyph.color(t.text2), &format!("{}{}", prefix, name))
             .on_hover_text(tr(name));
-        name_it(&b, &format!("{}{}", prefix, name));
         if b.clicked() {
             format_selection(ui.ctx(), id, text, mark);
         }
@@ -3116,6 +3121,14 @@ impl App {
                 let mut schedule: Option<Option<i64>> = None;
                 let mut insert: Option<String> = None;
                 ui.horizontal(|ui| {
+                    let gap = ui.spacing().item_spacing.x;
+                    // room for all eight squares and, at the right, the clock
+                    // (once there is text) and Send. A narrower box leaves out
+                    // B, I, S and </>: their shortcuts and typed marks still work.
+                    let side = crate::widgets::CONTROL_H;
+                    let room = 8.0 * side + 7.0 * TOOL_GAP + 2.0 * gap + side + SEND_D;
+                    let formats = ui.available_width() >= room;
+                    ui.spacing_mut().item_spacing.x = TOOL_GAP;
                     let tool = |ui: &mut Ui, g: &str, tip: &str| {
                         let plus = g == "+";
                         let text = if plus {
@@ -3123,13 +3136,11 @@ impl App {
                         } else {
                             RichText::new(g).color(t.text2)
                         };
-                        let b = ui.add(ghost(egui::Button::new(text)));
+                        let b = glyph_button(ui, text, tip);
                         if plus {
                             crate::app::icons::paint_sign(ui, &b, false, Some(t.text2));
                         }
-                        let b = b.on_hover_text(tr(tip));
-                        name_it(&b, tip);
-                        b
+                        b.on_hover_text(tr(tip))
                     };
                     if tool(ui, "+", "Add files").clicked() {
                         self.pick_media(false);
@@ -3188,10 +3199,13 @@ impl App {
                             close_popup(ui);
                         }
                     });
-                    format_buttons(ui, &t, text_id, &mut self.chat.channel.text, "");
+                    if formats {
+                        format_buttons(ui, &t, text_id, &mut self.chat.channel.text, "");
+                    }
                     if itool(ui, Icon::Task, "Create task").clicked() {
                         self.open_quick_add(None);
                     }
+                    ui.spacing_mut().item_spacing.x = gap;
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         // Post in words; a message sends with the paper plane drawn on it
                         let label = if self.composer_mode == ComposerMode::Post {
@@ -3217,9 +3231,9 @@ impl App {
                             // round: a circle around the paper plane, a pill around "Post"
                             .corner_radius(15)
                             .min_size(if label.is_empty() {
-                                vec2(30.0, 30.0)
+                                vec2(SEND_D, SEND_D)
                             } else {
-                                vec2(34.0, 30.0)
+                                vec2(34.0, SEND_D)
                             }),
                         );
                         let sent = ui.add(b);
@@ -3418,23 +3432,21 @@ impl App {
                 }
                 let mut pick = false;
                 ui.horizontal(|ui| {
-                    let b = ui.add(ghost(egui::Button::new(crate::app::icons::sign_text(
-                        false,
-                    ))));
+                    let gap = ui.spacing().item_spacing.x;
+                    ui.spacing_mut().item_spacing.x = TOOL_GAP;
+                    let b = glyph_button(
+                        ui,
+                        crate::app::icons::sign_text(false),
+                        "Add files to the reply",
+                    );
                     crate::app::icons::paint_sign(ui, &b, false, Some(t.text2));
-                    let b = b.on_hover_text(tr("Add files"));
-                    b.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::Button,
-                            true,
-                            "Add files to the reply",
-                        )
-                    });
-                    pick = b.clicked();
-                    let at = ui
-                        .add(ghost(egui::Button::new(RichText::new("@").color(t.text2))))
-                        .on_hover_text(tr("Mention someone"));
-                    name_it(&at, "Mention someone in the reply");
+                    pick = b.on_hover_text(tr("Add files")).clicked();
+                    let at = glyph_button(
+                        ui,
+                        RichText::new("@").color(t.text2),
+                        "Mention someone in the reply",
+                    )
+                    .on_hover_text(tr("Mention someone"));
                     popup(ui, &at, mention_popup, 210.0, |ui| {
                         if people.is_empty() {
                             let why = if nobody {
@@ -3461,6 +3473,7 @@ impl App {
                         }
                     });
                     format_buttons(ui, &t, id, text, "reply ");
+                    ui.spacing_mut().item_spacing.x = gap;
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let ready = files_ok && (!text.trim().is_empty() || has_files);
                         if (primary_button(ui, &t, tr("Send")).clicked() || enter) && ready {

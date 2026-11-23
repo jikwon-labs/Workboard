@@ -611,6 +611,68 @@ fn plus_buttons_draw_the_plus_in_their_middle() {
     h.assert_plus_centered("Add files");
 }
 
+/// The message boxes' text tools (+, @, B, I, S, </>) are as big as the
+/// emoji button beside them, and their hover fill covers that square: a
+/// frameless button is only as wide as its text, so the "+" lit up as a
+/// tall, thin bar.
+#[test]
+fn message_box_tools_are_squares_like_the_emoji_button() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let emoji = h.rect("Emoji");
+    for name in [
+        "Add files",
+        "Mention someone",
+        "Bold",
+        "Italic",
+        "Strikethrough",
+        "Code",
+    ] {
+        let r = h.rect(name);
+        assert_eq!(r.size(), emoji.size(), "{name}");
+        assert!(
+            (r.center().y - emoji.center().y).abs() < 0.5,
+            "{name} {r:?} in a row with the emoji button {emoji:?}"
+        );
+    }
+    let plus = h.rect("Add files");
+    h.hover(plus.center());
+    for edge in [
+        plus.left_center() + vec2(1.0, 0.0),
+        plus.right_center() - vec2(1.0, 0.0),
+        plus.center_top() + vec2(0.0, 1.0),
+        plus.center_bottom() - vec2(0.0, 1.0),
+    ] {
+        assert!(
+            h.hover_fill_at(edge),
+            "the fill reaches {edge:?} of {plus:?}"
+        );
+    }
+    h.assert_plus_centered("Add files");
+
+    // the reply box's tools, in the thread beside the conversation
+    h.send_message("A question for the thread");
+    let msg = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .and_then(|c| c.messages.last())
+        .map(|m| m.id)
+        .unwrap();
+    h.app.chat.thread_open = Some(msg);
+    h.settle();
+    let at = h.rect("Mention someone in the reply");
+    for name in ["Add files to the reply", "reply Bold", "reply Code"] {
+        let r = h.rect(name);
+        assert_eq!(r.size(), emoji.size(), "{name}");
+        assert!((r.center().y - at.center().y).abs() < 0.5, "{name} {r:?}");
+    }
+    assert_eq!(at.size(), emoji.size());
+    h.assert_plus_centered("Add files to the reply");
+}
+
 /// Buttons with one glyph in them (the bulk bar's "x", a Space's "..." in
 /// Settings, the Timeline's zoom "-" and "+") are square: a button is as
 /// wide as its text plus the side padding, so these came out wider than

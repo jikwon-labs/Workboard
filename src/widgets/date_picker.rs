@@ -13,6 +13,17 @@ const CELL: f32 = 32.0;
 const GAP: f32 = 17.0;
 /// The column of quick options: what the month leaves of the menu.
 const OPTIONS_W: f32 = DATE_MENU_W - GAP - 7.0 * CELL;
+
+/// How wide a date menu is in this window: `DATE_MENU_W`, or what a narrow
+/// window leaves inside its margins (a 360 pt window cut the menu's left
+/// side off). Narrower than `DATE_MENU_W`, the quick options go above the
+/// month instead of beside it.
+pub fn date_menu_w(ui: &Ui) -> f32 {
+    let margin = egui::Frame::popup(ui.style()).total_margin().sum().x;
+    DATE_MENU_W
+        .min(ui.ctx().screen_rect().width() - 16.0 - margin)
+        .max(7.0 * CELL)
+}
 /// The circle behind a day (hovered or picked), and the arrows' squares.
 const DAY_R: f32 = 13.0;
 /// Text in a row starts this far in from the row's hover fill.
@@ -84,10 +95,14 @@ fn date_menu_inner(
         .data(|d| d.get_temp(id))
         .unwrap_or_else(|| NaiveDate::from_ymd_opt(base.year(), base.month(), 1).unwrap());
     let td = today();
+    let w = date_menu_w(ui);
+    // a narrow window: the quick options in two columns above the month
+    let narrow = w < DATE_MENU_W - 0.5;
+    let opts_h = if narrow { CELL * 4.0 + GAP } else { 0.0 };
     // eight rows: the month's name, the weekdays and six weeks. The quick
     // options take a row each beside them, Clear the last, so the menu is
     // as tall with or without a date and nothing is left empty below
-    let (rect, _) = ui.allocate_exact_size(vec2(DATE_MENU_W, CELL * 8.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(w, opts_h + CELL * 8.0), Sense::hover());
     let mut picked: Option<Option<NaiveDate>> = None;
     let wd = td.weekday().num_days_from_monday() as i64;
     let opts: [(&str, NaiveDate); 7] = [
@@ -100,7 +115,15 @@ fn date_menu_inner(
         ("8 weeks", td + Duration::days(56)),
     ];
     let option_row = |i: usize| {
-        Rect::from_min_size(rect.min + vec2(0.0, CELL * i as f32), vec2(OPTIONS_W, CELL))
+        if narrow {
+            let half = w / 2.0;
+            Rect::from_min_size(
+                rect.min + vec2(half * (i % 2) as f32, CELL * (i / 2) as f32),
+                vec2(half, CELL),
+            )
+        } else {
+            Rect::from_min_size(rect.min + vec2(0.0, CELL * i as f32), vec2(OPTIONS_W, CELL))
+        }
     };
     for (i, (label, d)) in opts.into_iter().enumerate() {
         if menu_line(ui, option_row(i), id.with(("opt", i)), label, t.text).clicked() {
@@ -110,15 +133,31 @@ fn date_menu_inner(
     let line = ui.visuals().widgets.noninteractive.bg_stroke;
     if current.is_some() {
         let r = option_row(7);
-        ui.painter().hline(r.x_range(), r.top(), line);
+        if !narrow {
+            ui.painter().hline(r.x_range(), r.top(), line);
+        }
         if menu_line(ui, r, id.with("clear"), "Clear", t.danger).clicked() {
             picked = Some(None);
         }
     }
-    ui.painter()
-        .vline(rect.left() + OPTIONS_W + GAP / 2.0, rect.y_range(), line);
+    if narrow {
+        ui.painter()
+            .hline(rect.x_range(), rect.top() + CELL * 4.0 + GAP / 2.0, line);
+    } else {
+        ui.painter()
+            .vline(rect.left() + OPTIONS_W + GAP / 2.0, rect.y_range(), line);
+    }
 
-    let grid = Rect::from_min_max(pos2(rect.right() - 7.0 * CELL, rect.top()), rect.max);
+    // the month: beside the options at the right, or under them, centred
+    let grid = if narrow {
+        let left = rect.left() + (w - 7.0 * CELL) / 2.0;
+        Rect::from_min_size(
+            pos2(left, rect.top() + opts_h),
+            vec2(7.0 * CELL, CELL * 8.0),
+        )
+    } else {
+        Rect::from_min_max(pos2(rect.right() - 7.0 * CELL, rect.top()), rect.max)
+    };
     let col = |c: usize| grid.left() + CELL * (c as f32 + 0.5);
     let row = |r: usize| grid.top() + CELL * (r as f32 + 0.5);
     // the month's name starts where the first day's circle does; the arrows
@@ -208,7 +247,7 @@ pub fn time_row(
 ) -> Option<Option<NaiveTime>> {
     let mut out = None;
     let Some(cur) = time else {
-        let (rect, _) = ui.allocate_exact_size(vec2(DATE_MENU_W, 28.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(date_menu_w(ui), 28.0), Sense::hover());
         if menu_line(ui, rect, id.with("add"), "Add time", t.text2).clicked() {
             out = Some(NaiveTime::from_hms_opt(9, 0, 0));
         }
@@ -303,7 +342,7 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) -> bool
     let (start_txt, due_txt) = (fmt_start(task), fmt_due(task));
     ui.horizontal(|ui| {
         // the two tabs share the menu's width
-        let tab_w = (DATE_MENU_W - ui.spacing().item_spacing.x) / 2.0;
+        let tab_w = (date_menu_w(ui) - ui.spacing().item_spacing.x) / 2.0;
         for (k, label, v) in [(0u8, "Start date", start_txt), (1u8, "Due date", due_txt)] {
             let txt = match v {
                 Some(d) => format!("{}: {}", tr(label), d),
@@ -366,7 +405,7 @@ pub fn dates_menu(ui: &mut Ui, t: &Theme, id: egui::Id, task: &mut Task) -> bool
     });
     ui.horizontal(|ui| {
         let gap = ui.spacing().item_spacing.x;
-        let w = (DATE_MENU_W - gap * (RECUR.len() - 1) as f32) / RECUR.len() as f32;
+        let w = (date_menu_w(ui) - gap * (RECUR.len() - 1) as f32) / RECUR.len() as f32;
         // plain buttons: a combo box would close this popup
         for (v, label) in RECUR {
             let sel = recur.as_deref().unwrap_or("") == v;

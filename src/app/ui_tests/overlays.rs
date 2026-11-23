@@ -535,3 +535,75 @@ fn the_large_pictures_long_name_stops_before_close_in_a_narrow_window() {
         );
     }
 }
+
+#[test]
+fn date_menu_fits_a_narrow_window() {
+    // the date menu opened 380 points wide: in a 360 point window its quick
+    // options were cut off on the left. Narrow, they go above the month.
+    for (w, hh) in SMALL {
+        let mut h = Ui1::sized(w, hh);
+        let list = h.app.data.first_list().unwrap();
+        h.app.section = Section::Home;
+        h.app.loc = Location::List(list);
+        h.app.view = ViewKind::List;
+        let tid = h.task_id("Set up analytics dashboard");
+        h.app.selected.insert(tid);
+        h.settle();
+        h.click("Due date");
+        let td = today();
+        let first = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
+        let start = first - Duration::days(first.weekday().num_days_from_sunday() as i64);
+        let mut names: Vec<String> = [
+            "Today",
+            "Tomorrow",
+            "This weekend",
+            "Next week",
+            "2 weeks",
+            "4 weeks",
+            "8 weeks",
+            "Previous month",
+            "Next month",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        names.push(format!("Day {}", start));
+        names.push(format!("Day {}", start + Duration::days(41)));
+        for n in &names {
+            let r = h.date_menu_rect(n);
+            assert!(
+                window(&h).contains_rect(r),
+                "at {}: {} {:?} outside the window",
+                w,
+                n,
+                r
+            );
+        }
+        let cut = h.cut_texts(window(&h));
+        assert!(cut.is_empty(), "at {}: cut {:?}", w, cut);
+    }
+}
+
+#[test]
+fn recent_tray_keeps_its_hide_button_inside_a_narrow_window() {
+    // three chips of fixed width pushed the hide button past the right
+    // edge of a 460 point window
+    for (w, hh) in SMALL {
+        let mut h = Ui1::sized(w, hh);
+        h.app.recent = h.app.data.tasks.iter().take(3).map(|t| t.id).collect();
+        h.settle();
+        let b = h.rect("Hide recent tasks");
+        assert!(
+            b.right() <= w && b.left() >= 0.0,
+            "at {}: hide button {:?} outside the window",
+            w,
+            b
+        );
+        assert!(
+            h.past_right_edge().is_empty(),
+            "at {}: {:?}",
+            w,
+            h.past_right_edge()
+        );
+    }
+}

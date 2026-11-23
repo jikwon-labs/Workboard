@@ -102,9 +102,33 @@ impl App {
                         );
                     }
                     let mut remove = None;
-                    for (i, id) in ids.iter().enumerate() {
+                    // the chips share what the row leaves beside the hide
+                    // button: narrower in a narrow window, and the last ones
+                    // left out when they would get too narrow (at 460 pt the
+                    // button was pushed past the window's edge)
+                    let gap = ui.spacing().item_spacing.x;
+                    let room = (ui.available_width() - 36.0).max(0.0);
+                    let base: Vec<f32> = (0..ids.len())
+                        .map(|i| if i == 1 { 180.0 } else { 128.0 })
+                        .collect();
+                    let mut shown = base.len();
+                    let mut scale = 1.0_f32;
+                    while shown > 0 {
+                        let sum: f32 = base[..shown].iter().sum();
+                        let gaps = gap * (shown - 1) as f32;
+                        if sum + gaps <= room {
+                            break;
+                        }
+                        let s = (room - gaps) / sum;
+                        if s * 128.0 >= 72.0 {
+                            scale = s;
+                            break;
+                        }
+                        shown -= 1;
+                    }
+                    for (i, id) in ids.iter().enumerate().take(shown) {
                         let Some(task) = self.task(*id) else { continue };
-                        let w = if i == 1 { 180.0 } else { 128.0 };
+                        let w = base[i] * scale;
                         let (r, resp) = ui.allocate_exact_size(vec2(w, 21.0), Sense::click());
                         ui.painter().rect_filled(
                             r,

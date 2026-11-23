@@ -16,6 +16,10 @@ pub fn popup<R>(
         ui.memory_mut(|m| m.toggle_popup(id));
     }
     close_when_scrolled_away(ui, resp, id);
+    // never wider than the window leaves inside its margins (a date menu
+    // opened at its full width in a 360 pt window lost its left side)
+    let side_margin = egui::Frame::popup(ui.style()).total_margin().sum().x;
+    let width = width.min(ui.ctx().screen_rect().width() - 16.0 - side_margin);
     // a menu taller than the window scrolls inside itself instead of running
     // off the bottom (egui moves a shorter one up until it fits). Only menus
     // that were too tall last frame get the scroll area, so ordinary menus

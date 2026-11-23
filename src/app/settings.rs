@@ -216,7 +216,7 @@ impl App {
             });
     }
 
-    /// The Settings page's left list: back to the workspace, then its
+    /// The Settings page's left list: back to the previous page, then its
     /// sections by group.
     fn settings_nav(&mut self, nui: &mut Ui) {
         let t = self.t();
@@ -226,7 +226,12 @@ impl App {
             )))
             .clicked()
         {
-            self.section = Section::Home;
+            // back to the page Settings was opened from, like the Back arrow
+            self.go_back();
+            if self.section == Section::Settings {
+                // nothing before Settings in the history
+                self.section = Section::Home;
+            }
         }
         nui.add_space(6.0);
         let ws = self.data.workspace.clone();

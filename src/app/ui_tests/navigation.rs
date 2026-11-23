@@ -1062,6 +1062,26 @@ fn settings_is_a_full_page_with_sections() {
 }
 
 #[test]
+fn back_to_workspace_returns_to_the_page_settings_was_opened_from() {
+    let mut h = Ui1::new();
+    h.click("general");
+    assert_eq!(h.app.section, Section::Chat);
+    let channel = h.app.chat.open;
+    assert!(channel.is_some());
+    h.click("Workspace menu");
+    h.click("Settings");
+    h.click("Settings Spaces");
+    h.click("Settings Themes");
+    h.click("\u{2190}  Back to Workspace");
+    assert_eq!(
+        h.app.section,
+        Section::Chat,
+        "back where Settings was opened"
+    );
+    assert_eq!(h.app.chat.open, channel);
+}
+
+#[test]
 fn search_shows_recent_items_and_finds_docs() {
     let mut h = Ui1::new();
     h.click("Task Set up analytics dashboard");

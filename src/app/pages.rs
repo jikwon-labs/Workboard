@@ -35,19 +35,27 @@ fn bar_row(
     let w = ui.available_width();
     let (r, _) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
     let p = ui.painter();
-    p.text(
-        r.left_center(),
-        Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(12.5),
-        t.text,
-    );
+    // the number at the right first, then the label in its column (narrower
+    // in a narrow card), shortened with "…" so a long name never runs over
+    // the bar or the number
+    let right_w = p
+        .layout_no_wrap(right.clone(), FontId::proportional(12.0), t.text2)
+        .size()
+        .x
+        .max(50.0)
+        + 10.0;
+    let label_w = 120.0_f32.min(w * 0.4);
+    let font = FontId::proportional(12.5);
+    let shown = fit_text(p, label, &font, (label_w - 8.0).min(w - right_w - 8.0));
+    p.text(r.left_center(), Align2::LEFT_CENTER, shown, font, t.text);
     let bar = Rect::from_min_max(
-        pos2(r.left() + 120.0, r.center().y - 5.0),
-        pos2(r.right() - 60.0, r.center().y + 5.0),
+        pos2(r.left() + label_w, r.center().y - 5.0),
+        pos2(r.right() - right_w, r.center().y + 5.0),
     );
-    p.rect_filled(bar, 5.0, t.hover);
-    if max > 0.0 && value > 0.0 {
+    if bar.width() >= 24.0 {
+        p.rect_filled(bar, 5.0, t.hover);
+    }
+    if max > 0.0 && value > 0.0 && bar.width() >= 24.0 {
         let f = (value / max).clamp(0.0, 1.0);
         p.rect_filled(
             Rect::from_min_size(bar.min, vec2((bar.width() * f).max(6.0), bar.height())),
@@ -521,8 +529,8 @@ impl App {
                                         paint_avatar(ui.painter(), r.center(), 15.0, m, t.card);
                                         ui.vertical(|ui| {
                                             let name = if m.id == self.data.me { trf!("{} (you)", m.shown()) } else { m.shown().to_string() };
-                                            ui.label(RichText::new(name).strong());
-                                            ui.label(RichText::new(trf!("{} open  \u{2022}  {} in progress  \u{2022}  {} done", open.len(), active, done)).small().color(t.text2));
+                                            ui.add(egui::Label::new(RichText::new(name).strong()).truncate());
+                                            ui.add(egui::Label::new(RichText::new(trf!("{} open  \u{2022}  {} in progress  \u{2022}  {} done", open.len(), active, done)).small().color(t.text2)).wrap());
                                         });
                                     });
                                     ui.add_space(4.0);
@@ -543,7 +551,10 @@ impl App {
                                         }
                                         let st = self.data.status_of(task);
                                         paint_status_circle(ui.painter(), r.left_center() + vec2(10.0, 0.0), 5.5, &st);
-                                        ui.painter().with_clip_rect(Rect::from_min_max(r.min, pos2(r.right() - 64.0, r.bottom()))).text(r.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, &task.name, FontId::proportional(12.5), t.text);
+                                        // shortened with "…" before the due date, not cut mid-letter
+                                        let font = FontId::proportional(12.5);
+                                        let name = fit_text(ui.painter(), &task.name, &font, r.width() - 22.0 - 64.0);
+                                        ui.painter().text(r.left_center() + vec2(22.0, 0.0), Align2::LEFT_CENTER, name, font, t.text);
                                         if let Some(d) = fmt_due(task) {
                                             ui.painter().text(r.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, d, FontId::proportional(11.5), due_color(task, false, &t));
                                         }

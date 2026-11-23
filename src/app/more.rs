@@ -871,18 +871,16 @@ impl App {
                 if resp.hovered() {
                     ui.painter().rect_filled(r, 6.0, t.hover);
                 }
-                ui.painter()
-                    .with_clip_rect(Rect::from_min_max(
-                        r.min,
-                        pos2(r.right() - 140.0, r.bottom()),
-                    ))
-                    .text(
-                        r.left_center() + vec2(40.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        &text,
-                        FontId::proportional(13.0),
-                        t.text,
-                    );
+                // shortened with "…" before the time, not cut mid-letter
+                let font = FontId::proportional(13.0);
+                let shown = fit_text(ui.painter(), &text, &font, r.width() - 40.0 - 140.0);
+                ui.painter().text(
+                    r.left_center() + vec2(40.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    shown,
+                    font,
+                    t.text,
+                );
                 ui.painter().text(
                     r.right_center() - vec2(6.0, 0.0),
                     Align2::RIGHT_CENTER,

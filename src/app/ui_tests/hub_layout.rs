@@ -66,3 +66,114 @@ fn timesheet_entries_shorten_long_task_names() {
         assert!(!h.painted_text(&fmt_duration(5400)).is_empty(), "{}", at);
     });
 }
+
+const LONG_PERSON: &str = "Bartholomew Alexander Fitzgerald-Montgomery the Third";
+
+/// A teammate with a long name, given `task` (cloned from a seed task).
+fn long_person_with_task(h: &mut Ui1, task: &str) -> u64 {
+    let pid = 9_100;
+    let mut p = h.app.data.members[1].clone();
+    p.id = pid;
+    p.name = LONG_PERSON.into();
+    p.display_name.clear();
+    h.app.data.members.push(p);
+    let mut x = task_named(h, "Design new homepage layout").clone();
+    x.id = 31_100;
+    x.name = task.into();
+    x.assignees = vec![pid];
+    x.parent = None;
+    h.app.data.tasks.push(x);
+    h.settle();
+    pid
+}
+
+/// The dashboard's bar cards ("Workload by assignee" and the others): a
+/// long name is shortened with "…" in its column before the bar, and
+/// never runs over the bar or the number at the right.
+#[test]
+fn dashboard_bars_shorten_long_names() {
+    each_size(|w, _, at| {
+        // tall enough to show every card
+        let mut h = Ui1::sized(w, 1800.0);
+        long_person_with_task(&mut h, "Plan the offsite");
+        h.app.section = Section::Dashboards;
+        h.app.dash_open = Some(crate::app::hubs::WORKSPACE_OVERVIEW);
+        h.settle();
+        assert_fits(&h, page(&h), at);
+        let label: Vec<(String, Rect)> = h
+            .texts_in(page(&h), Seen::Visible)
+            .into_iter()
+            .filter(|(s, _)| s.starts_with("Bart"))
+            .collect();
+        assert!(!label.is_empty(), "{at}: the long name's row");
+        for (s, r) in label {
+            assert!(s.ends_with('\u{2026}'), "{at}: {s:?} in full");
+            assert!(r.width() <= 120.0, "{at}: {s:?} {r:?} runs over the bar");
+        }
+    });
+}
+
+/// The goal card shared to chat: a long goal name is shortened before the
+/// percent at the right instead of running under it.
+#[test]
+fn shared_goal_card_shortens_a_long_name_before_the_percent() {
+    each_size(|w, hh, at| {
+        let mut h = Ui1::sized(w, hh);
+        let id = h.app.data.new_id();
+        h.app.data.extra.goals.push(Goal {
+            id,
+            name: "Win three hundred new customers and more repeat orders this half".into(),
+            color: [0x44, 0x66, 0xff],
+            due: Some(today() + chrono::Duration::days(30)),
+            owner: h.app.data.me,
+            start: Some(today() - chrono::Duration::days(10)),
+            ..Default::default()
+        });
+        h.app.open_goal_share(id);
+        h.settle();
+        let dialog = h.modal_rect();
+        let texts = h.texts_in(dialog, Seen::Visible);
+        let name = texts
+            .iter()
+            .find(|(s, r)| {
+                s.starts_with("Win three") && !s.contains(" is done") && dialog.contains_rect(*r)
+            })
+            .unwrap_or_else(|| panic!("{at}: the card's name"))
+            .1;
+        let pct = texts
+            .iter()
+            .find(|(s, r)| s.ends_with('%') && (r.center().y - name.center().y).abs() < 20.0)
+            .unwrap_or_else(|| panic!("{at}: the card's percent"))
+            .1;
+        assert!(
+            name.right() <= pct.left(),
+            "{at}: the name {name:?} runs under {pct:?}"
+        );
+        assert!(
+            pct.right() <= dialog.right(),
+            "{at}: {pct:?} outside {dialog:?}"
+        );
+    });
+}
+
+/// Teams' Analytics: a long task name on a person's card is shortened with
+/// "…" before its due date, and a long name over the card is too.
+#[test]
+fn teams_analytics_cards_shorten_long_names() {
+    each_size(|w, _, at| {
+        // tall enough to show every card
+        let mut h = Ui1::sized(w, 1800.0);
+        long_person_with_task(&mut h, LONG_NAME);
+        h.app.section = Section::Teams;
+        h.app.team_open = None;
+        h.app.hub.teams = TeamsPage::from_key(3);
+        h.settle();
+        assert_fits(&h, page(&h), at);
+        assert!(
+            h.texts_in(page(&h), Seen::Visible)
+                .iter()
+                .any(|(s, _)| s.starts_with("A task with")),
+            "{at}: the long task's row"
+        );
+    });
+}

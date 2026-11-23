@@ -272,7 +272,18 @@ fn paint_goal_card(ui: &mut Ui, t: &Theme, card: &GoalCard, data: &Data, link: b
                         t.text,
                     );
                 }
+                // the percent at the right keeps its room: the name is
+                // shortened with "…" before it instead of running under it
+                let pct = format!("{}%", card.pct);
+                let pct_w = ui
+                    .painter()
+                    .layout_no_wrap(pct.clone(), FontId::proportional(18.0), t.text)
+                    .size()
+                    .x;
+                let name_w =
+                    (ui.available_width() - pct_w - 2.0 * ui.spacing().item_spacing.x).max(40.0);
                 ui.vertical(|ui| {
+                    ui.set_max_width(name_w);
                     ui.spacing_mut().item_spacing.y = 1.0;
                     let label = if done {
                         tr("Goal achieved")
@@ -290,7 +301,7 @@ fn paint_goal_card(ui: &mut Ui, t: &Theme, card: &GoalCard, data: &Data, link: b
                     );
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new(format!("{}%", card.pct)).size(18.0).strong());
+                    ui.label(RichText::new(pct).size(18.0).strong());
                 });
             });
             ui.add_space(10.0);

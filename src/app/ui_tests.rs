@@ -26,6 +26,7 @@ mod layout_tests;
 mod look;
 mod media;
 mod meetings;
+mod mini;
 mod navigation;
 mod notify_settings;
 mod people;

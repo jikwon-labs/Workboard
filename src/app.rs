@@ -36,6 +36,7 @@ mod kept;
 mod listview;
 mod login;
 mod menus;
+mod mini;
 mod more;
 mod msgquery;
 mod nav;
@@ -634,6 +635,8 @@ pub struct App {
     /// a delete asked of the team server, waiting for its answer
     deleting_ws: Option<delete_ws::DeletingWs>,
     huddle: huddle::HuddleRt,
+    /// The small window that stays above other apps (mini.rs).
+    mini: mini::MiniUi,
     notify_rt: notify::NotifyRt,
     /// watchers on the other team workspaces (watch.rs)
     watch_rt: watch::WatchRt,
@@ -884,6 +887,8 @@ struct ChatUi {
     thread_window_at: Option<Rect>,
     /// The thread's window is the one in front: its replies count as read.
     thread_window_focused: bool,
+    /// The input method fixes for the thread's window's own input (ime.rs).
+    thread_ime: ime::ImeFix,
     /// The pass the thread panel was last drawn in: the window waits for
     /// the next one (drawn in the app's own window, as in the click tests,
     /// both would be the same reply box).
@@ -1264,6 +1269,7 @@ impl App {
             making_ws: None,
             deleting_ws: None,
             huddle: Default::default(),
+            mini: Default::default(),
             notify_rt: Default::default(),
             watch_rt: Default::default(),
             ws_places: HashMap::new(),
@@ -5701,6 +5707,14 @@ impl App {
         self.huddle_tick(Some(ctx));
         self.notify_tick(Some(ctx));
         self.huddle_bar(ctx);
+        if signing_in {
+            // signed out: nothing of the workspace stays on the screen
+            if self.mini.channel.is_some() || self.mini.text_for.is_some() {
+                self.forget_mini();
+            }
+        } else {
+            self.mini_window(ctx);
+        }
         // a joined workspace needs to know who you are
         // (on a server the invite code says who you are)
         if self

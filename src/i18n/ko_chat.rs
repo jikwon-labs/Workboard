@@ -18,6 +18,11 @@ pub const T: &[(&str, &str)] = &[
     // thread
     ("Thread", "스레드"),
     ("Open in new window", "새 창에서 열기"),
+    // the small window above other apps (mini.rs)
+    ("Open in a small window", "작은 창으로 열기"),
+    ("Open in the main window", "큰 창에서 열기"),
+    ("No messages yet", "아직 메시지가 없습니다"),
+    ("Message {}", "{}에 메시지 보내기"),
     ("Back to the sidebar", "사이드바로 되돌리기"),
     ("1 reply", "답장 1개"),
     ("{} replies", "답장 {}개"),

@@ -875,6 +875,19 @@ impl App {
     /// messages come in, as the end of [`Self::chat`] marks it: not
     /// marked unread to stay so, the window in front.
     pub(super) fn reading_now(&self, c: &Channel) -> bool {
+        // the small window in front, showing it (mini.rs)
+        if self.mini.focused
+            && self
+                .mini
+                .channel
+                .is_some_and(|m| self.chat.keep_unread != Some(m))
+            && self
+                .mini
+                .channel
+                .is_some_and(|m| self.conversation(c).iter().any(|d| d.id == m))
+        {
+            return true;
+        }
         let Some(open) = self.chat.open else {
             return false;
         };
@@ -897,7 +910,7 @@ impl App {
     }
 
     /// Something in an open conversation still to be marked read.
-    fn read_mark_due(&self, c: &Channel) -> bool {
+    pub(super) fn read_mark_due(&self, c: &Channel) -> bool {
         self.conversation(c).iter().any(|d| {
             self.unread_here(d) > 0
                 || d.messages.iter().map(|m| m.ts).max().unwrap_or(0) > d.last_read
@@ -1734,9 +1747,9 @@ impl App {
                     }
                     // shortened before the buttons on the right (it ran under them)
                     let buttons = if self.ai_offered() && !no_messages {
-                        270.0
+                        300.0
                     } else {
-                        150.0
+                        180.0
                     };
                     let room = (ui.available_width() - buttons).max(40.0);
                     ui.scope(|ui| {
@@ -1818,6 +1831,13 @@ impl App {
                             .clicked()
                         {
                             self.open_call_dialog();
+                        }
+                        // this conversation in a small window above other apps (mini.rs)
+                        if icon_button(ui, &t, Icon::PopOut, "", "Open in a small window", false)
+                            .on_hover_text(tr("Open in a small window"))
+                            .clicked()
+                        {
+                            self.open_mini(cid);
                         }
                     });
                 });
@@ -2853,6 +2873,7 @@ impl App {
                     closed = self.escape_closes_thread(ctx, false);
                     return;
                 }
+                super::ime::fix_window_input(&mut self.chat.thread_ime, ctx);
                 let win = egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
                     self.thread_body(ui, cid, &channel, tid, &parent, true, &mut acts);
                 });
@@ -4458,7 +4479,13 @@ impl App {
 
     /// Sends a message or a reply (`ChatAction::Send`): a slash command, a
     /// message waiting for its files, or one that goes out now.
-    fn send_chat(&mut self, ch: u64, text: String, parent: Option<u64>, files: Vec<Attachment>) {
+    pub(super) fn send_chat(
+        &mut self,
+        ch: u64,
+        text: String,
+        parent: Option<u64>,
+        files: Vec<Attachment>,
+    ) {
         let me = self.data.me;
         // files the box was sent with before they were ready
         // the box it was written in: the channel's, or the thread's

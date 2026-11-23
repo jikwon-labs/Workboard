@@ -256,9 +256,81 @@ impl ImeFix {
     }
 }
 
+/// The same fixes for a window of the app's other than the main one (the
+/// thread's own window, the small window): eframe gives those windows' input
+/// to egui without `raw_input_hook`, so they are applied to the window's
+/// events at the start of its frame, before any text box reads them. Each
+/// window keeps an `ImeFix` of its own.
+pub(super) fn fix_window_input(fix: &mut ImeFix, ctx: &egui::Context) {
+    let focus = ctx.memory(|m| m.focused());
+    let (end, later) = ctx.input_mut(|i| {
+        let mut raw = RawInput {
+            events: std::mem::take(&mut i.events),
+            focused: i.focused,
+            ..Default::default()
+        };
+        let end = fix.ends_syllable(focus, &raw);
+        let later = fix.fix(&mut raw);
+        i.events = raw.events;
+        (end, later)
+    });
+    if end {
+        crate::os::end_composition();
+    }
+    if later {
+        // the window is drawn with the main one: both are asked for
+        ctx.request_repaint();
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn another_windows_input_gets_the_same_fixes() {
+        let ctx = egui::Context::default();
+        let mut fix = ImeFix::default();
+        let pass = |fix: &mut ImeFix, events: Vec<Event>| -> Vec<Event> {
+            let raw = RawInput {
+                events,
+                focused: true,
+                ..Default::default()
+            };
+            let mut seen = vec![];
+            let _ = ctx.run(raw, |ctx| {
+                fix_window_input(fix, ctx);
+                seen = ctx.input(|i| i.events.clone());
+            });
+            seen
+        };
+        // a Backspace in the frame a syllable ends waits for the next one
+        let first = pass(
+            &mut fix,
+            vec![
+                ime(ImeEvent::Preedit("안".into())),
+                ime(ImeEvent::Commit("안".into())),
+                key(Key::Backspace, true, Default::default()),
+            ],
+        );
+        assert!(!first.iter().any(|e| matches!(
+            e,
+            Event::Key {
+                key: Key::Backspace,
+                ..
+            }
+        )));
+        let second = pass(&mut fix, vec![]);
+        assert!(second.iter().any(|e| matches!(
+            e,
+            Event::Key {
+                key: Key::Backspace,
+                pressed: true,
+                ..
+            }
+        )));
+    }
 
     fn key(key: Key, pressed: bool, modifiers: egui::Modifiers) -> Event {
         Event::Key {

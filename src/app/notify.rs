@@ -118,7 +118,7 @@ fn preview(m: &Message) -> String {
 
 /// What a message with only attachments says in a banner: a picture, a
 /// video, both, or a file.
-fn sent_what(a: &[crate::model::Attachment]) -> &'static str {
+pub(super) fn sent_what(a: &[crate::model::Attachment]) -> &'static str {
     let has = |k: MediaKind| a.iter().any(|x| x.kind == k);
     if has(MediaKind::File) {
         tr("Sent a file")
@@ -1079,9 +1079,11 @@ impl App {
     /// the Dock badge.
     pub(super) fn notify_tick(&mut self, ctx: Option<&egui::Context>) {
         if let Some(ctx) = ctx {
-            // the thread's own window in front counts as the app's
+            // the thread's own window or the small window in front counts
+            // as the app's
             self.notify_rt.away = !ctx.input(|i| i.viewport().focused.unwrap_or(true))
-                && !self.chat.thread_window_focused;
+                && !self.chat.thread_window_focused
+                && !self.mini.focused;
         }
         for target in crate::notifier::take_clicked() {
             self.open_target(&target);

@@ -103,7 +103,7 @@ pub struct HuddleRt {
     /// Latest picture of everyone sending video (identity, or ME), and
     /// whether it still has to go to the screen.
     pub(super) pictures: HashMap<String, (std::sync::Arc<Picture>, bool)>,
-    textures: HashMap<String, egui::TextureHandle>,
+    pub(super) textures: HashMap<String, egui::TextureHandle>,
     /// The video shown large (clicked), if any.
     pub(super) focus: Option<String>,
     /// The screen or window being shared from here.
@@ -458,6 +458,18 @@ impl App {
             self.tell_view_sizes(HashMap::new());
             return;
         }
+        self.huddle_textures(ctx);
+        let Some((screens, cameras)) = self.huddle_shown_videos() else {
+            self.huddle.focus = None;
+            self.tell_view_sizes(HashMap::new());
+            return;
+        };
+        self.huddle_videos_large(ctx, t, screens, cameras);
+    }
+
+    /// Puts the pictures that came in since the last frame on the screen's
+    /// textures (the main window's and the small window's share them).
+    pub(super) fn huddle_textures(&mut self, ctx: &egui::Context) {
         for (id, (pic, fresh)) in self.huddle.pictures.iter_mut() {
             if !*fresh {
                 continue;
@@ -481,7 +493,14 @@ impl App {
                 }
             }
         }
-        // only people still in the call: a picture can outlive its sender by a frame
+    }
+
+    /// The pictures to show, as (picture, whose name) for the shared screens
+    /// and for the cameras; None when there are none. Only people still in
+    /// the call: a picture can outlive its sender by a frame.
+    pub(super) fn huddle_shown_videos(
+        &self,
+    ) -> Option<(Vec<(String, String)>, Vec<(String, String)>)> {
         let in_call = |id: &str| self.huddle.people.iter().any(|p| p.identity == id);
         let mut ids: Vec<String> = self
             .huddle
@@ -491,9 +510,7 @@ impl App {
             .cloned()
             .collect();
         if ids.is_empty() {
-            self.huddle.focus = None;
-            self.tell_view_sizes(HashMap::new());
-            return;
+            return None;
         }
         ids.sort_by_key(|id| (id == ME, id.clone()));
         let name_of = |id: &str| -> String {
@@ -511,6 +528,17 @@ impl App {
             .iter()
             .map(|id| (id.clone(), name_of(screen_owner(id).unwrap_or(id))))
             .partition(|(id, _)| screen_owner(id).is_some());
+        Some((screens, cameras))
+    }
+
+    /// The pictures over the main window, above the bar.
+    fn huddle_videos_large(
+        &mut self,
+        ctx: &egui::Context,
+        t: &Theme,
+        screens: Vec<(String, String)>,
+        cameras: Vec<(String, String)>,
+    ) {
         // a clicked video shows large and the rest small; otherwise tiles get
         // smaller when many people send video (and when a screen is shared)
         if self
@@ -639,7 +667,7 @@ impl App {
 
     /// Tell the call how large each received picture is drawn (when that
     /// changes), so it asks for the video layer that fits.
-    fn tell_view_sizes(&mut self, sizes: HashMap<String, f32>) {
+    pub(super) fn tell_view_sizes(&mut self, sizes: HashMap<String, f32>) {
         if sizes == self.huddle.views {
             return;
         }
@@ -650,8 +678,9 @@ impl App {
     }
 
     /// The "Share your screen" chooser above the bar: the displays and
-    /// windows, or how to give the Screen Recording permission.
-    fn share_menu(&mut self, ctx: &egui::Context, t: &Theme) {
+    /// windows, or how to give the Screen Recording permission. `width`:
+    /// how wide it is (narrower in the small window, see mini.rs).
+    pub(super) fn share_menu(&mut self, ctx: &egui::Context, t: &Theme, width: f32) {
         if !self.huddle.share_menu {
             return;
         }
@@ -673,7 +702,7 @@ impl App {
                         color: Color32::from_black_alpha(40),
                     })
                     .show(ui, |ui| {
-                        ui.set_width(380.0);
+                        ui.set_width(width);
                         ui.label(
                             RichText::new(tr("Share your screen"))
                                 .strong()
@@ -733,7 +762,7 @@ impl App {
                                     };
                                     let r = ui.add(
                                         egui::Button::new(label)
-                                            .min_size(vec2(352.0, 26.0))
+                                            .min_size(vec2(width - 28.0, 26.0))
                                             .corner_radius(6),
                                     );
                                     r.widget_info(|| {
@@ -765,7 +794,7 @@ impl App {
                                                     RichText::new(&w.name).small(),
                                                 )
                                                 .truncate()
-                                                .min_size(vec2(352.0, 24.0))
+                                                .min_size(vec2(width - 28.0, 24.0))
                                                 .corner_radius(6),
                                             );
                                             r.widget_info(|| {
@@ -810,15 +839,9 @@ impl App {
             .unwrap_or_else(|| p.name.clone())
     }
 
-    /// The bar at the bottom while in a huddle (above the message box, so it
-    /// never covers it).
-    pub(super) fn huddle_bar(&mut self, ctx: &egui::Context) {
-        let Some(ch) = self.huddle.channel else {
-            return;
-        };
-        let t = self.t();
-        let where_ = self
-            .data
+    /// Where the huddle is, as the bar says it ("#general", a person's name).
+    pub(super) fn huddle_place(&self, ch: u64) -> String {
+        self.data
             .channels
             .iter()
             .find(|c| c.id == ch)
@@ -829,14 +852,172 @@ impl App {
                     self.channel_label(c)
                 }
             })
-            .unwrap_or_else(|| tr("a conversation").into());
-        let green = Color32::from_rgb(0x00, 0x88, 0x44);
-        let mut leave = false;
-        let mut mute: Option<bool> = None;
-        let mut camera: Option<bool> = None;
-        let mut share_click = false;
+            .unwrap_or_else(|| tr("a conversation").into())
+    }
+
+    /// Who is in the huddle so far, or that it is still connecting.
+    pub(super) fn huddle_status(&self) -> String {
+        if self.huddle.joined {
+            match self.huddle.people.len() {
+                0 | 1 => tr("Only you so far").to_string(),
+                n => trf!("{} people", n),
+            }
+        } else {
+            tr("Connecting\u{2026}").to_string()
+        }
+    }
+
+    /// One person in the huddle: a round initial, ringed while speaking,
+    /// with a red mark while muted. Its name says who and how they are.
+    pub(super) fn huddle_person(&self, ui: &mut Ui, t: &Theme, p: &Person) {
+        let green = HUDDLE_GREEN;
+        let name = self.huddle_name(p);
+        let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
+        let color = p
+            .member()
+            .and_then(|m| self.data.member(m))
+            .map(|m| rgb(m.color))
+            .unwrap_or(t.text3);
+        if p.speaking && !p.muted {
+            ui.painter()
+                .circle_stroke(r.center(), 15.0, Stroke::new(2.5_f32, green));
+        }
+        ui.painter().circle_filled(r.center(), 12.0, color);
+        let initial = name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default();
+        ui.painter().text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            initial,
+            FontId::proportional(12.0),
+            Color32::WHITE,
+        );
+        if p.muted {
+            ui.painter()
+                .circle_filled(r.right_bottom() - vec2(5.0, 5.0), 5.5, t.danger);
+            ui.painter().line_segment(
+                [
+                    r.right_bottom() - vec2(8.0, 8.0),
+                    r.right_bottom() - vec2(2.0, 2.0),
+                ],
+                Stroke::new(1.5_f32, Color32::WHITE),
+            );
+        }
+        let state = if p.muted {
+            "muted"
+        } else if p.speaking {
+            "speaking"
+        } else {
+            "listening"
+        };
+        let label = if p.me {
+            format!("{} (you), {}", name, state)
+        } else {
+            format!("{}, {}", name, state)
+        };
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
+        let shown = if p.me {
+            trf!("{} (you), {}", name, tr(state))
+        } else {
+            format!("{}, {}", name, tr(state))
+        };
+        resp.on_hover_text(shown);
+    }
+
+    /// The huddle's buttons: Mute, Video, Share screen and Leave, in the bar
+    /// and in the small window. What was pressed goes in `press`.
+    pub(super) fn huddle_buttons(&self, ui: &mut Ui, t: &Theme, press: &mut HuddlePress) {
+        let muted = self.huddle.muted;
+        if ui
+            .add(
+                egui::Button::new(if muted { tr("Unmute") } else { tr("Mute") })
+                    .min_size(vec2(72.0, 30.0))
+                    .corner_radius(7),
+            )
+            .clicked()
+        {
+            press.mute = Some(!muted);
+        }
+        let cam = self.huddle.camera;
+        if ui
+            .add(
+                egui::Button::new(if cam { tr("Stop video") } else { tr("Video") })
+                    .min_size(vec2(72.0, 30.0))
+                    .corner_radius(7),
+            )
+            .clicked()
+        {
+            press.camera = Some(!cam);
+        }
+        let sharing = self.huddle.screen.is_some();
+        if ui
+            .add(
+                egui::Button::new(if sharing {
+                    tr("Stop sharing screen")
+                } else {
+                    tr("Share screen")
+                })
+                .min_size(vec2(72.0, 30.0))
+                .corner_radius(7),
+            )
+            .clicked()
+        {
+            press.share = true;
+        }
+        if ui
+            .add(Tint(
+                egui::Button::new(RichText::new(tr("Leave")).color(Color32::WHITE))
+                    .fill(t.danger)
+                    .min_size(vec2(64.0, 30.0))
+                    .corner_radius(7),
+            ))
+            .clicked()
+        {
+            press.leave = true;
+        }
+    }
+
+    /// Does what was pressed among the huddle's buttons.
+    pub(super) fn huddle_pressed(&mut self, press: HuddlePress) {
+        if let Some(m) = press.mute {
+            self.set_huddle_muted(m);
+        }
+        if let Some(c) = press.camera {
+            self.set_huddle_camera(c);
+        }
+        if press.share {
+            if self.huddle.screen.is_some() {
+                self.set_huddle_screen(None);
+            } else if self.huddle.share_menu {
+                self.huddle.share_menu = false;
+            } else {
+                self.open_share_menu();
+            }
+        }
+        if press.leave {
+            self.leave_huddle();
+        }
+    }
+
+    /// The bar at the bottom while in a huddle (above the message box, so it
+    /// never covers it). Not while the huddle shows in the small window.
+    pub(super) fn huddle_bar(&mut self, ctx: &egui::Context) {
+        let Some(ch) = self.huddle.channel else {
+            return;
+        };
+        if self.mini_has_huddle() {
+            return;
+        }
+        let t = self.t();
+        let where_ = self.huddle_place(ch);
+        let green = HUDDLE_GREEN;
+        let mut press = HuddlePress::default();
+        let mut small = false;
         self.huddle_videos(ctx, &t);
-        self.share_menu(ctx, &t);
+        self.share_menu(ctx, &t, 380.0);
         egui::Area::new(egui::Id::new("huddle_bar"))
             .order(egui::Order::Middle)
             .anchor(Align2::CENTER_BOTTOM, [0.0, -132.0])
@@ -866,15 +1047,9 @@ impl App {
                                         .strong()
                                         .color(t.text),
                                 );
-                                let status = if self.huddle.joined {
-                                    match self.huddle.people.len() {
-                                        0 | 1 => tr("Only you so far").to_string(),
-                                        n => trf!("{} people", n),
-                                    }
-                                } else {
-                                    tr("Connecting\u{2026}").to_string()
-                                };
-                                ui.label(RichText::new(status).small().color(t.text2));
+                                ui.label(
+                                    RichText::new(self.huddle_status()).small().color(t.text2),
+                                );
                                 if self.huddle.screen.is_some() {
                                     ui.label(
                                         RichText::new(tr("Sharing your screen"))
@@ -884,129 +1059,23 @@ impl App {
                                 }
                             });
                             ui.add_space(10.0);
-                            for p in self.huddle.people.clone() {
-                                let name = self.huddle_name(&p);
-                                let (r, resp) =
-                                    ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-                                let color = p
-                                    .member()
-                                    .and_then(|m| self.data.member(m))
-                                    .map(|m| rgb(m.color))
-                                    .unwrap_or(t.text3);
-                                if p.speaking && !p.muted {
-                                    ui.painter().circle_stroke(
-                                        r.center(),
-                                        15.0,
-                                        Stroke::new(2.5_f32, green),
-                                    );
-                                }
-                                ui.painter().circle_filled(r.center(), 12.0, color);
-                                let initial = name
-                                    .chars()
-                                    .next()
-                                    .map(|c| c.to_uppercase().to_string())
-                                    .unwrap_or_default();
-                                ui.painter().text(
-                                    r.center(),
-                                    Align2::CENTER_CENTER,
-                                    initial,
-                                    FontId::proportional(12.0),
-                                    Color32::WHITE,
-                                );
-                                if p.muted {
-                                    ui.painter().circle_filled(
-                                        r.right_bottom() - vec2(5.0, 5.0),
-                                        5.5,
-                                        t.danger,
-                                    );
-                                    ui.painter().line_segment(
-                                        [
-                                            r.right_bottom() - vec2(8.0, 8.0),
-                                            r.right_bottom() - vec2(2.0, 2.0),
-                                        ],
-                                        Stroke::new(1.5_f32, Color32::WHITE),
-                                    );
-                                }
-                                let state = if p.muted {
-                                    "muted"
-                                } else if p.speaking {
-                                    "speaking"
-                                } else {
-                                    "listening"
-                                };
-                                let label = if p.me {
-                                    format!("{} (you), {}", name, state)
-                                } else {
-                                    format!("{}, {}", name, state)
-                                };
-                                resp.widget_info(|| {
-                                    egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label)
-                                });
-                                let shown = if p.me {
-                                    trf!("{} (you), {}", name, tr(state))
-                                } else {
-                                    format!("{}, {}", name, tr(state))
-                                };
-                                resp.on_hover_text(shown);
+                            for p in &self.huddle.people {
+                                self.huddle_person(ui, &t, p);
                             }
                             ui.add_space(10.0);
-                            let muted = self.huddle.muted;
-                            if ui
-                                .add(
-                                    egui::Button::new(if muted {
-                                        tr("Unmute")
-                                    } else {
-                                        tr("Mute")
-                                    })
-                                    .min_size(vec2(72.0, 30.0))
-                                    .corner_radius(7),
-                                )
-                                .clicked()
-                            {
-                                mute = Some(!muted);
-                            }
-                            let cam = self.huddle.camera;
-                            if ui
-                                .add(
-                                    egui::Button::new(if cam {
-                                        tr("Stop video")
-                                    } else {
-                                        tr("Video")
-                                    })
-                                    .min_size(vec2(72.0, 30.0))
-                                    .corner_radius(7),
-                                )
-                                .clicked()
-                            {
-                                camera = Some(!cam);
-                            }
-                            let sharing = self.huddle.screen.is_some();
-                            if ui
-                                .add(
-                                    egui::Button::new(if sharing {
-                                        tr("Stop sharing screen")
-                                    } else {
-                                        tr("Share screen")
-                                    })
-                                    .min_size(vec2(72.0, 30.0))
-                                    .corner_radius(7),
-                                )
-                                .clicked()
-                            {
-                                share_click = true;
-                            }
-                            if ui
-                                .add(Tint(
-                                    egui::Button::new(
-                                        RichText::new(tr("Leave")).color(Color32::WHITE),
-                                    )
-                                    .fill(t.danger)
-                                    .min_size(vec2(64.0, 30.0))
-                                    .corner_radius(7),
-                                ))
-                                .clicked()
-                            {
-                                leave = true;
+                            self.huddle_buttons(ui, &t, &mut press);
+                            // the huddle and its conversation in a small
+                            // window that stays above other apps (mini.rs)
+                            let b = super::icons::icon_button(
+                                ui,
+                                &t,
+                                Icon::PopOut,
+                                "",
+                                "Huddle in a small window",
+                                false,
+                            );
+                            if b.on_hover_text(tr("Open in a small window")).clicked() {
+                                small = true;
                             }
                         });
                     });
@@ -1025,23 +1094,21 @@ impl App {
                 ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
             }
         }
-        if let Some(m) = mute {
-            self.set_huddle_muted(m);
-        }
-        if let Some(c) = camera {
-            self.set_huddle_camera(c);
-        }
-        if share_click {
-            if self.huddle.screen.is_some() {
-                self.set_huddle_screen(None);
-            } else if self.huddle.share_menu {
-                self.huddle.share_menu = false;
-            } else {
-                self.open_share_menu();
-            }
-        }
-        if leave {
-            self.leave_huddle();
+        self.huddle_pressed(press);
+        if small && self.huddle.channel == Some(ch) {
+            self.open_mini(ch);
         }
     }
+}
+
+/// The huddle's green (the call icon, the ring around whoever speaks).
+pub(super) const HUDDLE_GREEN: Color32 = Color32::from_rgb(0x00, 0x88, 0x44);
+
+/// What was pressed among a huddle's buttons this frame.
+#[derive(Default)]
+pub(super) struct HuddlePress {
+    mute: Option<bool>,
+    camera: Option<bool>,
+    share: bool,
+    leave: bool,
 }

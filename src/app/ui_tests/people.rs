@@ -1479,6 +1479,21 @@ fn work_together_buttons_wrap_instead_of_overlapping() {
                         );
                     }
                 }
+                // with room, one row with Stop sharing at its right end
+                if w >= 960.0 {
+                    assert!(
+                        (rects[0].center().y - rects[2].center().y).abs() < 4.0,
+                        "{}: {:?}",
+                        what,
+                        rects
+                    );
+                    assert!(
+                        rects[2].right() > dialog.right() - 40.0,
+                        "{}: {:?}",
+                        what,
+                        rects[2]
+                    );
+                }
             }
         }
     }

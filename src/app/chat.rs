@@ -1665,9 +1665,16 @@ impl App {
                 // (a wrapping row's available width is the whole row's)
                 let room =
                     ui.max_rect().right() - ui.min_rect().right() - ui.spacing().item_spacing.x;
-                below = room < 214.0;
-                if !below {
-                    step = self.channel_find_bar(ui, find_id, count);
+                let finding = self.channel_find.is_some();
+                below = finding && room < 214.0;
+                if finding && !below {
+                    // in the room left, so it ends at the row's right
+                    let h = ui.spacing().interact_size.y;
+                    ui.allocate_ui_with_layout(
+                        vec2(room, h),
+                        Layout::left_to_right(Align::Center),
+                        |ui| step = self.channel_find_bar(ui, find_id, count),
+                    );
                 }
             });
             if below {

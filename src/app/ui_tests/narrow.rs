@@ -789,12 +789,23 @@ fn channel_find_and_message_chips_keep_the_channel_inside() {
                 let what = format!("{:?} {} find {:?} {:?}", lang, w, q, p);
                 let past = h.past_right_edge();
                 let cut = h.cut_texts(Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2()));
+                let row = h.rect(tr("Add bookmarks, notes, and more"));
                 set_lang(Lang::En);
                 assert!(past.is_empty(), "{}: past the right edge {:?}", what, past);
                 assert!(cut.is_empty(), "{}: cut {:?}", what, cut);
                 if q.is_some() {
                     let r = h.rect("Close find");
                     assert!(r.right() <= w, "{}: {:?}", what, r);
+                    // with room, beside the bookmarks chip
+                    if w >= 1440.0 && p == ChannelPanel::All {
+                        assert!(
+                            (r.center().y - row.center().y).abs() < 6.0,
+                            "{}: {:?} {:?}",
+                            what,
+                            r,
+                            row
+                        );
+                    }
                 }
             }
         }

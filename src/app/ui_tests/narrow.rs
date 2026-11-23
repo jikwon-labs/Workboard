@@ -216,6 +216,33 @@ fn medium_top_bar_keeps_its_controls_apart() {
     }
 }
 
+#[test]
+fn wide_top_bar_keeps_its_controls_apart() {
+    // a long workspace name pushed the arrows over the planner button: the
+    // search box was placed from the window's middle alone
+    for name in [
+        "Seoul head office design and development workspace",
+        "Seoul head office design, development, marketing, sales and support all in one workspace",
+    ] {
+        for w in [960.0, 1100.0, 1440.0] {
+            let mut h = Ui1::sized(w, 560.0);
+            h.app.data.workspace = name.into();
+            h.settle();
+            assert!(h.has("Search"));
+            top_bar_fits(&h);
+            let arrow = h.rect("Go back");
+            let planner = h.rect("Planner shortcut");
+            assert!(
+                arrow.left() >= planner.right(),
+                "at {}: the arrow {:?} starts left of the planner {:?}",
+                w,
+                arrow,
+                planner
+            );
+        }
+    }
+}
+
 /// Nothing past the right edge, no text cut mid-glyph, on the whole window.
 fn fits(h: &Ui1, what: &str) {
     let past = h.past_right_edge();

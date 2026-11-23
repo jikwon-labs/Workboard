@@ -283,9 +283,27 @@ impl App {
                     self.compact_bar(ui, full, full.left() + left);
                 } else {
                     left += self.sheet_button(ui, pos2(full.left() + left, full.center().y));
-                    // workspace picker (a narrow window keeps room for the search)
+                    // what sits at the right: the avatar, pinned tools, a
+                    // server warning, the running timer
+                    let mut reserve = 60.0 + 28.0 * self.data.extra.pinned_tools.len() as f32;
+                    if self.server_trouble().is_some() {
+                        reserve += 110.0;
+                    }
+                    if self.data.tasks.iter().any(|x| self.data.is_my_timer(x)) {
+                        // the wide bar shows more of the task's name
+                        reserve += if self.tier == Tier::Wide {
+                            240.0
+                        } else {
+                            150.0
+                        };
+                    }
+                    let to = full.right() - reserve;
+                    // workspace picker: shortened so the planner button, the
+                    // arrows and a search box with AI Chats in it fit
+                    // after it (a narrow window keeps room for the search)
                     let max_name = if self.tier == Tier::Wide {
-                        f32::INFINITY
+                        // pill padding 58, planner 32, arrows 64, search 220
+                        (to - full.left() - left - 58.0 - 32.0 - 64.0 - 220.0).max(140.0)
                     } else {
                         140.0
                     };
@@ -315,28 +333,19 @@ impl App {
                     if cresp.on_hover_text(tr("Planner")).clicked() {
                         self.section = Section::Planner;
                     }
-                    // back / forward + search with AI Chats
-                    let (sw, sx) = if self.tier == Tier::Wide {
-                        (
-                            287.0f32.min(full.width() * 0.25).max(220.0),
-                            full.center().x + 40.0,
-                        )
+                    // back / forward + search with AI Chats: a little right
+                    // of the middle, but always after the planner button
+                    // (and the arrows left of the search) and before what
+                    // sits at the right
+                    let from = cr.right() + 12.0 + 52.0;
+                    let most = if self.tier == Tier::Wide {
+                        287.0f32.min(full.width() * 0.25).max(220.0)
                     } else {
-                        // narrow: between the planner button (and the arrows
-                        // left of the search) and what sits at the right
-                        let from = cr.right() + 12.0 + 52.0;
-                        let mut reserve = 60.0 + 28.0 * self.data.extra.pinned_tools.len() as f32;
-                        if self.server_trouble().is_some() {
-                            reserve += 110.0;
-                        }
-                        if self.data.tasks.iter().any(|x| self.data.is_my_timer(x)) {
-                            reserve += 150.0;
-                        }
-                        let to = full.right() - reserve;
-                        let sw = (to - from).clamp(120.0, 220.0);
-                        let lo = from + sw / 2.0;
-                        (sw, (full.center().x + 40.0).min(to - sw / 2.0).max(lo))
+                        220.0
                     };
+                    let sw = (to - from).clamp(120.0, most);
+                    let lo = from + sw / 2.0;
+                    let sx = (full.center().x + 40.0).min(to - sw / 2.0).max(lo);
                     // too narrow for the AI Chats chip inside it: AI is on the rail
                     let with_ai = sw >= 200.0;
                     let sr = Rect::from_center_size(pos2(sx, full.center().y), vec2(sw, 28.0));

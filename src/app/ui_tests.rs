@@ -18,6 +18,7 @@ mod empty_states;
 mod forms;
 mod goals;
 mod harness;
+mod hub_layout;
 mod hub_sidebars;
 mod huddle;
 mod i18n_tests;

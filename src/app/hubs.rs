@@ -2472,12 +2472,34 @@ impl App {
                 let mut remove = None;
                 // (task, whose, old start, new start, hours)
                 let mut save = None;
-                for (s, e, name, id, member) in &rows {
-                    ui.horizontal(|ui| {
-                        let local = local(*s);
-                        let when = local
-                            .map(|d| d.text("%a %b %-d, %-I:%M %p"))
-                            .unwrap_or_default();
+                // a narrow card puts the date over the task, which then has
+                // the row beside its time and buttons
+                let stacked = ui.available_width() < 480.0;
+                for (i, (s, e, name, id, member)) in rows.iter().enumerate() {
+                    let local = local(*s);
+                    let when = local
+                        .map(|d| d.text("%a %b %-d, %-I:%M %p"))
+                        .unwrap_or_default();
+                    let editing = self
+                        .sweep
+                        .entry_edit
+                        .as_ref()
+                        .is_some_and(|x| x.task == *id && x.member == *member && x.start == *s);
+                    if stacked && i > 0 {
+                        ui.add_space(6.0);
+                    }
+                    if stacked && !editing {
+                        ui.label(RichText::new(&when).color(t.text2));
+                    }
+                    // the editing row wraps in a narrow card
+                    let row = |ui: &mut Ui, f: &mut dyn FnMut(&mut Ui)| {
+                        if editing {
+                            ui.horizontal_wrapped(|ui| f(ui));
+                        } else {
+                            ui.horizontal(|ui| f(ui));
+                        }
+                    };
+                    row(ui, &mut |ui: &mut Ui| {
                         if let Some(ed) = self
                             .sweep
                             .entry_edit
@@ -2511,9 +2533,8 @@ impl App {
                             }
                             return;
                         }
-                        ui.label(RichText::new(when).color(t.text2));
-                        if ui.link(name).clicked() {
-                            self.actions.push(Action::Open(*id));
+                        if !stacked {
+                            ui.label(RichText::new(&when).color(t.text2));
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if ui
@@ -2540,6 +2561,14 @@ impl App {
                                 });
                             }
                             ui.label(fmt_duration(e - s));
+                            // the task's name gets what is left, shortened
+                            // with "…" before the time
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                                if ui.link(name).clicked() {
+                                    self.actions.push(Action::Open(*id));
+                                }
+                            });
                         });
                     });
                 }

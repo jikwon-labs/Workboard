@@ -6,6 +6,14 @@
 
 ## 할 일
 
+- [ ] **배포 키·인증서 다시 들이기** (2026-11-24 발견, 0.1.29 배포가 여기서 멈춤): 이 MacBook 에는 배포에 쓰는 것이 하나도 없다. 앱은 빌드되지만(`scripts/bundle.sh`, 빌드 1118) 공증 전에 멈춘다. 빠진 것과 들이는 법:
+  - Developer ID 인증서 `Developer ID Application: jikwon seo (K6599UJ4KM)`: `security find-identity -v -p codesigning` 이 0개다. 전에 배포하던 맥의 키체인 접근에서 인증서와 개인 키를 .p12 로 내보내 가져오거나, 개발자 계정에서 새로 만든다. 새로 만들면 `Resources/Workboard.provisionprofile` 도 그 인증서로 다시 받아야 앱이 실행된다.
+  - 공증 프로필 `symboard-notary`: `xcrun notarytool store-credentials symboard-notary`.
+  - Sparkle 서명 키(키체인 계정 `workboard`): 백업 파일로 `vendor/Sparkle/bin/generate_keys --account workboard -f <파일>`. `generate_keys --account workboard -p` 가 `scripts/bundle.sh` 의 `SUPublicEDKey`(`DL5Ve/iIbE…`)와 같은 값을 찍어야 한다. **이 키를 못 찾으면 이미 설치된 앱이 앞으로 업데이트를 전부 거절한다.** 새 키로 바꾸는 일은 하지 않는다.
+  - TestFlight API 키 `~/.appstoreconnect/`(키 ID `63P26JH467`, `workboard.env` 와 .p8): 전에 쓰던 맥에서 폴더째 옮긴다. .p8 은 처음 한 번만 받을 수 있어서 없으면 App Store Connect 에서 새 키를 만든다. `ios/scripts/testflight.sh check` 로 확인.
+  - SSH 호스트 `macmini`: `ssh seojigwon@macmini` 가 "Could not resolve hostname" 이다. `deploy/README.md` "SSH" 대로 `~/.ssh/config` 를 다시 만든다.
+  - main 체크아웃의 `build/updates/`(예전 zip, 차분 업데이트·appcast 기록용)와 `build/symbols/`: 폴더가 없다. `build/updates/` 는 SSH 가 된 뒤 서버에서 받아 온다: `rsync -a --exclude '*windows*' 'seojigwon@macmini:Library/Application Support/WorkboardServer/updates/' build/updates/`. 이것 없이 올리면 appcast 에 0.1.29 만 남는다.
+  - 다 되면 `/release` 로 0.1.29 를 이어서 낸다. 버전 커밋(`d86021e` Mac, `215a279` iPhone)은 이미 main 에 있다. iPhone 은 아래 Xcode 26 설치도 필요하다.
 - [ ] **화이트보드 QA 수정 직접 확인** (2026-11-21 QA, 자동 테스트로 못 본 것): 실제 트랙패드로 핀치 확대와 두 손가락 스크롤, 가운데 버튼(또는 Space) 드래그가 도형·메모 위에서 시작해도 화면이 움직이는지. 한글 입력기로 메모에 "안녕" 을 조합하는 도중 메모 도구로 보드의 빈 곳을 눌렀을 때 글자가 처음 메모에만 남고 새 메모에 중복으로 들어가지 않는지. 다크 테마에서 검은 펜 선이 밝게 보이는지. iPhone(TestFlight 다음 빌드)에서 템플릿 보드의 Clear board 뒤 Mac 에서도 도형·선이 사라지는지, Mac 에서 크기를 키운 메모가 iPhone 에서 그 크기로 보이는지. Windows 는 `gh workflow run windows.yml --ref main`.
 - [ ] **양식 QA 수정 직접 확인** (2026-11-21 QA, 자동 테스트로 못 본 것): 시험 서버(`--port 8797`, 임시 폴더)와 `WORKBOARD_HOME` 앱 사본 두 개로 한쪽이 만든 양식에 다른 쪽이 답하고, 만든 쪽 답변 탭과 알림 배너에 오는지(실제 서버 자동 테스트는 있음). 0.1.21 앱(또는 iPhone 앱, 둘 다 답에 양식 id 를 남기지 않음)으로 낸 답변이 새 앱에서 양식 이름을 바꾼 뒤에도 답변 탭에 남는지. 실제 한글 입력기로 양식 찾기와 질문 이름을 조합해 넣을 때. 최소 창(900×560)에서 양식 표의 오른쪽 열(작성·별표·메뉴)을 트랙패드 가로 스크롤로 닿을 수 있는지.
 - [ ] **Xcode 26 이상 다시 설치** (2026-11-23 발견): 이 MacBook 의 Xcode 가 16.4(iOS 18.5 SDK, iOS 18.6 시뮬레이터 하나)라서 iPhone 앱이 빌드되지 않는다(`ios/Workboard/CallKit.swift` 의 `.allowBluetoothHFP` 가 iOS 26 SDK 에만 있다). UI 테스트 러너도 시뮬레이터에 붙지 못한다(`DTServiceHubClient failed to bless service hub`, 시뮬레이터를 다시 켜도 같음). `docs/ios-design.md` 의 마지막 검증은 Xcode 27.2·iOS 27 시뮬레이터였다. 다음 TestFlight 전에 해야 한다.

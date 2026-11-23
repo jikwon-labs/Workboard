@@ -657,6 +657,8 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         Some(ws_config(wb_net::MAX_MESSAGE)),
     )
     .await;
+    // someone invited is in now (the welcome below already says so)
+    hub.joined(member);
     // listen before sending the copy so no update falls in between
     let mut updates = hub.updates.subscribe();
     let mut kicks = hub.kicks.subscribe();

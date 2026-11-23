@@ -111,6 +111,23 @@ pub fn mark_restored(data: &mut Value, now: i64) {
 
 /// Write a member's role into the team's copy so everyone's app shows it.
 pub(crate) fn label_role(canon: &mut Value, member: u64, role: Role) -> bool {
+    set_member_field(canon, member, "role", json!(role.label()))
+}
+
+/// Someone invited signed in: they're no longer shown as invited, wherever
+/// they joined from (the iPhone app doesn't take it off their entry itself).
+pub(crate) fn still_invited(canon: Option<&Value>, member: u64) -> bool {
+    member_record(canon, member).and_then(|m| m.get("invited")) == Some(&Value::Bool(true))
+}
+
+/// Take `invited` off a member's entry in the team's copy.
+pub(crate) fn mark_joined(canon: &mut Value, member: u64) -> bool {
+    still_invited(Some(canon), member) && set_member_field(canon, member, "invited", json!(false))
+}
+
+/// Set one field of a member's entry in the team's copy, stamped so it wins
+/// over the apps' older copies of it.
+fn set_member_field(canon: &mut Value, member: u64, field: &str, value: Value) -> bool {
     if !copy_shape_ok(canon) {
         return false;
     }
@@ -124,18 +141,18 @@ pub(crate) fn label_role(canon: &mut Value, member: u64, role: Role) -> bool {
     else {
         return false;
     };
-    if m.get("role").and_then(|r| r.as_str()) == Some(role.label()) {
+    if m.get(field) == Some(&value) {
         return false;
     }
-    m["role"] = json!(role.label());
+    m[field] = value;
     let sync = canon.get("extra").and_then(|e| e.get("sync"));
     let meta: Option<wb_sync::SyncMeta> = match sync {
         None | Some(Value::Null) => Some(Default::default()),
         Some(s) => serde_json::from_value(s.clone()).ok(),
     };
     if let Some(mut meta) = meta {
-        // only the role field changed, so a rename made meanwhile still counts
-        wb_sync::touch_fields(&mut meta, member, &["role"], now_ms());
+        // only this field changed, so a rename made meanwhile still counts
+        wb_sync::touch_fields(&mut meta, member, &[field], now_ms());
         wb_sync::json::set_meta(canon, &meta);
         return true;
     }

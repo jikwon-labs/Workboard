@@ -364,6 +364,24 @@ impl Hub {
         (member, role, tag, Some(token))
     }
 
+    /// `member` signed in, so they've joined: if their entry still says
+    /// invited, everyone's People shows them as a member from now on.
+    pub(crate) fn joined(&self, member: u64) {
+        let mut g = self.state();
+        // looked at first: most sign-ins change nothing, and the copy is
+        // only copied to change it
+        if !still_invited(g.canon.as_deref(), member) {
+            return;
+        }
+        if g.canon
+            .as_mut()
+            .map(Arc::make_mut)
+            .is_some_and(|c| mark_joined(c, member))
+        {
+            self.broadcast_canon(&mut g, false);
+        }
+    }
+
     /// `device` is still signed in here as `member`.
     pub(crate) fn device_is(&self, device: &str, member: u64) -> bool {
         let g = self.state();

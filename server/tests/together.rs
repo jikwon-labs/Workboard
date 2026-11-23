@@ -434,6 +434,65 @@ fn two_apps(port: u16) -> (App, App) {
     (a, b)
 }
 
+/// Someone invited who signs in is a member from then on in everyone's
+/// People, even from an app that leaves its own entry as it is (the
+/// iPhone app); and so is someone who joined that way before and comes back.
+#[test]
+fn signing_in_takes_invited_off_the_person() {
+    let home = TempHome::new("joined");
+    let server = Server::start_at(&home, 0);
+    let mut data = workspace();
+    data["members"][1]["invited"] = json!(true);
+    data["members"][2]["invited"] = json!(true);
+    let mut a = App::connect(server.port, Some(data));
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    let invited = |d: &Value, id: u64| {
+        d["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == id)
+            .is_some_and(|m| m["invited"] == true)
+    };
+    a.wait("Bo and Cy invited", |d| invited(d, 2) && invited(d, 3));
+
+    let code = a.invite(2, Role::Member);
+    let mut b = App::join(server.port, &code);
+    b.until("B signed in", |b| b.member == Some(2));
+    b.wait("B's own copy says joined", |d| !invited(d, 2));
+    a.wait("the owner sees B joined", |d| {
+        !invited(d, 2) && invited(d, 3)
+    });
+
+    // Cy joined while the server didn't do this yet, and comes back with
+    // the token from then
+    let code = a.invite(3, Role::Member);
+    let mut c = App::join(server.port, &code);
+    c.until("C has a token", |c| c.token.is_some());
+    let (token, device) = (c.token.clone(), c.device.clone());
+    drop(c);
+    a.wait("the owner sees C joined", |d| !invited(d, 3));
+    // as an older server left them
+    a.change(|d| {
+        let m = d["members"].as_array_mut().unwrap();
+        let cy = m.iter_mut().find(|m| m["id"] == 3).unwrap();
+        cy["invited"] = json!(true);
+    });
+    b.wait("the server has Cy invited again", |d| invited(d, 3));
+    let mut again = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            token,
+            device,
+            ..Default::default()
+        },
+    );
+    again.until("C back", |c| c.member == Some(3));
+    a.wait("the owner sees C joined again", |d| !invited(d, 3));
+    server.stop();
+}
+
 /// Another device of `a`'s person, signed in with a code `a` shows (the
 /// phone link), holding the team's copy.
 fn second_device(port: u16, a: &mut App) -> App {

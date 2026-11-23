@@ -1700,3 +1700,38 @@ fn calendar_week_dates_keep_clear_of_the_toggle() {
         }
     }
 }
+
+/// A List grouped by priority in the light theme: the group pills' text is
+/// dark on the light yellow (High) and light blue (Normal), readable at
+/// least 3:1. It used to be white on them, hard to read.
+#[test]
+fn priority_group_pills_are_readable() {
+    let mut h = Ui1::sized(1440.0, 900.0);
+    let list = list_id(&h, "Website Redesign");
+    h.app.loc = Location::List(list);
+    h.app.view = ViewKind::List;
+    h.app.prefs.group_by = GroupBy::Priority;
+    h.settle();
+    let mut seen = 0;
+    for p in [2usize, 3, 4] {
+        let label = tr(crate::model::PRIORITIES[p].label).to_uppercase();
+        let fill = rgb(crate::model::PRIORITIES[p].color);
+        for (r, c) in h.painted_text(&label) {
+            // the pill's text, not the same word in a row's Priority column
+            if r.height() > 16.0 {
+                continue;
+            }
+            seen += 1;
+            let k = contrast(
+                c,
+                if p == 4 {
+                    Color32::from_rgb(0xb0, 0xb0, 0xb0)
+                } else {
+                    fill
+                },
+            );
+            assert!(k >= 3.0, "{label}: {c:?} on {fill:?} is {k:.2}:1");
+        }
+    }
+    assert!(seen >= 2, "the High and Normal groups are drawn");
+}

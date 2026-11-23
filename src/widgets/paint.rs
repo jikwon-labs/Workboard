@@ -219,7 +219,9 @@ pub fn paint_empty_avatar(p: &egui::Painter, center: Pos2, r: f32, color: Color3
 }
 
 /// Status pill: open statuses are a light grey pill with dark text and a dashed
-/// circle; the others are filled with their colour and white text (as measured).
+/// circle; the others are filled with their colour and white text (as
+/// measured), or dark text on a fill too light for white (a priority
+/// group's yellow or light blue, where white was hard to read).
 pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
     let open = st.kind == StatusKind::Open;
     let dark = ui.visuals().dark_mode;
@@ -237,7 +239,7 @@ pub fn status_pill(ui: &mut Ui, st: &Status, sense: Sense) -> Response {
             },
         )
     } else {
-        (rgb(st.color), Color32::WHITE)
+        (rgb(st.color), ink_on(rgb(st.color)))
     };
     let text = crate::i18n::status_text(&st.name).to_uppercase();
     let galley = ui

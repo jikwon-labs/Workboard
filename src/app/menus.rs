@@ -485,21 +485,45 @@ impl App {
         let room = screen.width() - 16.0 - 2.0 * DIALOG_PAD;
         let max_w = d.width.1.min(room);
         let min_w = d.width.0.min(max_w);
+        // a short window: the dialog moves up as far as it must to stay
+        // whole (its height is the last frame's), and a body taller than
+        // the window scrolls under the title row
+        let last_h = ctx
+            .memory(|m| m.area_rect(d.id))
+            .map_or(0.0, |r| r.height());
+        let (align, [dx, mut dy]) = d.anchor;
+        let spare = (screen.height() - 2.0 * DIALOG_EDGE - last_h).max(0.0);
+        dy = match align.y() {
+            Align::Min => dy.min(spare + DIALOG_EDGE).max(DIALOG_EDGE),
+            Align::Center => dy.clamp(-spare / 2.0, spare / 2.0),
+            Align::Max => dy.max(-spare - DIALOG_EDGE).min(-DIALOG_EDGE),
+        };
         let shown = egui::Window::new(RichText::new(d.name).size(17.0))
             .id(d.id)
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
-            .anchor(d.anchor.0, d.anchor.1)
+            .anchor(align, [dx, dy])
             .min_width(min_w)
             .max_width(max_w)
+            // (egui starts a window 420 high and lets it grow only as its
+            // content did: room for the whole window's height instead)
+            .default_height(screen.height() - 2.0 * (DIALOG_EDGE + DIALOG_PAD))
             .frame(dialog_frame(&t))
             .show(ctx, |ui| {
                 ui.set_min_width(min_w - 20.0);
+                let top = ui.min_rect().top();
                 if dialog_header_as(ui, &t, d.title, d.close_name) {
                     close = true;
                 }
-                body(self, ui)
+                let header = ui.cursor().top() - top;
+                let body_h =
+                    (screen.height() - 2.0 * DIALOG_EDGE - 2.0 * DIALOG_PAD - header).max(80.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("dialog_body")
+                    .max_height(body_h)
+                    .show(ui, |ui| body(self, ui))
+                    .inner
             });
         ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, d.id));
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.menu_was_open {
@@ -511,6 +535,8 @@ impl App {
 
 /// The dialog frame's padding on each side (`dialog_frame`).
 const DIALOG_PAD: f32 = 20.0;
+/// The least room between a dialog and the window's top or bottom edge.
+const DIALOG_EDGE: f32 = 8.0;
 
 pub(super) fn modal_window_id(m: &Modal) -> egui::Id {
     egui::Id::new(("modal_window", std::mem::discriminant(m)))

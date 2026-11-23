@@ -413,12 +413,21 @@ impl App {
         self.goal_owner_and_color(ui, t, d);
         ui.add_space(14.0);
         ui.separator();
-        ui.horizontal(|ui| {
+        // a narrow window: the note above the buttons
+        let note = |ui: &mut Ui| {
             ui.label(
                 RichText::new(tr("You can change all of this later"))
                     .size(12.5)
                     .color(t.text2),
             );
+        };
+        if w < 420.0 {
+            note(ui);
+        }
+        ui.horizontal(|ui| {
+            if w >= 420.0 {
+                note(ui);
+            }
             let named = !d.name.trim().is_empty() && !same_range(d);
             let (create, cancel) = footer_buttons(ui, t, tr("Create goal"), named);
             name_it(&create, "Create goal");
@@ -464,18 +473,32 @@ impl App {
                 let hint = new_target(d.kind).name;
                 match d.kind {
                     TargetType::Number => {
-                        // a column each: its label over its box
+                        // a column each: its label over its box (a narrow
+                        // window has the name on a row of its own)
+                        let one_row = ui.available_width() >= 390.0;
+                        if !one_row {
+                            small(ui, "Target name");
+                            let r = ui.add(
+                                field(&mut d.target_name)
+                                    .hint_text(hint.as_str())
+                                    .desired_width(f32::INFINITY),
+                            );
+                            name_field(&r, "Target name entry");
+                            ui.add_space(4.0);
+                        }
                         ui.horizontal_top(|ui| {
-                            let name_w = (ui.available_width() - 250.0).max(140.0);
-                            ui.vertical(|ui| {
-                                small(ui, "Target name");
-                                let r = ui.add(
-                                    field(&mut d.target_name)
-                                        .hint_text(hint.as_str())
-                                        .desired_width(name_w),
-                                );
-                                name_field(&r, "Target name entry");
-                            });
+                            if one_row {
+                                let name_w = (ui.available_width() - 250.0).max(140.0);
+                                ui.vertical(|ui| {
+                                    small(ui, "Target name");
+                                    let r = ui.add(
+                                        field(&mut d.target_name)
+                                            .hint_text(hint.as_str())
+                                            .desired_width(name_w),
+                                    );
+                                    name_field(&r, "Target name entry");
+                                });
+                            }
                             ui.vertical(|ui| {
                                 small(ui, "Start value");
                                 let r = ui.add_sized(vec2(64.0, 26.0), number_box(&mut d.from));
@@ -584,6 +607,8 @@ impl App {
 
     /// The goal's owner and colour.
     fn goal_owner_and_color(&mut self, ui: &mut Ui, t: &Theme, d: &mut GoalDraft) {
+        // a narrow window: the colours on a row under the owner
+        let one_row = ui.available_width() >= 470.0;
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(crate::i18n::tr_ctx("Owner (goal)", "Owner"))
@@ -609,27 +634,38 @@ impl App {
                         ui.selectable_value(&mut d.owner, *id, n);
                     }
                 });
-            ui.add_space(16.0);
-            ui.label(
-                RichText::new(tr("Color"))
-                    .size(13.0)
-                    .strong()
-                    .color(t.text2),
-            );
-            for c in GOAL_COLORS {
-                let (r, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
-                ui.painter().circle_filled(r.center(), 10.0, rgb(c));
-                hover_ring(ui, &resp, r.shrink(1.0), 11.0);
-                if d.color == c {
-                    ui.painter()
-                        .circle_stroke(r.center(), 12.0, Stroke::new(1.5, t.text));
-                }
-                name_it(&resp, &format!("New goal color {:?}", c));
-                if resp.clicked() {
-                    d.color = c;
-                }
+            if one_row {
+                ui.add_space(16.0);
+                Self::goal_colors(ui, t, d);
             }
         });
+        if !one_row {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| Self::goal_colors(ui, t, d));
+        }
+    }
+
+    /// New goal's colour label and swatches, in a row.
+    fn goal_colors(ui: &mut Ui, t: &Theme, d: &mut GoalDraft) {
+        ui.label(
+            RichText::new(tr("Color"))
+                .size(13.0)
+                .strong()
+                .color(t.text2),
+        );
+        for c in GOAL_COLORS {
+            let (r, resp) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+            ui.painter().circle_filled(r.center(), 10.0, rgb(c));
+            hover_ring(ui, &resp, r.shrink(1.0), 11.0);
+            if d.color == c {
+                ui.painter()
+                    .circle_stroke(r.center(), 12.0, Stroke::new(1.5, t.text));
+            }
+            name_it(&resp, &format!("New goal color {:?}", c));
+            if resp.clicked() {
+                d.color = c;
+            }
+        }
     }
 
     /// Goal achieved: the moment a goal reaches 100%.

@@ -30,6 +30,7 @@ mod mini;
 mod narrow;
 mod navigation;
 mod notify_settings;
+mod overlays;
 mod people;
 mod posts;
 mod profile;

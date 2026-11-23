@@ -30,6 +30,7 @@
 
 use super::*;
 use crate::media::{self, Rgba};
+use egui::{Pos2, Vec2};
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1556,6 +1557,11 @@ pub(super) struct Viewer {
     frame: Option<egui::TextureHandle>,
     /// a video found not to play here (so it isn't tried every frame)
     unplayable: Option<String>,
+    /// how large the picture is shown, in times its fitted size (1: fitted
+    /// to the window); back to 1 for the next picture
+    pub(super) zoom: f32,
+    /// how far the zoomed picture's middle is moved from the window's
+    pub(super) pan: Vec2,
 }
 
 impl Viewer {
@@ -1567,6 +1573,34 @@ impl Viewer {
             player: None,
             frame: None,
             unplayable: None,
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+        }
+    }
+
+    /// Zoom to `z` times the fitted size (within 1..=`max`), keeping the
+    /// point of the picture under `at` where it is (`mid`: the middle of the
+    /// fitted picture).
+    fn zoom_to(&mut self, z: f32, at: Pos2, mid: Pos2, max: f32) {
+        let z = z.clamp(1.0, max.max(1.0));
+        let d = at - mid;
+        self.pan = d - (d - self.pan) * (z / self.zoom);
+        self.zoom = z;
+        if z <= 1.0 {
+            self.pan = Vec2::ZERO;
+        }
+    }
+
+    /// Keep a picture of `size` from leaving a gap at the edge of `bounds`
+    /// where it is larger than them, and in the middle where it isn't.
+    fn keep_in(&mut self, size: Vec2, mid: Pos2, bounds: Rect) {
+        for i in 0..2 {
+            let (lo, hi) = (bounds.min[i], bounds.max[i]);
+            self.pan[i] = if size[i] <= hi - lo {
+                0.0
+            } else {
+                self.pan[i].clamp(hi - mid[i] - size[i] / 2.0, lo - mid[i] + size[i] / 2.0)
+            };
         }
     }
 }
@@ -2676,8 +2710,29 @@ impl App {
                     area.width(),
                     area.height(),
                 );
-                let pic = Rect::from_center_size(area.center(), vec2(w, h));
-                let pic_resp = ui.interact(pic, ui.id().with("media_pic"), Sense::click());
+                // a picture can be zoomed: a click zooms in where it's
+                // clicked (to its real size, or twice the fitted size when
+                // that's small) and back; pinch or Cmd+scroll zooms by
+                // steps; dragging or scrolling moves a zoomed one
+                let zoomable = a.kind == MediaKind::Image && tex.is_some();
+                if !zoomable {
+                    v.zoom = 1.0;
+                    v.pan = Vec2::ZERO;
+                }
+                let mid = area.center();
+                let real = a.w.max(1) as f32 / ctx.pixels_per_point() / w;
+                let max_zoom = (real * 4.0).max(8.0);
+                let click_zoom = if real >= 1.5 { real } else { 2.0 };
+                let pic = Rect::from_center_size(mid + v.pan, vec2(w, h) * v.zoom);
+                let pic_resp = ui.interact(
+                    pic.intersect(bg),
+                    ui.id().with("media_pic"),
+                    if zoomable {
+                        Sense::click_and_drag()
+                    } else {
+                        Sense::click()
+                    },
+                );
                 pic_resp.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Image,
@@ -2691,6 +2746,57 @@ impl App {
                 if !retryable {
                     no_pointer(&pic_resp);
                 }
+                if zoomable {
+                    let pointer = ui
+                        .input(|i| i.pointer.hover_pos())
+                        .filter(|p| bg.contains(*p));
+                    let pinch = ui.input(|i| i.zoom_delta());
+                    if let Some(p) = pointer.filter(|_| pinch != 1.0) {
+                        v.zoom_to(v.zoom * pinch, p, mid, max_zoom);
+                    }
+                    if pic_resp.clicked() {
+                        let at = pic_resp.interact_pointer_pos().unwrap_or(mid);
+                        let z = if v.zoom > 1.0 { 1.0 } else { click_zoom };
+                        v.zoom_to(z, at, mid, max_zoom);
+                    }
+                    if v.zoom > 1.0 {
+                        v.pan += pic_resp.drag_delta();
+                        if pointer.is_some() {
+                            v.pan += ui.input(|i| i.smooth_scroll_delta);
+                        }
+                    }
+                    // keys, unless something is being typed
+                    if !ctx.wants_keyboard_input() {
+                        let (zin, zout, fit_key) = ui.input(|i| {
+                            (
+                                i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals),
+                                i.key_pressed(egui::Key::Minus),
+                                i.key_pressed(egui::Key::Num0),
+                            )
+                        });
+                        if zin {
+                            v.zoom_to(v.zoom * 1.5, mid, mid, max_zoom);
+                        }
+                        if zout {
+                            v.zoom_to(v.zoom / 1.5, mid, mid, max_zoom);
+                        }
+                        if fit_key {
+                            v.zoom_to(1.0, mid, mid, max_zoom);
+                        }
+                    }
+                    if pic_resp.hovered() {
+                        ui.ctx().set_cursor_icon(if pic_resp.dragged() {
+                            egui::CursorIcon::Grabbing
+                        } else if v.zoom > 1.0 {
+                            egui::CursorIcon::Grab
+                        } else {
+                            egui::CursorIcon::ZoomIn
+                        });
+                    }
+                }
+                let size = vec2(w, h) * v.zoom;
+                v.keep_in(size, mid, bg);
+                let pic = Rect::from_center_size(mid + v.pan, size);
                 match &tex {
                     Some(tex) => {
                         ui.painter().image(
@@ -2726,6 +2832,15 @@ impl App {
                     && !pic.contains(bg_resp.interact_pointer_pos().unwrap_or(pic.center()))
                 {
                     close = true;
+                }
+                // a zoomed picture goes under the name and the buttons: a
+                // dark band keeps them readable
+                if v.zoom > 1.0 {
+                    ui.painter().rect_filled(
+                        Rect::from_min_size(bg.min, vec2(bg.width(), 54.0)),
+                        0.0,
+                        Color32::from_black_alpha(170),
+                    );
                 }
                 // top: name and the buttons
                 let top =
@@ -2790,6 +2905,27 @@ impl App {
                                             crate::os::open_path(p);
                                         }
                                     }
+                                }
+                            }
+                            // zoom out, how large (as a share of the real
+                            // size; a click fits it again), zoom in
+                            if zoomable {
+                                ui.add_space(12.0);
+                                let zin = b(ui, "+");
+                                name_it(&zin, "Zoom in");
+                                if zin.on_hover_text(tr("Zoom in")).clicked() {
+                                    v.zoom_to(v.zoom * 1.5, mid, mid, max_zoom);
+                                }
+                                let pct = (v.zoom / real * 100.0).round() as u32;
+                                let fit_b = b(ui, &format!("{}%", pct));
+                                name_it(&fit_b, "Fit to window");
+                                if fit_b.on_hover_text(tr("Fit to window")).clicked() {
+                                    v.zoom_to(1.0, mid, mid, max_zoom);
+                                }
+                                let zout = b(ui, "\u{2212}");
+                                name_it(&zout, "Zoom out");
+                                if zout.on_hover_text(tr("Zoom out")).clicked() {
+                                    v.zoom_to(v.zoom / 1.5, mid, mid, max_zoom);
                                 }
                             }
                         });
@@ -2980,6 +3116,8 @@ impl App {
         if step != 0 {
             let n = m.attachments.len() as i32;
             v.index = ((v.index as i32 + step).rem_euclid(n)) as usize;
+            v.zoom = 1.0;
+            v.pan = Vec2::ZERO;
         }
         v.index = media[v.index];
         let _ = t;

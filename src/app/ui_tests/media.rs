@@ -196,6 +196,92 @@ fn drop_a_picture_send_it_and_open_it_large() {
 }
 
 #[test]
+fn a_picture_opened_large_zooms_in_and_moves() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let pic = test_picture("zoom.png", 600, 400);
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(pic),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    h.until("the picture ready in the message box", |h| {
+        h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty()
+    });
+    h.settle();
+    h.click("Message composer");
+    h.key(egui::Key::Enter);
+    let m = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .clone();
+    h.until("the picture decoded for the screen", |h| {
+        h.app
+            .files
+            .texture(&m.attachments[0].file, crate::app::files::THUMB)
+            .is_some()
+    });
+    h.click("Picture zoom.png");
+    let zoom = |h: &Ui1| h.app.viewer.as_ref().unwrap().zoom;
+    let pan = |h: &Ui1| h.app.viewer.as_ref().unwrap().pan;
+    assert_eq!(zoom(&h), 1.0, "opens fitted to the window");
+    // a click on the picture zooms in where it was clicked, another fits it again
+    let big = h.rect("Large zoom.png");
+    let at = big.center() + vec2(200.0, 100.0);
+    h.click_at(at);
+    assert_eq!(
+        zoom(&h),
+        2.0,
+        "twice the fitted size: the real size is smaller"
+    );
+    assert!(
+        h.app.viewer.is_some(),
+        "a click on the picture doesn't close it"
+    );
+    assert!(
+        pan(&h).x < 0.0 && pan(&h).y < 0.0,
+        "the clicked point stays under the pointer"
+    );
+    // dragging moves it
+    let before = pan(&h);
+    h.drag_by(pos2(700.0, 450.0), pos2(800.0, 450.0));
+    assert!(pan(&h).x > before.x, "dragged to the right");
+    assert_eq!(zoom(&h), 2.0, "a drag isn't a click");
+    h.click_at(pos2(700.0, 450.0));
+    assert_eq!((zoom(&h), pan(&h)), (1.0, egui::Vec2::ZERO), "fitted again");
+    // the buttons above it
+    h.click("Zoom in");
+    assert_eq!(zoom(&h), 1.5);
+    h.click("Zoom in");
+    h.click("Zoom out");
+    assert_eq!(zoom(&h), 1.5);
+    h.click("Fit to window");
+    assert_eq!(zoom(&h), 1.0);
+    h.click("Zoom out");
+    assert_eq!(zoom(&h), 1.0, "never smaller than fitted");
+    // pinching (or Cmd+scroll) zooms by steps; the keys too
+    h.hover(pos2(720.0, 450.0));
+    h.frame(vec![egui::Event::Zoom(1.25)]);
+    h.settle();
+    assert_eq!(zoom(&h), 1.25);
+    h.key(egui::Key::Equals);
+    assert!((zoom(&h) - 1.875).abs() < 1e-4);
+    h.key(egui::Key::Num0);
+    assert_eq!(zoom(&h), 1.0);
+    // a click beside a fitted picture still closes it
+    h.click_at(pos2(30.0, 450.0));
+    assert!(h.app.viewer.is_none());
+}
+
+#[test]
 fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
     let mut h = Ui1::new();
     let id = open_design_task(&mut h);

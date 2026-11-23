@@ -695,6 +695,10 @@ impl App {
             .show(ui, |ui| {
                 // a compact window: the right-hand chips go on a second row
                 let two_rows = self.tier == Tier::Compact;
+                // too narrow for the search field beside the chips: it gets
+                // a row of its own under them (it pushed the chips, and the
+                // List under them, past the left edge)
+                let mut search_below = false;
                 let row = |ui: &mut Ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     // full chip labels, and whether they all fit in one row; if
@@ -875,12 +879,40 @@ impl App {
                                 self.search.clear();
                             }
                         }
-                        if self.show_search {
-                            // compact: what is left after the avatar and four icon
-                            // chips still to come on its left (the field used
-                            // to push Sort over Columns)
+                        // compact: what is left after the avatar and four icon
+                        // chips still to come on its left (the field used
+                        // to push Sort over Columns)
+                        let left_after = {
+                            let extra = |s: &str| {
+                                if s.is_empty() {
+                                    0.0
+                                } else {
+                                    ui.painter()
+                                        .layout_no_wrap(
+                                            s.to_string(),
+                                            FontId::proportional(13.0),
+                                            t.text,
+                                        )
+                                        .size()
+                                        .x
+                                        + 6.0
+                                }
+                            };
+                            let fcount = if nf > 0 {
+                                nf.to_string()
+                            } else {
+                                String::new()
+                            };
+                            ui.available_width()
+                                - (26.0 + 4.0 * 34.0 + 5.0 * 6.0)
+                                - extra(&fcount)
+                                - extra(sort_arrow.trim())
+                        };
+                        if self.show_search && compact && left_after < 60.0 {
+                            search_below = true;
+                        } else if self.show_search {
                             let fw = if compact {
-                                (ui.available_width() - 214.0).clamp(60.0, 110.0)
+                                left_after.clamp(60.0, 110.0)
                             } else {
                                 180.0
                             };
@@ -1022,6 +1054,17 @@ impl App {
                     ui.horizontal_wrapped(row);
                 } else {
                     ui.horizontal(row);
+                }
+                if search_below {
+                    let r = ui.add(
+                        field(&mut self.search)
+                            .hint_text(tr("Search tasks..."))
+                            .desired_width(ui.available_width() - 12.0),
+                    );
+                    name_field(&r, "Search tasks...");
+                    if std::mem::take(&mut self.search_focus) {
+                        r.request_focus();
+                    }
                 }
             });
     }

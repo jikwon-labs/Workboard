@@ -265,11 +265,15 @@ impl App {
         let (salt, prefix, join_name) = names;
         let mut flip = false;
         let mut drop: Option<usize> = None;
+        // a narrow panel: the row's parts go on to a second line instead of
+        // running past its edge, and the values box fits on its line
+        let values_width = values_width
+            .min(ui.available_width() - 48.0 - 3.0 * ui.spacing().item_spacing.x - 28.0);
         for i in 0..rows.len() {
             let row = rows[i].clone();
             let mut new = row.clone();
             let n = i + 1;
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 // a fixed-width lead so every row's drop-downs line up
                 flip |= join_lead(ui, t, i, join, join_name);
                 let fr = egui::ComboBox::from_id_salt(("filter_field", salt, i))
@@ -305,6 +309,11 @@ impl App {
                             }
                         });
                     name_it(&or.response, &format!("{} {} condition", prefix, n));
+                });
+                // (in the row itself: a new line inside the enabled scope
+                // didn't move the box)
+                crate::widgets::wrap_unless_room(ui, values_width);
+                ui.add_enabled_ui(row.field.is_some(), |ui| {
                     let choices = row
                         .field
                         .map(|f| self.filter_choices(f))
@@ -385,7 +394,9 @@ impl App {
         for s in &self.data.extra.saved_filters {
             ui.horizontal(|ui| match &mut editing {
                 Some((id, text)) if *id == s.id => {
-                    let r = ui.add(field(text).desired_width(260.0));
+                    let r = ui.add(
+                        field(text).desired_width((ui.available_width() - 90.0).clamp(80.0, 260.0)),
+                    );
                     name_field(&r, "Saved filter new name");
                     focus_once(ui, &r);
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -452,10 +463,23 @@ impl App {
             editing = start_rename;
         }
         ui.horizontal(|ui| {
+            // the field leaves room for Save filter beside it
+            let save_w = ui
+                .painter()
+                .layout_no_wrap(
+                    tr("Save filter").to_string(),
+                    egui::TextStyle::Button.resolve(ui.style()),
+                    t.text,
+                )
+                .size()
+                .x
+                + 2.0 * ui.spacing().button_padding.x;
+            let field_w = (ui.available_width() - save_w - ui.spacing().item_spacing.x - 12.0)
+                .clamp(80.0, 260.0);
             let r = ui.add(
                 field(&mut name)
                     .hint_text(tr("Name this filter"))
-                    .desired_width(260.0),
+                    .desired_width(field_w),
             );
             name_field(&r, "Saved filter name");
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -519,6 +543,15 @@ impl App {
     pub(crate) fn filter_panel(&mut self, ctx: &egui::Context, at: Pos2, pill: Rect) {
         let t = self.t();
         let mut close = false;
+        // as wide as the window lets it be (it ran past the right edge of a
+        // small window), and moved left to stay inside
+        let screen = ctx.screen_rect();
+        let width = (screen.width() - 16.0 - 2.0 * 12.0 - 2.0).min(560.0);
+        let at = pos2(
+            at.x.min(screen.right() - 8.0 - width - 2.0 * 12.0 - 2.0)
+                .max(screen.left() + 8.0),
+            at.y,
+        );
         let area = egui::Area::new(egui::Id::new("filter_panel"))
             .order(egui::Order::Foreground)
             .fixed_pos(at)
@@ -526,7 +559,7 @@ impl App {
                 egui::Frame::popup(ui.style())
                     .inner_margin(egui::Margin::same(12))
                     .show(ui, |ui| {
-                        ui.set_width(560.0);
+                        ui.set_width(width);
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(tr("Filters")).strong());
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

@@ -1701,6 +1701,107 @@ fn calendar_week_dates_keep_clear_of_the_toggle() {
     }
 }
 
+/// The Filter panel in the smallest window, with conditions, a group and a
+/// saved filter: it fits inside the window and its rows wrap. It used to be
+/// 560 points wide whatever the window, so "Select option" and "Save
+/// filter" were cut at the right.
+#[test]
+fn filter_panel_fits_a_small_window() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        for (w, hh) in [(360.0, 640.0), (460.0, 640.0), (960.0, 560.0)] {
+            let mut h = Ui1::sized(w, hh);
+            h.app.notepad_open = false;
+            h.app.section = Section::Home;
+            h.app.loc = Location::Everything;
+            h.app.view = ViewKind::List;
+            h.app.prefs.filter.rows = vec![
+                crate::app::parity::FilterRow::default(),
+                crate::app::parity::FilterRow::default(),
+            ];
+            h.app.prefs.filter.groups = vec![crate::app::parity::FilterGroup {
+                join: crate::app::parity::Join::Or,
+                rows: vec![
+                    crate::app::parity::FilterRow::default(),
+                    crate::app::parity::FilterRow::default(),
+                ],
+            }];
+            h.app.save_filter("Mine");
+            h.app.filter_open = true;
+            h.settle();
+            crate::i18n::set_lang(lang);
+            h.settle();
+            h.settle();
+            for name in [
+                "Filter 1 values",
+                "Filter 2 values",
+                "Group 1 filter 1 values",
+                "Remove filter 1",
+                "Remove group 1 filter 2",
+                "Save filter",
+                "Filter search",
+                "Delete saved filter Mine",
+            ] {
+                let r = h.rect(name);
+                assert!(
+                    r.left() >= 0.0 && r.right() <= w,
+                    "{lang:?} {w}x{hh}: {name} at {r:?}"
+                );
+            }
+            let page = Rect::from_min_size(Pos2::ZERO, h.size);
+            let cut = h.cut_texts(page);
+            assert!(
+                !cut.iter()
+                    .any(|s| s == tr("Select option") || s == tr("Save filter")),
+                "{lang:?} {w}x{hh}: {cut:?}"
+            );
+            crate::i18n::set_lang(crate::i18n::Lang::En);
+        }
+    }
+}
+
+/// The List's toolbar in the smallest window with the search field open
+/// and filters on: the field gets a row of its own when it doesn't fit
+/// beside the chips. It used to push the chips, and the List under them,
+/// past the window's left edge, so the starts of the rows were cut.
+#[test]
+fn list_search_and_filters_stay_inside_a_small_window() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        for (w, hh) in [(360.0, 640.0), (460.0, 640.0)] {
+            let mut h = Ui1::sized(w, hh);
+            let list = list_id(&h, "Website Redesign");
+            h.app.loc = Location::List(list);
+            h.app.view = ViewKind::List;
+            h.app.show_search = true;
+            h.app.search = "design".into();
+            h.app.me_mode = true;
+            h.app.assignee_filter = Some(h.app.data.members[1].id);
+            h.settle();
+            crate::i18n::set_lang(lang);
+            h.settle();
+            h.settle();
+            for name in [
+                "Search tasks...",
+                "Search tasks",
+                "Task Design new homepage layout",
+            ] {
+                let r = h.rect(name);
+                assert!(
+                    r.left() >= 0.0 && r.right() <= w,
+                    "{lang:?} {w}x{hh}: {name} at {r:?}"
+                );
+            }
+            let page = Rect::from_min_size(Pos2::ZERO, h.size);
+            let cut: Vec<String> = h
+                .cut_texts(page)
+                .into_iter()
+                .filter(|s| s.starts_with("Design new") || s == tr("Name"))
+                .collect();
+            assert!(cut.is_empty(), "{lang:?} {w}x{hh}: {cut:?}");
+            crate::i18n::set_lang(crate::i18n::Lang::En);
+        }
+    }
+}
+
 /// A List grouped by priority in the light theme: the group pills' text is
 /// dark on the light yellow (High) and light blue (Normal), readable at
 /// least 3:1. It used to be white on them, hard to read.

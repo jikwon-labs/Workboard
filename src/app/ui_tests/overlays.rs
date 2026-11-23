@@ -416,3 +416,36 @@ fn floating_windows_and_small_dialogs_stay_inside_small_windows() {
     }
     assert!(bad.is_empty(), "{:#?}", bad);
 }
+
+#[test]
+fn a_popup_closes_when_its_button_scrolls_away() {
+    // the dashboard's "+ Add card" menu stayed at the window's top after
+    // the page scrolled its button out of sight
+    let mut h = Ui1::sized(960.0, 560.0);
+    h.app.section = Section::Dashboards;
+    h.app.new_dashboard("Workspace overview");
+    h.settle();
+    h.click("+ Add card");
+    let item = "Add card Overdue tasks";
+    assert!(h.has(item), "the menu opens");
+    // wheel over the page, away from the menu
+    let at = pos2(h.size.x - 60.0, h.size.y - 60.0);
+    for _ in 0..10 {
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -200.0),
+            modifiers: Default::default(),
+        }]);
+        h.settle();
+        if !h.has("+ Add card") {
+            break;
+        }
+    }
+    let shown = h
+        .tree
+        .iter()
+        .any(|(n, r)| n == "+ Add card" && r.bottom() > 40.0 && r.top() < h.size.y);
+    assert!(!shown, "the page scrolled the button away");
+    assert!(!h.has(item), "the menu went with its button");
+}

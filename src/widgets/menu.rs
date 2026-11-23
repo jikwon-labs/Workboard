@@ -15,6 +15,7 @@ pub fn popup<R>(
     if resp.clicked() {
         ui.memory_mut(|m| m.toggle_popup(id));
     }
+    close_when_scrolled_away(ui, resp, id);
     // a menu taller than the window scrolls inside itself instead of running
     // off the bottom (egui moves a shorter one up until it fits). Only menus
     // that were too tall last frame get the scroll area, so ordinary menus
@@ -124,6 +125,15 @@ pub fn window_inside<'a>(
         .max_size(room.size() - frame.total_margin().sum())
 }
 
+/// Closes the open popup `id` once its button is scrolled out of sight:
+/// egui kept it inside the window, so it stayed at the window's top or
+/// bottom edge, away from anything it belonged to.
+fn close_when_scrolled_away(ui: &Ui, resp: &Response, id: egui::Id) {
+    if !ui.clip_rect().intersects(resp.rect) && ui.memory(|m| m.is_popup_open(id)) {
+        ui.memory_mut(|m| m.close_popup());
+    }
+}
+
 /// Opens a popup to the right of `resp` when it is clicked, its top level
 /// with the button's and moved up as far as it must to stay in the window;
 /// shows `add` while open. For the left bar: below its button a popup
@@ -139,6 +149,7 @@ pub fn popup_right<R>(
     if resp.clicked() {
         ui.memory_mut(|m| m.toggle_popup(id));
     }
+    close_when_scrolled_away(ui, resp, id);
     let screen = ui.ctx().screen_rect();
     // last frame's height (none before it has been shown: egui keeps that
     // first frame inside the window)

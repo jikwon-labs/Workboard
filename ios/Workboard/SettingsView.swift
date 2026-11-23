@@ -83,7 +83,6 @@ struct SettingsView: View {
                                 Text(client.me.flatMap { client.view.member($0)?.name } ?? "Choose who you are")
                             }
                         }
-                        if client.me != nil { profileLinks }
                     }
                 } header: {
                     Text("You")
@@ -93,6 +92,10 @@ struct SettingsView: View {
                     } else if client.settings.accountEmail == nil {
                         Text("This iPhone was signed in with an invite code. Set a password to sign in with your email on other devices.")
                     }
+                }
+                // apart from "Kept on this iPhone only": a profile goes to everyone
+                if !client.settings.meFromServer, client.me != nil {
+                    Section { profileLinks }
                 }
                 Section {
                     switch notifier.permission {

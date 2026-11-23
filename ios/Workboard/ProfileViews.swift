@@ -106,11 +106,14 @@ struct ProfileEditView: View {
     var body: some View {
         Form {
             Section {
-                VStack(spacing: 14) {
+                VStack(spacing: 12) {
                     preview
-                    HStack(spacing: 12) {
+                    // plain words in one line under the photo, as in Contacts
+                    // (framed buttons of two widths, one broken onto two
+                    // lines, looked off)
+                    HStack(spacing: 28) {
                         PhotosPicker(selection: $picked, matching: .images) {
-                            Label("Upload photo", systemImage: "photo")
+                            Text("Upload photo")
                         }
                         .accessibilityIdentifier("uploadPhotoButton")
                         if photo != nil {
@@ -122,7 +125,8 @@ struct ProfileEditView: View {
                             .accessibilityIdentifier("removePhotoButton")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .lineLimit(1)
+                    .buttonStyle(.borderless)
                     .disabled(uploading || !client.canEdit)
                 }
                 .frame(maxWidth: .infinity)
@@ -295,7 +299,15 @@ struct StatusEditView: View {
                     Button {
                         text = s
                     } label: {
-                        Text(verbatim: s).foregroundStyle(.primary)
+                        // a choice, not an action: plain text (`.primary` here
+                        // would be the button's tint), ticked when chosen
+                        HStack {
+                            Text(verbatim: s).foregroundStyle(Color.primary)
+                            Spacer()
+                            if text.trimmed == s {
+                                Image(systemName: "checkmark").foregroundStyle(Color.wbAccent)
+                            }
+                        }
                     }
                     .accessibilityIdentifier("statusSuggestion-\(i)")
                 }

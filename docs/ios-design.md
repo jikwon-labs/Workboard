@@ -89,7 +89,7 @@ xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard \
 
 UI 테스트 전에는 모든 시뮬레이터에서 Workboard 앱을 꺼 둔다(`xcrun simctl terminate <기기> com.seojigwon.workboard`, `WB_IOS_UI=1 scripts/wt verify` 는 알아서 끈다). 예전 실행에서 남은 앱은 가짜 서버 주소에 계속 붙어 있다가, 서버를 새로 띄우면 자기가 가진 예전 작업공간을 그대로 다시 올린다. 그러면 예제의 마감일이 그 앱을 띄운 날 기준으로 남고, 테스트가 만든 작업이 수십 개 쌓여 "오늘·내일" 작업, 새로 만든 작업 줄, 대시보드를 찾는 테스트가 실패한다(2026-11-22, 하루 전에 띄운 앱 하나 때문에 6개가 실패했다).
 
-`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`, `&imported=KEY` 를 붙이면 맥의 Slack 가져오기가 쓴 것처럼 `imported` 가 붙는다. `&file=NAME` 은 파일을 붙여 보내고(`&kind=Image` 면 1x1 그림, 앱이 받아 갈 수 있게 서버에 둔다), `&reply=ID` 는 그 메시지의 스레드 답글로 보낸다), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`), 다음 관리 요청에 N초 늦게 답하기(`/admin/late-answer?secs=N`, 그동안 그 연결에는 아무것도 가지 않는다), 다른 사람이 입력 중이라고 알리기(`/admin/typing?channel=C&member=M`)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
+`--admin-http` 는 테스트 전용이다. 시뮬레이터 안의 테스트가 초대 코드 발급(`/admin/invite`), 취소(`/admin/revoke`), "다른 사람이 보낸 메시지"(`/admin/say`, `&imported=KEY` 를 붙이면 맥의 Slack 가져오기가 쓴 것처럼 `imported` 가 붙는다. `&file=NAME` 은 파일을 붙여 보내고(`&kind=Image` 면 1x1 그림, 앱이 받아 갈 수 있게 서버에 둔다), `&reply=ID` 는 그 메시지의 스레드 답글로 보낸다), 마지막 재설정 코드 조회(`/admin/reset-code`), 계정 지우기(`/admin/drop-account`, 비밀번호 없이 로그인된 기기를 흉내 냄), 서버가 잠깐 사라지기(`/admin/offline?secs=N` 은 앱 연결을 끊고 새 연결을 N초 동안 거절, `/admin/online` 은 되돌림. 주소는 그대로), 메시지가 서버에 있는지 보기(`/admin/find?text=T`), 다음 관리 요청에 N초 늦게 답하기(`/admin/late-answer?secs=N`, 그동안 그 연결에는 아무것도 가지 않는다), 다른 사람이 입력 중이라고 알리기(`/admin/typing?channel=C&member=M`), 다른 사람이 프로필을 바꾼 것처럼 하기(`/admin/member?member=M`, `&photo=1` 1x1 그림, `&photo=SHA` 미리 `PUT /files` 로 올린 그림, `&photo=0` 없음, `&status=`·`&display=`·`&title=`. 서버에 있는 그 멤버를 돌려준다)를 HTTP 로 할 수 있게 한다. 실제 서버에는 필요 없다.
 
 예제 작업공간에서는 Sam Lee(멤버 3)에게만 이메일(`sam@example.com`)이 있다. 초대 코드에 이메일을 비워도 되는 경우와 이메일을 꼭 넣어야 하는 경우(멤버 2)를 둘 다 시험하기 위해서다.
 
@@ -230,6 +230,7 @@ POST http(s)://host:port/auth/forgot   {"email": "..."}
 - 이메일이 없으면 "Set a password"(이메일 + 비밀번호), 있으면 "Change password"(현재 비밀번호 + 새 비밀번호).
 - 둘 다 `set_password {email, password, old_password?}` 를 보낸다. 성공하면 서버가 `account {email}` 을 보내고, 실패하면 `error {code: "denied"}`.
 - Sign out 은 토큰과 "나"를 지우고 로그인 화면으로 간다.
+- 그 아래 "Edit profile" 과 "Set status"(아래 "프로필과 상태").
 
 ### 초대 링크
 
@@ -384,6 +385,17 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **한글 기울임:** Apple 에는 기울임 한글(일본어·중국어도) 글꼴이 없어서 SwiftUI `.italic()`·UIKit `traitItalic` 이 한글을 세운 채로 그렸다. 문서 보기·문서 편집기·채팅에서 `*기울임*` 의 한글이 보통 글자로 보였다(영어만 기울었다). 이제 글꼴 행렬에 약 12도 기울기를 넣은 글꼴로 그린다(WorkboardKit `Slant.swift`). Core Text 가 한글을 그리는 대체 글꼴에도 같은 행렬을 넘겨서 모든 글자가 기운다. 영어도 SF 이탤릭 대신 같은 기울인 SF 라서 섞여도 기울기가 같다. SwiftUI 에서는 기울임 구간에 글꼴을 직접 넣으므로, 그 줄의 글자 스타일(본문 `.body`, 문서 제목은 `.title2`·`.title3` 굵게, `.headline`)과 Dynamic Type 크기를 넘긴다(`Italics.swift`). 바깥에서 `.font(...)` 로 다른 크기를 씌운 곳에 `ChatText`·`MarkdownBody` 를 쓰면 기울임 구간만 넘긴 스타일 크기로 남으니 스타일도 같이 넘긴다.
 - **편집기에서 조합 중인 한글:** 편집기는 한글 조합 중에는 서식을 다시 그리지 않는다(음절이 끊긴다). 그런데 새 글자의 서식(`typingAttributes`)을 늘 보통으로 두어서, B 버튼을 누르고 한글을 치면 조합 중인 글자가 보통으로 보였다. 이제 커서 자리에 글자 하나를 넣어 본 서식(`typingLook`)을 쓰고, 조합이 커서 이동으로 끝나면(글자가 바뀌지 않아 `textViewDidChange` 가 오지 않는다) `textViewDidChangeSelection` 에서 다시 그린다.
 - **검증:** `SlantTests` 2개(대체 글꼴까지 행렬이 가는지, 기울임 구간에만 글꼴이 들어가는지). 시뮬레이터 스크린샷으로 문서 보기·편집기·채팅의 한글 기울임, 굵게+기울임, `setMarkedText` 로 흉내 낸 조합 중 굵게·기울임을 봤다. 실제 한글 키보드로 친 것은 UI 테스트 러너가 이 Mac(Xcode 16.4, iOS 18.6 시뮬레이터)에서 시작하지 못해 못 봤다(`docs/macbook/README.md`).
+
+## 프로필과 상태 (2026-11-23)
+
+맥의 Edit profile·Set status(`src/app/profile.rs`, 프로필 메뉴)를 옮겼다. 전에는 iPhone 에서 이름·사진·상태를 바꿀 수 없었고, 맥에서 올린 사진도 이니셜로만 보였다.
+
+- **설정 > 내 프로필 편집** (`ProfileViews.swift`): 사진, 성명, 표시 이름, 직함. 고른 사진은 가운데 정사각형으로 잘라 512px 이하 PNG 로 만들고(`PictureConvert.profilePhoto`, 맥의 `square_png` 와 같다) 바로 `PUT /files` 로 올린다. 저장은 `Edits.setProfile` 로 바뀐 필드만 쓴다(멤버는 필드마다 합쳐지므로 다른 기기가 그새 바꾼 나머지가 살아남는다). 사진 없음은 serde 처럼 `"photo": null`.
+- **설정 > 상태 설정**: 맥의 제안 다섯 개(이모지까지 상태 글자에 들어간다, 고른 줄에 체크), 상태 지우기. `Edits.setStatusText`.
+- **아바타** (`Theme.swift` `Avatar`): `MemberView.photo` 가 있으면 사진을 한 번 받아(`AvatarPhotos`, 같은 사진은 한 번만 받고 실패하면 1분 동안 다시 묻지 않는다) 보이는 크기로 디코드해 이니셜 위에 그린다.
+- **보이는 곳**: 1:1 DM 맨 위 이름 아래 상대의 상태, Teams 의 All People 에 직함 · 상태.
+- 로그인 없는 서버에서는 "이 iPhone 에만 저장" 안내와 섞이지 않게 두 줄을 따로 묶는다.
+- **검증:** `ProfileTests` 6개, `PictureConvertTests` 2개 추가. UI 테스트 `ProfileUITests` 4개(18789 가짜 서버)는 썼지만 이 MacBook 의 Xcode 16.4 에서는 XCUITest 실행기가 시작하지 않아 돌리지 못했다. 대신 시뮬레이터에 앱을 깔고 `orca computer` 로 눌러 사진 올리기(임시 코드로 파일을 고른 사진처럼 넣음)·저장·상태 저장/지우기가 서버에 닿는 것, 다른 사람 사진·상태가 DM·Teams 에 나오는 것, 한국어 화면을 확인했다.
 
 ## 설계와 달라진 점
 

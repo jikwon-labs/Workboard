@@ -75,6 +75,7 @@ pub const T: &[(&str, &str)] = &[
     ("Only the owner or an admin of this workspace can invite people.", "이 워크스페이스의 소유자나 관리자만 사람을 초대할 수 있습니다."),
     ("Only the owner or an admin of this workspace can change this.", "이 워크스페이스의 소유자나 관리자만 바꿀 수 있습니다."),
     ("Only the owner of this workspace can change its name and color.", "이 워크스페이스의 이름과 색은 소유자만 바꿀 수 있습니다."),
+    ("Only the owner of this workspace can rename a channel.", "채널 이름은 이 워크스페이스의 소유자만 바꿀 수 있습니다."),
     ("This computer is signed in to the team's server as {}. Each person uses Workboard on their own computer with their own sign-in.", "이 컴퓨터는 팀 서버에 {}(으)로 로그인되어 있습니다. 사람마다 자기 컴퓨터에서 자기 계정으로 Workboard를 씁니다."),
     ("Who are you?", "누구신가요?"),
     ("Start a call", "통화 시작"),

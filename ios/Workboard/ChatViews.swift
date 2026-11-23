@@ -1131,6 +1131,7 @@ struct TypingLine: View {
 
 /// Channel Settings, as on the Mac: name and topic, and who is in it. A
 /// private channel with chosen people is how a group conversation is made.
+/// Only the workspace's owner renames a channel (the server keeps it too).
 /// Whoever made the channel, an owner or an admin may change who else is in
 /// it; anyone may join or leave.
 struct ChannelSettingsView: View {
@@ -1141,6 +1142,8 @@ struct ChannelSettingsView: View {
     @State private var name = ""
     @State private var topic = ""
 
+    private var renames: Bool { client.canEdit && client.myRole == .owner }
+
     var body: some View {
         let v = client.view
         let me = client.me ?? 0
@@ -1149,10 +1152,15 @@ struct ChannelSettingsView: View {
                 let manager = client.data.map { Edits.mayManageChannel($0, channel: c.id, me: me, role: client.settings.role) } ?? false
                 Form {
                     if c.kind == .channel {
-                        Section("Name") {
+                        Section {
                             TextField("Channel name", text: $name)
                                 .textInputAutocapitalization(.never)
+                                .disabled(!renames)
                                 .accessibilityIdentifier("channelSettingsName")
+                        } header: {
+                            Text("Name")
+                        } footer: {
+                            if !renames { Text("Only the owner of this workspace can rename a channel.") }
                         }
                         Section("Topic") {
                             TextField("What it's about", text: $topic, axis: .vertical)
@@ -1214,7 +1222,7 @@ struct ChannelSettingsView: View {
     func save(_ c: ChannelView) {
         guard client.canEdit, c.kind == .channel else { return }
         client.edit { d, _ in
-            if name.trimmingCharacters(in: .whitespaces) != c.name { Edits.renameChannel(&d, channel: c.id, to: name) }
+            if renames && name.trimmingCharacters(in: .whitespaces) != c.name { Edits.renameChannel(&d, channel: c.id, to: name) }
             if topic.trimmed != c.topic { Edits.setChannelTopic(&d, channel: c.id, to: topic) }
         }
     }

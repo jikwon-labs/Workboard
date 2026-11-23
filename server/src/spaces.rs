@@ -28,7 +28,8 @@
 // fields, automations, templates and teams, or who a Slack user comes in
 // as (`extra.slack_map`, set by Import from Slack). Admins may do all of
 // that, but the owner's own entry stays the owner's (`guard_entries`) and
-// only the owner renames or recolours the workspace (`OWNER_VALUES`). And
+// only the owner renames or recolours the workspace (`OWNER_VALUES`) or
+// renames a channel (`guard_channel_names`). And
 // chat messages and task comments stay their authors' (`guard_authors`): a
 // plain member can't write as someone else or change or delete what someone
 // else wrote.
@@ -481,6 +482,39 @@ impl Cx {
 }
 
 impl Cx {
+    /// Not the owner: the team's channels keep their names. A channel they
+    /// make they name; afterwards only the owner renames it.
+    fn guard_channel_names(&mut self, canon: &Value, data: &mut Value) {
+        let team: HashMap<u64, &Value> = array_at(canon, "channels")
+            .iter()
+            .filter(|c| c.get("kind").and_then(|k| k.as_str()) != Some("Direct"))
+            .filter_map(|c| written_id(c).map(|i| (i, c)))
+            .collect();
+        for c in array_at_mut(data, "channels").into_iter().flatten() {
+            let Some(id) = written_id(c) else { continue };
+            let Some(t) = team.get(&id) else { continue };
+            // (a copy that leaves the field out changes nothing)
+            if c.get("name").is_none_or(|n| Some(n) == t.get("name")) {
+                continue;
+            }
+            let change = self.their_change(id);
+            match (t.get("name"), c.as_object_mut()) {
+                (Some(n), Some(o)) => {
+                    o.insert("name".into(), n.clone());
+                }
+                (None, Some(o)) => {
+                    o.remove("name");
+                }
+                _ => {}
+            }
+            if let Some(f) = self.dmeta.fields.get_mut(&id) {
+                f.remove("name");
+            }
+            self.out.bump.entry(id).or_insert((change, 0));
+            self.out.refused = true;
+        }
+    }
+
     /// An admin: they bring people in and take them out, but `owners`'
     /// entries (name, email, role) stay as the owner has them, and the owner
     /// can't be taken out of the list. The workspace's name and colour stay
@@ -1095,6 +1129,9 @@ pub fn guard(
         // its admins in charge of everything)
         cx.guard_entries(canon, data, owners);
         cx.guard_values(canon, data, OWNER_VALUES);
+    }
+    if !manages || !owners.is_empty() {
+        cx.guard_channel_names(canon, data);
     }
     let meta = std::mem::take(&mut cx.dmeta);
     set_meta(data, &meta);

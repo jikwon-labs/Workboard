@@ -1614,7 +1614,7 @@ impl App {
                     });
                 });
             }
-            Modal::WorkspaceSettings { .. } if !self.may_rename_workspace() => {
+            Modal::WorkspaceSettings { .. } if !self.has_owner_rights() => {
                 // reached by a link or a stale screen: on a server the
                 // workspace's name and colour are the owner's (the server
                 // keeps them too)

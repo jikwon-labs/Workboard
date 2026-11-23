@@ -94,10 +94,11 @@ impl App {
         }
     }
 
-    /// Whether I may rename or recolour the workspace: on a team server
-    /// only its owner (the server keeps it too), found as in
-    /// [`Self::may_manage`]. Alone or in a shared folder anyone may.
-    pub(crate) fn may_rename_workspace(&self) -> bool {
+    /// Whether I may do what only the owner does: rename or recolour the
+    /// workspace, and rename its channels. On a team server only its owner
+    /// (the server keeps it too), found as in [`Self::may_manage`]. Alone or
+    /// in a shared folder anyone may.
+    pub(crate) fn has_owner_rights(&self) -> bool {
         if !self.on_server() {
             return true;
         }

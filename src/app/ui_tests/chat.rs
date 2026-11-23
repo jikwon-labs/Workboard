@@ -1295,6 +1295,58 @@ fn a_deleted_channel_goes_to_trash_and_comes_back_with_its_messages() {
 }
 
 #[test]
+fn only_the_workspace_owner_renames_a_channel_on_a_server() {
+    let mut h = Ui1::new();
+    let cid = h.channel_id("website-redesign");
+    let name_of = |h: &Ui1| {
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .unwrap()
+            .name
+            .clone()
+    };
+    // a channel I made, on a team server
+    let me = h.app.data.me;
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .creator = me;
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    // a plain member or an admin: the name can't be typed into
+    for role in [wb_net::Role::Member, wb_net::Role::Admin] {
+        h.app.sync_rt.role = Some(role);
+        h.app.modal = Some(Modal::ChannelSettings(cid));
+        h.settle();
+        h.click("Channel name");
+        h.key(egui::Key::End);
+        h.type_text("-x");
+        assert_eq!(name_of(&h), "website-redesign", "{:?} renamed it", role);
+        h.key(egui::Key::Escape);
+        h.app.modal = None;
+    }
+    // the owner
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Channel name");
+    h.key(egui::Key::End);
+    h.type_text("-x");
+    assert_eq!(name_of(&h), "website-redesign-x");
+}
+
+#[test]
 fn someone_elses_channel_can_be_joined_but_not_deleted_or_its_people_changed() {
     let mut h = Ui1::new();
     let cid = h.channel_id("website-redesign");

@@ -4672,12 +4672,13 @@ fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
         c["name"] = json!("renamed by Bo");
         c.as_object_mut().unwrap().remove("creator");
     });
-    a.wait("B's rename at A", |d| {
-        channel(d, 40).is_some_and(|c| c["name"] == "renamed by Bo")
+    a.wait("B joins at A", |d| {
+        channel(d, 40).is_some_and(|c| c["members"] == json!([1, 3, 2]))
     });
     let c = channel(&a.data, 40).unwrap();
     assert_eq!(c["members"], json!([1, 3, 2]), "B joined, Cy stays");
     assert_eq!(c["creator"], 1, "the maker stays");
+    assert_eq!(c["name"], "ann's", "only the owner renames it");
     // B deletes it: nothing happens for the team; B deletes the old one: gone
     b.change(|d| {
         d["channels"]
@@ -4716,6 +4717,71 @@ fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
     b.wait("the owner deleted Bo's channel", |d| {
         channel(d, 60).is_none()
     });
+    server.stop();
+}
+
+/// Only the workspace's owner renames a channel: not a plain member (even
+/// for one they made), not an admin. Anyone still names a channel they make
+/// and changes its topic.
+#[test]
+fn only_the_owner_renames_a_channel() {
+    let home = TempHome::new("chanrename");
+    let server = Server::start_at(&home, 0);
+    let (mut a, mut b) = two_apps(server.port);
+    let named = |id: u64, name: &'static str| {
+        move |d: &Value| channel(d, id).is_some_and(|c| c["name"] == name)
+    };
+    // Bo makes and names one
+    b.change(|d| {
+        d["channels"].as_array_mut().unwrap().push(json!({"id": 9100, "name": "bo's", "kind": "Channel", "topic": "", "creator": 2, "members": [2], "messages": [], "last_read": 0}));
+    });
+    a.wait("Bo's channel reaches Ann", named(9100, "bo's"));
+    // and renames it and changes its topic: only the topic goes through
+    b.change(|d| {
+        let c = d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["id"] == 9100)
+            .unwrap();
+        c["name"] = json!("bo renamed");
+        c["topic"] = json!("lunch");
+    });
+    let kept =
+        |d: &Value| channel(d, 9100).is_some_and(|c| c["name"] == "bo's" && c["topic"] == "lunch");
+    a.wait("the topic reaches Ann, not the name", kept);
+    b.wait("Bo gets the name back", kept);
+    // nor as an admin
+    a.client.send(Msg::SetRole {
+        member: 2,
+        role: Role::Admin,
+    });
+    b.until("B learns it is admin", |b| b.role == Some(Role::Admin));
+    b.change(|d| {
+        let c = d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["id"] == 9100)
+            .unwrap();
+        c["name"] = json!("admin renamed");
+        c["topic"] = json!("dinner");
+    });
+    let kept =
+        |d: &Value| channel(d, 9100).is_some_and(|c| c["name"] == "bo's" && c["topic"] == "dinner");
+    a.wait("an admin's topic reaches Ann, not the name", kept);
+    b.wait("the admin gets the name back", kept);
+    // the owner renames it
+    a.change(|d| {
+        let c = d["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["id"] == 9100)
+            .unwrap();
+        c["name"] = json!("ann renamed");
+    });
+    b.wait("the owner's rename reaches Bo", named(9100, "ann renamed"));
     server.stop();
 }
 

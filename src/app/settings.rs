@@ -97,7 +97,7 @@ impl App {
     /// Whether I see `tab` in Settings (see [`SettingsTab::admin_only`]).
     fn may_open_settings(&self, tab: SettingsTab) -> bool {
         match tab {
-            SettingsTab::General => self.may_rename_workspace(),
+            SettingsTab::General => self.has_owner_rights(),
             _ => !tab.admin_only() || self.may_manage(),
         }
     }

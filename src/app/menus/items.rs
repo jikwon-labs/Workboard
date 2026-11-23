@@ -47,10 +47,23 @@ impl App {
         let is_channel = self.data.channels[ci].kind == ChannelKind::Channel;
         if is_channel {
             ui.label(tr("Name"));
-            if ui
-                .add(field(&mut self.data.channels[ci].name).desired_width(f32::INFINITY))
-                .changed()
-            {
+            // renaming is the workspace owner's (the server keeps it too)
+            let renames = self.has_owner_rights();
+            let b = ui.add_enabled(
+                renames,
+                field(&mut self.data.channels[ci].name).desired_width(f32::INFINITY),
+            );
+            b.widget_info(move || {
+                egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, renames, "Channel name")
+            });
+            let b = if renames {
+                b
+            } else {
+                b.on_disabled_hover_text(tr(
+                    "Only the owner of this workspace can rename a channel.",
+                ))
+            };
+            if b.changed() && renames {
                 self.dirty = true;
             }
             // a gap before each name, so it reads with the field below it

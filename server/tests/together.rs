@@ -3975,9 +3975,10 @@ fn a_quit_mac_gets_pushes_and_a_watching_mac_does_not() {
                 chans.push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 3], "messages": [], "last_read": 0}));
             }
             let c = chans.iter_mut().find(|c| c["id"] == 20).unwrap();
-            c["messages"].as_array_mut().unwrap().push(
-                json!({"id": id, "author": 1, "text": text, "ts": now() / 1000}),
-            );
+            c["messages"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"id": id, "author": 1, "text": text, "ts": now() / 1000}));
         }
     };
     a.change(dm(21, "while open"));

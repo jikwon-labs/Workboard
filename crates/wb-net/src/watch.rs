@@ -151,9 +151,7 @@ fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<Ctl>, ring: Sender<Ctl
     loop {
         let ended = match connect(&addr) {
             Ok(mut ws) => {
-                let e = watch_session(
-                    &mut ws, &sign_in, &srx, &ring, &line, &mut tries, &mut push,
-                );
+                let e = watch_session(&mut ws, &sign_in, &srx, &ring, &line, &mut tries, &mut push);
                 let _ = ws.close(None);
                 let _ = ws.flush();
                 e

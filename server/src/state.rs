@@ -209,9 +209,7 @@ impl Saved {
         if token.is_empty() {
             return self.push.remove(device).is_some();
         }
-        if !self.devices.contains_key(device)
-            || !push::token_ok(&token)
-        {
+        if !self.devices.contains_key(device) || !push::token_ok(&token) {
             return false;
         }
         let Some(platform) = push::norm_platform(platform) else {

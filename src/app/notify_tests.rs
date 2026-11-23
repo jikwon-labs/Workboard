@@ -1298,7 +1298,10 @@ fn a_pushed_banner_opens_its_conversation() {
     assert_eq!(a.section, Section::Chat);
     assert_eq!(a.chat.open, Some(dm));
     // a thread reply, sent without a workspace (a server from before it)
-    assert_eq!(a.open_pushed(&format!(":{}:7", dm)), format!("chat:{}:7", dm));
+    assert_eq!(
+        a.open_pushed(&format!(":{}:7", dm)),
+        format!("chat:{}:7", dm)
+    );
     // another workspace: that one opens first
     let other = super::push::ws_key("workspace-42.json").unwrap();
     assert_eq!(

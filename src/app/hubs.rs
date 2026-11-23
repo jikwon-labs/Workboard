@@ -1486,6 +1486,9 @@ impl App {
         if self.page_covered() {
             return;
         }
+        if self.hub.teams == TeamsPage::People {
+            self.people_profile_panel(ui);
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
             .show_inside(ui, |ui| match self.hub.teams {

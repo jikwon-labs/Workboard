@@ -84,18 +84,34 @@ impl Modal {
 const PROFILE_W: f32 = 340.0;
 
 impl App {
-    /// Someone's profile (`ChatUi::profile`) at the right, where a thread
-    /// shows: photo or initials, name, title, whether they're online, status,
-    /// email and role, and a button to message them (Edit profile for me).
-    /// The close button or Escape closes it.
+    /// The profile opened in Chat or on the Posts page (`ChatUi::profile`),
+    /// where a thread shows (see `profile_side`).
     pub(super) fn profile_panel(&mut self, ui: &mut Ui) {
-        let Some(id) = self.chat.profile else {
-            return;
-        };
+        if let Some(id) = self.chat.profile {
+            if !self.profile_side(ui, id) {
+                self.chat.profile = None;
+            }
+        }
+    }
+
+    /// The profile opened from a name in People (`App::people_profile`), at
+    /// the right of the page.
+    pub(super) fn people_profile_panel(&mut self, ui: &mut Ui) {
+        if let Some(id) = self.people_profile {
+            if !self.profile_side(ui, id) {
+                self.people_profile = None;
+            }
+        }
+    }
+
+    /// Someone's profile at the right: photo or initials, name, title,
+    /// whether they're online, status, email and role, and a button to
+    /// message them (Edit profile for me). False when it should close: its
+    /// close button, Escape, or they're no longer in the workspace.
+    fn profile_side(&mut self, ui: &mut Ui, id: u64) -> bool {
         let Some(m) = self.data.member(id).cloned() else {
             // no longer in the workspace
-            self.chat.profile = None;
-            return;
+            return false;
         };
         let t = self.t();
         let me = self.data.me;
@@ -246,9 +262,7 @@ impl App {
             && self.modal.is_none()
             && !self.menu_was_open
             && ui.memory(|mm| mm.focused().is_none());
-        if close || escape {
-            self.chat.profile = None;
-        }
+        !(close || escape)
     }
 
     /// Edit profile (My settings) for me. Without an email of my own it

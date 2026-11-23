@@ -19,6 +19,7 @@ impl App {
         self.post.f_author = None;
         self.post.picked.clear();
         self.chat.profile = None;
+        self.people_profile = None;
     }
 
     /// The text box's cursor: where it is (the end when the box never had

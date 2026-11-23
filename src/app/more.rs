@@ -227,19 +227,35 @@ impl App {
                 let manages = !server || self.sync_rt.role.is_some_and(|r| r.manages());
                 let owner = !server || self.sync_rt.role == Some(wb_net::Role::Owner);
                 let mut remove = None;
+                let mut profile = None;
                 for m in &members {
                     // another admin is the owner's to change or remove (as the server)
                     let manages = manages && (owner || m.role != MemberRole::Admin || m.id == me);
                     let (r, _) = ui.allocate_exact_size(vec2(w, 46.0), Sense::hover());
+                    if self.people_profile == Some(m.id) {
+                        // whose profile shows at the right
+                        ui.painter().rect_filled(r, 0.0, t.selected_bg);
+                    }
                     ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(0.5_f32, t.border));
                     paint_avatar(ui.painter(), pos2(r.left() + 22.0, r.center().y), 13.0, m, t.bg);
                     let name = if m.id == me { trf!("{} (you)", m.shown()) } else { m.shown().to_string() };
                     let name_w = w * ex - 44.0 - 8.0;
                     // under the name: their title and status
                     let sub = [m.title.trim(), m.status_text.trim()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" \u{00B7} ");
-                    paint_fit(ui, pos2(r.left() + 44.0, r.center().y - (if sub.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text, name_w);
+                    let nr = paint_fit(ui, pos2(r.left() + 44.0, r.center().y - (if sub.is_empty() { 0.0 } else { 8.0 })), Align2::LEFT_CENTER, &name, FontId::proportional(14.0), t.text, name_w);
+                    let mut right = nr.right();
                     if !sub.is_empty() {
-                        paint_fit(ui, pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &sub, FontId::proportional(12.0), t.text3, name_w);
+                        right = right.max(paint_fit(ui, pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &sub, FontId::proportional(12.0), t.text3, name_w).right());
+                    }
+                    // the avatar and name open their profile at the right
+                    let hit = Rect::from_min_max(pos2(r.left() + 6.0, r.top() + 4.0), pos2(right + 4.0, r.bottom() - 4.0));
+                    let resp = ui.interact(hit, ui.id().with(("member profile", m.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Link, true, format!("Profile of {}", m.shown())));
+                    if resp.hovered() {
+                        ui.painter().hline(nr.x_range(), nr.bottom() - 1.0, Stroke::new(1.0_f32, t.text));
+                    }
+                    if resp.clicked() {
+                        profile = Some(m.id);
                     }
                     if !compact {
                         paint_fit(ui, pos2(r.left() + w * ex + 8.0, r.center().y), Align2::LEFT_CENTER, if m.email.is_empty() { "-" } else { &m.email }, FontId::proportional(13.5), t.text2, col_w(ex, rx));
@@ -285,6 +301,9 @@ impl App {
                 }
                 if let Some((kind, id, name)) = remove {
                     self.modal = Some(Modal::ConfirmRemove { kind, id, name });
+                }
+                if profile.is_some() {
+                    self.people_profile = profile;
                 }
                 // how invited people get in, for where this workspace is kept
                 if members.iter().any(|m| m.invited) {

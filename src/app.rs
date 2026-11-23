@@ -728,6 +728,10 @@ pub struct App {
     task_files: Vec<(u64, files::Pending)>,
     /// A picture chosen in Edit profile, while it gets ready and goes up.
     profile_photo: Option<files::Pending>,
+    /// Whose profile shows at the right of People (in Settings, the Teams
+    /// hub or its own page), opened from their name there. Chat and the
+    /// Posts page have their own (`ChatUi::profile`).
+    people_profile: Option<u64>,
     /// What of `task_files` is written down (task, file), once read back
     /// for this workspace; None until then.
     task_files_saved: Option<Vec<(u64, String)>>,
@@ -1363,6 +1367,7 @@ impl App {
             confirm_bulk_delete: false,
             task_files: vec![],
             profile_photo: None,
+            people_profile: None,
             task_files_saved: None,
             sweep: Default::default(),
             lang_choice,
@@ -3115,6 +3120,7 @@ impl App {
                             .show_inside(ui, |ui| self.meetings_page(ui));
                     }
                     Section::People => {
+                        self.people_profile_panel(ui);
                         egui::CentralPanel::default()
                             .frame(page)
                             .show_inside(ui, |ui| self.people_page(ui));

@@ -172,6 +172,21 @@ impl App {
             self.settings_state = None;
         }
         let label = self.settings_tab.label();
+        // someone's profile, opened from their name in People: at the
+        // right, the whole height of the section
+        let mut body = body;
+        if label == "People" && self.people_profile.is_some() {
+            let mut pui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(body)
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            self.people_profile_panel(&mut pui);
+            if self.people_profile.is_some() {
+                // the panel moved what's left of the row to its left
+                body.max.x = pui.available_rect_before_wrap().right();
+            }
+        }
         let pad = if self.tier == crate::app::shell::Tier::Compact {
             16.0
         } else {

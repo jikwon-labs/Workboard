@@ -1339,3 +1339,74 @@ fn settings_people_puts_the_line_beside_invite() {
         assert!(line.right() <= button.left(), "{}x{}: not under it", w, hh);
     }
 }
+
+/// A name in People is a link: the hand over it, and a click opens their
+/// profile at the right with the list beside it, in Settings, on the People
+/// page and in the Teams hub. The close button or Escape closes it, Message
+/// goes to the conversation with them, and Chat's profile stays its own.
+#[test]
+fn a_name_in_people_opens_their_profile_at_the_right() {
+    let mut h = Ui1::sized(1440.0, 900.0);
+    h.app.open_settings("People");
+    h.settle();
+    // the pointer is on the window, as it is for a person
+    h.hover(pos2(700.0, 60.0));
+    let alex = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.name == "Alex Kim")
+        .unwrap()
+        .id;
+    let name = h.find("Profile of Alex Kim").expect("the name is a link");
+    h.hover(name);
+    assert_eq!(
+        h.cursor,
+        egui::CursorIcon::PointingHand,
+        "the hand over the name"
+    );
+    assert!(!h.has("Close profile"));
+    h.click("Profile of Alex Kim");
+    h.settle();
+    assert!(h.has("Close profile"), "the profile opens");
+    assert!(h.has("Message Alex Kim"));
+    assert_eq!(h.app.people_profile, Some(alex));
+    assert_eq!(h.app.chat.profile, None, "Chat's profile stays its own");
+    // at the right edge, the whole height, with the list beside it
+    let close = h.rect("Close profile");
+    assert!(close.right() > 1440.0 - 40.0, "at the right: {:?}", close);
+    assert!(close.top() < 60.0, "from the top: {:?}", close);
+    for s in ["Invite people", "Profile of Alex Kim"] {
+        let r = h.rect(s);
+        assert!(r.right() < 1440.0 - 340.0, "{} beside it: {:?}", s, r);
+    }
+    // Escape closes it
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert!(!h.has("Close profile") && h.app.people_profile.is_none());
+
+    // on the People page: the close button
+    h.app.section = Section::People;
+    h.settle();
+    h.click("Profile of Alex Kim");
+    h.settle();
+    assert!(h.has("Close profile"));
+    assert!(h.rect("Profile of Alex Kim").right() < 1440.0 - 340.0);
+    h.click("Close profile");
+    h.settle();
+    assert!(!h.has("Close profile") && h.app.people_profile.is_none());
+
+    // in the Teams hub: Message goes to the conversation with them
+    h.app.section = Section::Teams;
+    h.app.hub.teams = TeamsPage::People;
+    h.settle();
+    h.click("Profile of Alex Kim");
+    h.settle();
+    assert!(h.has("Close profile"));
+    h.click("Message Alex Kim");
+    h.settle();
+    assert_eq!(h.app.section, Section::Chat);
+    assert!(h.app.people_profile.is_none() && h.app.chat.profile.is_none());
+    assert!(!h.has("Close profile"), "no profile over the conversation");
+}

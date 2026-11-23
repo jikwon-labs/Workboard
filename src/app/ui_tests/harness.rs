@@ -929,6 +929,19 @@ pub(super) fn task_named<'a>(h: &'a Ui1, name: &str) -> &'a Task {
         .unwrap_or_else(|| panic!("no task {:?}", name))
 }
 
+/// Points HOME at a new folder for a test that saves workspace files (or
+/// needs none there: Cmd+1..9 open the workspaces listed in it); the guard
+/// keeps the other such tests waiting until it's done.
+pub(super) fn own_home(tag: &str) -> std::sync::MutexGuard<'static, ()> {
+    let guard = crate::app::tests::HOME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let home = temp_home(&format!("home-{}", tag));
+    std::fs::create_dir_all(&home).unwrap();
+    crate::app::tests::point_home(&home);
+    guard
+}
+
 pub(super) fn cmd_key(h: &mut Ui1, key: egui::Key) {
     let cmd = egui::Modifiers {
         command: true,

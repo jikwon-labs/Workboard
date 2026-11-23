@@ -52,6 +52,26 @@ pub(super) fn paint_unread_badge(
 /// the rail's color so it reads as cut out of the icon's background instead
 /// of sitting on top of it.
 fn paint_rail_badge(p: &egui::Painter, danger: Color32, rail: Color32, icon: Pos2, n: usize) {
+    paint_ringed_badge(
+        p,
+        danger,
+        rail,
+        icon + vec2(6.0, -16.0),
+        Align2::LEFT_TOP,
+        n,
+    );
+}
+
+/// A small red count placed by `align` at `at`, ringed in `ring` (the color
+/// behind what it sits on the corner of).
+fn paint_ringed_badge(
+    p: &egui::Painter,
+    danger: Color32,
+    ring: Color32,
+    at: Pos2,
+    align: Align2,
+    n: usize,
+) {
     let label = if n > 99 {
         "99+".to_string()
     } else {
@@ -59,8 +79,8 @@ fn paint_rail_badge(p: &egui::Painter, danger: Color32, rail: Color32, icon: Pos
     };
     let g = p.layout_no_wrap(label, FontId::proportional(10.0), Color32::WHITE);
     let h = 14.0;
-    let r = Rect::from_min_size(icon + vec2(6.0, -16.0), vec2((g.size().x + 8.0).max(h), h));
-    p.rect_filled(r.expand(2.0), h / 2.0 + 2.0, rail);
+    let r = align.anchor_size(at, vec2((g.size().x + 8.0).max(h), h));
+    p.rect_filled(r.expand(2.0), h / 2.0 + 2.0, ring);
     p.rect_filled(r, h / 2.0, danger);
     p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
 }
@@ -77,8 +97,9 @@ struct RailLift {
     to: usize,
 }
 
-/// The keys that open the rail's items, top to bottom.
-const RAIL_KEYS: [egui::Key; 9] = [
+/// The keys that open the rail's items, top to bottom (and, with the
+/// workspace key, the workspaces: `workspace_keys`).
+pub(super) const RAIL_KEYS: [egui::Key; 9] = [
     egui::Key::Num1,
     egui::Key::Num2,
     egui::Key::Num3,
@@ -635,6 +656,20 @@ impl App {
             [cv + vec2(0.0, 2.0), cv + vec2(4.0, -2.0)],
             Stroke::new(1.3_f32, t.text2),
         );
+        // what came in for me in the other workspaces since each was last
+        // open: a red number on the top right corner, over it, so the pill
+        // and what follows it don't move when the number comes and goes
+        let others = self.ws_unread_total();
+        if others > 0 {
+            paint_ringed_badge(
+                ui.painter(),
+                t.danger,
+                t.app_bg,
+                wr.right_top() + vec2(4.0, -4.0),
+                Align2::RIGHT_TOP,
+                others,
+            );
+        }
         if self.force_menu.as_deref() == Some("workspace") {
             let pid = ui.id().with("ws_menu");
             ui.memory_mut(|m| m.open_popup(pid));

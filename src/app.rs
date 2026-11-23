@@ -5700,6 +5700,9 @@ impl App {
         if !signing_in && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::G)) {
             self.new_message_open = true;
         }
+        if !signing_in {
+            self.workspace_keys(ctx);
+        }
         if signing_in {
             // signing in: nothing of the app until then
             self.login_screen(ctx);

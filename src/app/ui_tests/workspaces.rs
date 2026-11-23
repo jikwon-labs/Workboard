@@ -2,18 +2,6 @@
 
 use super::*;
 
-/// Points HOME at a new folder for a test that saves workspace files; the
-/// guard keeps the other such tests waiting until it's done.
-fn own_home(tag: &str) -> std::sync::MutexGuard<'static, ()> {
-    let guard = crate::app::tests::HOME_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let home = temp_home(&format!("home-{}", tag));
-    std::fs::create_dir_all(&home).unwrap();
-    crate::app::tests::point_home(&home);
-    guard
-}
-
 #[test]
 fn new_workspace_on_this_computer_is_a_name_and_apps() {
     let _home = own_home("wizard");
@@ -346,4 +334,150 @@ fn a_workspace_deleted_on_the_server_says_so_and_comes_off_this_computer() {
         .toast
         .as_ref()
         .is_some_and(|t| t.0.starts_with("Removed ")));
+}
+
+/// This workspace (data.json), "Side Biz" and "Third" on this computer, in
+/// the switch menu's order: the files of the other two.
+fn three_workspaces(h: &mut Ui1) -> (String, String) {
+    h.app.data.save();
+    let owner = h.app.data.member(h.app.data.me).cloned().unwrap();
+    let side = format!("workspace-side-{:x}.json", crate::sync::random_u64());
+    let third = format!("workspace-third-{:x}.json", crate::sync::random_u64());
+    Data::blank("Side Biz", owner.clone()).save_file(&side);
+    Data::blank("Third", owner).save_file(&third);
+    Data::save_workspaces(&[
+        WsEntry {
+            name: "My Workspace".into(),
+            file: "data.json".into(),
+        },
+        WsEntry {
+            name: "Side Biz".into(),
+            file: side.clone(),
+        },
+        WsEntry {
+            name: "Third".into(),
+            file: third.clone(),
+        },
+    ]);
+    (side, third)
+}
+
+/// The key held with 1..9 to open a workspace, as the system sends it.
+fn workspace_mods() -> egui::Modifiers {
+    if cfg!(target_os = "macos") {
+        egui::Modifiers {
+            command: true,
+            mac_cmd: true,
+            ..Default::default()
+        }
+    } else {
+        egui::Modifiers {
+            alt: true,
+            ..Default::default()
+        }
+    }
+}
+
+#[test]
+fn the_workspace_button_counts_what_came_in_for_me_in_the_others() {
+    let _home = own_home("ws-unread");
+    let mut h = Ui1::new();
+    let (side, third) = three_workspaces(&mut h);
+    let ours = h.app.data.workspace.clone();
+    h.settle();
+    assert_eq!(red_badge_in(&h, "Workspace menu"), None, "nothing came in");
+    // three notes from Side Biz and one from Third (as their watchers hear them)
+    let pill = h.rect("Workspace menu");
+    let planner = h.rect("Planner shortcut");
+    h.app.watch_rt.unread.insert(side.clone(), 3);
+    h.app.watch_rt.unread.insert(third.clone(), 1);
+    h.settle();
+    assert_eq!(red_badge_in(&h, "Workspace menu"), Some("4".into()));
+    // on the corner: nothing moves when the number comes or goes
+    assert_eq!(h.rect("Workspace menu"), pill);
+    assert_eq!(h.rect("Planner shortcut"), planner);
+    let (name, _) = h.painted_text(&ours)[0];
+    assert!(pill.contains_rect(name));
+    // the menu shows each workspace's own, and the key that opens it
+    h.click("Workspace menu");
+    assert_eq!(red_badge_in(&h, "Side Biz"), Some("3".into()));
+    assert_eq!(red_badge_in(&h, "Third"), Some("1".into()));
+    let m = crate::os::workspace_mod_symbol();
+    let key = |n: usize| crate::os::keys(&format!("{}{}", m, n));
+    assert!(
+        h.texts()
+            .iter()
+            .any(|t| t.ends_with(&key(2)) && t.contains("This computer")),
+        "Side Biz is the second: {:?}",
+        h.texts()
+    );
+    assert!(h.texts().iter().any(|t| t.ends_with(&key(3))));
+    // paused notifications: no red numbers, as on the rail
+    h.key(egui::Key::Escape);
+    h.app.data.extra.muted_until = now_ts() + 3600;
+    h.settle();
+    assert_eq!(red_badge_in(&h, "Workspace menu"), None, "while muted");
+    h.app.data.extra.muted_until = 0;
+    // opening Side Biz: it has nothing waiting any more, Third still does
+    h.click("Workspace menu");
+    h.click("Side Biz");
+    h.settle();
+    assert_eq!(h.app.ws_file, side);
+    assert_eq!(h.app.ws_unread(&side), 0);
+    assert!(!h.app.watch_rt.unread.contains_key(&side));
+    assert_eq!(red_badge_in(&h, "Workspace menu"), Some("1".into()));
+}
+
+#[test]
+fn the_workspace_key_with_a_number_opens_that_workspace() {
+    let _home = own_home("ws-keys");
+    let mut h = Ui1::new();
+    let (side, third) = three_workspaces(&mut h);
+    assert_eq!(h.app.ws_file, "data.json");
+    h.key_with(egui::Key::Num2, workspace_mods());
+    assert_eq!(h.app.ws_file, side, "the second in the menu");
+    assert_eq!(h.app.data.workspace, "Side Biz");
+    h.key_with(egui::Key::Num3, workspace_mods());
+    assert_eq!(h.app.ws_file, third);
+    // the open one, or one past the last: nothing happens
+    h.key_with(egui::Key::Num3, workspace_mods());
+    h.key_with(egui::Key::Num9, workspace_mods());
+    assert_eq!(h.app.ws_file, third);
+    h.key_with(egui::Key::Num1, workspace_mods());
+    assert_eq!(h.app.ws_file, "data.json");
+    // not over a dialog
+    h.app.modal = Some(Modal::Shortcuts);
+    h.settle();
+    h.key_with(egui::Key::Num2, workspace_mods());
+    assert_eq!(h.app.ws_file, "data.json", "not over a dialog");
+    // the shortcuts list names it
+    let m = crate::os::workspace_mod_symbol();
+    let keys = crate::os::keys(&format!("{}1 \u{2013} {}9", m, m));
+    assert!(h.has(&keys), "{:?}", h.texts());
+    assert!(h.has("Switch workspace"));
+    h.app.modal = None;
+    h.settle();
+    // Ctrl+2 still opens the left bar's second item, not a workspace
+    if cfg!(target_os = "macos") {
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        h.key_with(egui::Key::Num2, ctrl);
+        assert_eq!(h.app.ws_file, "data.json");
+    }
+}
+
+#[test]
+fn an_open_task_keeps_cmd_numbers_for_its_priority() {
+    let _home = own_home("ws-keys-task");
+    let mut h = Ui1::new();
+    three_workspaces(&mut h);
+    let id = h.open_clean_task();
+    h.key_with(egui::Key::Num2, workspace_mods());
+    assert_eq!(h.app.ws_file, "data.json", "the task stays open");
+    assert_eq!(h.app.open_task, Some(id));
+    if cfg!(target_os = "macos") {
+        assert_eq!(h.app.task(id).unwrap().priority, 2, "its priority instead");
+    }
 }

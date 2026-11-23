@@ -148,6 +148,15 @@ impl App {
                         "Set or clear priority (open task)",
                     ),
                     ("\u{2303}1 \u{2013} \u{2303}9", "Go to a left bar item"),
+                    // Alt off the Mac, where Ctrl+1..9 are the left bar's
+                    (
+                        if cfg!(target_os = "macos") {
+                            "\u{2318}1 \u{2013} \u{2318}9"
+                        } else {
+                            "\u{2325}1 \u{2013} \u{2325}9"
+                        },
+                        "Switch workspace",
+                    ),
                     ("\u{2318}/\u{21E7} click", "Select several tasks"),
                     ("/", "Commands in a Doc"),
                     // Cmd+Left / Cmd+Right do it too (parity.rs), like Safari

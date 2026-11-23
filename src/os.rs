@@ -76,6 +76,27 @@ pub fn redo_keys() -> String {
     }
 }
 
+/// The key held with 1–9 to open a workspace: Cmd on the Mac; Alt
+/// elsewhere, where Ctrl (egui's command key) with 1–9 opens the left bar's
+/// items.
+pub fn workspace_mods() -> egui::Modifiers {
+    if cfg!(target_os = "macos") {
+        egui::Modifiers::COMMAND
+    } else {
+        egui::Modifiers::ALT
+    }
+}
+
+/// That key as the Mac writes it, for `keys` ("\u{2318}"; "\u{2325}",
+/// which `keys` writes "Alt+", elsewhere).
+pub fn workspace_mod_symbol() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "\u{2318}"
+    } else {
+        "\u{2325}"
+    }
+}
+
 /// Takes this system's Redo shortcut from the input: Cmd+Shift+Z, and on
 /// Windows and Linux Ctrl+Y as well (on the Mac Cmd+Y is not Redo).
 pub fn take_redo(i: &mut egui::InputState) -> bool {

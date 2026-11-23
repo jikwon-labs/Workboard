@@ -622,29 +622,41 @@ impl App {
             self.modal = Some(self.together_modal());
             close_popup(ui);
         }
-        let others: Vec<WsEntry> = Data::workspaces()
-            .into_iter()
-            .filter(|w| w.file != self.ws_file)
-            .collect();
-        if !others.is_empty() || self.ws_file != "data.json" {
+        let all = self.workspace_order();
+        if all.iter().any(|w| w.file != self.ws_file) {
             ui.separator();
             section_label(ui, &t, tr("Switch Workspace"));
-            let mut all = others;
-            // this computer's own workspace, unless it was deleted
-            let own = !self.persist || Data::path().is_file();
-            if own && self.ws_file != "data.json" && !all.iter().any(|w| w.file == "data.json") {
-                all.insert(
-                    0,
-                    WsEntry {
-                        name: "My Workspace".into(),
-                        file: "data.json".into(),
-                    },
-                );
-            }
-            for w in all {
-                // workspaces often share a name ("My Workspace"): say where each one lives
-                let place = self.workspace_place(&w.file);
-                if menu_item(ui, &t, Icon::Building, &w.name, tr(place)).clicked() {
+            for (i, w) in all.iter().enumerate() {
+                if w.file == self.ws_file {
+                    continue;
+                }
+                // workspaces often share a name ("My Workspace"): say where
+                // each one lives, and the shortcut that opens it
+                let place = tr(self.workspace_place(&w.file));
+                let right = if i < super::shell::RAIL_KEYS.len() {
+                    let key = format!("{}{}", crate::os::workspace_mod_symbol(), i + 1);
+                    format!("{}   {}", place, key)
+                } else {
+                    place.to_string()
+                };
+                let resp = menu_item(ui, &t, Icon::Building, &w.name, &right);
+                // what came in there for me since it was last open
+                let n = self.ws_unread(&w.file);
+                if n > 0 {
+                    let name_w = ui
+                        .painter()
+                        .layout_no_wrap(w.name.clone(), FontId::proportional(14.0), t.text)
+                        .size()
+                        .x;
+                    super::shell::paint_unread_badge(
+                        ui.painter(),
+                        t.danger,
+                        resp.rect.left_center() + vec2(32.0 + name_w + 6.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        n,
+                    );
+                }
+                if resp.clicked() {
                     self.switch_workspace(&w.file);
                     close_popup(ui);
                 }
@@ -692,6 +704,55 @@ impl App {
         place
     }
 
+    /// Every workspace on this computer in the switch menu's order, the
+    /// open one in its place: this computer's own first (unless it was
+    /// deleted), then the list of the others. 1–9 with the workspace key
+    /// (`workspace_keys`) open them in this order.
+    pub(super) fn workspace_order(&self) -> Vec<WsEntry> {
+        let mut all = Data::workspaces();
+        let own = !self.persist || Data::path().is_file() || self.ws_file == "data.json";
+        if own && !all.iter().any(|w| w.file == "data.json") {
+            all.insert(
+                0,
+                WsEntry {
+                    name: "My Workspace".into(),
+                    file: "data.json".into(),
+                },
+            );
+        }
+        if !all.iter().any(|w| w.file == self.ws_file) {
+            all.push(WsEntry {
+                name: self.data.workspace.clone(),
+                file: self.ws_file.clone(),
+            });
+        }
+        all
+    }
+
+    /// Cmd+1..9 (Alt+1..9 off the Mac, where Ctrl+1..9 open the left bar's
+    /// items) open the workspaces in the switch menu's order. Not while a
+    /// dialog, the command palette or quick add is up, nor while a task is
+    /// open: there Cmd+1..4 set its priority.
+    pub(super) fn workspace_keys(&mut self, ctx: &egui::Context) {
+        if !self.rail_keys_on() {
+            return;
+        }
+        let mods = crate::os::workspace_mods();
+        let Some(n) = ctx.input_mut(|i| {
+            super::shell::RAIL_KEYS
+                .iter()
+                .position(|&k| i.consume_key(mods, k))
+        }) else {
+            return;
+        };
+        if let Some(w) = self.workspace_order().get(n) {
+            if w.file != self.ws_file {
+                let file = w.file.clone();
+                self.switch_workspace(&file);
+            }
+        }
+    }
+
     pub(super) fn switch_workspace(&mut self, file: &str) {
         // a status editor still open: its edits are done (and saved with
         // this workspace) like on closing it, and it doesn't stay open on
@@ -726,6 +787,8 @@ impl App {
             self.data = d;
             self.data_changed();
             self.ws_file = file.to_string();
+            // what came in there while it was closed is here to see now
+            self.watch_rt.unread.remove(file);
             if self.persist {
                 Data::set_last_workspace(file);
             }

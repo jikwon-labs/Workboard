@@ -650,6 +650,9 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
     assert_eq!(note.body, "got a minute?");
     assert_eq!(note.target, format!("ws:{}:chat:{}", first, dm));
     assert_eq!(a.data.workspace, "Side project", "nothing opened by itself");
+    // a red 1 beside the first workspace in the menu, and on the button
+    assert_eq!(a.ws_unread(&first), 1);
+    assert_eq!(a.ws_unread_total(), 1);
 
     // a click opens the first workspace and, once its copy has it, the conversation
     a.open_target(&note.target);
@@ -657,6 +660,8 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
     watch_until(&mut a, "the conversation open", &|a| {
         a.section == Section::Chat && a.chat.open == Some(dm)
     });
+    assert_eq!(a.ws_unread_total(), 0, "seen now");
+    assert!(a.watch_rt.unread.is_empty());
     // now the second one is watched instead
     watch_until(&mut a, "watching the second workspace", &|a| {
         a.watch_rt.listening(&second)

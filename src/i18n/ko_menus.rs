@@ -8,6 +8,8 @@ pub const T: &[(&str, &str)] = &[
     ("Manage", "관리"),
     ("Work together (shared)", "함께 작업하기 (공유 중)"),
     ("Switch Workspace", "워크스페이스 전환"),
+    // keyboard shortcuts list
+    ("Switch workspace", "워크스페이스 전환"),
     ("Team server", "팀 서버"),
     ("Shared folder", "공유 폴더"),
     ("This computer", "이 컴퓨터"),

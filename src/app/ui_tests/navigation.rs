@@ -1857,6 +1857,8 @@ fn rail_hint(h: &Ui1, name: &str) -> Option<String> {
 
 #[test]
 fn holding_ctrl_numbers_the_rail_and_ctrl_number_opens_that_item() {
+    // no other workspaces: Cmd+2 would open the second one
+    let _home = own_home("rail-keys");
     let mut h = Ui1::new();
     // the bar by default: Home, Planner, AI, Teams
     assert_eq!(h.app.data.extra.rail_items, ["Planner", "AI", "Teams"]);
@@ -1887,7 +1889,8 @@ fn holding_ctrl_numbers_the_rail_and_ctrl_number_opens_that_item() {
     // a number past the last item does nothing
     h.key_with(egui::Key::Num9, egui::Modifiers::CTRL);
     assert_eq!(h.app.section, Section::Home);
-    // the Mac's Cmd key neither numbers the bar nor moves along it
+    // the Mac's Cmd key neither numbers the bar nor moves along it (with
+    // a number it opens a workspace, and this is the only one)
     let cmd = egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND;
     h.frame_held(vec![], cmd);
     assert_eq!(rail_hint(&h, "Rail Planner"), None, "no numbers with Cmd");

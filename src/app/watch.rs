@@ -7,7 +7,10 @@
 // nothing else. They are announced like the open workspace's notices
 // (`deliver`: a toast in front, else a banner), with the workspace's name in
 // the title. A click opens that workspace and, once its copy has the
-// conversation, the conversation.
+// conversation, the conversation. Each one heard also counts towards the red
+// number beside that workspace in the switch menu and on the workspace
+// button (`ws_unread`), until that workspace is opened. The counts are kept
+// while the app runs: what came in while it was quit isn't counted.
 //
 // The list of watchers is looked at again when the open workspace changes,
 // when a sign-in token is saved or forgotten, and every LOOK_SECS (a
@@ -47,6 +50,8 @@ pub struct WatchRt {
     then_open: Option<(String, std::time::Instant)>,
     /// how many notes came in (makes keys unique)
     count: u64,
+    /// workspace file -> notes heard from it since it was last open
+    pub(super) unread: HashMap<String, usize>,
 }
 
 impl WatchRt {
@@ -126,6 +131,9 @@ impl App {
         }
         for (file, name, title, body, channel, parent) in heard {
             self.watch_rt.count += 1;
+            if file != self.ws_file {
+                *self.watch_rt.unread.entry(file.clone()).or_default() += 1;
+            }
             let target = match (channel, parent) {
                 (Some(c), Some(p)) => format!("chat:{}:{}", c, p),
                 (Some(c), None) => format!("chat:{}", c),
@@ -186,6 +194,11 @@ impl App {
                 want.insert(w.file, (addr, device, w.name));
             }
         }
+        // a workspace opened, left the server or gone from this computer
+        // has nothing waiting any more
+        self.watch_rt
+            .unread
+            .retain(|file, _| want.contains_key(file));
         self.watch_rt.on.retain(|file, w| {
             want.get(file)
                 .is_some_and(|(a, d, _)| *a == w.addr && *d == w.device)
@@ -240,6 +253,20 @@ impl App {
                 w.pushed = Some(token.to_string());
             }
         }
+    }
+
+    /// The red number for workspace `file`: what was heard from it since it
+    /// was last open. Nothing while notifications are paused, as on the rail.
+    pub(super) fn ws_unread(&self, file: &str) -> usize {
+        if file == self.ws_file || self.data.extra.muted_until > now_ts() {
+            return 0;
+        }
+        self.watch_rt.unread.get(file).copied().unwrap_or(0)
+    }
+
+    /// The red number on the workspace button: all the other workspaces'.
+    pub(super) fn ws_unread_total(&self) -> usize {
+        self.watch_rt.unread.keys().map(|f| self.ws_unread(f)).sum()
     }
 
     /// Open a note's target in another workspace: switch to it, then open

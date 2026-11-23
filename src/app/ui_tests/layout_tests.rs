@@ -1567,6 +1567,67 @@ fn small_window_docs_list_headers_and_form_footer_fit() {
     assert!(over.is_empty(), "Fill out: {:?}", over);
 }
 
+/// The Docs list at every window size, in English and Korean, with dates
+/// over a day old (the longest kind, "11월 21일 오전 10:23"): each date shows
+/// in full, ends before its row's Sharing avatar and nothing in the list is
+/// drawn over anything else. A date column a fixed share of the width ran
+/// the date under the avatar.
+#[test]
+fn docs_list_dates_fit_at_every_window_size() {
+    use crate::i18n::{set_lang, Lang};
+    let old = crate::timefmt::local_ts(
+        chrono::NaiveDate::from_ymd_opt(2025, 12, 28).unwrap(),
+        chrono::NaiveTime::from_hms_opt(22, 58, 0).unwrap(),
+    )
+    .unwrap();
+    for lang in [Lang::En, Lang::Ko] {
+        set_lang(lang);
+        for (w, ht) in [
+            (360.0, 640.0),
+            (480.0, 700.0),
+            (599.0, 700.0),
+            (600.0, 700.0),
+            (760.0, 700.0),
+            (959.0, 700.0),
+            (960.0, 560.0),
+            (1100.0, 800.0),
+            (1440.0, 900.0),
+            (1920.0, 1080.0),
+        ] {
+            let mut data = Data::seed();
+            for d in &mut data.docs {
+                d.updated = old;
+            }
+            let mut h = Ui1::sized_with(w, ht, data);
+            h.app.section = Section::Docs;
+            h.app.doc_open = None;
+            h.settle();
+            let date = fmt_ago(old);
+            let dates = h.painted_text(&date);
+            assert!(!dates.is_empty(), "{lang:?} {w}: no full date {date:?}");
+            let me = h.app.data.member(h.app.data.me).unwrap().initials();
+            for (dr, _) in &dates {
+                for (ar, _) in h.painted_text(&me) {
+                    if (ar.center().y - dr.center().y).abs() < 6.0 {
+                        // the avatar's circle is 11 points across its middle
+                        assert!(
+                            dr.right() + 2.0 < ar.center().x - 12.5,
+                            "{lang:?} {w}: {date:?} runs under the avatar"
+                        );
+                    }
+                }
+            }
+            let list = Rect::from_min_max(
+                pos2(dates[0].0.left() - w, dates[0].0.top() - 60.0),
+                h.size.to_pos2(),
+            );
+            let over = overlapping(&h.texts_in(list, Seen::Visible));
+            assert!(over.is_empty(), "{lang:?} {w}: {over:?}");
+        }
+    }
+    set_lang(Lang::En);
+}
+
 /// A sidebar whose rows all fit does not move under the wheel: an empty gap
 /// kept after the last row for when the list is scrolled to its end made a
 /// list that fits a few points too tall, so it slid that far.

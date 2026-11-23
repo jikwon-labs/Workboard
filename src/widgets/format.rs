@@ -122,10 +122,25 @@ pub fn fmt_ago(ts: i64) -> String {
         }
     } else {
         let dt = crate::timefmt::local(ts)
-            .map(|x| x.text("%b %-d at %-I:%M %p"))
+            .map(|x| x.text(AGO_DATE))
             .unwrap_or_default();
         dt
     }
+}
+
+/// How `fmt_ago` writes a time over a day old.
+const AGO_DATE: &str = "%b %-d at %-I:%M %p";
+
+/// The longest texts `fmt_ago` gives, for a column that has to fit any of
+/// them: a two-digit day and hour, and the most minutes and hours.
+pub fn fmt_ago_longest() -> [String; 3] {
+    let day = NaiveDate::from_ymd_opt(2026, 12, 28).unwrap_or_default();
+    let at = chrono::NaiveTime::from_hms_opt(22, 58, 0).unwrap_or_default();
+    [
+        day.and_time(at).and_utc().text(AGO_DATE),
+        crate::trf!("{} mins ago", 59),
+        crate::trf!("{} hours ago", 23),
+    ]
 }
 
 /// Repeat choices for recurring tasks (stored value, label).

@@ -117,6 +117,44 @@ fn gallery_card(
 }
 
 /// The small "Wiki" label after a doc's title.
+/// How far a Wiki badge reaches past the text it follows.
+fn wiki_badge_width(p: &egui::Painter) -> f32 {
+    let g = p.layout_no_wrap(
+        tr("Wiki").to_string(),
+        FontId::proportional(11.0),
+        Color32::WHITE,
+    );
+    8.0 + g.size().x + 12.0
+}
+
+/// Where the Docs list's columns start, from its left edge, with the right
+/// edge last: Date updated and Sharing as wide as their longest text (a
+/// share of the width cut a long date over the avatar), and Name, Location
+/// and Tags share what is left. A compact window shows Name and Date updated
+/// only. Each cell's text starts 30 points into its column.
+fn docs_cols(ui: &Ui, w: f32, compact: bool, heads: &[&str; 5]) -> [f32; 6] {
+    let width = |s: &str, size: f32| {
+        ui.painter()
+            .layout_no_wrap(s.to_string(), FontId::proportional(size), Color32::WHITE)
+            .size()
+            .x
+    };
+    let date = fmt_ago_longest()
+        .iter()
+        .map(|s| width(s, 14.0))
+        .fold(width(tr(heads[3]), 13.0), f32::max);
+    let date_w = 30.0 + date + 16.0;
+    if compact {
+        let d = (w - date_w).max(w * 0.5);
+        return [0.0, d, d, d, w, w];
+    }
+    // the avatar is 22 points wide, 31 points into its column
+    let share_w = (30.0 + width(tr(heads[4]), 13.0) + 12.0).max(31.0 + 22.0 + 12.0);
+    let rest = (w - date_w - share_w).max(0.0);
+    let (name, loc) = (rest * 0.55, rest * 0.81);
+    [0.0, name, loc, rest, rest + date_w, w]
+}
+
 pub(super) fn wiki_badge(p: &egui::Painter, t: &Theme, left_center: egui::Pos2) {
     let c = Color32::from_rgb(0x44, 0x66, 0xff);
     let g = p.layout_no_wrap(tr("Wiki").to_string(), FontId::proportional(11.0), c);
@@ -661,32 +699,21 @@ impl App {
                                 });
                                 ui.add_space(8.0);
                                 let w = ui.available_width();
-                                // a compact window: Name and Date updated only
-                                let cols = if icons_only {
-                                    [0.0, 0.62, 0.62, 0.62, 1.0]
-                                } else {
-                                    [0.0, 0.42, 0.62, 0.76, 0.88]
-                                };
+                                let heads = ["Name", "Location", "Tags", "Date updated", "Sharing"];
+                                let cols = docs_cols(ui, w, icons_only, &heads);
                                 let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-                                for (i, (x, h)) in cols
-                                    .iter()
-                                    .zip(["Name", "Location", "Tags", "Date updated", "Sharing"])
-                                    .enumerate()
-                                {
+                                for (i, h) in heads.iter().enumerate() {
                                     if icons_only && i != 0 && i != 3 {
                                         continue;
                                     }
-                                    // shortened to its column (in a narrow window
-                                    // "Date updated" ran over "Sharing")
-                                    let next = cols.get(i + 1).copied().unwrap_or(1.0);
                                     paint_fit(
                                         ui,
-                                        pos2(hr.left() + w * x + 30.0, hr.center().y),
+                                        pos2(hr.left() + cols[i] + 30.0, hr.center().y),
                                         Align2::LEFT_CENTER,
                                         tr(h),
                                         FontId::proportional(13.0),
                                         t.text2,
-                                        w * (next - x) - 34.0,
+                                        cols[i + 1] - cols[i] - 34.0,
                                     );
                                 }
                                 ui.painter().hline(
@@ -764,12 +791,20 @@ impl App {
                                         2.0,
                                         Color32::from_rgb(16, 144, 224),
                                     );
-                                    let tr_ = ui.painter().text(
+                                    // shortened to leave room for its Wiki badge
+                                    let badge = if d.is_wiki() {
+                                        wiki_badge_width(ui.painter())
+                                    } else {
+                                        0.0
+                                    };
+                                    let tr_ = paint_fit(
+                                        ui,
                                         r.left_center() + vec2(60.0, 0.0),
                                         Align2::LEFT_CENTER,
                                         &d.title,
                                         FontId::proportional(14.5),
                                         t.text,
+                                        cols[1] - 60.0 - 8.0 - badge,
                                     );
                                     if d.is_wiki() {
                                         wiki_badge(ui.painter(), &t, tr_.right_center());
@@ -783,30 +818,34 @@ impl App {
                                     if icons_only {
                                     } else if let Some((n, c)) = loc {
                                         let lr = Rect::from_center_size(
-                                            pos2(r.left() + w * cols[1] + 38.0, r.center().y),
+                                            pos2(r.left() + cols[1] + 38.0, r.center().y),
                                             vec2(16.0, 16.0),
                                         );
                                         ui.painter().rect_filled(lr, 4.0, rgb(c));
-                                        ui.painter().text(
-                                            pos2(r.left() + w * cols[1] + 52.0, r.center().y),
+                                        paint_fit(
+                                            ui,
+                                            pos2(r.left() + cols[1] + 52.0, r.center().y),
                                             Align2::LEFT_CENTER,
-                                            n,
+                                            &n,
                                             FontId::proportional(14.0),
                                             t.text2,
+                                            cols[2] - cols[1] - 56.0,
                                         );
                                     } else {
-                                        ui.painter().text(
-                                            pos2(r.left() + w * cols[1] + 30.0, r.center().y),
+                                        paint_fit(
+                                            ui,
+                                            pos2(r.left() + cols[1] + 30.0, r.center().y),
                                             Align2::LEFT_CENTER,
                                             tr("Workspace"),
                                             FontId::proportional(14.0),
                                             t.text2,
+                                            cols[2] - cols[1] - 34.0,
                                         );
                                     }
                                     if icons_only {
                                     } else if d.tags.is_empty() {
                                         ui.painter().text(
-                                            pos2(r.left() + w * cols[2] + 30.0, r.center().y),
+                                            pos2(r.left() + cols[2] + 30.0, r.center().y),
                                             Align2::LEFT_CENTER,
                                             "\u{2013}",
                                             FontId::proportional(14.0),
@@ -815,8 +854,8 @@ impl App {
                                     } else {
                                         // tag chips, clipped to the column
                                         let col = Rect::from_min_max(
-                                            pos2(r.left() + w * cols[2] + 30.0, r.top()),
-                                            pos2(r.left() + w * cols[3] + 24.0, r.bottom()),
+                                            pos2(r.left() + cols[2] + 30.0, r.top()),
+                                            pos2(r.left() + cols[3] + 24.0, r.bottom()),
                                         );
                                         let p = ui.painter().with_clip_rect(col);
                                         let mut x = col.left();
@@ -836,12 +875,14 @@ impl App {
                                             x = cr.right() + 4.0;
                                         }
                                     }
-                                    ui.painter().text(
-                                        pos2(r.left() + w * cols[3] + 30.0, r.center().y),
+                                    paint_fit(
+                                        ui,
+                                        pos2(r.left() + cols[3] + 30.0, r.center().y),
                                         Align2::LEFT_CENTER,
-                                        fmt_ago(d.updated),
+                                        &fmt_ago(d.updated),
                                         FontId::proportional(14.0),
                                         t.text2,
+                                        cols[4] - cols[3] - 34.0,
                                     );
                                     if let Some(m) = self
                                         .data
@@ -851,7 +892,7 @@ impl App {
                                     {
                                         paint_avatar(
                                             ui.painter(),
-                                            pos2(r.left() + w * cols[4] + 42.0, r.center().y),
+                                            pos2(r.left() + cols[4] + 42.0, r.center().y),
                                             11.0,
                                             m,
                                             t.bg,

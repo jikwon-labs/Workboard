@@ -4033,6 +4033,21 @@ fn a_quit_mac_gets_pushes_and_a_watching_mac_does_not() {
     wait_for("the watch connection gone", || connections(port) < before);
     a.change(dm(24, "ok bye"));
     wait_for("the DM pushed again", || fake.to(&mac).len() == 2);
+
+    // "Notify me while Workboard is quit" turned off: an empty token on the
+    // watch connection, and the server forgets this Mac
+    let w = wb_net::Watcher::start(&addr, &device, &token, None, Arc::new(|| {}));
+    w.set_push(Msg::PushToken {
+        token: String::new(),
+        platform: "macos".into(),
+        env: "production".into(),
+        workspace: Some(ws.clone()),
+        prefs: None,
+    });
+    wait_for("the Mac's token forgotten", || {
+        !saved_tokens(&home).iter().any(|(d, _)| *d == device)
+    });
+    drop(w);
     server.stop();
 }
 

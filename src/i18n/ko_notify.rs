@@ -44,6 +44,8 @@ pub const T: &[(&str, &str)] = &[
     ("How you're notified", "알림 방식"),
     ("Desktop notifications", "데스크톱 알림"),
     ("When off, notifications show only inside Workboard", "끄면 Workboard 안에서만 알림 표시"),
+    ("Notify me while Workboard is quit", "Workboard가 꺼져 있을 때도 알림 받기"),
+    ("The team server sends banners even when the app isn't running", "앱을 실행하지 않아도 팀 서버가 알림을 보냅니다"),
     ("Notification sound", "알림 소리"),
     ("Show the unread count on the Dock icon", "Dock 아이콘에 안 읽은 수 표시"),
     ("Show the unread count on the taskbar icon", "작업 표시줄 아이콘에 안 읽은 수 표시"),

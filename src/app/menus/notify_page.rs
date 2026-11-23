@@ -86,6 +86,8 @@ impl App {
         let manages = self.i_manage();
         let tn = tones(t);
         let (mut ch, mut test, mut open_settings) = (false, false, false);
+        let mut while_quit = !self.push_rt.off;
+        let while_quit_was = while_quit;
         let n = &mut self.data.extra.notify;
         ui.spacing_mut().item_spacing.y = 0.0;
 
@@ -106,6 +108,23 @@ impl App {
                 },
                 |_, _| false,
             );
+            // the team server's pushes through Apple (push.rs): the Mac only
+            if cfg!(target_os = "macos") {
+                setting_row(
+                    ui,
+                    t,
+                    &tn,
+                    Icon::Moon,
+                    "Notify me while Workboard is quit",
+                    &mut while_quit,
+                    true,
+                    RowOpts {
+                        desc: Some("The team server sends banners even when the app isn't running"),
+                        ..Default::default()
+                    },
+                    |_, _| false,
+                );
+            }
             ch |= setting_row(
                 ui,
                 t,
@@ -326,6 +345,9 @@ impl App {
         ui.add_space(8.0);
 
         let sound = n.sound;
+        if while_quit != while_quit_was {
+            self.set_push_while_quit(while_quit);
+        }
         if open_settings && persist {
             crate::os::open_notification_settings();
         }

@@ -15,6 +15,11 @@
 // on the banner opens that workspace: the notifier hands back
 // "push:WS:CHANNEL[:THREAD]" and `open_pushed` turns it into a target.
 //
+// "Notify me while Workboard is quit" (Settings > Notifications, on unless
+// turned off) is this computer's own (`Data::push_while_quit`): off, the
+// app sends an empty token everywhere instead, and the servers forget this
+// Mac's.
+//
 // The token comes from Apple only in the installed app, signed with its
 // provisioning profile (scripts/bundle.sh). Run any other way there is none
 // and nothing is sent.
@@ -32,6 +37,8 @@ pub struct PushRt {
     /// what the open workspace's connection was last sent (cleared by each
     /// welcome)
     pub(super) sent: Option<String>,
+    /// "Notify me while Workboard is quit" turned off
+    pub(super) off: bool,
 }
 
 /// The `workspace` sent with the token: the file's name in hex (the server
@@ -105,10 +112,12 @@ impl App {
         if !cfg!(target_os = "macos") {
             return;
         }
-        let started = *self.push_rt.started.get_or_insert_with(|| {
+        if self.push_rt.started.is_none() {
+            self.push_rt.off = !Data::push_while_quit();
             crate::notifier::start_push();
-            std::time::Instant::now()
-        });
+            self.push_rt.started = Some(std::time::Instant::now());
+        }
+        let started = self.push_rt.started.unwrap_or_else(std::time::Instant::now);
         let Some(token) = crate::notifier::push_token() else {
             if started.elapsed().as_secs() < WAIT_FOR_SECS {
                 if let Some(ctx) = ctx {
@@ -121,18 +130,38 @@ impl App {
     }
 
     /// Send `token` where it wasn't yet: the open workspace's connection
-    /// (with its choices) and the watch connections.
+    /// (with its choices) and the watch connections. Turned off: an empty
+    /// token instead, which stops the pushes.
     pub(super) fn push_to_servers(&mut self, token: &str) {
+        let off = self.push_rt.off;
         if let Some(net) = &self.sync_rt.net {
-            let prefs = push_prefs(&self.data.extra.notify, self.data.extra.muted_until);
-            let msg = token_msg(token, &self.ws_file, Some(prefs));
+            let msg = self.push_wanted(token);
             let key = format!("{}|{}", self.ws_file, msg.to_json());
             if self.push_rt.sent.as_deref() != Some(key.as_str()) {
                 net.send(msg);
                 self.push_rt.sent = Some(key);
             }
         }
-        self.watch_push(token);
+        self.watch_push(if off { "" } else { token });
+    }
+
+    /// The `push_token` the open workspace's server should have.
+    pub(super) fn push_wanted(&self, token: &str) -> wb_net::Msg {
+        if self.push_rt.off {
+            token_msg("", &self.ws_file, None)
+        } else {
+            let prefs = push_prefs(&self.data.extra.notify, self.data.extra.muted_until);
+            token_msg(token, &self.ws_file, Some(prefs))
+        }
+    }
+
+    /// "Notify me while Workboard is quit" switched: kept on this computer,
+    /// and the servers are told on the next frame.
+    pub(super) fn set_push_while_quit(&mut self, on: bool) {
+        self.push_rt.off = !on;
+        if self.persist {
+            Data::set_push_while_quit(on);
+        }
     }
 
     /// A clicked pushed banner ("push:WS:CHANNEL[:THREAD]"): the target it

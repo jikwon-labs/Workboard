@@ -37,6 +37,36 @@ fn a_whole_row_turns_its_setting_on_and_off() {
     );
 }
 
+/// "Notify me while Workboard is quit": on at first, and off sends an empty
+/// token to the open workspace's server, so it stops pushing to this Mac.
+#[test]
+#[cfg_attr(not(target_os = "macos"), ignore = "the row shows on the Mac only")]
+fn notifying_while_quit_turns_off_and_tells_the_server() {
+    let mut h = open_dialog();
+    assert!(!h.app.push_rt.off, "on at first");
+    h.click("Notify me while Workboard is quit");
+    assert!(h.app.push_rt.off);
+    let token = "ab".repeat(32);
+    let off = h.app.push_wanted(&token);
+    assert!(
+        matches!(&off, wb_net::Msg::PushToken { token, .. } if token.is_empty()),
+        "turned off: an empty token, {:?}",
+        off
+    );
+    h.click("Notify me while Workboard is quit");
+    assert!(!h.app.push_rt.off, "a second click turns it back on");
+    let on = h.app.push_wanted(&token);
+    assert!(
+        matches!(&on, wb_net::Msg::PushToken { token: t, prefs: Some(_), .. } if *t == token),
+        "on: the token with this computer's choices, {:?}",
+        on
+    );
+    assert!(
+        matches!(h.app.modal, Some(Modal::Notifications)),
+        "the dialog stays open"
+    );
+}
+
 #[test]
 fn the_preview_follows_the_delivery_switches() {
     let mut h = open_dialog();

@@ -91,6 +91,21 @@ impl Data {
         let _ = std::fs::write(Self::dir().join("language"), crate::i18n::choice_key(c));
     }
 
+    /// Whether this computer is notified while the app is quit (Settings >
+    /// Notifications, src/app/push.rs): on unless turned off here.
+    pub fn push_while_quit() -> bool {
+        std::fs::read_to_string(Self::dir().join("push-while-quit"))
+            .map_or(true, |s| s.trim() != "off")
+    }
+
+    pub fn set_push_while_quit(on: bool) {
+        let _ = std::fs::create_dir_all(Self::dir());
+        let _ = std::fs::write(
+            Self::dir().join("push-while-quit"),
+            if on { "on" } else { "off" },
+        );
+    }
+
     pub fn set_last_workspace(file: &str) {
         let _ = std::fs::create_dir_all(Self::dir());
         let _ = std::fs::write(Self::dir().join("last-workspace"), file);

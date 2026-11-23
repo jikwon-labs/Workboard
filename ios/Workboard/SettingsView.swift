@@ -62,6 +62,7 @@ struct SettingsView: View {
                             }
                         }
                         .accessibilityElement(children: .combine)
+                        profileLinks
                         NavigationLink {
                             PasswordView()
                         } label: {
@@ -82,6 +83,7 @@ struct SettingsView: View {
                                 Text(client.me.flatMap { client.view.member($0)?.name } ?? "Choose who you are")
                             }
                         }
+                        if client.me != nil { profileLinks }
                     }
                 } header: {
                     Text("You")
@@ -205,6 +207,29 @@ struct SettingsView: View {
         case .waiting(_, let n): Text("Reconnecting (try \(n))")
         case .idle: Text("Disconnected")
         }
+    }
+
+    /// Edit profile and Set status (with the status now), as in the Mac's
+    /// profile menu.
+    @ViewBuilder var profileLinks: some View {
+        NavigationLink {
+            ProfileEditView()
+        } label: {
+            Label("Edit profile", systemImage: "person.crop.circle")
+        }
+        .accessibilityIdentifier("editProfileLink")
+        NavigationLink {
+            StatusEditView()
+        } label: {
+            HStack {
+                Label("Set status", systemImage: "face.smiling")
+                Spacer()
+                if let status = client.me.flatMap({ client.view.member($0)?.statusText }), !status.isEmpty {
+                    Text(verbatim: status).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+        }
+        .accessibilityIdentifier("setStatusLink")
     }
 
     /// The open workspace and the ones kept on this iPhone, like the Mac

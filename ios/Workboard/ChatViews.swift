@@ -340,6 +340,16 @@ struct ConversationView: View {
             .navigationTitle(v.place(of: c, me: me))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if let status = otherStatus(c, me: me) {
+                    ToolbarItem(placement: .principal) {
+                        VStack(spacing: 0) {
+                            Text(verbatim: v.place(of: c, me: me)).font(.headline).lineLimit(1)
+                            Text(verbatim: status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("conversationStatus")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     MessageFilterMenu(filter: $filter)
                 }
@@ -444,6 +454,15 @@ struct ConversationView: View {
             withAnimation { position = id }
             jump = nil
         }
+    }
+
+    /// The other person's status in a direct message between two, shown
+    /// under their name at the top.
+    func otherStatus(_ c: ChannelView, me: UInt64) -> String? {
+        guard c.kind == .direct else { return nil }
+        let others = c.members.filter { $0 != me }
+        guard others.count == 1, let s = client.view.member(others[0])?.statusText, !s.isEmpty else { return nil }
+        return s
     }
 
     func huddle(_ ch: UInt64, video: Bool) {

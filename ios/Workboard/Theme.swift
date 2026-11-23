@@ -13,6 +13,8 @@ extension Color {
     }
 }
 
+/// Someone's profile photo, or their initials on their colour while it isn't
+/// here (and without one).
 struct Avatar: View {
     let member: MemberView?
     var size: CGFloat = 32
@@ -26,6 +28,9 @@ struct Avatar: View {
                     .font(.system(size: size * 0.38, weight: .semibold))
                     .foregroundStyle(.white)
             )
+            .overlay {
+                if let p = member?.photo { AvatarPhoto(file: p.file, name: p.name, side: size) }
+            }
             .accessibilityHidden(true)
     }
 }

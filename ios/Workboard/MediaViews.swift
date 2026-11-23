@@ -70,6 +70,12 @@ enum PictureCache {
         return c
     }()
 
+    /// The picture `key` already decoded at `maxPixels`, nil when it isn't
+    /// (or was let go of).
+    static func cached(key: String, maxPixels: Int) -> UIImage? {
+        cache.object(forKey: "\(key)-\(maxPixels)" as NSString)
+    }
+
     /// The picture at `url` with its longest side at most `maxPixels`,
     /// decoded off the main thread. `key` names the file (its sha256).
     static func thumbnail(_ url: URL, key: String, maxPixels: Int) async -> UIImage? {

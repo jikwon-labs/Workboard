@@ -1570,6 +1570,16 @@
         }
       }
     },
+    "Clear status": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "상태 지우기"
+          }
+        }
+      }
+    },
     "Clear the whole board?": {
       "localizations": {
         "ko": {
@@ -2218,6 +2228,16 @@
         }
       }
     },
+    "Display name": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "표시 이름"
+          }
+        }
+      }
+    },
     "Divider": {
       "localizations": {
         "ko": {
@@ -2398,6 +2418,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "메시지 편집"
+          }
+        }
+      }
+    },
+    "Edit profile": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "내 프로필 편집"
           }
         }
       }
@@ -2795,6 +2825,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "금"
+          }
+        }
+      }
+    },
+    "Full name": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "성명"
           }
         }
       }
@@ -3224,6 +3264,16 @@
         }
       }
     },
+    "Job title": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "직함"
+          }
+        }
+      }
+    },
     "Join": {
       "localizations": {
         "ko": {
@@ -3331,6 +3381,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "나중에 %lld"
+          }
+        }
+      }
+    },
+    "Let people know what you do at %@.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@에서 어떤 일을 하는지 알려 주세요."
           }
         }
       }
@@ -4300,6 +4360,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "이 대화에 아직 링크가 없습니다"
+          }
+        }
+      }
+    },
+    "No photo": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사진 없음"
           }
         }
       }
@@ -5276,6 +5346,16 @@
         }
       }
     },
+    "Profile photo": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "프로필 사진"
+          }
+        }
+      }
+    },
     "Progress": {
       "localizations": {
         "ko": {
@@ -5535,6 +5615,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "저장 취소"
+          }
+        }
+      }
+    },
+    "Remove photo": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사진 삭제"
           }
         }
       }
@@ -6121,6 +6211,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "우선순위 설정"
+          }
+        }
+      }
+    },
+    "Set status": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "상태 설정"
           }
         }
       }
@@ -6869,6 +6969,16 @@
         }
       }
     },
+    "That picture couldn't be read.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사진을 읽을 수 없습니다."
+          }
+        }
+      }
+    },
     "The email you were invited with. Leave it empty if the invite came to your email. You can also paste the whole invite link or email here.": {
       "localizations": {
         "ko": {
@@ -6985,6 +7095,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "이 대화는 없어졌습니다"
+          }
+        }
+      }
+    },
+    "This could be your first name or a nickname: what you'd like people to call you. Others see it before your full name.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이름이나 별명처럼 사람들이 불러 주었으면 하는 이름입니다. 다른 사람에게는 성명보다 이 이름이 먼저 보입니다."
           }
         }
       }
@@ -7660,6 +7780,16 @@
         }
       }
     },
+    "Upload photo": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사진 업로드"
+          }
+        }
+      }
+    },
     "Uploading": {
       "localizations": {
         "ko": {
@@ -7861,6 +7991,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "무엇을 논의하나요?"
+          }
+        }
+      }
+    },
+    "What's your status?": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지금 상태는 어떤가요?"
           }
         }
       }
@@ -8338,6 +8478,56 @@
           "stringUnit": {
             "state": "translated",
             "value": "예상 시간 지우기"
+          }
+        }
+      }
+    },
+    "☹ Out sick": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "☹ 병가"
+          }
+        }
+      }
+    },
+    "🌴 Vacationing": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "🌴 휴가 중"
+          }
+        }
+      }
+    },
+    "🏠 Working remotely": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "🏠 원격 근무 중"
+          }
+        }
+      }
+    },
+    "📅 In a meeting": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "📅 회의 중"
+          }
+        }
+      }
+    },
+    "🚌 Commuting": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "🚌 이동 중"
           }
         }
       }

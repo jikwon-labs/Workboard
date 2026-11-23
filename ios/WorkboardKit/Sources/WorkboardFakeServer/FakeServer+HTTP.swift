@@ -117,6 +117,47 @@ extension FakeServer {
                 broadcast(.typing(channel: ch, member: who, thread: thread))
                 log("admin: \(who) typing in \(ch)")
                 respond(p, 200, ["ok": true])
+            case "/admin/member":
+                // someone's profile as if their app had changed it: &photo=1
+                // a small picture (kept here so apps can fetch it), &photo=SHA
+                // a picture put here before, &photo=0 none, &status=,
+                // &display=, &title=; answers with the member as the server
+                // has it now
+                let q = { (n: String) in comps?.queryItems?.first { $0.name == n }?.value }
+                var snap = snapshot ?? [:]
+                let before = snap
+                var people = snap["members"]?.array ?? []
+                for i in people.indices where people[i]["id"]?.uint == member {
+                    switch q("photo") {
+                    case "1":
+                        let bytes = Self.tinyPNG
+                        let sha = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+                        files[sha] = (bytes, "image/png")
+                        people[i]["photo"] = FileAPI.attachment(sha: sha, name: Edits.profilePhotoName, isVideo: false, bytes: bytes.count, w: 1, h: 1, secs: 0)
+                    case "0": people[i]["photo"] = .null
+                    case let sha? where files[sha] != nil:
+                        let size = files[sha]!.data.count
+                        people[i]["photo"] = FileAPI.attachment(sha: sha, name: Edits.profilePhotoName, isVideo: false, bytes: size, w: 512, h: 512, secs: 0)
+                    default: break
+                    }
+                    for (param, key) in [("status", "status_text"), ("display", "display_name"), ("title", "title")] {
+                        if let v = q(param) { people[i][key] = .string(v) }
+                    }
+                }
+                snap["members"] = .array(people)
+                if snap != before {
+                    // stamped like an app's edit, so apps take the change
+                    var meta = SyncMeta(of: snap)
+                    Sync.stamp(snap, &meta, now: Int64(Date().timeIntervalSince1970 * 1000))
+                    snap.set("extra.sync", meta.json)
+                    snapshot = snap
+                    rev += 1
+                    wentWhole()
+                    broadcast(.update(data: snap, rev: rev))
+                    log("admin: profile of member \(member)")
+                }
+                let now = (snapshot?["members"]?.array ?? []).first { $0["id"]?.uint == member }
+                respond(p, 200, ["member": now ?? .null])
             case "/admin/reset-code":
                 let email = comps?.queryItems?.first { $0.name == "email" }?.value?.lowercased() ?? ""
                 respond(p, 200, ["code": lastResetCode[email].map(JSON.string) ?? .null])

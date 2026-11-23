@@ -18,6 +18,12 @@ public struct MemberView: Identifiable, Hashable, Sendable {
     public let email: String
     public let role: String
     public let invited: Bool
+    /// Their profile photo: a square picture on the team server, named like
+    /// a chat picture (Member::photo). Nil without one.
+    public let photo: AttachmentView?
+    /// What they're up to ("📅 In a meeting"), from Set status; empty when
+    /// not set.
+    public let statusText: String
 
     init(_ j: JSON) {
         id = j["id"]?.uint ?? 0
@@ -29,9 +35,15 @@ public struct MemberView: Identifiable, Hashable, Sendable {
         email = j["email"]?.string ?? ""
         role = j["role"]?.string ?? ""
         invited = j["invited"]?.bool ?? false
+        photo = j["photo"].flatMap { $0.object == nil ? nil : AttachmentView($0) }.flatMap { FileAPI.isFileName($0.file) ? $0 : nil }
+        statusText = (j["status_text"]?.string ?? "").trimmed
     }
 
-    public var initials: String {
+    public var initials: String { Self.initials(of: name) }
+
+    /// The first letters of the first two words (Member::initials), "?"
+    /// for none.
+    public static func initials(of name: String) -> String {
         let s = name.split(separator: " ").compactMap(\.first).prefix(2).map(String.init).joined().uppercased()
         return s.isEmpty ? "?" : s
     }

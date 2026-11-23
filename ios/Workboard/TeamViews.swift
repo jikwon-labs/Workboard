@@ -45,6 +45,12 @@ struct TeamsView: View {
                         Avatar(member: m, size: 26)
                         VStack(alignment: .leading) {
                             Text(m.name)
+                            // what they do and what they're up to, as on the Mac's People page
+                            let about = [m.title, m.statusText].filter { !$0.isEmpty }.joined(separator: " · ")
+                            if !about.isEmpty {
+                                Text(verbatim: about).font(.caption)
+                                    .accessibilityIdentifier("memberAbout-\(m.id)")
+                            }
                             Text([m.role, m.invited ? "Invited" : nil, teams.filter { $0.members.contains(m.id) }.map(\.name).joined(separator: ", ")].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.caption).foregroundStyle(.secondary)
                         }

@@ -1410,3 +1410,76 @@ fn a_name_in_people_opens_their_profile_at_the_right() {
     assert!(h.app.people_profile.is_none() && h.app.chat.profile.is_none());
     assert!(!h.has("Close profile"), "no profile over the conversation");
 }
+
+/// Work together's button rows (Reconnect now / Change address and Check
+/// for changes now / Show folder, each with Stop sharing at the right end)
+/// keep their buttons apart: what doesn't fit goes on the next row (they
+/// were drawn over each other in a narrow window).
+#[test]
+fn work_together_buttons_wrap_instead_of_overlapping() {
+    use crate::i18n::{set_lang, Lang};
+    for lang in [Lang::En, Lang::Ko] {
+        for (w, hh) in [
+            (360.0, 640.0),
+            (460.0, 640.0),
+            (700.0, 640.0),
+            (960.0, 560.0),
+            (1440.0, 900.0),
+        ] {
+            for folder in [false, true] {
+                let mut h = Ui1::sized(w, hh);
+                set_lang(lang);
+                h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+                    folder: if folder {
+                        "/Users/me/Library/CloudStorage/Shared/Workboard".into()
+                    } else {
+                        String::new()
+                    },
+                    device: "dev1".into(),
+                    tag: 5,
+                    server: (!folder).then(|| "127.0.0.1:1".into()),
+                });
+                h.app.modal = Some(h.app.together_modal());
+                h.settle();
+                let names: Vec<String> = if folder {
+                    vec!["Check for changes now", "Show folder", "Stop sharing"]
+                } else {
+                    vec!["Reconnect now", "Change address", "Stop sharing"]
+                }
+                .into_iter()
+                .map(|n| tr(n).to_string())
+                .collect();
+                let what = format!("{:?} {} folder {}", lang, w, folder);
+                for n in &names {
+                    h.scroll_into_view(n);
+                }
+                let rects: Vec<Rect> = names.iter().map(|n| h.rect(n)).collect();
+                let dialog = h.modal_rect();
+                set_lang(Lang::En);
+                for (n, r) in names.iter().zip(&rects) {
+                    assert!(
+                        r.left() >= dialog.left() && r.right() <= dialog.right(),
+                        "{}: {} {:?} outside {:?}",
+                        what,
+                        n,
+                        r,
+                        dialog
+                    );
+                }
+                for i in 0..rects.len() {
+                    for j in i + 1..rects.len() {
+                        assert!(
+                            !rects[i].intersects(rects[j]),
+                            "{}: {} {:?} and {} {:?}",
+                            what,
+                            names[i],
+                            rects[i],
+                            names[j],
+                            rects[j]
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

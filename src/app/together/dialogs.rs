@@ -367,7 +367,7 @@ impl App {
                 }
             }
             ui.add_space(10.0);
-            ui.horizontal(|ui| {
+            let stop = stop_sharing_row(ui, t, |ui| {
                 if ui.button(tr("Reconnect now")).clicked() {
                     self.sync_rt.net = None;
                     self.sync_rt.net_status = None;
@@ -385,17 +385,11 @@ impl App {
                     self.sync_rt.editing_addr = true;
                     *addr = server.clone();
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .button(RichText::new(tr("Stop sharing")).color(t.danger))
-                        .on_hover_text(tr("Keep working on this computer only; your copy stays"))
-                        .clicked()
-                    {
-                        self.stop_sharing();
-                        close = true;
-                    }
-                });
             });
+            if stop {
+                self.stop_sharing();
+                close = true;
+            }
         } else if let Some(cfg) = self.data.extra.shared.clone() {
             ui.label(
                 RichText::new(tr("This workspace is shared"))
@@ -418,7 +412,7 @@ impl App {
             ui.label(RichText::new(tr("Tasks, chat and docs show up for everyone a few seconds after their sync app copies the folder. Calls open in the browser from a link posted in chat.")).small().color(t.text3));
             ui.label(RichText::new(tr(FOLDER_PRIVACY)).small().color(t.text2));
             ui.add_space(10.0);
-            ui.horizontal(|ui| {
+            let stop = stop_sharing_row(ui, t, |ui| {
                 if ui.button(tr("Check for changes now")).clicked() {
                     let changed = self.sync_pull();
                     *result = if changed {
@@ -431,17 +425,11 @@ impl App {
                     ui.ctx()
                         .open_url(egui::OpenUrl::new_tab(format!("file://{}", cfg.folder)));
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .button(RichText::new(tr("Stop sharing")).color(t.danger))
-                        .on_hover_text(tr("Keep working on this computer only; your copy stays"))
-                        .clicked()
-                    {
-                        self.stop_sharing();
-                        close = true;
-                    }
-                });
             });
+            if stop {
+                self.stop_sharing();
+                close = true;
+            }
         } else {
             ui.label(tr(
                 "Work on this workspace with other people, without a server.",
@@ -683,4 +671,42 @@ impl App {
             link: String::new(),
         });
     }
+}
+
+/// A row of Work together's buttons (`left`) with Stop sharing at its right
+/// end; what doesn't fit goes on the next row, Stop sharing at the right of
+/// a row of its own (on one row the buttons were drawn over each other in a
+/// narrow window). True when Stop sharing was pressed.
+fn stop_sharing_row(ui: &mut Ui, t: &Theme, left: impl FnOnce(&mut Ui)) -> bool {
+    let label = tr("Stop sharing");
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let stop_w = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), font, t.danger)
+        .size()
+        .x
+        + 2.0 * ui.spacing().button_padding.x;
+    let stop = |ui: &mut Ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.button(RichText::new(label).color(t.danger))
+                .on_hover_text(tr("Keep working on this computer only; your copy stays"))
+                .clicked()
+        })
+        .inner
+    };
+    let mut pressed = false;
+    let mut beside = false;
+    ui.horizontal_wrapped(|ui| {
+        left(ui);
+        // (a wrapping row's available width is the whole row's)
+        let room = ui.max_rect().right() - ui.cursor().left() - ui.spacing().item_spacing.x;
+        beside = room >= stop_w;
+        if beside {
+            pressed = stop(ui);
+        }
+    });
+    if !beside {
+        ui.horizontal(|ui| pressed = stop(ui));
+    }
+    pressed
 }

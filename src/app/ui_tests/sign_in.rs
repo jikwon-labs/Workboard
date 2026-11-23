@@ -319,7 +319,8 @@ fn log_out_asks_first_then_deletes_the_team_copy_and_shows_the_sign_in_screen() 
 
     h.click("Profile menu");
     h.click("Log out");
-    h.click("Log out");
+    // the dialog, its title and its button are all "Log out": the button
+    h.click_lowest("Log out");
     assert!(h.app.data.extra.shared.is_none());
     assert!(
         !h.app.data.tasks.iter().any(|t| t.name == team_task),

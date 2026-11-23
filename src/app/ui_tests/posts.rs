@@ -989,7 +989,8 @@ fn logging_out_starts_the_posts_page_channel_and_filters_over() {
     together::save_token(addr, "dev-posts-out", "token-1");
     h.click("Profile menu");
     h.click("Log out");
-    h.click("Log out");
+    // the dialog's button, not its title (both "Log out")
+    h.click_lowest("Log out");
     assert!(h.app.data.extra.shared.is_none(), "logged out");
     assert_eq!(h.app.post.channel, 0);
     assert_eq!(h.app.post.f_channel, None);

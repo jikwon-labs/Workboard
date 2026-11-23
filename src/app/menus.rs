@@ -230,6 +230,12 @@ pub(super) enum Modal {
     /// An AI answer and what to do with it (ai.rs). Last, so the other
     /// dialogs keep their window ids.
     Ai(Box<super::ai::AiDialog>),
+    /// Change someone else's names for everyone (`profile.rs`).
+    MemberName {
+        id: u64,
+        name: String,
+        display: String,
+    },
 }
 
 pub const ROLES: [(&str, &str); 4] = [
@@ -1432,6 +1438,7 @@ impl App {
             Modal::WorkspaceSettings { .. } => tr("Workspace settings").into(),
             Modal::NewWorkspace { .. } => tr("Create Workspace").into(),
             Modal::Profile { .. } => tr("Edit profile").into(),
+            Modal::MemberName { .. } => tr("Change name").into(),
             Modal::SetStatus { .. } => tr("Set status").into(),
             Modal::Themes => tr("Themes").into(),
             Modal::Shortcuts => tr("Keyboard shortcuts").into(),
@@ -1640,6 +1647,9 @@ impl App {
                 email,
                 photo,
             } => close = self.profile_body(ui, t, name, display, title, email, photo),
+            Modal::MemberName { id, name, display } => {
+                close = self.member_name_body(ui, t, *id, name, display)
+            }
             Modal::SetStatus { text } => close = self.set_status_body(ui, t, text),
             Modal::Themes => close = self.themes_body(ui, t),
             Modal::Shortcuts => close = self.shortcuts_body(ui, t),

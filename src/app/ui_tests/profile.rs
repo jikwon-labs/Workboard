@@ -329,3 +329,83 @@ fn edit_profile_opens_at_its_width_without_growing() {
         later
     );
 }
+
+/// From someone's profile (their name on a message), the owner or an admin
+/// changes the names everyone sees them by: someone whose phone app has no
+/// Edit profile yet can't. A plain member on the team server gets no such
+/// button, nor an admin for the owner (the server turns both down).
+#[test]
+fn an_owner_or_admin_changes_someone_elses_name() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Posts;
+    h.settle();
+    h.hover(pos2(900.0, 600.0));
+    h.click("general");
+    let list = Rect::from_min_max(pos2(330.0, 120.0), pos2(1440.0, 760.0));
+    let at = h.rect_in("Alex Kim", list).center();
+    h.click_at(at);
+    h.settle();
+    assert!(h.has("Close profile"), "Alex's profile opens");
+    let alex = h.app.chat.profile.unwrap();
+    // alone on this computer anyone may
+    h.click("Change name of Alex Kim");
+    assert!(matches!(h.app.modal, Some(Modal::MemberName { .. })));
+    assert!(h.has("Member full name") && h.has("Member display name"));
+    h.click("Member display name");
+    h.type_text("Lexi");
+    h.click("Save changes");
+    assert!(h.app.modal.is_none(), "the dialog closes");
+    let m = h.app.data.member(alex).unwrap().clone();
+    assert_eq!(
+        (m.name.as_str(), m.display_name.as_str()),
+        ("Alex Kim", "Lexi")
+    );
+    h.settle();
+    assert!(
+        h.has("Change name of Lexi"),
+        "the profile shows the new name"
+    );
+
+    // Cancel changes nothing
+    h.click("Change name of Lexi");
+    h.click("Member display name");
+    h.type_text("xx");
+    h.click("Cancel");
+    assert_eq!(h.app.data.member(alex).unwrap().display_name, "Lexi");
+
+    // on the team server
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    for (mine, theirs, offered) in [
+        (wb_net::Role::Member, MemberRole::Admin, false),
+        (wb_net::Role::Admin, MemberRole::Admin, true),
+        (wb_net::Role::Admin, MemberRole::Owner, false),
+        (wb_net::Role::Owner, MemberRole::Admin, true),
+    ] {
+        h.app.sync_rt.role = Some(mine);
+        h.app
+            .data
+            .members
+            .iter_mut()
+            .find(|m| m.id == alex)
+            .unwrap()
+            .role = theirs.clone();
+        h.settle();
+        assert!(h.has("Close profile"));
+        assert_eq!(
+            h.has("Change name of Lexi"),
+            offered,
+            "{mine:?} changing an {theirs:?}'s name"
+        );
+    }
+    // my own profile has Edit profile instead
+    let me = h.app.data.me;
+    h.app.chat.profile = Some(me);
+    h.settle();
+    assert!(h.has("Edit profile") && !h.has("Change name"));
+}

@@ -133,6 +133,9 @@ pub const T: &[(&str, &str)] = &[
     ("Shown when there's no photo.", "사진이 없을 때 보입니다."),
     ("Choose a profile photo", "프로필 사진을 고르세요"),
     ("That file isn't a picture this app can open.", "이 앱에서 열 수 없는 그림 파일입니다."),
+    // someone else's name, from their profile
+    ("Change name", "이름 바꾸기"),
+    ("Everyone sees them by the display name, else the full name, on phones too.", "모두에게 표시 이름이, 없으면 성명이 보입니다. 휴대폰 앱에서도 같습니다."),
     // set status
     ("What's your status?", "지금 상태는 어떤가요?"),
     ("\u{1F4C5} In a meeting", "\u{1F4C5} 회의 중"),

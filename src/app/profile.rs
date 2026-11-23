@@ -219,6 +219,28 @@ impl App {
                     self.apply_chat(vec![super::chat::ChatAction::Dm(id)]);
                     close = true;
                 }
+                if self.may_rename(&m) {
+                    ui.add_space(6.0);
+                    if icon_button_ex(
+                        ui,
+                        &t,
+                        Icon::Edit,
+                        tr("Change name"),
+                        &format!("Change name of {}", m.shown()),
+                        true,
+                        w,
+                        t.text,
+                        t.text2,
+                    )
+                    .clicked()
+                    {
+                        self.modal = Some(Modal::MemberName {
+                            id,
+                            name: m.name.clone(),
+                            display: m.display_name.clone(),
+                        });
+                    }
+                }
             });
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape))
             && self.modal.is_none()
@@ -239,6 +261,75 @@ impl App {
             }
         }
         Modal::profile(&m)
+    }
+
+    /// Whether I may change `m`'s names for everyone: someone else, and on a
+    /// team server I'm its owner or an admin (as the server checks: only
+    /// they change anyone else's entry, and an admin not the owner's).
+    /// Alone or in a shared folder anyone may.
+    pub(super) fn may_rename(&self, m: &Member) -> bool {
+        let me = self.data.me;
+        if m.id == me || !self.may_manage() {
+            return false;
+        }
+        if !self.on_server() || m.role != MemberRole::Owner {
+            return true;
+        }
+        // the owner's: the owner only (the server's word, else People's)
+        match self.sync_rt.role {
+            Some(r) => r == wb_net::Role::Owner,
+            None => self
+                .data
+                .member(me)
+                .is_some_and(|x| x.role == MemberRole::Owner),
+        }
+    }
+
+    /// Change name: someone else's full and display names, which everyone
+    /// then sees them by (on the phone app too). Returns true when it should
+    /// close.
+    pub(super) fn member_name_body(
+        &mut self,
+        ui: &mut Ui,
+        t: &Theme,
+        id: u64,
+        name: &mut String,
+        display: &mut String,
+    ) -> bool {
+        let mut close = false;
+        let heading = |ui: &mut Ui, s: &str| {
+            ui.label(RichText::new(s).strong().color(t.text));
+        };
+        heading(ui, tr("Full name"));
+        let r = ui.add(field(name).desired_width(f32::INFINITY));
+        name_field(&r, "Member full name");
+        ui.add_space(10.0);
+        heading(ui, tr("Display name"));
+        let r = ui.add(
+            field(display)
+                .hint_text(tr("Display name"))
+                .desired_width(f32::INFINITY),
+        );
+        name_field(&r, "Member display name");
+        ui.label(
+            RichText::new(tr(
+                "Everyone sees them by the display name, else the full name, on phones too.",
+            ))
+            .small()
+            .color(t.text3),
+        );
+        ui.add_space(4.0);
+        let ok = !name.trim().is_empty() && self.data.member(id).is_some();
+        let (save, cancel) = dialog_footer(ui, t, tr("Save changes"), ok);
+        if save {
+            if let Some(m) = self.data.members.iter_mut().find(|m| m.id == id) {
+                m.name = name.trim().to_string();
+                m.display_name = display.trim().to_string();
+                self.dirty = true;
+            }
+            close = true;
+        }
+        close || cancel
     }
 
     /// Open Edit profile for me.

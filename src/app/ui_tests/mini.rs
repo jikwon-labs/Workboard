@@ -546,3 +546,49 @@ fn what_the_small_window_shows_makes_no_toast() {
     );
     assert!(h.has("already in sight"));
 }
+
+#[test]
+fn small_window_shows_who_is_typing_under_its_box() {
+    let mut h = Ui1::new();
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
+        .unwrap()
+        .id;
+    h.app.section = Section::Chat;
+    h.app.chat.open = Some(dm);
+    h.settle();
+    h.click("Open in a small window");
+    assert_eq!(h.app.mini.channel, Some(dm));
+    let name = h.app.data.member(2).unwrap().shown().to_string();
+    let line = format!("{} is typing...", name);
+    let box_at = h.rect("Small window message box");
+    assert!(!h.has(&line));
+
+    h.app.take_net_events(vec![wb_net::Event::Typing {
+        channel: dm,
+        member: 2,
+        thread: None,
+    }]);
+    h.settle();
+    assert!(
+        h.tree.iter().any(|(n, r)| n == &line
+            && r.top() >= box_at.bottom() - 1.0
+            && r.left() >= box_at.left() - 20.0
+            && r.right() <= box_at.right() + 60.0),
+        "the line sits just under the small window's box"
+    );
+    assert_eq!(
+        h.rect("Small window message box"),
+        box_at,
+        "the box stays put"
+    );
+
+    // their message arrives: gone
+    message_from(&mut h, dm, 2, "here it is");
+    h.settle();
+    assert!(!h.has(&line));
+}

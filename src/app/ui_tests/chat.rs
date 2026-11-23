@@ -2067,7 +2067,7 @@ fn who_else_is_typing_shows_under_the_message_box_for_a_moment() {
 }
 
 #[test]
-fn in_a_direct_message_the_other_person_typing_shows_as_dots_by_their_name_in_the_sidebar() {
+fn in_a_direct_message_the_other_person_typing_shows_under_the_box_and_as_dots_in_the_sidebar() {
     let mut h = Ui1::new();
     let dm = h
         .app
@@ -2098,15 +2098,24 @@ fn in_a_direct_message_the_other_person_typing_shows_as_dots_by_their_name_in_th
         thread: None,
     }]);
     h.settle();
-    let dots = h.rect(&line);
+    let shown: Vec<Rect> = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == &line)
+        .map(|(_, r)| *r)
+        .collect();
+    assert_eq!(shown.len(), 2, "in the sidebar and under the box");
     assert!(
-        row.contains_rect(dots) && dots.left() > row.left() + 30.0,
-        "the dots sit after their name in the sidebar, not at the top of the conversation"
+        shown
+            .iter()
+            .any(|d| row.contains_rect(*d) && d.left() > row.left() + 30.0),
+        "the dots sit after their name in the sidebar"
     );
-    assert_eq!(
-        h.tree.iter().filter(|(n, _)| n == &line).count(),
-        1,
-        "only in the sidebar"
+    assert!(
+        shown
+            .iter()
+            .any(|l| l.top() >= box_at.bottom() - 1.0 && l.left() >= box_at.left() - 30.0),
+        "the line sits under the message box, seen when the sidebar is hidden too"
     );
     assert_eq!(h.rect("Message composer"), box_at);
 

@@ -333,6 +333,8 @@ impl App {
         ui.separator();
         // the box at the bottom, the messages above it in what is left
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
+            // bottom up: the typing line goes under the box
+            self.typing_row_for(ui, cid);
             self.mini_composer(ui, t, label, out);
             ui.add_space(6.0);
             ui.with_layout(Layout::top_down(Align::LEFT), |ui| {

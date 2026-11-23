@@ -1,8 +1,9 @@
 // "Someone is typing..." in a conversation on a team server: the app tells
 // the server every few seconds while its person writes in the message box,
 // and shows, under the box, who else the server says is writing there (in a
-// direct message, moving dots by the other person's name in the sidebar
-// instead).
+// direct message also as moving dots by the other person's name in the
+// sidebar, which a narrow window hides). The small window shows the line
+// too.
 // Typing in a thread's reply box shows only under that thread's box.
 // Nothing is saved; it lasts a few seconds after the last word from the
 // server, or until that person's message arrives.
@@ -145,8 +146,7 @@ impl App {
 
     /// Three dots going up and down in `r` while the other person of the
     /// direct message `c` writes: drawn after their name in the sidebar's
-    /// Direct Messages. The line under the message box stays empty there:
-    /// whose conversation it is says who is typing.
+    /// Direct Messages (the line under the message box shows as well).
     pub(super) fn typing_dots(&self, ui: &mut Ui, c: &Channel, r: Rect) {
         let Some(line) = self.typing_line(c) else {
             return;
@@ -167,13 +167,26 @@ impl App {
 
     /// Draw the typing line (a row kept the same height whether or not
     /// someone is typing, so the message box doesn't jump), and redraw once
-    /// it should go away. Under a thread's reply box (`thread`) it shows in
-    /// a direct message too: the dots in the sidebar are for the conversation.
+    /// it should go away. `thread` is the thread whose reply box it is under
+    /// (None: the conversation's own box).
     pub(super) fn typing_row(&mut self, ui: &mut Ui, c: &Channel, thread: Option<u64>) {
-        let t = self.t();
+        let line = self.typing_line_in(c, thread);
+        self.draw_typing_row(ui, line);
+    }
+
+    /// The same under the small window's box, for conversation `cid`.
+    pub(super) fn typing_row_for(&mut self, ui: &mut Ui, cid: u64) {
         let line = self
-            .typing_line_in(c, thread)
-            .filter(|_| thread.is_some() || c.kind != ChannelKind::Direct);
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .and_then(|c| self.typing_line_in(c, None));
+        self.draw_typing_row(ui, line);
+    }
+
+    fn draw_typing_row(&mut self, ui: &mut Ui, line: Option<String>) {
+        let t = self.t();
         let w = ui.available_width();
         let (r, resp) = ui.allocate_exact_size(vec2(w, 16.0), Sense::hover());
         if let Some(line) = line {

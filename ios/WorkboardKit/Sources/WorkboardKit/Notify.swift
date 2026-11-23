@@ -486,6 +486,43 @@ public enum Notify {
         }
     }
 
+    /// A notification shown on this iPhone, as `readOnes` looks at it: its
+    /// "channel", "id" (the message or reply), "parent" (a thread reply's)
+    /// and "ts" (the message's time), and when it was shown.
+    public struct Shown: Sendable {
+        public let id: String
+        public let channel: UInt64?
+        public let message: UInt64?
+        public let thread: UInt64?
+        public let ts: Int64?
+        public let shownAt: Int64
+        public init(id: String, channel: UInt64?, message: UInt64?, thread: UInt64?, ts: Int64?, shownAt: Int64) {
+            self.id = id; self.channel = channel; self.message = message; self.thread = thread; self.ts = ts; self.shownAt = shownAt
+        }
+    }
+
+    /// The shown notifications about what I have read, here or on my other
+    /// devices: a message up to its conversation's read position, a thread
+    /// reply marked read (`extra.replies_read`). One without a time (from an
+    /// older server, or a summary) goes by when it was shown.
+    public static func readOnes(_ shown: [Shown], data: JSON) -> [String] {
+        var read: [UInt64: Int64] = [:]
+        for c in data["channels"]?.array ?? [] {
+            if let id = c["id"]?.uint { read[id] = c["last_read"]?.int ?? 0 }
+        }
+        let repliesRead = Set((data.at("extra.replies_read")?.array ?? []).compactMap(\.string))
+        return shown.filter { n in
+            guard let ch = n.channel else { return false }
+            if n.thread != nil {
+                // reading the conversation isn't reading its threads
+                guard let id = n.message else { return false }
+                return repliesRead.contains("chat:\(ch):\(id)")
+            }
+            guard let r = read[ch], r > 0 else { return false }
+            return (n.ts ?? n.shownAt) <= r
+        }.map(\.id)
+    }
+
     /// The app icon's number, as the Mac's Dock counts it (dock_count and
     /// inbox_badge in src/app): Primary Inbox rows not marked read
     /// (`extra.replies_read`), my reminders that are due (unless the Mac's

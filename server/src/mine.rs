@@ -55,6 +55,8 @@ impl Hub {
             g.mine_dirty = true;
             (merged, part)
         };
+        // their phones that aren't connected hear of it in a moment
+        self.read_changed(member, &part);
         // nobody listening is fine
         let _ = self.mines.send((member, merged, Some(Arc::new(part))));
         None

@@ -3778,6 +3778,101 @@ fn in_general(text: &str, id: u64, author: u64) -> impl FnOnce(&mut Value) + '_ 
     }
 }
 
+/// Read on the Mac while my iPhone is away: the phone gets one quiet push
+/// with what changed (a burst of reading is one push), so its icon's number
+/// and notifications can follow without opening the app. Nothing goes to it
+/// while it is connected (it hears of it there), nor to anyone else's phone.
+#[test]
+fn reading_on_the_mac_reaches_my_away_iphone_as_one_quiet_push() {
+    use wb_sync::mine::{collect, MineView};
+    let home = TempHome::new("read-push");
+    let fake = Arc::new(FakePush::default());
+    let server = Server::start_with(
+        &home,
+        0,
+        workboard_server::Options {
+            push: Some(fake.clone()),
+            read_push_quiet: Duration::from_millis(300),
+            ..Default::default()
+        },
+    );
+    let port = server.port;
+    let (mut a, mut b) = two_apps(port);
+    // someone else's phone, away
+    let bo = "b2".repeat(32);
+    phone(&mut a, port, 3, &bo, &home);
+    // my phone: sends its token, then goes to the background
+    let mine = second_device(port, &mut a);
+    let ann = "a1".repeat(32);
+    mine.client.send(Msg::PushToken {
+        token: ann.clone(),
+        platform: "ios".into(),
+        env: "development".into(),
+        workspace: Some("w1".into()),
+        prefs: None,
+    });
+    let (device, token) = (mine.device.clone(), mine.token.clone());
+    wait_for("the token in server.json", || {
+        saved_tokens(&home).contains(&(device.clone(), ann.clone()))
+    });
+    let before = connections(port);
+    drop(mine);
+    wait_for("the phone's connection gone", || connections(port) < before);
+    a.until("A's state", |a| a.mine.is_some());
+
+    // the Mac reads #general, then a DM, a moment apart
+    let mut mac = MineView::default();
+    mac.read.insert(10, 500);
+    let first = collect(&mac, &json!({}), now());
+    a.client.send(Msg::Mine {
+        data: first.clone(),
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    mac.read.insert(20, 600);
+    a.client.send(Msg::Mine {
+        data: collect(&mac, &first, now() + 1),
+    });
+    wait_for("a quiet push to my phone", || !fake.to(&ann).is_empty());
+    std::thread::sleep(Duration::from_millis(1500));
+    let got = fake.to(&ann);
+    assert_eq!(got.len(), 1, "one push for the burst: {:?}", got);
+    let p = &got[0];
+    assert_eq!(
+        p["aps"],
+        json!({"content-available": 1}),
+        "no banner, no sound"
+    );
+    assert_eq!(p["ws"], "w1", "for that workspace");
+    assert_eq!(p["mine"]["read"]["10"]["ts"], 500);
+    assert_eq!(p["mine"]["read"]["20"]["ts"], 600);
+    assert!(fake.to(&bo).is_empty(), "never anyone else's phone");
+
+    // with my phone connected it hears of it there: no push
+    let mut back = App::start(
+        port,
+        Value::Null,
+        SignIn {
+            token,
+            device: device.clone(),
+            ..Default::default()
+        },
+    );
+    back.until("the phone's state", |p| p.mine.is_some());
+    mac.read.insert(10, 700);
+    let known = a.mine.clone().unwrap();
+    a.client.send(Msg::Mine {
+        data: collect(&mac, &known, now() + 2),
+    });
+    back.until("the phone hears it on its connection", |p| {
+        p.mine
+            .as_ref()
+            .is_some_and(|m| m["read"]["10"]["ts"] == 700)
+    });
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(fake.to(&ann).len(), 1, "nothing more pushed");
+    b.pump();
+}
+
 /// A phone's choices (sent with its token) decide its pushes: a keyword
 /// notifies like a mention, a channel set to nothing stays quiet.
 #[test]
@@ -3847,9 +3942,12 @@ fn iphones_get_pushes_for_dms_mentions_and_their_threads_while_away() {
     wait_for("the DM pushed to Bo's phone", || fake.to(&bo).len() == 1);
     let sent = fake.sent.lock().unwrap().clone();
     assert_eq!(sent[0].0, "development", "the env the phone said");
+    // with the message's id and time: the phone takes it away once read
+    let ts = sent[0].2["ts"].as_i64().unwrap();
+    assert!((now() / 1000 - ts).abs() < 60, "the message's time: {}", ts);
     assert_eq!(
         sent[0].2,
-        json!({"aps": {"alert": {"title": "Ann", "body": "lunch?"}, "sound": "default", "thread-id": "ch-20"}, "channel": 20})
+        json!({"aps": {"alert": {"title": "Ann", "body": "lunch?"}, "sound": "default", "thread-id": "ch-20"}, "channel": 20, "id": 21, "ts": ts})
     );
 
     // in a channel only who is mentioned; a message without mentions notifies no one

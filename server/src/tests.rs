@@ -490,6 +490,8 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         closed: watch::channel(false).0,
         epoch: 1,
         seen: Mutex::new(Default::default()),
+        read_pending: Mutex::new(Default::default()),
+        read_quiet: Duration::from_secs(10),
     }
 }
 

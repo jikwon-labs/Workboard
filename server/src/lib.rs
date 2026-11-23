@@ -645,6 +645,11 @@ struct Hub {
     /// device id -> the copies its connection sent last (newest connection
     /// of each device), for catching it up when it reconnects
     seen: Mutex<std::collections::HashMap<String, Arc<Mutex<Seen>>>>,
+    /// member id -> reading state changed and not yet pushed to their
+    /// iPhones (notify.rs, read_push_tick)
+    read_pending: Mutex<BTreeMap<u64, notify::ReadPending>>,
+    /// how long that waits for a quiet moment (Options::read_push_quiet)
+    read_quiet: Duration,
 }
 
 /// A number for a run of the server (`Hub::epoch`): random, and under
@@ -726,6 +731,8 @@ impl Hub {
             typing: broadcast::channel(64).0,
             mines: broadcast::channel(64).0,
             closed: watch::channel(false).0,
+            read_pending: Mutex::new(Default::default()),
+            read_quiet: options.read_push_quiet,
         })
     }
 
@@ -982,6 +989,9 @@ pub struct Options {
     /// What answers the apps' AI requests. None: Anthropic's API as ai.json
     /// or ANTHROPIC_API_KEY say (or no AI when they don't).
     pub ai: Option<ai::AiSetup>,
+    /// How long someone's reading state stays the same before their iPhones
+    /// that aren't connected are told of it (a quiet push).
+    pub read_push_quiet: Duration,
 }
 
 impl Default for Options {
@@ -992,6 +1002,7 @@ impl Default for Options {
             push: None,
             poster: None,
             ai: None,
+            read_push_quiet: notify::READ_PUSH_QUIET,
         }
     }
 }
@@ -1063,6 +1074,7 @@ pub async fn serve_on(
                     for hub in registry.all() {
                         hub.save_tick();
                         hub.post_due();
+                        hub.read_push_tick();
                         hub.admin_file();
                         if tick % 60 == 1 {
                             hub.backup_now();

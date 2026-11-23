@@ -18,6 +18,14 @@
 // someone's Trash, and never a device that is connected right now, not even
 // by a watch connection (the app shows those itself). At most MAX_PER_DEVICE notifications go
 // to one device per merge; the rest become one "N more new messages".
+// Each notification carries its message's "id" and "ts", so the phone can
+// take it away once that message is read.
+//
+// Read elsewhere: when a member's reading state (mine.rs) changes, their
+// iPhones that aren't connected get a quiet background push a little later
+// (`read_payload`, Hub::read_push_tick) with what changed. The app takes it
+// in without opening: the icon's number follows, and the notifications of
+// what was read on the Mac go away.
 //
 // Set up by an apns.json in the server folder (like mail.json):
 //
@@ -70,6 +78,8 @@ pub const RESTORED_SLACK_SECS: i64 = 5 * 60;
 pub const JWT_SECS: i64 = 50 * 60;
 /// The longest body in a notification (characters).
 const MAX_BODY: usize = 180;
+/// The most a read-elsewhere push carries (bytes of JSON; APNs takes 4 KB).
+pub const MAX_READ_PUSH: usize = 3000;
 
 /// A device's push token, as the app sent it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -316,6 +326,59 @@ impl Apns {
     }
 }
 
+/// APNs' push type and priority for `payload`: a quiet one (no alert, only
+/// `content-available`) goes as "background", at the low priority Apple
+/// requires for it; everything else as an alert at once.
+pub fn push_kind(payload: &Value) -> (&'static str, &'static str) {
+    let aps = &payload["aps"];
+    if aps.get("alert").is_none() && aps["content-available"] == 1 {
+        ("background", "5")
+    } else {
+        ("alert", "10")
+    }
+}
+
+/// The quiet push that tells a phone what changed in its member's reading
+/// state (`part`, as `mine_part` has it), within MAX_READ_PUSH: the read
+/// positions first (what the icon's number and the notifications follow
+/// most), then the rest while it fits. Read positions that don't all fit go
+/// newest first.
+pub fn read_payload(part: &Value) -> Value {
+    let mut mine = serde_json::Map::new();
+    let size = |m: &serde_json::Map<String, Value>| {
+        json!({"aps": {"content-available": 1}, "mine": m})
+            .to_string()
+            .len()
+    };
+    if let Some(read) = part.get("read").and_then(|r| r.as_object()) {
+        let mut newest: Vec<(&String, &Value)> = read.iter().collect();
+        newest.sort_by_key(|(_, e)| std::cmp::Reverse(e.get("at").and_then(|a| a.as_i64())));
+        let mut kept = serde_json::Map::new();
+        for (k, e) in newest {
+            kept.insert(k.clone(), e.clone());
+            mine.insert("read".into(), Value::Object(kept.clone()));
+            if size(&mine) > MAX_READ_PUSH {
+                kept.remove(k);
+                break;
+            }
+        }
+        if kept.is_empty() {
+            mine.remove("read");
+        } else {
+            mine.insert("read".into(), Value::Object(kept));
+        }
+    }
+    for k in ["replies_seen", "replies_read", "inbox", "set"] {
+        if let Some(v) = part.get(k) {
+            mine.insert(k.into(), v.clone());
+            if size(&mine) > MAX_READ_PUSH {
+                mine.remove(k);
+            }
+        }
+    }
+    json!({"aps": {"content-available": 1}, "mine": mine})
+}
+
 pub fn apns_host(env: &str) -> &'static str {
     if norm_env(env) == "development" {
         "api.sandbox.push.apple.com"
@@ -383,11 +446,12 @@ impl Sender for Apns {
             Err(e) => return Outcome::Failed(e),
         };
         let url = format!("https://{}/3/device/{}", apns_host(env), token);
+        let (kind, priority) = push_kind(payload);
         let headers = [
             ("authorization", format!("bearer {}", jwt)),
             ("apns-topic", self.topic(platform).to_string()),
-            ("apns-push-type", "alert".to_string()),
-            ("apns-priority", "10".to_string()),
+            ("apns-push-type", kind.to_string()),
+            ("apns-priority", priority.to_string()),
         ];
         let config = curl_config(&url, &headers, &payload.to_string());
         let args = [
@@ -725,7 +789,11 @@ pub fn notes_in(
             // the strongest reason for each member
             to.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
             to.dedup_by_key(|x| x.0);
-            let p = payload(&title(author), &body_of(m), cid, parent);
+            let mut p = payload(&title(author), &body_of(m), cid, parent);
+            // which message, and its time: the phone takes the notification
+            // away once that is read (on any of the member's devices)
+            p["id"] = json!(id);
+            p["ts"] = json!(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
             let text = text_field(m, "text");
             for (member, why) in to {
                 if member == author || skip.contains(&member) || wb_sync::closed_to(ch, member) {
@@ -805,7 +873,9 @@ pub fn batch(notes: &[&Note]) -> Vec<Value> {
             .rsplit_once(" in #")
             .map(|(_, p)| format!("#{}", p))
             .unwrap_or_else(|| title.to_string());
-        json!({"aps": {"alert": {"title": place, "body": body}, "sound": "default", "thread-id": format!("ch-{}", ch)}, "channel": ch})
+        // the newest it sums up: read past that, it goes away too
+        let ts = rest.iter().filter_map(|n| n.payload["ts"].as_i64()).max();
+        json!({"aps": {"alert": {"title": place, "body": body}, "sound": "default", "thread-id": format!("ch-{}", ch)}, "channel": ch, "ts": ts})
     } else {
         json!({"aps": {"alert": {"title": "Workboard", "body": body}, "sound": "default"}})
     };
@@ -926,10 +996,53 @@ mod tests {
         );
         let n = notes(&c, &HashSet::new(), &[], now());
         assert_eq!(who(&n), vec![(2, 5)], "the author never");
+        let ts = c["channels"][0]["messages"][0]["ts"].clone();
         assert_eq!(
             n[0].payload,
-            json!({"aps": {"alert": {"title": "Alex Kim", "body": "lunch?"}, "sound": "default", "thread-id": "ch-301"}, "channel": 301})
+            json!({"aps": {"alert": {"title": "Alex Kim", "body": "lunch?"}, "sound": "default", "thread-id": "ch-301"}, "channel": 301, "id": 5, "ts": ts})
         );
+        assert_eq!(push_kind(&n[0].payload), ("alert", "10"));
+    }
+
+    /// What changed in someone's reading state goes to their phone as a
+    /// quiet push (no banner, no sound), within what APNs takes: read
+    /// positions first, the newest of them when they don't all fit.
+    #[test]
+    fn read_elsewhere_goes_as_a_quiet_push_that_fits() {
+        let part = json!({
+            "read": {"10": {"ts": 5, "at": 100}},
+            "replies_read": {"chat:10:7": {"on": true, "at": 100}},
+        });
+        let p = read_payload(&part);
+        assert_eq!(p, json!({"aps": {"content-available": 1}, "mine": part}));
+        assert_eq!(push_kind(&p), ("background", "5"));
+
+        // far too much: the newest read positions that fit, nothing else
+        let mut read = serde_json::Map::new();
+        for i in 0..500u64 {
+            read.insert(
+                format!("{}", 1_838_000_000_000_000 + i),
+                json!({"ts": 1_795_000_000 + i, "at": 1_795_000_000_000u64 + i}),
+            );
+        }
+        let mut inbox = serde_json::Map::new();
+        for i in 0..200u64 {
+            inbox.insert(format!("chat:1:{}", i), json!({"tab": "cleared", "at": 1}));
+        }
+        let p = read_payload(&json!({"read": read, "inbox": inbox}));
+        assert!(
+            p.to_string().len() <= MAX_READ_PUSH,
+            "{}",
+            p.to_string().len()
+        );
+        let kept = p["mine"]["read"].as_object().unwrap();
+        assert!(kept.len() > 10);
+        assert!(
+            kept.contains_key(&format!("{}", 1_838_000_000_000_000u64 + 499)),
+            "the newest"
+        );
+        assert!(!kept.contains_key("1838000000000000"), "not the oldest");
+        assert!(p["mine"].get("inbox").is_none());
     }
 
     /// After a merge only the conversations the incoming copy brought are

@@ -17,6 +17,14 @@
 // "ws" (this iPhone's name for the workspace, SyncClient.pushKey): a push from
 // a workspace that isn't open always shows, and tapping it switches to that
 // workspace first.
+//
+// Read elsewhere: a message's notification also carries its "id" and "ts",
+// and once that message is read (here or on my Mac) it is taken away
+// (`clearRead`). While the app isn't connected the server sends a quiet push
+// when I read on another device ({"aps": {"content-available": 1}, "mine":
+// what changed, "ws"}; the remote-notification background mode in
+// Config/Info.plist): iOS wakes the app for a moment, it takes that in, and
+// the icon's number and the notifications follow without opening it.
 
 import SwiftUI
 import UIKit
@@ -34,6 +42,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     @MainActor var otherWorkspace: (String?) -> Bool = { _ in false }
     /// A tap that arrived before the app was ready.
     @MainActor var pendingOpen: (UInt64, UInt64?, String?)?
+    /// Takes in a quiet push (what I read on my other devices, its "ws");
+    /// true when something changed. Set when the app starts (before any
+    /// screen: iOS may start the app in the background for the push).
+    @MainActor static var quietPush: (JSON, String?) async -> Bool = { _, _ in false }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
@@ -48,6 +60,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         // expected in the simulator and in unsigned builds (no aps-environment entitlement)
         print("remote notifications not available: \(error.localizedDescription)")
+    }
+
+    /// A quiet push (no banner): what I read on my other devices while this
+    /// iPhone wasn't connected.
+    nonisolated func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard let part = Notifier.json(userInfo["mine"]) else {
+            completionHandler(.noData)
+            return
+        }
+        let ws = userInfo["ws"] as? String
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                Task { @MainActor in
+                    let changed = await AppDelegate.quietPush(part, ws)
+                    completionHandler(changed ? .newData : .noData)
+                }
+            }
+        }
     }
 
     // The completion-handler forms, with the handler called on the main
@@ -201,7 +231,34 @@ final class Notifier {
         if client.catchingUp { fresh.removeAll { $0.kind != .huddle } }
         deliver(fresh, view: client.view)
         updateBadge(data, view: client.view, me: me, inbox: inbox)
+        Task { await clearRead(data) }
         scheduleClock(client: client)
+    }
+
+    /// My reading state changed while the app is in the background (a quiet
+    /// push): the icon's number and the notifications follow.
+    func settle(client: SyncClient) async {
+        guard let data = client.data, let me = client.me else { return }
+        updateBadge(data, view: client.view, me: me, inbox: client.inboxItems(me: me))
+        await clearRead(data)
+    }
+
+    /// Take away the notifications of what I have read, here or on my other
+    /// devices (Notify.readOnes).
+    func clearRead(_ data: JSON) async {
+        let center = UNUserNotificationCenter.current()
+        let shown = await center.deliveredNotifications().map { n in
+            let info = n.request.content.userInfo
+            return Notify.Shown(
+                id: n.request.identifier,
+                channel: Notifier.channel(in: info),
+                message: Notifier.number(info["id"]),
+                thread: Notifier.number(info["parent"]),
+                ts: Notifier.number(info["ts"]).map { Int64(clamping: $0) },
+                shownAt: Int64(n.date.timeIntervalSince1970))
+        }
+        let gone = Notify.readOnes(shown, data: data)
+        if !gone.isEmpty { center.removeDeliveredNotifications(withIdentifiers: gone) }
     }
 
     /// The conversation or task already on screen needs no notification.
@@ -275,6 +332,10 @@ final class Notifier {
         case .channel(let c, let thread):
             info["channel"] = c
             if let thread { info["parent"] = thread }
+            // which message, and when: it goes away once that is read
+            // (clearRead), as the server's pushes do
+            if n.key.hasPrefix("chat:"), let id = n.key.split(separator: ":").last.flatMap({ UInt64($0) }) { info["id"] = id }
+            if let ts = n.ts { info["ts"] = ts }
         case .task(let id): info["task"] = id
         case .people: break
         }
@@ -389,6 +450,13 @@ final class Notifier {
     }
 
     nonisolated static func channel(in info: [AnyHashable: Any]) -> UInt64? { number(info["channel"]) }
+
+    /// A part of a push's payload (a dictionary) as JSON.
+    nonisolated static func json(_ v: Any?) -> JSON? {
+        guard let v, v is [String: Any] || v is NSDictionary,
+              let d = try? JSONSerialization.data(withJSONObject: v) else { return nil }
+        return try? JSON(parsing: d)
+    }
 
     nonisolated static func number(_ v: Any?) -> UInt64? {
         if let n = v as? NSNumber { return n.uint64Value }

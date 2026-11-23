@@ -237,6 +237,16 @@ iPhone 앱이 연결돼 있지 않을 때도 새 메시지·멘션·DM 을 알�
 - **Mac(2026-11-23).** Mac 앱도 꺼져 있을 때 같은 길로 알림을 받는다. 앱이 Apple 에서 받은 토큰을 `push_token {token, platform: "macos", env: "production"}` 으로 보낸다. 열린 워크스페이스에는 이 컴퓨터의 알림 설정(배너를 끄면 아무것도 받지 않음)을 `prefs` 로 같이, welcome 뒤마다 보낸다. 다른 워크스페이스에는 watch 연결로 `prefs` 없이 보내고, 서버는 전에 받아 둔 `prefs` 를 그대로 둔다. `workspace` 는 워크스페이스 파일 이름의 hex 라, 알림을 누르면 그 워크스페이스를 열고 대화로 간다(`src/app/push.rs`). 서버는 Mac 토큰을 `apns.json` 의 `mac_topic`(없으면 Mac 앱 번들 ID `local.workboard.app`)으로 보낸다. APNs 키가 Team Scoped 라 키는 그대로 쓴다. watch 연결이 열려 있는 기기에도 푸시하지 않는다(그 앱이 직접 알림을 띄운다). 앱이 다시 켜졌을 때 그동안 온 메시지는 따라잡기라 배너를 다시 띄우지 않으니 겹치지 않는다. 토큰은 서명된 설치본에서만 나온다: Apple 개발자 계정의 App ID `local.workboard.app`(푸시 켬)과 Developer ID 프로필 `Resources/Workboard.provisionprofile`(2031-08 만료)을 `scripts/bundle.sh` 가 앱에 넣고 `Resources/Workboard.entitlements` 로 서명한다. 2026-11-23 에 서명한 빌드에서 토큰을 받고, 앱을 끈 채 이 키로 실제 APNs 에 보내 배너가 뜨는 것을 확인했다. 손으로 시험할 때는 `WB_SHOW_PUSH_TOKEN=1` 로 앱을 띄우면 토큰을 찍는다. 설정 > 알림의 "Workboard가 꺼져 있을 때도 알림 받기"(기본 켬, 이 컴퓨터의 `push-while-quit` 파일)를 끄면 열린 워크스페이스와 watch 연결 모두에 빈 토큰을 보내 서버가 이 Mac 의 토큰을 지운다.
 - **알려진 한계:** 실제 APNs 로는 한 번도 보내 보지 않았다. 실제 번들 ID, Push capability, entitlements, .p8 키가 있어야 확인할 수 있다(`docs/ios-design.md` "알림"). "연결된 기기 제외" 는 서버가 연결이 끊긴 걸 알아챌 때까지(앱이 정지된 뒤 최대 약 90초) 푸시가 가지 않는다는 뜻이기도 하다. 그 사이 온 메시지는 iOS 가 앱을 깨워 주지 않으면 알림이 없다. 알림마다 curl 을 한 번 띄운다(작은 팀에는 충분).
 
+### 다른 기기에서 읽은 것을 iPhone 알림에 반영 (2026-11-24)
+
+맥에서 다 읽어도 iPhone 앱 아이콘 숫자와 알림 센터의 알림이 그대로 남았다. 읽음 상태(`mine`)는 서버가 이미 맞추고 있었지만, iPhone 은 앱이 연결돼 있을 때만 그걸 받기 때문이다. 코드: `server/src/notify.rs`(`read_changed`, `read_push_tick`), `push::read_payload`, iPhone `Notifications.swift`(`clearRead`, `AppDelegate.quietPush`), `SyncClient.takeReadElsewhere`.
+
+- **조용한 푸시.** 누군가의 읽음 상태가 바뀌면(`Hub::take_mine` 이 합쳐서 달라졌을 때) 바뀐 부분을 그 사람 몫으로 모아 둔다. 10초 동안 더 바뀌지 않으면(계속 바뀌어도 60초 뒤에는) 1초마다 도는 일(`read_push_tick`)이 그 사람의 iPhone 중 연결돼 있지 않은 것에 `{"aps": {"content-available": 1}, "mine": 바뀐 것, "ws": ...}` 를 보낸다. 헤더는 `apns-push-type: background`, `apns-priority: 5`(`push::push_kind`). 배너·소리는 없다. 페이로드는 3000바이트 안으로 줄인다: 읽은 위치 먼저(최근 것부터), 남는 자리에 나머지. 연결된 기기는 `mine_part` 로 이미 받으므로 보내지 않는다. Mac 토큰에는 보내지 않는다.
+- **iPhone.** iOS 가 앱을 잠깐 깨우면(이미 있는 `remote-notification` 백그라운드 모드) `mine_part` 처럼 합친다(`ws` 가 열린 워크스페이스일 때만). 그 뒤 아이콘 숫자를 다시 세고 읽은 메시지의 알림을 지운 다음 사본을 저장한다. 앱이 꺼져 있었으면 저장된 사본을 먼저 연다.
+- **알림 지우기.** 메시지 알림(서버 푸시와 앱의 로컬 알림 모두)에 그 메시지의 `id` 와 `ts` 를 싣는다. 대화의 읽은 위치가 `ts` 를 넘으면 지우고, 스레드 답글은 `extra.replies_read` 에 들어가면 지운다(`Notify.readOnes`). `ts` 가 없는 예전 알림은 뜬 시각으로 판단한다. 앱이 켜져 있을 때도 알림 검사(`scan`)마다 같은 규칙으로 지우므로, iPhone 에서 직접 읽은 것도 알림 센터에서 사라진다.
+- **한계.** 조용한 푸시는 iOS 가 횟수를 조절하고(대략 한 시간에 몇 번), 사용자가 앱을 위로 밀어 끈 상태면 오지 않는다. 그럴 때는 앱을 열면 연결하면서 맞춘다. 맥 알림 센터의 알림은 iPhone 에서 읽어도 아직 지우지 않는다.
+- **검증:** 서버 단위 `read_elsewhere_goes_as_a_quiet_push_that_fits`(모양, background 헤더, 4KB 안으로 줄이기), 통합 `reading_on_the_mac_reaches_my_away_iphone_as_one_quiet_push`(연이어 읽어도 푸시 하나, `ws`, 남의 폰엔 안 감, 연결된 폰엔 안 감), iPhone 패키지 `testAQuietPushBringsWhatIReadOnTheMac`, `testNotificationsOfWhatIReadGoAway`.
+
 ### 화면 공유와 화질 조절 (2026-11-16)
 
 "알려진 한계" 에 있던 두 가지(고정 화질, 화면 공유 없음)를 만들었다.

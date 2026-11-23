@@ -145,6 +145,34 @@ final class MineTests: FakeServerTestCase {
         XCTAssertFalse(Sync.shared.contains("extra.mine_sync"))
         XCTAssertNil(Sync.outgoing(phone.data!).at("extra.mine_sync"))
     }
+
+    /// Read on the Mac while the phone wasn't connected: the server's quiet
+    /// push (read_payload in server/src/push.rs) is taken in as a
+    /// `mine_part` is, only for its own workspace, and the next connection
+    /// agrees with it.
+    func testAQuietPushBringsWhatIReadOnTheMac() async throws {
+        let server = FakeServer(snapshot: SampleWorkspace.make(), requireSignIn: true)
+        let url = try await start(server)
+        defer { server.stop() }
+        let phone = device(url)
+        await until("sign-in screen") { phone.needsSignIn }
+        phone.signIn(.invite(code: server.invite(member: 1), email: nil, newPassword: nil))
+        await until("signed in, state kept") { phone.canEdit && phone.mineOK }
+        phone.disconnect()
+        await until("away") { !phone.state.isConnected }
+        let before = phone.view.channels.first { $0.id == 301 }!.lastRead
+
+        let part: JSON = ["read": ["301": ["ts": 4_000_000_000, "at": 1_800_000_000_000]]]
+        XCTAssertFalse(phone.takeReadElsewhere(part, workspace: "another"), "another workspace's")
+        XCTAssertEqual(phone.view.channels.first { $0.id == 301 }?.lastRead, before)
+        var updated = false
+        phone.onUpdate = { updated = true }
+        XCTAssertTrue(phone.takeReadElsewhere(part, workspace: phone.pushKey))
+        XCTAssertEqual(phone.view.channels.first { $0.id == 301 }?.lastRead, 4_000_000_000)
+        XCTAssertTrue(updated, "the icon's number is worked out again")
+        XCTAssertFalse(phone.mineOK, "a push isn't the server saying it keeps my state")
+        XCTAssertEqual(phone.data?.at("extra.mine_sync.read.301.ts"), 4_000_000_000)
+    }
 }
 
 extension MineView {

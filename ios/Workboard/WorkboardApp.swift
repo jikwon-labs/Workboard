@@ -29,7 +29,7 @@ struct WorkboardApp: App {
     @State private var client: SyncClient
     @State private var nav: Nav
     @State private var calls = CallManager()
-    @State private var notifier = Notifier()
+    @State private var notifier: Notifier
 
     init() {
         let args = UserDefaults.standard
@@ -52,6 +52,17 @@ struct WorkboardApp: App {
         if let server = args.string(forKey: "wbServer") { c.setServer(server) }
         if args.double(forKey: "wbAskTimeout") > 0 { c.askTimeout = args.double(forKey: "wbAskTimeout") }
         _client = State(initialValue: c)
+        let n = Notifier()
+        _notifier = State(initialValue: n)
+        // what I read on my other devices while away (a quiet push; iOS may
+        // start the app in the background for it, with no screen)
+        AppDelegate.quietPush = { part, ws in
+            if c.data == nil { await c.openSaved() }
+            guard c.takeReadElsewhere(part, workspace: ws) else { return false }
+            await n.settle(client: c)
+            await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in c.flushSoon { k.resume() } }
+            return true
+        }
         let nav = Nav(open: args.string(forKey: "wbOpen"))
         if let u = args.string(forKey: "wbOpenURL") { nav.openedLink = InviteLink.parse(u) }
         _nav = State(initialValue: nav)

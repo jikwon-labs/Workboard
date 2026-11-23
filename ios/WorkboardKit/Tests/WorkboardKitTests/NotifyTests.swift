@@ -238,4 +238,21 @@ final class NotifyTests: XCTestCase {
             XCTAssertEqual(a2, b2)
         }
     }
+
+    /// What I read on any of my devices takes its notifications away: up
+    /// to the conversation's read position, thread replies once marked read.
+    func testNotificationsOfWhatIReadGoAway() {
+        var d = SampleWorkspace.make()
+        d.updateItem(at: "channels", id: 301) { $0["last_read"] = 1_000 }
+        d.set("extra.replies_read", ["chat:302:901"])
+        let shown = [
+            Notify.Shown(id: "read", channel: 301, message: 5, thread: nil, ts: 900, shownAt: 2_000),
+            Notify.Shown(id: "newer", channel: 301, message: 6, thread: nil, ts: 1_100, shownAt: 1_100),
+            Notify.Shown(id: "old server", channel: 301, message: nil, thread: nil, ts: nil, shownAt: 990),
+            Notify.Shown(id: "reply read", channel: 302, message: 901, thread: 321, ts: 50, shownAt: 50),
+            Notify.Shown(id: "reply not read", channel: 302, message: 902, thread: 321, ts: 50, shownAt: 50),
+            Notify.Shown(id: "no place", channel: nil, message: nil, thread: nil, ts: 1, shownAt: 1),
+        ]
+        XCTAssertEqual(Notify.readOnes(shown, data: d), ["read", "old server", "reply read"])
+    }
 }

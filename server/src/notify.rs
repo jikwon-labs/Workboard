@@ -114,10 +114,7 @@ impl Hub {
     /// Send `notes` to the devices of their members that have a push token
     /// and aren't connected, MAX_PER_DEVICE each at most, on the job threads.
     pub(crate) fn notify(self: &Arc<Self>, saved: &Saved, notes: Vec<push::Note>) {
-        let Some(sender) = self.pusher.clone() else {
-            return;
-        };
-        if notes.is_empty() {
+        if self.pusher.is_none() || notes.is_empty() {
             return;
         }
         let online = self.online.locked().clone();
@@ -151,6 +148,15 @@ impl Hub {
                     .push((tok.clone(), p));
             }
         }
+        self.send_pushes(per_device);
+    }
+
+    /// Send each device its notifications in order, on the job threads;
+    /// forget a device's token when APNs says the app is gone.
+    fn send_pushes(self: &Arc<Self>, per_device: BTreeMap<String, Vec<(push::PushToken, Value)>>) {
+        let Some(sender) = self.pusher.clone() else {
+            return;
+        };
         for (device, list) in per_device {
             let (hub, sender) = (self.clone(), sender.clone());
             jobs::run(&format!("push:{}", device), move || {
@@ -176,6 +182,89 @@ impl Hub {
                 }
             });
         }
+    }
+
+    /// `member`'s reading state changed by `part` (mine.rs): their iPhones
+    /// that aren't connected hear of it in a moment (`read_push_tick`), once
+    /// for a burst of changes (reading one conversation after another).
+    pub(crate) fn read_changed(&self, member: u64, part: &Value) {
+        if self.pusher.is_none() || part.as_object().is_none_or(|o| o.is_empty()) {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let mut g = self.read_pending.locked();
+        match g.get_mut(&member) {
+            Some(p) => {
+                wb_sync::mine::merge(&mut p.part, part);
+                p.last = now;
+            }
+            None => {
+                g.insert(
+                    member,
+                    ReadPending {
+                        part: part.clone(),
+                        first: now,
+                        last: now,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Once a second: the reading state that stayed the same for
+    /// `read_quiet` (or has waited READ_PUSH_MAX_WAIT) goes to its member's
+    /// iPhones that aren't connected, as a quiet push (`push::read_payload`).
+    /// A connected one has it already (`mine_part`).
+    pub(crate) fn read_push_tick(self: &Arc<Self>) {
+        let now = std::time::Instant::now();
+        let due: BTreeMap<u64, Value> = {
+            let mut g = self.read_pending.locked();
+            if g.is_empty() {
+                return;
+            }
+            let ready: Vec<u64> = g
+                .iter()
+                .filter(|(_, p)| {
+                    now - p.last >= self.read_quiet || now - p.first >= READ_PUSH_MAX_WAIT
+                })
+                .map(|(m, _)| *m)
+                .collect();
+            ready
+                .into_iter()
+                .filter_map(|m| g.remove(&m).map(|p| (m, p.part)))
+                .collect()
+        };
+        if due.is_empty() {
+            return;
+        }
+        let online = self.online.locked().clone();
+        let watching = self.watching.locked().clone();
+        let mut per_device: BTreeMap<String, Vec<(push::PushToken, Value)>> = BTreeMap::new();
+        {
+            let g = self.state();
+            for (device, tok) in &g.saved.push {
+                if tok.platform != "ios"
+                    || online.get(device).is_some_and(|n| *n > 0)
+                    || watching.get(device).is_some_and(|n| *n > 0)
+                {
+                    continue;
+                }
+                let Some(part) = g.saved.devices.get(device).and_then(|d| due.get(&d.member))
+                else {
+                    continue;
+                };
+                let mut p = push::read_payload(part);
+                // the phone's name for this workspace: its state, not another's
+                if let Some(ws) = &tok.workspace {
+                    p["ws"] = json!(ws);
+                }
+                per_device
+                    .entry(device.clone())
+                    .or_default()
+                    .push((tok.clone(), p));
+            }
+        }
+        self.send_pushes(per_device);
     }
 
     /// The choices kept with `device`'s push token, while it is `token`.
@@ -206,4 +295,19 @@ impl Hub {
             g.dirty = true;
         }
     }
+}
+
+/// The longest a member's changed reading state waits for a quiet moment
+/// before it goes to their phones anyway.
+pub(crate) const READ_PUSH_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long a member's reading state stays the same before it goes to their
+/// phones (`Options::read_push_quiet`).
+pub const READ_PUSH_QUIET: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A member's reading state that changed and hasn't gone to their phones yet.
+pub(crate) struct ReadPending {
+    /// what changed, all of it since the last push
+    part: Value,
+    first: std::time::Instant,
+    last: std::time::Instant,
 }

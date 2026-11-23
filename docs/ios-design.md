@@ -273,8 +273,10 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 
 ```json
 {"aps": {"alert": {"title": "Alex Kim in #general", "body": "..."}, "sound": "default", "thread-id": "ch-301"},
- "channel": 301, "parent": 311}
+ "channel": 301, "parent": 311, "id": 990, "ts": 1795448200}
 ```
+
+  `id`·`ts` 는 2026-11-24 부터 붙는다. 그 메시지를 읽으면(이 iPhone 이든 맥이든) 알림 센터에서 지운다. 맥에서 읽은 것은 서버가 조용한 푸시(`content-available`)로 알려 준다. 자세한 것은 `docs/server-design.md` "다른 기기에서 읽은 것을 iPhone 알림에 반영".
 
 - **서버 쪽(2026-11-16):** workboard-server 가 `push_token` 을 기기별로 저장하고, 새 메시지·멘션·DM 이 오면 위 모양으로 APNs 에 보낸다(답글이면 `parent` 와 `"subtitle": "Thread reply"` 도). 보낸 사람 자신의 기기와 **지금 서버에 연결된 기기**에는 보내지 않는다. 연결된 앱은 로컬 알림을 띄우므로 "그 대화를 보고 있는 기기" 를 이것으로 대신했다. 규칙 전체는 `server/src/push.rs` 맨 위와 `docs/server-design.md` 7단계.
 - **푸시 설정(2026-11-16):**

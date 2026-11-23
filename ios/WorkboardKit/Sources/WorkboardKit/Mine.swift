@@ -202,15 +202,29 @@ extension SyncClient {
     /// The server sent only what changed in my reading state (mine_part):
     /// the rest is as my devices last agreed, so the whole of it is that
     /// with this in it (on a tie the server's stays).
-    func takeMinePart(_ part: JSON) {
+    func takeMinePart(_ part: JSON, onConnection: Bool = true) {
         guard let d = data else { return }
         var theirs = part
         Mine.merge(&theirs, d.at("extra.mine_sync") ?? [:])
-        takeMine(theirs)
+        takeMine(theirs, onConnection: onConnection)
     }
 
-    func takeMine(_ theirs: JSON) {
-        mineOK = true
+    /// A quiet push from the server while this iPhone wasn't connected
+    /// (read_payload in server/src/push.rs, "mine"): what changed in my
+    /// reading state on my other devices, taken in as a `mine_part` is.
+    /// `workspace` is the push's "ws": false when it is for another
+    /// workspace kept here, or there's no copy to take it into yet.
+    @discardableResult
+    public func takeReadElsewhere(_ part: JSON, workspace: String?) -> Bool {
+        if let workspace, !workspace.isEmpty, workspace != pushKey { return false }
+        guard data != nil, part.object != nil else { return false }
+        takeMinePart(part, onConnection: false)
+        return true
+    }
+
+    func takeMine(_ theirs: JSON, onConnection: Bool = true) {
+        // (said by the server on this connection; a quiet push isn't one)
+        if onConnection { mineOK = true }
         guard var d = data else { return }
         let ours = Mine.collect(Mine.view(of: d), known: d.at("extra.mine_sync") ?? [:], now: nowMs())
         var merged = theirs

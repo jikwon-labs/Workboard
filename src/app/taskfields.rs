@@ -398,6 +398,7 @@ impl App {
         t: &Theme,
         id: egui::Id,
         task: &mut Task,
+        labelled: bool,
     ) {
         let me = self.data.me;
         let on = task.watched_by(me);
@@ -405,7 +406,11 @@ impl App {
             ui,
             t,
             Icon::Eye,
-            tr(if on { "Watching" } else { "Watch" }),
+            if labelled {
+                tr(if on { "Watching" } else { "Watch" })
+            } else {
+                ""
+            },
             if on { "Stop watching" } else { "Watch task" },
             false,
             0.0,

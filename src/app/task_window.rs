@@ -253,7 +253,134 @@ impl App {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(18, 10))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                // the buttons on the right first, then the left side in what
+                // they leave: the avatars of who watches were drawn over the
+                // path (and in the smallest window over "Watch")
+                let full = ui.available_rect_before_wrap();
+                let row = Rect::from_min_size(full.min, vec2(full.width(), CONTROL_H));
+                // too narrow for "Watching" written out: its eye alone
+                let labelled = row.width() >= 420.0;
+                let mut right_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(row)
+                        .layout(Layout::right_to_left(Align::Center)),
+                );
+                {
+                    let ui = &mut right_ui;
+                    if icons::icon_button(ui, &t, Icon::Close, "", "Close task", false)
+                        .on_hover_text(tr("Close"))
+                        .clicked()
+                    {
+                        close = true;
+                    }
+                    // the menu has "Copy ID", so no separate ID button here
+                    let r = icons::icon_button(ui, &t, Icon::Dots, "", "Task actions", false)
+                        .on_hover_text(tr("More"));
+                    self.watchers_header(ui, &t, win_id, &mut task, labelled);
+                    // a real menu, like the one a task's right click opens:
+                    // rows without a frame each
+                    click_menu(&r, |ui| {
+                        if ui.button(tr("Move to...")).clicked() {
+                            self.modal = Some(Modal::MoveTasks {
+                                ids: vec![tid],
+                                query: String::new(),
+                            });
+                            ui.close_menu();
+                        }
+                        if ui.button(tr("Make subtask of...")).clicked() {
+                            self.modal = Some(Modal::PickTask {
+                                task: tid,
+                                mode: TaskPick::Parent,
+                                query: String::new(),
+                            });
+                            ui.close_menu();
+                        }
+                        if task.parent.is_some() && ui.button(tr("Make top-level task")).clicked() {
+                            task.parent = None;
+                            self.make_top_level(tid);
+                            ui.close_menu();
+                        }
+                        if ui.button(tr("Duplicate")).clicked() {
+                            if let Some(n) = self.duplicate_task(tid) {
+                                self.actions.push(Action::Open(n));
+                            }
+                            ui.close_menu();
+                        }
+                        if ui.button(tr("Remind me")).clicked() {
+                            self.modal = Some(Modal::reminder(
+                                task.name.clone(),
+                                today() + Duration::days(1),
+                            ));
+                            self.reminder_about = (Some(task.id), None);
+                            ui.close_menu();
+                        }
+                        if ui.button(tr("Copy ID")).clicked() {
+                            ui.ctx().copy_text(tid.to_string());
+                            self.toast(tr("Task ID copied"));
+                            ui.close_menu();
+                        }
+                        if ui
+                            .button(if task.archived {
+                                tr("Unarchive")
+                            } else {
+                                tr("Archive")
+                            })
+                            .clicked()
+                        {
+                            let a = !task.archived;
+                            self.set_archived(&[tid], a);
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if self.may_manage() && ui.button(tr("Save as template")).clicked() {
+                            let id = self.data.new_id();
+                            self.data.extra.templates.push(TaskTemplate {
+                                id,
+                                name: task.name.clone(),
+                                task_name: task.name.clone(),
+                                description: task.description.clone(),
+                                checklist: task.checklist.iter().map(|c| c.text.clone()).collect(),
+                                tags: task.tags.clone(),
+                                priority: task.priority,
+                                ..Default::default()
+                            });
+                            self.toast = Some((tr("Saved as a template").into(), now_ts()));
+                            self.dirty = true;
+                            ui.close_menu();
+                        }
+                        if ui.button(tr("Copy link")).clicked() {
+                            self.copy_link(ui, nav::task_link(tid));
+                            ui.close_menu();
+                        }
+                        if ui
+                            .button(if self.data.is_my_timer(&task) {
+                                tr("Stop timer")
+                            } else {
+                                tr("Start timer")
+                            })
+                            .clicked()
+                        {
+                            self.actions.push(Action::ToggleTimer(tid));
+                            ui.close_menu();
+                        }
+                        if ui
+                            .button(RichText::new(tr("Delete task")).color(t.danger))
+                            .clicked()
+                        {
+                            self.actions.push(Action::DeleteTask(tid));
+                            ui.close_menu();
+                        }
+                    });
+                }
+                let right_left = right_ui.min_rect().left();
+                let left_rect = Rect::from_min_max(row.min, pos2(right_left - 8.0, row.bottom()));
+                let mut left_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(left_rect)
+                        .layout(Layout::left_to_right(Align::Center)),
+                );
+                {
+                    let ui = &mut left_ui;
                     // previous / next task in the current view
                     let (prev, next) = self.neighbours(tid);
                     if ui
@@ -284,12 +411,49 @@ impl App {
                             self.actions.push(Action::Open(n));
                         }
                     }
-                    let mut path = self.data.list_path(task.list_id).join("  /  ");
-                    if self.tier != super::shell::Tier::Wide {
-                        // room for the buttons at the right
-                        let room = (ui.available_width() - 250.0).max(40.0);
-                        path = fit_text(ui.painter(), &path, &FontId::proportional(14.0), room);
+                    // the path and the parent task share what the buttons
+                    // on the right leave, each shortened with an ellipsis
+                    let path_font = egui::TextStyle::Button.resolve(ui.style());
+                    let link_font = egui::TextStyle::Body.resolve(ui.style());
+                    let small = egui::TextStyle::Small.resolve(ui.style());
+                    let sp = ui.spacing().item_spacing.x;
+                    let width = |ui: &Ui, s: &str, f: &FontId| {
+                        ui.painter()
+                            .layout_no_wrap(s.to_string(), f.clone(), t.text)
+                            .size()
+                            .x
+                    };
+                    let full_path = self.data.list_path(task.list_id).join("  /  ");
+                    let parent = task
+                        .parent
+                        .and_then(|pid| self.task(pid).map(|p| (pid, p.name.clone())));
+                    let mut extra = ui.spacing().button_padding.x * 2.0 + 4.0;
+                    if task.archived {
+                        extra += sp + width(ui, tr("Archived"), &small);
                     }
+                    if level < crate::sync::Level::Edit {
+                        extra += sp + 12.0 + width(ui, tr("Can comment"), &small);
+                    }
+                    if parent.is_some() {
+                        extra += 2.0 * sp + width(ui, "/", &link_font);
+                    }
+                    let room = (ui.available_width() - extra).max(48.0);
+                    let pw = width(ui, &full_path, &path_font);
+                    let cw = parent
+                        .as_ref()
+                        .map_or(0.0, |(_, n)| width(ui, n, &link_font));
+                    let (path_room, parent_room) = if pw + cw <= room {
+                        (pw, cw)
+                    } else if parent.is_none() {
+                        (room, 0.0)
+                    } else if pw <= room / 2.0 {
+                        (pw, room - pw)
+                    } else if cw <= room / 2.0 {
+                        (room - cw, cw)
+                    } else {
+                        (room / 2.0, room / 2.0)
+                    };
+                    let path = fit_text(ui.painter(), &full_path, &path_font, path_room.max(24.0));
                     if ui
                         .add(ghost(egui::Button::new(RichText::new(path).color(t.text2))))
                         .on_hover_text(tr("Move to another List"))
@@ -304,132 +468,15 @@ impl App {
                         ui.label(RichText::new(tr("Archived")).small().color(t.danger));
                     }
                     self.level_note(ui, &t, level);
-                    if let Some(pid) = task.parent {
-                        if let Some(p) = self.task(pid) {
-                            ui.label(RichText::new("/").color(t.text3));
-                            let n = if self.tier == super::shell::Tier::Wide {
-                                30
-                            } else {
-                                12
-                            };
-                            if ui.link(truncate(&p.name, n)).clicked() {
-                                self.actions.push(Action::Open(pid));
-                            }
+                    if let Some((pid, name)) = &parent {
+                        ui.label(RichText::new("/").color(t.text3));
+                        let shown = fit_text(ui.painter(), name, &link_font, parent_room.max(24.0));
+                        if ui.link(shown).clicked() {
+                            self.actions.push(Action::Open(*pid));
                         }
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if icons::icon_button(ui, &t, Icon::Close, "", "Close task", false)
-                            .on_hover_text(tr("Close"))
-                            .clicked()
-                        {
-                            close = true;
-                        }
-                        // the menu has "Copy ID", so no separate ID button here
-                        let r = icons::icon_button(ui, &t, Icon::Dots, "", "Task actions", false)
-                            .on_hover_text(tr("More"));
-                        self.watchers_header(ui, &t, win_id, &mut task);
-                        // a real menu, like the one a task's right click opens:
-                        // rows without a frame each
-                        click_menu(&r, |ui| {
-                            if ui.button(tr("Move to...")).clicked() {
-                                self.modal = Some(Modal::MoveTasks {
-                                    ids: vec![tid],
-                                    query: String::new(),
-                                });
-                                ui.close_menu();
-                            }
-                            if ui.button(tr("Make subtask of...")).clicked() {
-                                self.modal = Some(Modal::PickTask {
-                                    task: tid,
-                                    mode: TaskPick::Parent,
-                                    query: String::new(),
-                                });
-                                ui.close_menu();
-                            }
-                            if task.parent.is_some()
-                                && ui.button(tr("Make top-level task")).clicked()
-                            {
-                                task.parent = None;
-                                self.make_top_level(tid);
-                                ui.close_menu();
-                            }
-                            if ui.button(tr("Duplicate")).clicked() {
-                                if let Some(n) = self.duplicate_task(tid) {
-                                    self.actions.push(Action::Open(n));
-                                }
-                                ui.close_menu();
-                            }
-                            if ui.button(tr("Remind me")).clicked() {
-                                self.modal = Some(Modal::reminder(
-                                    task.name.clone(),
-                                    today() + Duration::days(1),
-                                ));
-                                self.reminder_about = (Some(task.id), None);
-                                ui.close_menu();
-                            }
-                            if ui.button(tr("Copy ID")).clicked() {
-                                ui.ctx().copy_text(tid.to_string());
-                                self.toast(tr("Task ID copied"));
-                                ui.close_menu();
-                            }
-                            if ui
-                                .button(if task.archived {
-                                    tr("Unarchive")
-                                } else {
-                                    tr("Archive")
-                                })
-                                .clicked()
-                            {
-                                let a = !task.archived;
-                                self.set_archived(&[tid], a);
-                                ui.close_menu();
-                            }
-                            ui.separator();
-                            if self.may_manage() && ui.button(tr("Save as template")).clicked() {
-                                let id = self.data.new_id();
-                                self.data.extra.templates.push(TaskTemplate {
-                                    id,
-                                    name: task.name.clone(),
-                                    task_name: task.name.clone(),
-                                    description: task.description.clone(),
-                                    checklist: task
-                                        .checklist
-                                        .iter()
-                                        .map(|c| c.text.clone())
-                                        .collect(),
-                                    tags: task.tags.clone(),
-                                    priority: task.priority,
-                                    ..Default::default()
-                                });
-                                self.toast = Some((tr("Saved as a template").into(), now_ts()));
-                                self.dirty = true;
-                                ui.close_menu();
-                            }
-                            if ui.button(tr("Copy link")).clicked() {
-                                self.copy_link(ui, nav::task_link(tid));
-                                ui.close_menu();
-                            }
-                            if ui
-                                .button(if self.data.is_my_timer(&task) {
-                                    tr("Stop timer")
-                                } else {
-                                    tr("Start timer")
-                                })
-                                .clicked()
-                            {
-                                self.actions.push(Action::ToggleTimer(tid));
-                                ui.close_menu();
-                            }
-                            if ui
-                                .button(RichText::new(tr("Delete task")).color(t.danger))
-                                .clicked()
-                            {
-                                self.actions.push(Action::DeleteTask(tid));
-                                ui.close_menu();
-                            }
-                        });
-                    });
-                });
+                }
+                ui.advance_cursor_after_rect(row);
             });
         close
     }
@@ -872,21 +919,23 @@ impl App {
                 sub_changed = true;
             }
             let closed = matches!(st.kind, StatusKind::Closed | StatusKind::Done);
-            ui.painter()
-                .with_clip_rect(Rect::from_min_max(
-                    r.min,
-                    pos2(r.right() - 200.0, r.bottom()),
-                ))
-                .text(
-                    r.left_center() + vec2(32.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    &s.name,
-                    FontId::proportional(13.0),
-                    if closed { t.text3 } else { t.text },
-                );
             // assignees and due date open their menus; on hover
             // the row also offers "make top-level" and delete
             let hover = ui.rect_contains_pointer(r);
+            // the name runs up to the assignees, or up to the hover buttons
+            // while they show, shortened with an ellipsis (it was cut
+            // mid-letter 200 points from the right, which in a narrow
+            // window left only a few letters)
+            let name_font = FontId::proportional(13.0);
+            let name_end = r.right() - if hover { 200.0 } else { 152.0 };
+            let name_room = (name_end - (r.left() + 32.0)).max(24.0);
+            ui.painter().text(
+                r.left_center() + vec2(32.0, 0.0),
+                Align2::LEFT_CENTER,
+                fit_text(ui.painter(), &s.name, &name_font, name_room),
+                name_font,
+                if closed { t.text3 } else { t.text },
+            );
             let ar = Rect::from_min_max(
                 pos2(r.right() - 146.0, r.top() + 4.0),
                 pos2(r.right() - 84.0, r.bottom() - 4.0),

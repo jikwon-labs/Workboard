@@ -2144,3 +2144,116 @@ fn attachment_tile_names_fit_the_tile() {
     }
     assert!(h.cut_texts(tile).is_empty(), "{:?}", h.cut_texts(tile));
 }
+
+/// The texts in `area` painted on the task window (after its frame), not
+/// the page's under it.
+fn window_texts(h: &Ui1, area: Rect) -> Vec<(String, Rect)> {
+    let close = h.rect("Close task");
+    let mut on_window = false;
+    let mut out = vec![];
+    each_shape(&h.shapes, |s, clip| match s {
+        egui::Shape::Rect(r)
+            if !on_window
+                && r.rect.contains(close.center())
+                // centred in the window, the same margin all round
+                && (r.rect.center() - h.size.to_pos2() / 2.0).length() < 1.0
+                && (8.0..=50.0).contains(&(h.size.x - r.rect.width())) =>
+        {
+            on_window = true;
+        }
+        egui::Shape::Text(ts) if on_window => {
+            let r = ts.visual_bounding_rect().intersect(clip);
+            let text = ts.galley.text().trim();
+            if !text.is_empty() && r.is_positive() && area.contains(r.center()) {
+                out.push((text.to_string(), r));
+            }
+        }
+        _ => {}
+    });
+    out
+}
+
+/// The task window's top row in narrow windows: the avatars of who watches
+/// keep clear of the path to the List (and the parent task, for a subtask),
+/// and of "Watch". They used to be drawn over "Tea…" or "Design new…", and
+/// at the smallest size over "Watch" too.
+#[test]
+fn task_header_avatars_keep_clear_of_the_path() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        for (w, hh) in [(700.0, 640.0), (460.0, 640.0), (360.0, 640.0)] {
+            for task in ["Design new homepage layout", "Wireframe hero section"] {
+                let mut h = Ui1::sized(w, hh);
+                let id = h.task_id(task);
+                let me = h.app.data.me;
+                let t = h.app.data.tasks.iter_mut().find(|x| x.id == id).unwrap();
+                t.set_watching(me, true);
+                t.set_watching(t.assignees.first().copied().unwrap_or(me), true);
+                h.app.open_task = Some(id);
+                h.settle();
+                crate::i18n::set_lang(lang);
+                h.settle();
+                let close = h.rect("Close task");
+                // the window's top row (the page shows around the window)
+                let band = Rect::from_x_y_ranges(
+                    w - close.right() - 8.0..=close.right() + 8.0,
+                    close.top() - 4.0..=close.bottom() + 4.0,
+                );
+                let texts = window_texts(&h, band);
+                assert!(
+                    texts.iter().any(|(s, _)| s == "\u{2193}"),
+                    "{lang:?} {w}x{hh} {task}: the row is found: {texts:?}"
+                );
+                let over = layout_tests::overlapping(&texts);
+                assert!(over.is_empty(), "{lang:?} {w}x{hh} {task}: {over:?}");
+                let watchers = h.rect("Watchers");
+                let watch = h.rect("Stop watching");
+                assert!(
+                    watchers.intersect(watch).width() <= 0.5,
+                    "{lang:?} {w}x{hh} {task}: {watchers:?} over {watch:?}"
+                );
+                for (s, r) in &texts {
+                    if watchers.contains(r.center()) || watch.contains(r.center()) {
+                        continue;
+                    }
+                    let o = watchers.intersect(*r);
+                    assert!(
+                        !(o.width() > 0.5 && o.height() > 0.5),
+                        "{lang:?} {w}x{hh} {task}: the avatars are over {s:?}"
+                    );
+                }
+                assert!(
+                    h.past_right_edge().is_empty(),
+                    "{lang:?} {w}x{hh} {task}: {:?}",
+                    h.past_right_edge()
+                );
+                crate::i18n::set_lang(crate::i18n::Lang::En);
+            }
+        }
+    }
+}
+
+/// In the smallest window a task's subtasks show their names up to the
+/// assignees, shortened with "…" if need be. They used to be cut mid-letter
+/// 200 points from the right ("Pick hero ir").
+#[test]
+fn subtask_names_use_the_room_up_to_the_assignees() {
+    let mut h = Ui1::sized(360.0, 640.0);
+    let id = h.task_id("Design new homepage layout");
+    h.app.open_task = Some(id);
+    h.settle();
+    h.scroll_into_view("Subtask assignees Pick hero image");
+    let page = Rect::from_min_size(Pos2::ZERO, h.size);
+    let cut = h.cut_texts(page);
+    assert!(
+        !cut.iter()
+            .any(|s| s.starts_with("Pick hero") || s.starts_with("Wireframe")),
+        "{cut:?}"
+    );
+    assert!(
+        h.texts().iter().any(|s| s == "Pick hero image"),
+        "the whole name"
+    );
+    let who = h.rect("Subtask assignees Pick hero image");
+    let (name, _) = h.painted_text("Pick hero image")[0];
+    assert!(name.right() <= who.left(), "{name:?} before {who:?}");
+}

@@ -1034,6 +1034,16 @@ impl App {
             .collect()
     }
 
+    /// The newest message or reply in a conversation and its duplicate
+    /// direct messages (0 when there is none).
+    pub(super) fn conversation_newest_ts(&self, c: &Channel) -> i64 {
+        self.conversation(c)
+            .iter()
+            .map(|d| newest_ts(d))
+            .max()
+            .unwrap_or(0)
+    }
+
     /// The copy of a direct message that shows (itself for anything else).
     pub(super) fn dm_primary(&self, c: &Channel) -> u64 {
         if c.kind != ChannelKind::Direct {

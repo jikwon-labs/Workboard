@@ -406,6 +406,97 @@ fn sidebar_direct_messages_have_one_add_button() {
     assert!(h.app.new_message_open);
 }
 
+/// The sidebar's direct messages, top to bottom, by the other person's name.
+fn sidebar_dm_order(h: &mut Ui1, names: &[&str]) -> Vec<String> {
+    for n in names {
+        h.scroll_into_view(n);
+    }
+    let mut v: Vec<(f32, String)> = names
+        .iter()
+        .map(|n| {
+            // the left-most one: the conversation's header and messages are
+            // to the right of the sidebar
+            let r = h
+                .tree
+                .iter()
+                .filter(|(t, _)| t == n)
+                .map(|(_, r)| *r)
+                .min_by(|a, b| a.left().total_cmp(&b.left()))
+                .unwrap_or_else(|| panic!("no sidebar row for {}", n));
+            (r.top(), n.to_string())
+        })
+        .collect();
+    v.sort_by(|a, b| a.0.total_cmp(&b.0));
+    v.into_iter().map(|x| x.1).collect()
+}
+
+/// Direct Messages list the conversation with the newest message first,
+/// whoever wrote it, and move it up when a message comes or I send one.
+#[test]
+fn sidebar_direct_messages_put_the_newest_conversation_on_top() {
+    let mut h = Ui1::new();
+    let names = ["Alex Kim", "Sam Lee", "Jordan Park"];
+    // Alex wrote ten minutes ago, Sam's has nothing yet; Jordan's is made
+    // last but wrote two hours ago
+    let from_jordan = |h: &mut Ui1, text: &str, ago: i64| {
+        let mut m = h
+            .app
+            .data
+            .channels
+            .iter()
+            .find_map(|c| c.messages.first())
+            .unwrap()
+            .clone();
+        m.id = h.app.data.new_id();
+        m.author = 4;
+        m.text = text.into();
+        m.ts = now_ts() - ago;
+        m.replies.clear();
+        m
+    };
+    let jordan = h.app.data.new_id();
+    let old = from_jordan(&mut h, "Old news", 7200);
+    h.app.data.channels.push(Channel {
+        id: jordan,
+        kind: ChannelKind::Direct,
+        members: vec![1, 4],
+        messages: vec![old],
+        last_read: now_ts(),
+        ..Default::default()
+    });
+    h.settle();
+    assert_eq!(
+        sidebar_dm_order(&mut h, &names),
+        ["Alex Kim", "Jordan Park", "Sam Lee"],
+        "newest message first, nothing yet at the end"
+    );
+
+    // Jordan writes: their conversation comes up
+    let m = from_jordan(&mut h, "Are you around?", 60);
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == jordan)
+        .unwrap()
+        .messages
+        .push(m);
+    h.app.data_changed();
+    h.settle();
+    assert_eq!(
+        sidebar_dm_order(&mut h, &names),
+        ["Jordan Park", "Alex Kim", "Sam Lee"]
+    );
+
+    // I write to Sam: theirs goes on top
+    h.click_side("Sam Lee", false);
+    h.send_message("Lunch at noon?");
+    assert_eq!(
+        sidebar_dm_order(&mut h, &names),
+        ["Sam Lee", "Jordan Park", "Alex Kim"]
+    );
+}
+
 #[test]
 fn folded_channels_open_up_for_a_new_channel() {
     // the name field sits at the end of the list, so a folded section opens

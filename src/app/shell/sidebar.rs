@@ -904,7 +904,7 @@ impl App {
             && !self.hidden("Direct Messages")
         {
             let me = self.data.me;
-            let dms: Vec<(u64, Option<Member>, usize)> = self
+            let mut dms: Vec<(u64, Option<Member>, usize, i64)> = self
                 .data
                 .channels
                 .iter()
@@ -918,9 +918,13 @@ impl App {
                             .and_then(|m| self.data.member(*m))
                             .cloned(),
                         self.unread_count(c),
+                        self.conversation_newest_ts(c),
                     )
                 })
                 .collect();
+            // the conversation with the newest message (from either side)
+            // first; ones without any keep their order at the end
+            dms.sort_by_key(|d| std::cmp::Reverse(d.3));
             let total = if muted {
                 0
             } else {
@@ -936,7 +940,7 @@ impl App {
             if !self.fold_shows(folded, filter) {
                 return;
             }
-            for (id, other, real_unread) in dms {
+            for (id, other, real_unread, _) in dms {
                 let unread = if muted { 0 } else { real_unread };
                 let (name, sub) = match &other {
                     Some(m) => (m.shown().to_string(), None),

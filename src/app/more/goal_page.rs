@@ -210,7 +210,15 @@ impl App {
             .show(ui, |ui| {
                 // the margins and the 1 pt outline on each side
                 ui.set_width(w - 54.0);
-                ui.horizontal_top(|ui| {
+                // a narrow window puts the ring over the rest, which then has
+                // the box's width (beside it, it ran past the window's edge)
+                let stacked = w < 560.0;
+                let layout = if stacked {
+                    Layout::top_down(Align::Min)
+                } else {
+                    Layout::left_to_right(Align::Min)
+                };
+                ui.with_layout(layout, |ui| {
                     ui.spacing_mut().item_spacing.x = 28.0;
                     // ring
                     let (rr, _) = ui.allocate_exact_size(vec2(140.0, 140.0), Sense::hover());
@@ -242,8 +250,11 @@ impl App {
                             t.text2,
                         );
                     }
-                    let info_w =
-                        (ui.available_width() - if w > 760.0 { 250.0 } else { 0.0 }).max(240.0);
+                    let info_w = if stacked {
+                        ui.available_width()
+                    } else {
+                        (ui.available_width() - if w > 760.0 { 250.0 } else { 0.0 }).max(240.0)
+                    };
                     ui.vertical(|ui| {
                         ui.set_width(info_w);
                         ui.spacing_mut().item_spacing.y = 10.0;
@@ -649,6 +660,37 @@ impl App {
                 TargetType::Done => done_toggle_width(ui, t),
                 _ => width_of(&v.st.value, FontId::proportional(value_size)).ceil() + unit_w,
             };
+        // too narrow for the name beside the value: the value (or the done
+        // button) goes on a line of its own under the name
+        let two_lines = ui.available_width() - 36.0 - 2.0 * gap - right_w < 140.0;
+        let right_w = if two_lines { 28.0 + gap } else { right_w };
+        // the value and its unit, or the done button; `rtl` in a right to
+        // left row
+        let value_part = |ui: &mut Ui, rtl: bool| -> Option<PageAct> {
+            match v.kind {
+                TargetType::Done => {
+                    let b = done_toggle(ui, t, v.st.done, color);
+                    name_it(&b, &format!("Done {}", v.name));
+                    b.clicked()
+                        .then_some(PageAct::Goal(GoalAct::ToggleDone { g: gid, i }))
+                }
+                _ => {
+                    let unit = |ui: &mut Ui| {
+                        if !v.st.unit.is_empty() {
+                            ui.label(RichText::new(&v.st.unit).size(14.0).color(t.text2));
+                        }
+                    };
+                    if rtl {
+                        unit(ui);
+                    }
+                    ui.label(RichText::new(&v.st.value).size(value_size).strong());
+                    if !rtl {
+                        unit(ui);
+                    }
+                    None
+                }
+            }
+        };
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
             ui.painter().rect_filled(r, 10.0, accent.0);
@@ -660,14 +702,21 @@ impl App {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 let name_id = egui::Id::new(("target name", gid, i));
                 let mut name = typed_name(ui, name_id, &self.data.extra.goals[gi].targets[i].name);
+                // a long name wraps instead of being cut mid-letter; it
+                // stays one line of text (Return ends the editing)
                 let r = ui.add(
-                    egui::TextEdit::singleline(&mut name)
+                    egui::TextEdit::multiline(&mut name)
                         .id(name_id)
                         .frame(false)
                         .font(FontId::proportional(15.0))
                         .desired_width(name_w)
+                        .desired_rows(1)
                         .margin(egui::Margin::ZERO),
                 );
+                if name.contains('\n') {
+                    name = name.replace('\n', "");
+                    r.surrender_focus();
+                }
                 name_field(&r, &format!("Target name {}", v.name));
                 if keep_typed(ui, name_id, &r, &name) {
                     self.data.extra.goals[gi].targets[i].name = name;
@@ -693,23 +742,21 @@ impl App {
                 if x.clicked() {
                     act = Some(PageAct::RemoveTarget(i));
                 }
-                match v.kind {
-                    TargetType::Done => {
-                        let b = done_toggle(ui, t, v.st.done, color);
-                        name_it(&b, &format!("Done {}", v.name));
-                        if b.clicked() {
-                            act = Some(PageAct::Goal(GoalAct::ToggleDone { g: gid, i }));
-                        }
-                    }
-                    _ => {
-                        if !v.st.unit.is_empty() {
-                            ui.label(RichText::new(&v.st.unit).size(14.0).color(t.text2));
-                        }
-                        ui.label(RichText::new(&v.st.value).size(value_size).strong());
+                if !two_lines {
+                    if let Some(a) = value_part(ui, true) {
+                        act = Some(a);
                     }
                 }
             });
         });
+        if two_lines {
+            ui.horizontal(|ui| {
+                ui.add_space(36.0);
+                if let Some(a) = value_part(ui, false) {
+                    act = Some(a);
+                }
+            });
+        }
         if v.kind == TargetType::Done {
             return act;
         }
@@ -718,6 +765,16 @@ impl App {
         paint_bar(ui.painter(), bar, v.st.frac, color, t.hover);
         ui.add_space(8.0);
         if v.kind == TargetType::Number {
+            let left = v.target - v.current;
+            let note = if v.st.done {
+                tr("Target met").to_string()
+            } else {
+                trf!(
+                    "{} to go",
+                    format!("{} {}", fmt_num(left.abs()), v.unit).trim_end()
+                )
+            };
+            let mut note_below = false;
             ui.horizontal(|ui| {
                 for (label, d, name) in [
                     ("\u{2212}", -1.0, "Minus 1"),
@@ -825,19 +882,25 @@ impl App {
                     }
                     None::<bool>
                 });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let left = v.target - v.current;
-                    let note = if v.st.done {
-                        tr("Target met").to_string()
-                    } else {
-                        trf!(
-                            "{} to go",
-                            format!("{} {}", fmt_num(left.abs()), v.unit).trim_end()
-                        )
-                    };
-                    ui.label(RichText::new(note).size(12.5).color(t.text2));
-                });
+                let note_w = ui
+                    .painter()
+                    .layout_no_wrap(note.clone(), FontId::proportional(12.5), t.text)
+                    .size()
+                    .x;
+                if ui.available_width() >= note_w + gap {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new(&note).size(12.5).color(t.text2));
+                    });
+                } else {
+                    note_below = true;
+                }
             });
+            // no room beside the buttons: under them, at the right
+            if note_below {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    ui.label(RichText::new(&note).size(12.5).color(t.text2));
+                });
+            }
             return act;
         }
         // tasks: the open ones to tick off, the closed ones on request

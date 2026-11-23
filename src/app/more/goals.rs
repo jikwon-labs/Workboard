@@ -277,14 +277,16 @@ pub(crate) fn goals_frame(
     header: impl FnOnce(&mut Ui),
     body: impl FnOnce(&mut Ui),
 ) {
+    // a narrow window keeps more of its width for the page
+    let side: i8 = if ui.available_width() < 600.0 { 16 } else { 32 };
     egui::ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             egui::Frame::new()
                 .inner_margin(egui::Margin {
-                    left: 32,
-                    right: 32,
+                    left: side,
+                    right: side,
                     top: 24,
                     bottom: 40,
                 })
@@ -697,29 +699,63 @@ impl App {
         let list_view = GoalsView::of(&self.data.extra.goals_view) == GoalsView::List;
         let mut head_act: Option<GoalAct> = None;
         let mut act: Option<GoalAct> = None;
+        // the filters and the view switch need this much (as last drawn):
+        // when the header row has no room for them they go on a row of
+        // their own under it, instead of running past the window's left edge
+        let tabs_id = egui::Id::new("goals_tabs_w");
+        let tabs_w: f32 = ui.data(|d| d.get_temp(tabs_id)).unwrap_or(0.0);
+        let two_rows = std::cell::Cell::new(false);
+        let counts = [n_all, n_mine, n_done];
         goals_frame(
             ui,
             "goals_page",
             |ui| {
-                ui.label(RichText::new(tr("Goals")).size(24.0).strong());
+                let avail = ui.available_width();
+                let title = ui.label(RichText::new(tr("Goals")).size(24.0).strong());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let b = primary_button(ui, &t, tr("+ New goal"));
                     name_it(&b, "New goal");
                     if b.clicked() {
                         head_act = Some(GoalAct::NewGoal);
                     }
+                    if title.rect.width() + b.rect.width() + 24.0 + tabs_w > avail {
+                        two_rows.set(true);
+                        return;
+                    }
+                    let from = ui.cursor().right();
                     ui.add_space(6.0);
                     if let Some(v) = view_switch(ui, &t, list_view) {
                         head_act = Some(GoalAct::View(v));
                     }
                     ui.add_space(6.0);
-                    let counts = [n_all, n_mine, n_done];
                     if let Some(f) = filter_tabs(ui, &t, filter, counts) {
                         head_act = Some(GoalAct::Filter(f));
                     }
+                    let w = from - ui.min_rect().left();
+                    ui.data_mut(|d| d.insert_temp(tabs_id, w));
                 });
             },
             |ui| {
+                if two_rows.get() {
+                    let r = ui
+                        .horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            if let Some(f) = filter_tabs(ui, &t, filter, counts) {
+                                act = Some(GoalAct::Filter(f));
+                            }
+                            if let Some(v) = view_switch(ui, &t, list_view) {
+                                act = Some(GoalAct::View(v));
+                            }
+                        })
+                        .response
+                        .rect;
+                    // as wide as they would be side by side in one row
+                    let one_row = ui.data(|d| d.get_temp::<f32>(tabs_id)).unwrap_or(0.0);
+                    if r.height() < 40.0 || one_row == 0.0 {
+                        ui.data_mut(|d| d.insert_temp(tabs_id, r.width() + 6.0));
+                    }
+                    ui.add_space(16.0);
+                }
                 // ---- summary
                 let active_all: Vec<&GoalRow> = rows.iter().filter(|r| r.pct < 100).collect();
                 let done_all: Vec<&GoalRow> = rows.iter().filter(|r| r.pct >= 100).collect();
@@ -1370,256 +1406,279 @@ impl App {
         day: NaiveDate,
     ) -> Option<GoalAct> {
         let mut act = None;
-        // inside the 1 pt outline on each side
-        let w = ui.available_width() - 2.0;
-        egui::Frame::new()
-            .fill(t.card)
-            .stroke(Stroke::new(1.0, t.border))
-            .corner_radius(12)
-            .show(ui, |ui| {
-                ui.set_width(w);
-                let cols = row_cols(w);
-                // heading
-                let (hr, _) = ui.allocate_exact_size(vec2(w, 36.0), Sense::hover());
-                let p = ui.painter();
-                let f = FontId::proportional(12.5);
-                let heads = [
-                    tr("Goal"),
-                    tr("Progress"),
-                    tr("Pace"),
-                    tr("Due"),
-                    crate::i18n::tr_ctx("Owner (goal)", "Owner"),
-                ];
-                for (i, h) in heads.iter().enumerate() {
-                    p.text(
-                        pos2(hr.left() + cols[i], hr.center().y),
-                        Align2::LEFT_CENTER,
-                        *h,
-                        f.clone(),
-                        t.text2,
-                    );
-                }
-                p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
-                let legend = rows.iter().any(|r| plan_mark(r).is_some());
-                for (ri, r) in rows.iter().enumerate() {
-                    let g = &r.g;
-                    let open = self.goal.list_open == Some(g.id);
-                    let (rr, _) = ui.allocate_exact_size(vec2(w, 58.0), Sense::hover());
-                    let click = ui.interact(rr, ui.id().with(("goal row", g.id)), Sense::click());
-                    name_it(&click, &format!("Goal row {}", g.name));
-                    if click.hovered() {
-                        ui.painter()
-                            .rect_filled(rr, 0.0, t.hover.gamma_multiply(0.5));
-                    }
-                    if click.clicked() {
-                        act = Some(GoalAct::Open(g.id));
-                    }
-                    let cy = rr.center().y;
-                    // the arrow
-                    let ab = Rect::from_center_size(pos2(rr.left() + 22.0, cy), vec2(24.0, 24.0));
-                    let ar =
-                        ui.interact(ab, ui.id().with(("goal row arrow", g.id)), Sense::click());
-                    name_it(&ar, &format!("Show targets of {}", g.name));
-                    hover_bg(ui, &ar, ab, 6.0);
+        // inside the 1 pt outline on each side; a window narrower than the
+        // columns need scrolls the table sideways instead of cutting the
+        // columns at its right edge
+        let w = (ui.available_width() - 2.0).max(ROWS_MIN_W);
+        let scroll = ui.available_width() - 2.0 < ROWS_MIN_W;
+        let mut table = |ui: &mut Ui| {
+            egui::Frame::new()
+                .fill(t.card)
+                .stroke(Stroke::new(1.0, t.border))
+                .corner_radius(12)
+                .show(ui, |ui| {
+                    ui.set_width(w);
+                    let cols = row_cols(w);
+                    // heading
+                    let (hr, _) = ui.allocate_exact_size(vec2(w, 36.0), Sense::hover());
                     let p = ui.painter();
-                    paint_triangle(p, ab.center(), open, t.text2);
-                    if ar.clicked() {
-                        act = Some(GoalAct::ExpandRow(if open { None } else { Some(g.id) }));
-                    }
-                    p.circle_filled(pos2(rr.left() + 44.0, cy), 5.0, rgb(g.color));
-                    let nf = FontId::proportional(14.0);
-                    let name_w = cols[1] - 70.0;
-                    p.text(
-                        pos2(rr.left() + 56.0, cy - 8.0),
-                        Align2::LEFT_CENTER,
-                        crate::widgets::fit_text(p, &g.name, &nf, name_w),
-                        nf,
-                        t.text,
-                    );
-                    let done = r.targets.iter().filter(|s| s.done).count();
-                    // as its card says it
-                    let summary = if g.targets.is_empty() {
-                        tr("No targets yet").to_string()
-                    } else {
-                        trf!("{} of {} targets done", done, g.targets.len())
-                    };
-                    p.text(
-                        pos2(rr.left() + 56.0, cy + 10.0),
-                        Align2::LEFT_CENTER,
-                        summary,
-                        FontId::proportional(12.0),
-                        t.text2,
-                    );
-                    // progress with today's mark
-                    let bar_w = cols[2] - cols[1] - 70.0;
-                    let bar =
-                        Rect::from_min_size(pos2(rr.left() + cols[1], cy - 4.0), vec2(bar_w, 8.0));
-                    paint_bar(p, bar, r.pct as f32 / 100.0, rgb(g.color), t.hover);
-                    if let Some(e) = plan_mark(r) {
-                        let x = bar.left() + bar.width() * e as f32 / 100.0;
-                        let m = Rect::from_min_max(
-                            pos2(x - 1.0, bar.top() - 5.0),
-                            pos2(x + 1.0, bar.bottom() + 5.0),
-                        );
-                        p.rect_filled(m, 1.0, t.text);
-                        let hint = ui
-                            .interact(
-                                m.expand2(vec2(4.0, 2.0)),
-                                ui.id().with(("goal plan mark", g.id)),
-                                Sense::hover(),
-                            )
-                            .on_hover_text(trf!("Planned for today: {}%", e));
-                        name_it(&hint, &format!("Plan mark {}", g.name));
-                    }
-                    p.text(
-                        pos2(bar.right() + 12.0, cy),
-                        Align2::LEFT_CENTER,
-                        format!("{}%", r.pct),
-                        FontId::proportional(14.0),
-                        t.text,
-                    );
-                    let pace_rect = Rect::from_min_size(
-                        pos2(rr.left() + cols[2], cy - 11.0),
-                        vec2(cols[3] - cols[2], 22.0),
-                    );
-                    if let Some(pace) = r.pace {
-                        place(ui, pace_rect, |ui| {
-                            pace_pill(ui, t, pace);
-                        });
-                    }
-                    let p = ui.painter();
-                    if let Some(due) = g.due {
+                    let f = FontId::proportional(12.5);
+                    let heads = [
+                        tr("Goal"),
+                        tr("Progress"),
+                        tr("Pace"),
+                        tr("Due"),
+                        crate::i18n::tr_ctx("Owner (goal)", "Owner"),
+                    ];
+                    for (i, h) in heads.iter().enumerate() {
                         p.text(
-                            pos2(rr.left() + cols[3], cy - 8.0),
+                            pos2(hr.left() + cols[i], hr.center().y),
                             Align2::LEFT_CENTER,
-                            due.text("%b %-d"),
-                            FontId::proportional(13.0),
-                            t.text,
-                        );
-                        let fg = match r.pace {
-                            Some(pc @ (Pace::Behind | Pace::AtRisk)) => pace_colors(pc, t).1,
-                            _ => t.text2,
-                        };
-                        // when it was achieved instead of the days left
-                        let under = match g.done_on.filter(|_| r.pct >= 100) {
-                            Some(d) => trf!("Achieved {}", d.text("%b %-d")),
-                            None => dday(due, day),
-                        };
-                        p.text(
-                            pos2(rr.left() + cols[3], cy + 10.0),
-                            Align2::LEFT_CENTER,
-                            under,
-                            FontId::proportional(12.0),
-                            fg,
+                            *h,
+                            f.clone(),
+                            t.text2,
                         );
                     }
-                    if let Some(m) = self.data.member(g.owner) {
-                        paint_avatar(p, pos2(rr.left() + cols[4] + 11.0, cy), 11.0, m, t.card);
-                        // shortened to end inside the row
-                        let nf = FontId::proportional(13.0);
-                        let room = rr.right() - 16.0 - (rr.left() + cols[4] + 28.0);
+                    p.hline(hr.x_range(), hr.bottom(), Stroke::new(1.0, t.border));
+                    let legend = rows.iter().any(|r| plan_mark(r).is_some());
+                    for (ri, r) in rows.iter().enumerate() {
+                        let g = &r.g;
+                        let open = self.goal.list_open == Some(g.id);
+                        let (rr, _) = ui.allocate_exact_size(vec2(w, 58.0), Sense::hover());
+                        let click =
+                            ui.interact(rr, ui.id().with(("goal row", g.id)), Sense::click());
+                        name_it(&click, &format!("Goal row {}", g.name));
+                        if click.hovered() {
+                            ui.painter()
+                                .rect_filled(rr, 0.0, t.hover.gamma_multiply(0.5));
+                        }
+                        if click.clicked() {
+                            act = Some(GoalAct::Open(g.id));
+                        }
+                        let cy = rr.center().y;
+                        // the arrow
+                        let ab =
+                            Rect::from_center_size(pos2(rr.left() + 22.0, cy), vec2(24.0, 24.0));
+                        let ar =
+                            ui.interact(ab, ui.id().with(("goal row arrow", g.id)), Sense::click());
+                        name_it(&ar, &format!("Show targets of {}", g.name));
+                        hover_bg(ui, &ar, ab, 6.0);
+                        let p = ui.painter();
+                        paint_triangle(p, ab.center(), open, t.text2);
+                        if ar.clicked() {
+                            act = Some(GoalAct::ExpandRow(if open { None } else { Some(g.id) }));
+                        }
+                        p.circle_filled(pos2(rr.left() + 44.0, cy), 5.0, rgb(g.color));
+                        let nf = FontId::proportional(14.0);
+                        let name_w = cols[1] - 70.0;
                         p.text(
-                            pos2(rr.left() + cols[4] + 28.0, cy),
+                            pos2(rr.left() + 56.0, cy - 8.0),
                             Align2::LEFT_CENTER,
-                            crate::widgets::fit_text(p, m.shown(), &nf, room),
+                            crate::widgets::fit_text(p, &g.name, &nf, name_w),
                             nf,
                             t.text,
                         );
-                    }
-                    if open {
-                        for (tg, st) in g.targets.iter().zip(&r.targets) {
-                            let (tr_, _) = ui.allocate_exact_size(vec2(w, 36.0), Sense::hover());
-                            let p = ui.painter();
-                            let cy = tr_.center().y;
-                            let kind = tr(TargetType::of(&tg.kind).label());
-                            let kg = p.layout_no_wrap(
-                                kind.to_string(),
-                                FontId::proportional(11.5),
-                                t.text2,
+                        let done = r.targets.iter().filter(|s| s.done).count();
+                        // as its card says it
+                        let summary = if g.targets.is_empty() {
+                            tr("No targets yet").to_string()
+                        } else {
+                            trf!("{} of {} targets done", done, g.targets.len())
+                        };
+                        p.text(
+                            pos2(rr.left() + 56.0, cy + 10.0),
+                            Align2::LEFT_CENTER,
+                            summary,
+                            FontId::proportional(12.0),
+                            t.text2,
+                        );
+                        // progress with today's mark
+                        let bar_w = cols[2] - cols[1] - 70.0;
+                        let bar = Rect::from_min_size(
+                            pos2(rr.left() + cols[1], cy - 4.0),
+                            vec2(bar_w, 8.0),
+                        );
+                        paint_bar(p, bar, r.pct as f32 / 100.0, rgb(g.color), t.hover);
+                        if let Some(e) = plan_mark(r) {
+                            let x = bar.left() + bar.width() * e as f32 / 100.0;
+                            let m = Rect::from_min_max(
+                                pos2(x - 1.0, bar.top() - 5.0),
+                                pos2(x + 1.0, bar.bottom() + 5.0),
                             );
-                            let kr = Rect::from_min_size(
-                                pos2(tr_.left() + 56.0, cy - 9.0),
-                                vec2(kg.size().x + 10.0, 18.0),
-                            );
-                            p.rect_filled(kr, 5.0, t.hover);
-                            p.galley(kr.center() - kg.size() / 2.0, kg, t.text2);
-                            let nf = FontId::proportional(13.0);
+                            p.rect_filled(m, 1.0, t.text);
+                            let hint = ui
+                                .interact(
+                                    m.expand2(vec2(4.0, 2.0)),
+                                    ui.id().with(("goal plan mark", g.id)),
+                                    Sense::hover(),
+                                )
+                                .on_hover_text(trf!("Planned for today: {}%", e));
+                            name_it(&hint, &format!("Plan mark {}", g.name));
+                        }
+                        p.text(
+                            pos2(bar.right() + 12.0, cy),
+                            Align2::LEFT_CENTER,
+                            format!("{}%", r.pct),
+                            FontId::proportional(14.0),
+                            t.text,
+                        );
+                        let pace_rect = Rect::from_min_size(
+                            pos2(rr.left() + cols[2], cy - 11.0),
+                            vec2(cols[3] - cols[2], 22.0),
+                        );
+                        if let Some(pace) = r.pace {
+                            place(ui, pace_rect, |ui| {
+                                pace_pill(ui, t, pace);
+                            });
+                        }
+                        let p = ui.painter();
+                        if let Some(due) = g.due {
                             p.text(
-                                pos2(kr.right() + 8.0, cy),
+                                pos2(rr.left() + cols[3], cy - 8.0),
                                 Align2::LEFT_CENTER,
-                                crate::widgets::fit_text(
-                                    p,
-                                    &tg.name,
-                                    &nf,
-                                    cols[1] - (kr.right() - tr_.left()) - 20.0,
-                                ),
-                                nf,
-                                t.text,
-                            );
-                            let bar = Rect::from_min_size(
-                                pos2(tr_.left() + cols[1], cy - 2.5),
-                                vec2(bar_w, 5.0),
-                            );
-                            paint_bar(p, bar, st.frac, rgb(g.color).gamma_multiply(0.75), t.hover);
-                            p.text(
-                                pos2(bar.right() + 12.0, cy),
-                                Align2::LEFT_CENTER,
-                                format!("{}%", pct_of(st.frac)),
-                                FontId::proportional(12.5),
-                                t.text2,
-                            );
-                            let value = if st.value.is_empty() {
-                                if st.done {
-                                    tr("Done").to_string()
-                                } else {
-                                    tr("Not done").to_string()
-                                }
-                            } else if st.unit.is_empty() {
-                                st.value.clone()
-                            } else {
-                                format!("{} {}", st.value, st.unit)
-                            };
-                            p.text(
-                                pos2(tr_.left() + cols[2], cy),
-                                Align2::LEFT_CENTER,
-                                value,
+                                due.text("%b %-d"),
                                 FontId::proportional(13.0),
                                 t.text,
                             );
+                            let fg = match r.pace {
+                                Some(pc @ (Pace::Behind | Pace::AtRisk)) => pace_colors(pc, t).1,
+                                _ => t.text2,
+                            };
+                            // when it was achieved instead of the days left
+                            let under = match g.done_on.filter(|_| r.pct >= 100) {
+                                Some(d) => trf!("Achieved {}", d.text("%b %-d")),
+                                None => dday(due, day),
+                            };
+                            p.text(
+                                pos2(rr.left() + cols[3], cy + 10.0),
+                                Align2::LEFT_CENTER,
+                                under,
+                                FontId::proportional(12.0),
+                                fg,
+                            );
+                        }
+                        if let Some(m) = self.data.member(g.owner) {
+                            paint_avatar(p, pos2(rr.left() + cols[4] + 11.0, cy), 11.0, m, t.card);
+                            // shortened to end inside the row
+                            let nf = FontId::proportional(13.0);
+                            let room = rr.right() - 16.0 - (rr.left() + cols[4] + 28.0);
+                            p.text(
+                                pos2(rr.left() + cols[4] + 28.0, cy),
+                                Align2::LEFT_CENTER,
+                                crate::widgets::fit_text(p, m.shown(), &nf, room),
+                                nf,
+                                t.text,
+                            );
+                        }
+                        if open {
+                            for (tg, st) in g.targets.iter().zip(&r.targets) {
+                                let (tr_, _) =
+                                    ui.allocate_exact_size(vec2(w, 36.0), Sense::hover());
+                                let p = ui.painter();
+                                let cy = tr_.center().y;
+                                let kind = tr(TargetType::of(&tg.kind).label());
+                                let kg = p.layout_no_wrap(
+                                    kind.to_string(),
+                                    FontId::proportional(11.5),
+                                    t.text2,
+                                );
+                                let kr = Rect::from_min_size(
+                                    pos2(tr_.left() + 56.0, cy - 9.0),
+                                    vec2(kg.size().x + 10.0, 18.0),
+                                );
+                                p.rect_filled(kr, 5.0, t.hover);
+                                p.galley(kr.center() - kg.size() / 2.0, kg, t.text2);
+                                let nf = FontId::proportional(13.0);
+                                p.text(
+                                    pos2(kr.right() + 8.0, cy),
+                                    Align2::LEFT_CENTER,
+                                    crate::widgets::fit_text(
+                                        p,
+                                        &tg.name,
+                                        &nf,
+                                        cols[1] - (kr.right() - tr_.left()) - 20.0,
+                                    ),
+                                    nf,
+                                    t.text,
+                                );
+                                let bar = Rect::from_min_size(
+                                    pos2(tr_.left() + cols[1], cy - 2.5),
+                                    vec2(bar_w, 5.0),
+                                );
+                                paint_bar(
+                                    p,
+                                    bar,
+                                    st.frac,
+                                    rgb(g.color).gamma_multiply(0.75),
+                                    t.hover,
+                                );
+                                p.text(
+                                    pos2(bar.right() + 12.0, cy),
+                                    Align2::LEFT_CENTER,
+                                    format!("{}%", pct_of(st.frac)),
+                                    FontId::proportional(12.5),
+                                    t.text2,
+                                );
+                                let value = if st.value.is_empty() {
+                                    if st.done {
+                                        tr("Done").to_string()
+                                    } else {
+                                        tr("Not done").to_string()
+                                    }
+                                } else if st.unit.is_empty() {
+                                    st.value.clone()
+                                } else {
+                                    format!("{} {}", st.value, st.unit)
+                                };
+                                p.text(
+                                    pos2(tr_.left() + cols[2], cy),
+                                    Align2::LEFT_CENTER,
+                                    value,
+                                    FontId::proportional(13.0),
+                                    t.text,
+                                );
+                            }
+                        }
+                        // the last row ends on the card's own edge without a legend
+                        if legend || ri + 1 < rows.len() {
+                            ui.painter().hline(
+                                rr.x_range(),
+                                ui.cursor().top(),
+                                Stroke::new(1.0, t.border),
+                            );
                         }
                     }
-                    // the last row ends on the card's own edge without a legend
-                    if legend || ri + 1 < rows.len() {
-                        ui.painter().hline(
-                            rr.x_range(),
-                            ui.cursor().top(),
-                            Stroke::new(1.0, t.border),
-                        );
+                    // what the mark on the bars means, when a bar has one
+                    if !legend {
+                        return;
                     }
-                }
-                // what the mark on the bars means, when a bar has one
-                if !legend {
-                    return;
-                }
-                let (lr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
-                let p = ui.painter();
-                let x = lr.left() + 20.0;
-                p.rect_filled(
-                    Rect::from_min_max(
-                        pos2(x, lr.center().y - 7.0),
-                        pos2(x + 2.0, lr.center().y + 7.0),
-                    ),
-                    1.0,
-                    t.text,
-                );
-                p.text(
-                    pos2(x + 10.0, lr.center().y),
-                    Align2::LEFT_CENTER,
-                    tr("Where it should be by today, from its start and due dates"),
-                    FontId::proportional(12.0),
-                    t.text2,
-                );
-            });
+                    let (lr, _) = ui.allocate_exact_size(vec2(w, 34.0), Sense::hover());
+                    let p = ui.painter();
+                    let x = lr.left() + 20.0;
+                    p.rect_filled(
+                        Rect::from_min_max(
+                            pos2(x, lr.center().y - 7.0),
+                            pos2(x + 2.0, lr.center().y + 7.0),
+                        ),
+                        1.0,
+                        t.text,
+                    );
+                    p.text(
+                        pos2(x + 10.0, lr.center().y),
+                        Align2::LEFT_CENTER,
+                        tr("Where it should be by today, from its start and due dates"),
+                        FontId::proportional(12.0),
+                        t.text2,
+                    );
+                });
+        };
+        if scroll {
+            egui::ScrollArea::horizontal()
+                .id_salt(("goal rows", rows.first().map(|r| r.g.id)))
+                .show(ui, table);
+        } else {
+            table(ui);
+        }
         act
     }
 
@@ -1904,6 +1963,9 @@ fn record_popup(
 }
 
 /// Where each column of the rows view starts.
+/// The narrowest the goals list's columns fit in (`row_cols`).
+const ROWS_MIN_W: f32 = 670.0;
+
 fn row_cols(w: f32) -> [f32; 5] {
     let fixed = 120.0 + 120.0 + 130.0;
     let flex = (w - fixed).max(300.0);

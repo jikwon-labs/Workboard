@@ -1783,6 +1783,55 @@ fn a_milestone_noted_on_two_computers_shows_once() {
     );
 }
 
+/// The Goals page, its list and a goal's own page stay inside every window
+/// size, in both languages, with long names: in a narrow window the ring
+/// goes over the goal's details, the filters go under the title, a
+/// target's value goes under its name, and the list scrolls sideways. A
+/// long target name wraps instead of being cut.
+#[test]
+fn goal_pages_fit_every_window_size() {
+    use super::hub_layout::{assert_fits, each_size, page};
+    const LONG_GOAL: &str = "Win three hundred new customers and more repeat orders this half";
+    const LONG_TARGET: &str = "Beta testers signed up online and offline together";
+    each_size(|w, hh, at| {
+        let mut h = Ui1::sized(w, hh);
+        h.app.data = two_goals().0.app.data.clone();
+        let a = h.app.data.extra.goals[0].id;
+        h.app.data.extra.goals[0].name = LONG_GOAL.into();
+        h.app.data.extra.goals[0].targets[0].name = LONG_TARGET.into();
+        h.app.section = Section::Goals;
+        h.settle();
+        h.settle();
+        assert_fits(&h, page(&h), &format!("{at} goals page"));
+        for n in ["New goal", "Show as list", "Show Achieved"] {
+            assert!(h.rect(n).right() <= w, "{at}: {n} {:?}", h.rect(n));
+        }
+        // the list's columns don't squeeze: the row keeps its width and
+        // scrolls in a narrow window
+        h.click("Show as list");
+        let row = h.rect(&format!("Goal row {LONG_GOAL}"));
+        assert!(row.left() >= 0.0 && row.width() >= 600.0, "{at}: {row:?}");
+        let cut = h.cut_texts(Rect::from_min_max(pos2(0.0, 40.0), pos2(w, row.top())));
+        assert!(cut.is_empty(), "{at}: above the list {cut:?}");
+        h.click("Show as cards");
+        // the goal's own page, top and bottom
+        h.app.goal.open = Some(a);
+        h.settle();
+        assert_fits(&h, page(&h), &format!("{at} goal page"));
+        h.scroll_into_view("Done Store review");
+        assert_fits(&h, page(&h), &format!("{at} goal page, its targets"));
+        for n in [
+            "Add target",
+            &format!("Remove target {LONG_TARGET}"),
+            &format!("Edit {LONG_TARGET}"),
+            "Done Store review",
+        ] {
+            let r = h.rect(n);
+            assert!(r.right() <= w, "{at}: {n} {r:?}");
+        }
+    });
+}
+
 /// A goal's pace sentence sits beside its pill, wrapping in its own column
 /// there, or on a line under the pill in a narrow window; it never wraps
 /// round under the pill.

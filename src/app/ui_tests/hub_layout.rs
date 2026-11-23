@@ -299,3 +299,23 @@ fn narrow_planner_stacks_its_days() {
         }
     });
 }
+
+/// The forms table in a narrow window: the name and the row's buttons, the
+/// List and the counts under the name, all inside the window instead of a
+/// table wider than it.
+#[test]
+fn narrow_forms_table_fits_the_window() {
+    each_size(|w, hh, at| {
+        let mut h = Ui1::sized(w, hh);
+        h.app.new_form();
+        h.app.form.open = None;
+        h.app.toast = None;
+        h.settle();
+        let title = h.app.data.extra.forms.last().unwrap().name.clone();
+        for n in [format!("Fill out {title}"), format!("Form menu {title}")] {
+            let r = h.rect(&n);
+            assert!(r.right() <= w, "{at}: {n} {r:?}");
+        }
+        assert_fits(&h, page(&h), at);
+    });
+}

@@ -5,6 +5,9 @@
 use super::*;
 use crate::app::hubs::OwnFilter;
 
+/// Narrower than this the table drops its columns (`form_table_row`).
+const COMPACT_BELOW: f32 = 600.0;
+
 /// The table's fixed columns after the name: (heading, width).
 const COLS: [(&str, f32); 6] = [
     ("List for new tasks", 200.0),
@@ -299,7 +302,15 @@ impl App {
         answers: &HashMap<u64, Vec<u64>>,
     ) {
         let fixed: f32 = COLS.iter().map(|c| c.1).sum();
-        let w = ui.available_width().max(fixed + 240.0);
+        // a narrow window: the name and the row's buttons only, with the
+        // List, questions and answers on a line under the name, instead of
+        // a table wider than the window
+        let compact = ui.available_width() < COMPACT_BELOW;
+        let w = if compact {
+            ui.available_width()
+        } else {
+            ui.available_width().max(fixed + 240.0)
+        };
         egui::ScrollArea::horizontal()
             .id_salt("forms_table")
             .auto_shrink([false, true])
@@ -316,7 +327,7 @@ impl App {
                     },
                     t.column_bg,
                 );
-                let name_w = w - fixed;
+                let name_w = if compact { w - COLS[5].1 } else { w - fixed };
                 let font = FontId::proportional(12.0);
                 ui.painter().text(
                     pos2(head.left() + 16.0, head.center().y),
@@ -327,6 +338,9 @@ impl App {
                 );
                 let mut x = head.left() + name_w;
                 for (i, (label, cw)) in COLS.iter().enumerate() {
+                    if compact {
+                        break;
+                    }
                     if !label.is_empty() {
                         let (at, align) = if i == 0 {
                             (pos2(x + 12.0, head.center().y), Align2::LEFT_CENTER)
@@ -342,7 +356,9 @@ impl App {
                 let mut bottom = head.bottom();
                 for f in forms {
                     let n = answers.get(&f.id).map_or(0, |v| v.len());
-                    bottom = self.form_table_row(ui, t, f, n, w, name_w).bottom();
+                    bottom = self
+                        .form_table_row(ui, t, f, n, w, name_w, compact)
+                        .bottom();
                 }
                 ui.painter().rect_stroke(
                     Rect::from_min_max(pos2(head.left(), top), pos2(head.left() + w, bottom)),
@@ -353,7 +369,73 @@ impl App {
             });
     }
 
-    /// One row of the forms table; returns its rectangle.
+    /// The table's questions, answers, maker and last edit for row `f`,
+    /// from `x` on, centred on `cy`.
+    #[allow(clippy::too_many_arguments)]
+    fn form_row_columns(
+        &self,
+        p: &egui::Painter,
+        ui: &mut Ui,
+        t: &Theme,
+        f: &Form,
+        answers: usize,
+        x: f32,
+        cy: f32,
+    ) {
+        let mut x = x;
+        // questions and answers, centred
+        p.text(
+            pos2(x + COLS[1].1 / 2.0, cy),
+            Align2::CENTER_CENTER,
+            f.fields.len().to_string(),
+            FontId::proportional(13.0),
+            t.text,
+        );
+        x += COLS[1].1;
+        p.text(
+            pos2(x + COLS[2].1 / 2.0, cy),
+            Align2::CENTER_CENTER,
+            answers.to_string(),
+            FontId::proportional(13.0),
+            if answers == 0 { t.text3 } else { t.text },
+        );
+        x += COLS[2].1;
+        // the maker's avatar; the name on hover
+        let c = pos2(x + COLS[3].1 / 2.0, cy);
+        match self.data.member(f.owner) {
+            Some(m) => {
+                paint_avatar(p, c, 11.0, m, t.bg);
+                let a = ui.interact(
+                    Rect::from_center_size(c, vec2(24.0, 24.0)),
+                    ui.id().with(("form_owner", f.id)),
+                    Sense::hover(),
+                );
+                a.on_hover_text(m.shown().to_string());
+            }
+            None => {
+                p.text(
+                    c,
+                    Align2::CENTER_CENTER,
+                    "\u{2014}",
+                    FontId::proportional(13.0),
+                    t.text3,
+                );
+            }
+        }
+        x += COLS[3].1;
+        p.text(
+            pos2(x + COLS[4].1 / 2.0, cy),
+            Align2::CENTER_CENTER,
+            edited_text(f.updated),
+            FontId::proportional(13.0),
+            t.text2,
+        );
+    }
+
+    /// One row of the forms table; returns its rectangle. `compact` puts
+    /// the List, questions and answers on a third line under the name and
+    /// leaves out the maker and the last edit.
+    #[allow(clippy::too_many_arguments)]
     fn form_table_row(
         &mut self,
         ui: &mut Ui,
@@ -362,8 +444,10 @@ impl App {
         answers: usize,
         w: f32,
         name_w: f32,
+        compact: bool,
     ) -> Rect {
-        let (r, row) = ui.allocate_exact_size(vec2(w, 60.0), Sense::click());
+        let (r, row) =
+            ui.allocate_exact_size(vec2(w, if compact { 80.0 } else { 60.0 }), Sense::click());
         let title = form_title(f);
         name_it(&row, &format!("Form {}", title));
         let p = ui.painter().clone();
@@ -375,6 +459,8 @@ impl App {
         }
         p.hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
         let cy = r.center().y;
+        // the name and the description over the List line when compact
+        let ty = if compact { cy - 10.0 } else { cy };
         // the tile opens the icon picker
         let tile = Rect::from_min_size(pos2(r.left() + 16.0, cy - 16.0), vec2(32.0, 32.0));
         let tresp = ui
@@ -403,11 +489,11 @@ impl App {
         let name = fit_text(&p, &title, &font, room);
         let g = p.layout_no_wrap(name, font, t.text);
         let name_end = left + g.size().x;
-        p.galley(pos2(left, cy - 9.0 - g.size().y / 2.0), g, t.text);
+        p.galley(pos2(left, ty - 9.0 - g.size().y / 2.0), g, t.text);
         if just_made && name_end + 80.0 < left + room {
             tag_pill(
                 &p,
-                pos2(name_end + 8.0, cy - 9.0),
+                pos2(name_end + 8.0, ty - 9.0),
                 tr("Just made"),
                 t.accent_text,
                 t.accent_bg,
@@ -416,15 +502,47 @@ impl App {
         let desc = crate::widgets::one_line(&f.description);
         let desc = fit_text(&p, &desc, &FontId::proportional(12.0), room);
         p.text(
-            pos2(left, cy + 10.0),
+            pos2(left, ty + 10.0),
             Align2::LEFT_CENTER,
             desc,
             FontId::proportional(12.0),
             t.text2,
         );
-        // List for new tasks, or a warning that opens the form to choose one
-        let mut x = r.left() + name_w;
-        let lw = COLS[0].1;
+        // List for new tasks, or a warning that opens the form to choose
+        // one (compact: under the description, with the counts after it)
+        let (mut x, cy_list, lw) = if compact {
+            // the counts after the List when both fit, else the List alone
+            let counts = format!(
+                "{} {}  \u{b7}  {} {}",
+                tr("Questions"),
+                f.fields.len(),
+                tr("Answers"),
+                answers
+            );
+            let font = FontId::proportional(12.0);
+            let cw = p
+                .layout_no_wrap(counts.clone(), font.clone(), t.text3)
+                .size()
+                .x;
+            let list_room = if room - cw - 16.0 >= 100.0 {
+                p.text(
+                    pos2(left + room, cy + 20.0),
+                    Align2::RIGHT_CENTER,
+                    counts,
+                    font,
+                    t.text3,
+                );
+                room - cw - 16.0
+            } else {
+                room
+            };
+            // (the List's text starts 32 in, its icon 20)
+            (left - 20.0, cy + 20.0, list_room + 20.0)
+        } else {
+            (r.left() + name_w, cy, COLS[0].1)
+        };
+        let cy_row = cy;
+        let cy = cy_list;
         let path = self
             .all_list_paths()
             .into_iter()
@@ -485,55 +603,14 @@ impl App {
                 }
             }
         }
-        x += lw;
-        // questions and answers, centred
-        p.text(
-            pos2(x + COLS[1].1 / 2.0, cy),
-            Align2::CENTER_CENTER,
-            f.fields.len().to_string(),
-            FontId::proportional(13.0),
-            t.text,
-        );
-        x += COLS[1].1;
-        p.text(
-            pos2(x + COLS[2].1 / 2.0, cy),
-            Align2::CENTER_CENTER,
-            answers.to_string(),
-            FontId::proportional(13.0),
-            if answers == 0 { t.text3 } else { t.text },
-        );
-        x += COLS[2].1;
-        // the maker's avatar; the name on hover
-        let c = pos2(x + COLS[3].1 / 2.0, cy);
-        match self.data.member(f.owner) {
-            Some(m) => {
-                paint_avatar(&p, c, 11.0, m, t.bg);
-                let a = ui.interact(
-                    Rect::from_center_size(c, vec2(24.0, 24.0)),
-                    ui.id().with(("form_owner", f.id)),
-                    Sense::hover(),
-                );
-                a.on_hover_text(m.shown().to_string());
-            }
-            None => {
-                p.text(
-                    c,
-                    Align2::CENTER_CENTER,
-                    "\u{2014}",
-                    FontId::proportional(13.0),
-                    t.text3,
-                );
-            }
+        let cy = cy_row;
+        if compact {
+            x = r.left() + name_w;
+        } else {
+            x += lw;
+            self.form_row_columns(&p, ui, t, f, answers, x, cy);
+            x += COLS[1].1 + COLS[2].1 + COLS[3].1 + COLS[4].1;
         }
-        x += COLS[3].1;
-        p.text(
-            pos2(x + COLS[4].1 / 2.0, cy),
-            Align2::CENTER_CENTER,
-            edited_text(f.updated),
-            FontId::proportional(13.0),
-            t.text2,
-        );
-        x += COLS[4].1;
         // Fill out, the star and the menu
         let fill_r = Rect::from_min_size(pos2(x, cy - 14.0), vec2(56.0, 28.0));
         let fill = ui.interact(

@@ -492,7 +492,7 @@ fn each_band_keeps_its_top_bar_inside() {
 /// Every screen the Korean check opens, in a compact and a medium window:
 /// no control past the right edge, no text cut mid-glyph, no dialog wider
 /// than the window. The views that scroll sideways on purpose (board,
-/// table, Gantt, timeline, the forms table, the timesheet grid)
+/// table, Gantt, timeline, the timesheet grid)
 /// and the task window over the page are left out.
 #[test]
 fn narrow_windows_fit_every_screen() {
@@ -501,7 +501,6 @@ fn narrow_windows_fit_every_screen() {
         "list table",
         "list gantt",
         "list timeline",
-        "forms table",
         "section Timesheets",
         "open task",
         "filter groups and saved filters",

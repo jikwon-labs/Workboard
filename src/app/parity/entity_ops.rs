@@ -349,7 +349,10 @@ impl App {
                     }
                     let cur = !here.is_empty() && here.iter().all(|h| *h == lid);
                     let tc = t.text2;
-                    let r = menu_row(ui, t, &path, cur, |p, c| shell_checklist_icon(p, c, tc));
+                    // a long path ends with an ellipsis instead of at the edge
+                    let room = ui.available_width() - 44.0;
+                    let shown = fit_text(ui.painter(), &path, &FontId::proportional(14.0), room);
+                    let r = menu_row(ui, t, &shown, cur, |p, c| shell_checklist_icon(p, c, tc));
                     if r.clicked() && !cur {
                         self.move_tasks(ids, lid);
                         self.selected.clear();

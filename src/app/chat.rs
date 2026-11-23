@@ -483,6 +483,8 @@ impl Default for Previews {
     }
 }
 
+/// The temp flag that shows a channel's tools in a compact window.
+const CHAN_TOOLS: &str = "chan_tools_open";
 impl App {
     /// Fetch the preview of the first web address of message `msg` (in
     /// channel `ch`), just sent.
@@ -1410,6 +1412,14 @@ impl App {
     /// the kinds of messages to show, Settings.
     fn channel_side_panel(&mut self, ui: &mut Ui, cid: u64, channel: &Channel) {
         let t = self.t();
+        // a compact window: only while its header's tools button has it open
+        if self.tier == super::shell::Tier::Compact
+            && !ui
+                .data(|d| d.get_temp::<bool>(egui::Id::new(CHAN_TOOLS)))
+                .unwrap_or(false)
+        {
+            return;
+        }
         // right panel: narrower in a small window so the messages keep room;
         // where even that leaves them too little (a thread open beside a
         // small window) only its icons, named on hover: it was drawn
@@ -1760,6 +1770,18 @@ impl App {
                         );
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // a compact window: the channel's tools (the panel
+                        // beside the messages) open from here
+                        if self.tier == super::shell::Tier::Compact {
+                            let id = egui::Id::new(CHAN_TOOLS);
+                            let open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+                            if icon_button(ui, &t, Icon::Dots, "", "Channel tools", open)
+                                .on_hover_text(tr("Channel tools"))
+                                .clicked()
+                            {
+                                ui.data_mut(|d| d.insert_temp(id, !open));
+                            }
+                        }
                         if channel.kind == ChannelKind::Channel {
                             // how this channel notifies me (notify.rs)
                             let mode = self.data.extra.notify.channel_mode(cid).to_string();
@@ -2118,16 +2140,41 @@ impl App {
                     tid,
                     egui::Id::new(super::files::THREAD_BOX),
                 );
-                let panel = panel
-                    .frame(
-                        egui::Frame::new()
-                            .fill(t.column_bg)
-                            .inner_margin(egui::Margin::symmetric(14, 10)),
-                    )
-                    .show_inside(ui, |ui| {
+                let frame = egui::Frame::new()
+                    .fill(t.column_bg)
+                    .inner_margin(egui::Margin::symmetric(14, 10));
+                if self.tier == super::shell::Tier::Compact {
+                    // one column: the thread is laid over the conversation
+                    // instead of beside it
+                    let over = ui.max_rect();
+                    egui::Area::new(egui::Id::new("thread_over"))
+                        .order(egui::Order::Middle)
+                        .fixed_pos(over.min)
+                        .constrain(false)
+                        .movable(false)
+                        .show(ui.ctx(), |ui| {
+                            ui.set_clip_rect(over);
+                            let mut inner = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .max_rect(over)
+                                    .layout(Layout::top_down(Align::Min)),
+                            );
+                            inner.painter().rect_filled(over, 0.0, t.column_bg);
+                            // clicks on it stay off the messages under it
+                            // (and give the layer its size, for the wheel)
+                            ui.allocate_rect(over, Sense::click());
+                            frame.show(&mut inner, |ui| {
+                                ui.set_min_size(over.size() - vec2(28.0, 20.0));
+                                self.thread_body(ui, cid, &channel, tid, &parent, false, &mut acts);
+                            });
+                        });
+                    thread_rect = Some(over);
+                } else {
+                    let panel = panel.frame(frame).show_inside(ui, |ui| {
                         self.thread_body(ui, cid, &channel, tid, &parent, false, &mut acts);
                     });
-                thread_rect = Some(panel.response.rect);
+                    thread_rect = Some(panel.response.rect);
+                }
                 self.chat.thread_panel_pass = ui.ctx().cumulative_pass_nr();
                 if self.escape_closes_thread(ui.ctx(), false) {
                     acts.push(ChatAction::CloseThread);
@@ -2324,11 +2371,15 @@ impl App {
                                 ui.label(RichText::new(tr("Collaborate seamlessly across tasks and conversations. Start chatting with your team or connect tasks to stay on top of your work.")).color(t.text2));
                                 ui.add_space(10.0);
                                 // alone in the workspace there is nobody to add: invite instead
+                                // centred like Import from Slack under it
+                                let wide_button = |ui: &mut Ui, text: &str| {
+                                    ui.vertical_centered(|ui| ui.add(egui::Button::new(text).min_size(vec2(cw, CONTROL_H)))).inner.clicked()
+                                };
                                 if self.data.solo() {
-                                    if self.may_manage() && ui.add(egui::Button::new(tr("+  Invite people")).min_size(vec2(cw, CONTROL_H))).clicked() {
+                                    if self.may_manage() && wide_button(ui, tr("+  Invite people")) {
                                         self.modal = Some(Modal::Invite { emails: String::new(), role: "Member".into() });
                                     }
-                                } else if ui.add(egui::Button::new(tr("+  Add People")).min_size(vec2(cw, CONTROL_H))).clicked() {
+                                } else if wide_button(ui, tr("+  Add People")) {
                                     self.modal = Some(Modal::ChannelSettings(cid));
                                 }
                                 // it brings people in: the owner's and admins' on a server
@@ -2343,8 +2394,14 @@ impl App {
                                     let ib = Rect::from_center_size(r.left_center() + vec2(26.0, 0.0), vec2(34.0, 34.0));
                                     ui.painter().rect_filled(ib, 8.0, t.card);
                                     line_icon(ui.painter(), icon, ib.center(), rgb(bg));
-                                    ui.painter().text(r.left_center() + vec2(54.0, -9.0), Align2::LEFT_CENTER, tr(title), FontId::proportional(14.5), t.text);
-                                    ui.painter().text(r.left_center() + vec2(54.0, 10.0), Align2::LEFT_CENTER, tr(sub), FontId::proportional(12.5), t.text2);
+                                    // shortened to the card (longer in Korean, they ran past it)
+                                    let room = cw - 54.0 - 10.0;
+                                    let tf = FontId::proportional(14.5);
+                                    let sf = FontId::proportional(12.5);
+                                    let title_s = fit_text(ui.painter(), tr(title), &tf, room);
+                                    let sub_s = fit_text(ui.painter(), tr(sub), &sf, room);
+                                    ui.painter().text(r.left_center() + vec2(54.0, -9.0), Align2::LEFT_CENTER, title_s, tf, t.text);
+                                    ui.painter().text(r.left_center() + vec2(54.0, 10.0), Align2::LEFT_CENTER, sub_s, sf, t.text2);
                                     if resp.clicked() {
                                         match title {
                                             "Track Tasks" => self.actions.push(Action::Go(Location::Everything)),

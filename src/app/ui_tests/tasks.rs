@@ -802,7 +802,7 @@ fn escape_in_the_subtask_field_keeps_the_task_open() {
 
 #[test]
 fn narrow_task_window_fields_stay_left_of_the_comments() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.click_left("Task Write copy for landing page", 60.0);
     assert!(h.app.open_task.is_some());
     let panel = h.rect("Comments").left() - 12.0;
@@ -837,7 +837,7 @@ fn narrow_task_window_fields_stay_left_of_the_comments() {
 
 #[test]
 fn narrow_task_window_has_no_blank_rows_when_fields_are_off() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.data.extra.apps.priorities = false;
     h.app.data.extra.apps.time_tracking = false;
     h.settle();

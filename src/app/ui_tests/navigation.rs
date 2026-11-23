@@ -879,7 +879,7 @@ fn wheel_rail(h: &mut Ui1, dy: f32) {
 #[test]
 fn a_full_bar_keeps_invite_at_the_bottom_and_scrolls_the_rest() {
     // the smallest window the app allows
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     let pinned = [
         "Docs",
         "Dashboards",
@@ -962,7 +962,7 @@ fn a_full_bar_keeps_invite_at_the_bottom_and_scrolls_the_rest() {
 /// small window, and opens from there. Clicking it there did nothing.
 #[test]
 fn home_moved_into_more_still_opens_from_there() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.data.extra.rail_items = [
         "Planner",
         "AI",
@@ -1973,7 +1973,7 @@ fn dragging_a_rail_item_shows_where_it_lands_and_moves_it_there() {
 #[test]
 fn on_a_full_bar_a_dragged_item_stays_above_more() {
     // the smallest window: some pinned apps are scrolled out of view
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     let pinned = [
         "Docs",
         "Dashboards",

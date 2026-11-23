@@ -272,7 +272,7 @@ fn text_and_clip(h: &Ui1, text: &str) -> Option<(Rect, Rect)> {
 #[test]
 fn a_long_title_stops_before_the_time_in_the_smallest_window() {
     const LONG: &str = "A very long task name that keeps going and going so that it runs right across the row and under the time on the right";
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     let me = h.app.data.me;
     for t in &mut h.app.data.tasks {
         t.activity.retain(|a| a.author == me);

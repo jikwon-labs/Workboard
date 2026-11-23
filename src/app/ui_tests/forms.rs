@@ -796,7 +796,7 @@ fn a_form_from_the_search_opens_on_edit() {
 #[test]
 fn a_long_form_name_leaves_the_tabs_room_in_a_small_window() {
     for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
-        let mut h = Ui1::sized(900.0, 560.0);
+        let mut h = Ui1::sized(960.0, 560.0);
         crate::i18n::set_lang(lang);
         h.app.new_form_from(Some(4));
         let fid = h.app.form.open.unwrap();
@@ -814,7 +814,7 @@ fn a_long_form_name_leaves_the_tabs_room_in_a_small_window() {
             answers.right(),
             star.left()
         );
-        assert!(answers.right() <= 900.0 && edit.left() > crumb.right());
+        assert!(answers.right() <= 960.0 && edit.left() > crumb.right());
     }
 }
 
@@ -824,7 +824,7 @@ fn a_long_form_name_leaves_the_tabs_room_in_a_small_window() {
 /// the line saying where an answer goes doesn't run under the switch.
 #[test]
 fn the_editor_fits_the_smallest_window() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.new_form_from(Some(4));
     h.settle();
     h.hover(pos2(600.0, 300.0));
@@ -1331,7 +1331,7 @@ fn a_restored_form_gets_back_its_older_answers_beside_a_namesake() {
 /// the name if need be), and the star still works.
 #[test]
 fn the_header_fits_beside_the_widest_sidebar() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.new_form_from(Some(4));
     let fid = h.app.form.open.unwrap();
     h.app.data.extra.forms[0].name = "A long form name that goes on".into();
@@ -1436,7 +1436,7 @@ fn will_be_created_chips_wrap_whole() {
 /// running past the window, so every choice's × can be pressed.
 #[test]
 fn long_choices_wrap_inside_the_window() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.new_form();
     h.settle();
     let fid = h.app.form.open.unwrap();

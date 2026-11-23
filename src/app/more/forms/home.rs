@@ -19,6 +19,10 @@ impl App {
     pub(crate) fn forms_hub(&mut self, ui: &mut Ui) {
         let t = self.t();
         self.forms_sidebar(ui);
+        // the compact window's sidebar fills it: no page under it
+        if self.page_covered() {
+            return;
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
             .show_inside(ui, |ui| {

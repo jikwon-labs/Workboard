@@ -800,7 +800,8 @@ impl App {
         name_field(&r, "Search templates");
         ui.add_space(6.0);
         let mut pick = None;
-        ui.horizontal(|ui| {
+        let narrow = ui.available_width() < 500.0;
+        let mut row = |ui: &mut Ui| {
             for cat in Category::ALL {
                 let r = ui.selectable_label(c.cat == cat, tr(cat.label()));
                 name_it(&r, &format!("Template category {}", cat.label()));
@@ -823,7 +824,13 @@ impl App {
                     pick = Some(Pick::NewTask);
                 }
             });
-        });
+        };
+        if narrow {
+            // the categories wrap; "+ New task template" goes under them
+            ui.horizontal_wrapped(|ui| row(ui));
+        } else {
+            ui.horizontal(|ui| row(ui));
+        }
         ui.add_space(6.0);
         ui.separator();
 
@@ -842,56 +849,28 @@ impl App {
         // tall enough that "Use template" shows without scrolling in a 900 pt window
         let h = (ui.ctx().screen_rect().height() - 300.0).clamp(230.0, 560.0);
         let left_w = 250.0;
-        ui.horizontal_top(|ui| {
-            ui.allocate_ui_with_layout(vec2(left_w, h), Layout::top_down(Align::Min), |ui| {
-                ui.set_min_size(vec2(left_w, h));
+        // a narrow window: the list, then the picked one in its place with a
+        // way back to the list
+        let stacked = ui.available_width() < 600.0;
+        if stacked {
+            if c.pick.is_none() {
                 egui::ScrollArea::vertical()
                     .id_salt("tc_list")
                     .max_height(h)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let w = ui.available_width();
-                        let team = entries
-                            .iter()
-                            .filter(|e| matches!(e.pick, Pick::Team(_)))
-                            .count();
-                        for (i, e) in entries.iter().enumerate() {
-                            if i == 0 && team > 0 {
-                                ui.label(RichText::new(tr("Your team")).small().color(t.text3));
-                            }
-                            if i == team {
-                                if team > 0 {
-                                    ui.add_space(6.0);
-                                }
-                                ui.label(RichText::new(tr("Built-in")).small().color(t.text3));
-                            }
-                            let sel = c.pick.as_ref() == Some(&e.pick);
-                            if template_row(
-                                ui,
-                                t,
-                                w,
-                                e.color,
-                                e.glyph,
-                                &e.name,
-                                &e.about,
-                                sel,
-                                &format!("Pick template {}", e.en),
-                            )
-                            .clicked()
-                            {
-                                pick = Some(e.pick.clone());
-                            }
-                        }
-                        if entries.is_empty() {
-                            ui.add_space(8.0);
-                            ui.label(
-                                RichText::new(tr("No templates match your search.")).color(t.text3),
-                            );
-                        }
+                        pick = self.template_list(ui, t, &entries, None);
                     });
-            });
-            ui.separator();
-            ui.vertical(|ui| {
+            } else {
+                let r = ui.add(ghost(egui::Button::new(
+                    RichText::new(tr("\u{2190}  All templates")).color(t.text2),
+                )));
+                name_it(&r, "All templates");
+                if r.clicked() {
+                    c.pick = None;
+                    c.renaming = None;
+                    c.confirm_delete = false;
+                }
                 egui::ScrollArea::vertical()
                     .id_salt("tc_detail")
                     .max_height(h)
@@ -899,8 +878,33 @@ impl App {
                     .show(ui, |ui| {
                         close = self.template_detail(ui, t, c);
                     });
+            }
+        } else {
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(vec2(left_w, h), Layout::top_down(Align::Min), |ui| {
+                    ui.set_min_size(vec2(left_w, h));
+                    egui::ScrollArea::vertical()
+                        .id_salt("tc_list")
+                        .max_height(h)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if let Some(p) = self.template_list(ui, t, &entries, c.pick.as_ref()) {
+                                pick = Some(p);
+                            }
+                        });
+                });
+                ui.separator();
+                ui.vertical(|ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("tc_detail")
+                        .max_height(h)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            close = self.template_detail(ui, t, c);
+                        });
+                });
             });
-        });
+        }
         if let Some(p) = pick {
             if let Some(tp) = self.picked_template(&p) {
                 c.name = tp.task_name.clone();
@@ -910,6 +914,54 @@ impl App {
             c.confirm_delete = false;
         }
         close
+    }
+
+    /// The templates to pick from, the team's first; returns the one clicked.
+    fn template_list(
+        &self,
+        ui: &mut Ui,
+        t: &Theme,
+        entries: &[Entry],
+        picked: Option<&Pick>,
+    ) -> Option<Pick> {
+        let mut out = None;
+        let w = ui.available_width();
+        let team = entries
+            .iter()
+            .filter(|e| matches!(e.pick, Pick::Team(_)))
+            .count();
+        for (i, e) in entries.iter().enumerate() {
+            if i == 0 && team > 0 {
+                ui.label(RichText::new(tr("Your team")).small().color(t.text3));
+            }
+            if i == team {
+                if team > 0 {
+                    ui.add_space(6.0);
+                }
+                ui.label(RichText::new(tr("Built-in")).small().color(t.text3));
+            }
+            let sel = picked == Some(&e.pick);
+            if template_row(
+                ui,
+                t,
+                w,
+                e.color,
+                e.glyph,
+                &e.name,
+                &e.about,
+                sel,
+                &format!("Pick template {}", e.en),
+            )
+            .clicked()
+            {
+                out = Some(e.pick.clone());
+            }
+        }
+        if entries.is_empty() {
+            ui.add_space(8.0);
+            ui.label(RichText::new(tr("No templates match your search.")).color(t.text3));
+        }
+        out
     }
 
     /// The right side: preview, where to make it and Use; Rename and Delete
@@ -947,12 +999,13 @@ impl App {
                 .circle_filled(r.center(), 17.0, rgb(color).gamma_multiply(0.14));
             super::icons::line_icon(ui.painter(), glyph, r.center(), rgb(color));
             ui.vertical(|ui| {
-                ui.label(RichText::new(&tp.name).size(16.0).strong());
+                // they wrap in a narrow window instead of widening it
+                ui.add(egui::Label::new(RichText::new(&tp.name).size(16.0).strong()).wrap());
                 let about = match &b {
                     Some(b) => b.about.to_string(),
                     None => format!("{} \u{2022} {}", tr("Your team"), about_team(&tp)),
                 };
-                ui.label(RichText::new(about).small().color(t.text2));
+                ui.add(egui::Label::new(RichText::new(about).small().color(t.text2)).wrap());
             });
         });
         if let (Pick::Team(id), true) = (pick.clone(), self.may_manage()) {
@@ -1165,10 +1218,16 @@ impl App {
                 }
             }
         }
-        let r = ui.add(
-            egui::Button::new(format!("{}  \u{25BE}", current))
-                .min_size(vec2(ui.available_width().min(360.0), 28.0)),
+        // a long path is shortened to the room there is
+        let room = ui.available_width().min(360.0);
+        let current = fit_text(
+            ui.painter(),
+            &current,
+            &FontId::proportional(14.0),
+            room - 40.0,
         );
+        let r =
+            ui.add(egui::Button::new(format!("{}  \u{25BE}", current)).min_size(vec2(room, 28.0)));
         name_it(&r, "Template destination");
         let mut chosen = None;
         popup(ui, &r, ui.id().with("tc_dest"), 300.0, |ui| {
@@ -1396,7 +1455,14 @@ fn template_preview(ui: &mut Ui, t: &Theme, tp: &TaskTemplate) {
                         let (r, _) = ui.allocate_exact_size(vec2(12.0, 16.0), Sense::hover());
                         paint_status_circle(ui.painter(), r.center(), 5.0, s);
                     }
-                    ui.label(&x.name);
+                    // shortened, leaving the priority and count room
+                    let room = (ui.available_width() - 110.0).max(60.0);
+                    ui.label(fit_text(
+                        ui.painter(),
+                        &x.name,
+                        &FontId::proportional(14.0),
+                        room,
+                    ));
                     if x.priority > 0 {
                         ui.label(
                             RichText::new(tr(PRIORITIES[x.priority as usize].label))
@@ -1414,7 +1480,11 @@ fn template_preview(ui: &mut Ui, t: &Theme, tp: &TaskTemplate) {
                             t.text3,
                         );
                     }
+                    // the tags that fit (a narrow window has no room for them all)
                     for tag in &x.tags {
+                        if ui.available_width() < 60.0 {
+                            break;
+                        }
                         chip(ui, tag, tag_color(tag));
                     }
                 });

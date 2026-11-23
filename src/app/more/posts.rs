@@ -342,7 +342,9 @@ impl App {
     fn post_filters(&mut self, ui: &mut Ui, pad: f32, cw: f32) {
         let t = self.t();
         let mut sort_below = false;
-        ui.horizontal(|ui| {
+        // a compact window: the chips wrap onto more rows
+        let wrap = self.tier == crate::app::shell::Tier::Compact;
+        let row = |ui: &mut Ui| {
             let row_left = ui.cursor().left();
             ui.add_space(pad);
             let fol = Tint(
@@ -483,7 +485,12 @@ impl App {
             } else {
                 sort_below = true;
             }
-        });
+        };
+        if wrap {
+            ui.horizontal_wrapped(row);
+        } else {
+            ui.horizontal(row);
+        }
         if sort_below {
             ui.add_space(6.0);
             ui.horizontal(|ui| {

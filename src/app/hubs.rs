@@ -457,6 +457,10 @@ impl App {
         if plus {
             self.new_doc(self.current_space());
         }
+        // the compact window's sidebar fills it: no page under it
+        if self.page_covered() {
+            return;
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
             .show_inside(ui, |ui| {
@@ -550,12 +554,16 @@ impl App {
                                     }
                                 });
                                 ui.add_space(16.0);
+                                // a compact window: the buttons show their icons only
+                                let icons_only = self.tier == super::shell::Tier::Compact;
                                 ui.horizontal(|ui| {
                                     let r = icon_button(
                                         ui,
                                         &t,
                                         Icon::Filter,
-                                        if self.docs.mine {
+                                        if icons_only {
+                                            ""
+                                        } else if self.docs.mine {
                                             tr("Filters \u{2022} 1")
                                         } else {
                                             tr("Filters")
@@ -575,7 +583,7 @@ impl App {
                                         ui,
                                         &t,
                                         Icon::Sort,
-                                        &sort_text,
+                                        if icons_only { "" } else { &sort_text },
                                         "Docs sort",
                                         true,
                                     );
@@ -601,7 +609,7 @@ impl App {
                                         ui,
                                         &t,
                                         Icon::Tag,
-                                        &tag_label,
+                                        if icons_only { "" } else { &tag_label },
                                         "Docs tag filter",
                                         true,
                                     );
@@ -642,20 +650,32 @@ impl App {
                                         let r = ui.add(
                                             field(&mut self.docs.search)
                                                 .hint_text(tr("Search"))
-                                                .desired_width(160.0),
+                                                .desired_width(if icons_only {
+                                                    120.0
+                                                } else {
+                                                    160.0
+                                                }),
                                         );
                                         name_field(&r, "Search Docs");
                                     });
                                 });
                                 ui.add_space(8.0);
                                 let w = ui.available_width();
-                                let cols = [0.0, 0.42, 0.62, 0.76, 0.88];
+                                // a compact window: Name and Date updated only
+                                let cols = if icons_only {
+                                    [0.0, 0.62, 0.62, 0.62, 1.0]
+                                } else {
+                                    [0.0, 0.42, 0.62, 0.76, 0.88]
+                                };
                                 let (hr, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
                                 for (i, (x, h)) in cols
                                     .iter()
                                     .zip(["Name", "Location", "Tags", "Date updated", "Sharing"])
                                     .enumerate()
                                 {
+                                    if icons_only && i != 0 && i != 3 {
+                                        continue;
+                                    }
                                     // shortened to its column (in a narrow window
                                     // "Date updated" ran over "Sharing")
                                     let next = cols.get(i + 1).copied().unwrap_or(1.0);
@@ -760,7 +780,8 @@ impl App {
                                             self.data.spaces.iter().find(|s| s.id == sid)
                                         })
                                         .map(|s| (s.name.clone(), s.color));
-                                    if let Some((n, c)) = loc {
+                                    if icons_only {
+                                    } else if let Some((n, c)) = loc {
                                         let lr = Rect::from_center_size(
                                             pos2(r.left() + w * cols[1] + 38.0, r.center().y),
                                             vec2(16.0, 16.0),
@@ -782,7 +803,8 @@ impl App {
                                             t.text2,
                                         );
                                     }
-                                    if d.tags.is_empty() {
+                                    if icons_only {
+                                    } else if d.tags.is_empty() {
                                         ui.painter().text(
                                             pos2(r.left() + w * cols[2] + 30.0, r.center().y),
                                             Align2::LEFT_CENTER,
@@ -821,8 +843,11 @@ impl App {
                                         FontId::proportional(14.0),
                                         t.text2,
                                     );
-                                    if let Some(m) =
-                                        self.data.member(d.owner).or_else(|| self.data.member(me))
+                                    if let Some(m) = self
+                                        .data
+                                        .member(d.owner)
+                                        .or_else(|| self.data.member(me))
+                                        .filter(|_| !icons_only)
                                     {
                                         paint_avatar(
                                             ui.painter(),
@@ -864,20 +889,27 @@ impl App {
                 bottom: 8,
             })
             .show(ui, |ui| {
+                // a compact window: its top bar's Back is the way to All Docs,
+                // and Delete and Archive are in the ⋯ menu
+                let compact = self.tier == super::shell::Tier::Compact;
                 ui.horizontal(|ui| {
-                    if ui
-                        .add(ghost(egui::Button::new(
-                            RichText::new(tr("\u{2190}  All Docs")).color(t.text2),
-                        )))
-                        .clicked()
+                    if !compact
+                        && ui
+                            .add(ghost(egui::Button::new(
+                                RichText::new(tr("\u{2190}  All Docs")).color(t.text2),
+                            )))
+                            .clicked()
                     {
                         self.doc_open = None;
                     }
-                    let loc = self.data.docs[idx]
+                    let mut loc = self.data.docs[idx]
                         .space
                         .and_then(|sid| self.data.spaces.iter().find(|s| s.id == sid))
                         .map(|s| s.name.clone())
                         .unwrap_or_else(|| tr("Workspace").into());
+                    if compact {
+                        loc = fit_text(ui.painter(), &loc, &FontId::proportional(14.0), 90.0);
+                    }
                     // the location moves the doc to another Space
                     let lr = ui
                         .add(ghost(egui::Button::new(
@@ -916,11 +948,12 @@ impl App {
                         let mr = icon_button(ui, &t, Icon::Dots, "", "Doc options", false)
                             .on_hover_text(tr("More"));
                         click_menu(&mr, |ui| self.doc_menu(ui, id, false));
-                        if ui
-                            .add(ghost(egui::Button::new(
-                                RichText::new(tr("Delete")).color(t.danger),
-                            )))
-                            .clicked()
+                        if !compact
+                            && ui
+                                .add(ghost(egui::Button::new(
+                                    RichText::new(tr("Delete")).color(t.danger),
+                                )))
+                                .clicked()
                         {
                             delete = true;
                         }
@@ -929,10 +962,11 @@ impl App {
                         } else {
                             "Archive"
                         };
-                        if ui
-                            .add(ghost(egui::Button::new(tr(arch))))
-                            .on_hover_text(tr("Move to Archived and save a Markdown copy"))
-                            .clicked()
+                        if !compact
+                            && ui
+                                .add(ghost(egui::Button::new(tr(arch))))
+                                .on_hover_text(tr("Move to Archived and save a Markdown copy"))
+                                .clicked()
                         {
                             self.toggle_archive(id);
                         }
@@ -1118,6 +1152,10 @@ impl App {
         }
         let me = self.data.me;
         let filter = self.hub.dash;
+        // the compact window's sidebar fills it: no page under it
+        if self.page_covered() {
+            return;
+        }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg)).show_inside(ui, |ui| {
             if self.dash_open.is_some() {
                 self.dashboard_content(ui);
@@ -1311,6 +1349,10 @@ impl App {
         if plus {
             self.new_whiteboard();
         }
+        // the compact window's sidebar fills it: no page under it
+        if self.page_covered() {
+            return;
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
             .show_inside(ui, |ui| {
@@ -1398,6 +1440,10 @@ impl App {
         }
         if plus && may {
             self.new_team();
+        }
+        // the compact window's sidebar fills it: no page under it
+        if self.page_covered() {
+            return;
         }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(t.bg))
@@ -1510,13 +1556,14 @@ impl App {
                         egui::TextEdit::singleline(&mut tm.name)
                             .font(FontId::proportional(24.0))
                             .frame(false)
-                            .desired_width(400.0),
+                            .desired_width(400.0f32.min(ui.available_width())),
                     )
                     .changed()
                 {
                     self.dirty = true;
                 }
-                ui.horizontal(|ui| {
+                // the colours wrap in a narrow window
+                ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(tr("Color")).color(t.text2));
                     for (i, c) in STATUS_PALETTE.iter().skip(1).enumerate() {
                         let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
@@ -1737,10 +1784,13 @@ impl App {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.set_height(40.0);
-                    let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
-                    line_icon(ui.painter(), Icon::Timesheets, r.center(), t.text2);
-                    ui.label(RichText::new(tr("Timesheets")).size(15.5));
-                    ui.separator();
+                    // a compact window: the tabs alone (Back names the hub)
+                    if self.tier != super::shell::Tier::Compact {
+                        let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
+                        line_icon(ui.painter(), Icon::Timesheets, r.center(), t.text2);
+                        ui.label(RichText::new(tr("Timesheets")).size(15.5));
+                        ui.separator();
+                    }
                     // no Approvals tab: submitting a week for approval isn't built
                     for (tab, label) in [
                         (SheetsTab::Mine, "My timesheet"),
@@ -1789,8 +1839,9 @@ impl App {
             },
             bg,
         );
+        let compact = self.tier == super::shell::Tier::Compact;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 18)).show(ui, |ui| {
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(if compact { 12 } else { 24 }, 18)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let (back, fwd) = super::icons::period_arrows(ui, &t);
                     if back {
@@ -1799,7 +1850,7 @@ impl App {
                     if fwd {
                         self.sheet_week = ws + Duration::days(7);
                     }
-                    let r = ui.add(ghost(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d"))).size(20.0))));
+                    let r = ui.add(ghost(egui::Button::new(RichText::new(format!("{} - {}  \u{25BE}", ws.text("%b %-d"), (ws + Duration::days(6)).text("%b %-d"))).size(if compact { 15.0 } else { 20.0 }))));
                     name_it(&r, "Pick a week");
                     // a calendar: the week of the picked day opens
                     let mut d = Some(ws);
@@ -1815,7 +1866,7 @@ impl App {
                                 (false, Icon::Table, "Timesheet", "Your time on each task for each day of the week"),
                             ] {
                                 let sel = self.sheet_entries == on;
-                                if icon_button_ex(ui, &t, kind, tr(label), label, sel, 0.0, if sel { t.text } else { t.text2 }, t.text2).on_hover_text(tr(hint)).clicked() {
+                                if icon_button_ex(ui, &t, kind, if compact { "" } else { tr(label) }, label, sel, 0.0, if sel { t.text } else { t.text2 }, t.text2).on_hover_text(tr(hint)).clicked() {
                                     self.sheet_entries = on;
                                 }
                             }
@@ -1920,7 +1971,15 @@ impl App {
             .corner_radius(10)
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
-                let w = ui.available_width();
+                // a narrow window: the week keeps readable columns and
+                // scrolls sideways
+                let compact = self.tier != super::shell::Tier::Wide;
+                let mut grid = |ui: &mut Ui| {
+                let w = if compact {
+                    ui.available_width().max(720.0)
+                } else {
+                    ui.available_width()
+                };
                 // the day columns narrow before the names go under 200 (in
                 // the smallest window the grid ran past the right edge)
                 let col = ((w - 200.0) / 8.0).clamp(60.0, 92.0);
@@ -2170,6 +2229,14 @@ impl App {
                         }
                     });
                 });
+                };
+                if compact {
+                    egui::ScrollArea::horizontal()
+                        .id_salt("sheet_grid")
+                        .show(ui, |ui| grid(ui));
+                } else {
+                    grid(ui);
+                }
             });
     }
 

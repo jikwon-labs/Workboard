@@ -680,6 +680,14 @@ impl App {
                 w -= hint_w(&g);
             }
         }
+        // and then the pen's width (a compact window: the colours are what
+        // fits under the board)
+        let mut width_label = width_label;
+        if w > room {
+            if let Some(g) = width_label.take() {
+                w -= SEP + g.size().x + 8.0 + SLIDER + 8.0 + 30.0 + 26.0;
+            }
+        }
         // centred under the board, but clear of the tool bar
         let left = (rect.center().x - w / 2.0).max(tools.right() + 12.0);
         let bar = Rect::from_min_size(

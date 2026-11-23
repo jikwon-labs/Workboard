@@ -47,7 +47,7 @@ impl App {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn side_row_as(
+    pub(super) fn side_row_as(
         &self,
         ui: &mut Ui,
         indent: f32,

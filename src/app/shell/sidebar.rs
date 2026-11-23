@@ -78,18 +78,16 @@ impl App {
     }
 
     pub(crate) fn sidebar(&mut self, ui: &mut Ui) {
+        // App hubs (hubs.rs) share the panel, so they keep the same width.
+        self.side_panel(ui, egui::Margin::symmetric(8, 6), true, |app, ui| {
+            app.sidebar_body(ui)
+        });
+    }
+
+    fn sidebar_body(&mut self, ui: &mut Ui) {
         let t = self.t();
-        if self.sidebar_collapsed {
-            self.collapsed_sidebar(ui);
-            return;
-        }
-        // App hubs (hubs.rs) reuse this id, so they keep the same width.
-        egui::SidePanel::left("sidebar")
-            .resizable(true)
-            .default_width(255.0)
-            .width_range(200.0..=400.0)
-            .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
-            .show_inside(ui, |ui| {
+        {
+            {
                 // header: Home, (hover) search / filter / close, + Create
                 self.sidebar_top(ui, t);
                 ui.add_space(4.0);
@@ -103,6 +101,10 @@ impl App {
                     let tc = t.text2;
                     let muted = self.data.extra.muted_until > now_ts();
                     if filter.is_empty() {
+                        if self.tier == Tier::Compact {
+                            // the rail's apps, which a compact window hides
+                            self.compact_apps(ui, tc);
+                        }
                         self.sidebar_nav(ui, t, tc, muted);
                         ui.add_space(6.0);
                         let r = ui.available_rect_before_wrap();
@@ -141,7 +143,8 @@ impl App {
                     }
                 });
                 self.unread_below(ui, &out);
-            });
+            }
+        }
     }
 
     /// A red "Unread messages" pill at the bottom of the sidebar while a
@@ -237,7 +240,9 @@ impl App {
             ("filter", "Filter your sidebar"),
             ("\u{00AB}", "Close sidebar"),
         ];
-        for (i, (glyph, tip)) in icons.iter().enumerate() {
+        // the home screen of a compact window has nothing under it to show
+        let n = if self.tier == Tier::Compact { 2 } else { 3 };
+        for (i, (glyph, tip)) in icons.iter().take(n).enumerate() {
             let br = Rect::from_center_size(
                 pos2(
                     create_r.left() - 90.0 + i as f32 * 29.0 + 14.0,
@@ -280,7 +285,7 @@ impl App {
                             Some("")
                         }
                     }
-                    _ => self.sidebar_collapsed = true,
+                    _ => self.close_sidebar(),
                 }
             }
         }

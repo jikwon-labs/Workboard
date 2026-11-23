@@ -29,17 +29,7 @@ impl App {
     /// The hub sidebar's panel, with the id and width of Home's so one
     /// dragged width applies everywhere; closed, it leaves the "»" strip.
     pub(crate) fn hub_side_panel(&mut self, ui: &mut Ui, body: impl FnOnce(&mut Self, &mut Ui)) {
-        if self.sidebar_collapsed {
-            self.collapsed_sidebar(ui);
-            return;
-        }
-        let t = self.t();
-        egui::SidePanel::left("sidebar")
-            .resizable(true)
-            .default_width(255.0)
-            .width_range(200.0..=400.0)
-            .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
-            .show_inside(ui, |ui| body(self, ui));
+        self.side_panel(ui, egui::Margin::symmetric(8, 6), false, body);
     }
 
     /// The top row: the hub's name (translated) and the « that closes the
@@ -47,7 +37,7 @@ impl App {
     pub(crate) fn side_title(&mut self, ui: &mut Ui, title: &str) {
         let t = self.t();
         if side_title_row(ui, &t, title, true) {
-            self.sidebar_collapsed = true;
+            self.close_sidebar();
         }
     }
 

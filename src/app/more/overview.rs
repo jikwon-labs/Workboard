@@ -53,7 +53,11 @@ impl App {
             let w = ui.available_width();
             let top: Vec<&str> = ["Recent", "Docs", "Bookmarks"].into_iter().filter(|c| card_on(self, c)).collect();
             let cw = (w - 12.0 * (top.len().max(1) as f32 - 1.0)) / top.len().max(1) as f32;
-            ui.horizontal_top(|ui| {
+            // too narrow for the cards side by side (their text went a word a
+            // line): one under another, the whole width
+            let stack = self.tier != crate::app::shell::Tier::Wide && cw < 220.0;
+            let cw = if stack { w } else { cw };
+            let cards = |ui: &mut Ui| {
                 // Recent
                 if card_on(self, "Recent") {
                 self.ov_card(ui, cw, "Recent", |s, ui| {
@@ -134,7 +138,12 @@ impl App {
                     }
                 });
                 }
-            });
+            };
+            if stack {
+                ui.vertical(cards);
+            } else {
+                ui.horizontal_top(cards);
+            }
             ui.add_space(12.0);
             // Folders
             let folders: Vec<(u64, String, usize)> = match self.loc {

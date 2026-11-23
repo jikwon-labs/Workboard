@@ -360,7 +360,21 @@ impl App {
         let heading = |ui: &mut Ui, s: &str| {
             ui.label(RichText::new(s).strong().color(t.text));
         };
-        ui.horizontal_top(|ui| {
+        // too narrow for the photo beside the fields: above them
+        // (a wide window keeps them side by side: the dialog grows to fit)
+        let stack = self.tier != super::shell::Tier::Wide
+            && ui.available_width() < PREVIEW + 20.0 + FIELDS_W;
+        let fields_w = if stack {
+            ui.available_width()
+        } else {
+            FIELDS_W
+        };
+        let row = if stack {
+            Layout::top_down(Align::Min)
+        } else {
+            Layout::left_to_right(Align::Min)
+        };
+        ui.with_layout(row, |ui| {
             ui.vertical(|ui| {
                 ui.set_width(PREVIEW);
                 heading(ui, tr("Profile photo"));
@@ -432,7 +446,7 @@ impl App {
             // fixed: a width taken from what's left would grow the dialog
             // a little every frame (the spacing between the columns)
             ui.vertical(|ui| {
-                ui.set_width(FIELDS_W);
+                ui.set_width(fields_w);
                 heading(ui, tr("Full name"));
                 let r = ui.add(field(name).desired_width(f32::INFINITY));
                 name_field(&r, "Profile full name");

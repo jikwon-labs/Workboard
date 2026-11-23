@@ -10,6 +10,7 @@ pub const T: &[(&str, &str)] = &[
     ),
     ("Search templates", "템플릿 검색"),
     ("All templates", "모든 템플릿"),
+    ("\u{2190}  All templates", "\u{2190}  모든 템플릿"),
     ("Lists & Spaces", "목록 및 스페이스"),
     ("Your team", "우리 팀"),
     ("Built-in", "기본 제공"),

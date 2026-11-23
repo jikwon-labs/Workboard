@@ -126,7 +126,7 @@ fn korean_sits_on_the_latin_baseline() {
 
 #[test]
 fn short_window_profile_menu_scrolls_to_trash_and_switch_person() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.click("Profile menu");
     h.settle();
     let menu_top = h.rect("Settings").top();

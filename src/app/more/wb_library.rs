@@ -460,21 +460,29 @@ impl App {
 
                 // the title, and the one button that makes a board
                 let head = row(ui, 40.0);
-                ui.painter().text(
-                    head.left_center(),
-                    Align2::LEFT_CENTER,
+                let g = ui.painter().layout_no_wrap(
+                    tr("New whiteboard").to_string(),
+                    crate::app::bold_font(ui.ctx(), 14.0),
+                    t.on_primary,
+                );
+                // the title is shortened to what the button leaves
+                let title_font = crate::app::bold_font(ui.ctx(), 22.0);
+                let title = fit_text(
+                    ui.painter(),
                     tr(match filter {
                         crate::app::hubs::OwnFilter::Mine => "My Whiteboards",
                         crate::app::hubs::OwnFilter::Favorites => "Favorites",
                         crate::app::hubs::OwnFilter::All => "All Whiteboards",
                     }),
-                    crate::app::bold_font(ui.ctx(), 22.0),
-                    t.text,
+                    &title_font,
+                    (head.width() - g.size().x - 46.0 - 12.0).max(40.0),
                 );
-                let g = ui.painter().layout_no_wrap(
-                    tr("New whiteboard").to_string(),
-                    crate::app::bold_font(ui.ctx(), 14.0),
-                    t.on_primary,
+                ui.painter().text(
+                    head.left_center(),
+                    Align2::LEFT_CENTER,
+                    title,
+                    title_font,
+                    t.text,
                 );
                 let br = Rect::from_min_size(
                     pos2(head.right() - g.size().x - 46.0, head.center().y - 18.0),

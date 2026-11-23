@@ -641,27 +641,30 @@ impl App {
                         .layout(Layout::left_to_right(Align::Center)),
                 );
                 left.spacing_mut().item_spacing.x = 4.0;
-                if icon_button(
-                    &mut left,
-                    &t,
-                    Icon::ChevronLeft,
-                    "",
-                    "Back to all forms",
-                    false,
-                )
-                .on_hover_text(tr("All forms"))
-                .clicked()
-                {
-                    self.form.open = None;
+                // a compact window: its top bar's Back leads to all forms
+                if self.tier != crate::app::shell::Tier::Compact {
+                    if icon_button(
+                        &mut left,
+                        &t,
+                        Icon::ChevronLeft,
+                        "",
+                        "Back to all forms",
+                        false,
+                    )
+                    .on_hover_text(tr("All forms"))
+                    .clicked()
+                    {
+                        self.form.open = None;
+                    }
+                    let crumb = left.add(ghost(egui::Button::new(
+                        RichText::new(tr("All forms")).size(13.0).color(t.text2),
+                    )));
+                    name_it(&crumb, "Forms crumb");
+                    if crumb.clicked() {
+                        self.form.open = None;
+                    }
+                    left.label(RichText::new("/").color(t.text3));
                 }
-                let crumb = left.add(ghost(egui::Button::new(
-                    RichText::new(tr("All forms")).size(13.0).color(t.text2),
-                )));
-                name_it(&crumb, "Forms crumb");
-                if crumb.clicked() {
-                    self.form.open = None;
-                }
-                left.label(RichText::new("/").color(t.text3));
                 let (tile, _) = left.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
                 paint_tile(left.painter(), tile, form_look(&f, &t));
                 left.add_space(2.0);

@@ -8,9 +8,13 @@ use super::*;
 use chrono::Datelike;
 use egui::{Pos2, Response};
 
+mod compact;
 mod header;
+mod narrow;
 mod side_tree;
 mod sidebar;
+
+pub(crate) use narrow::{Sheet, Tier};
 
 pub(super) use super::icons::line_icon;
 use super::icons::paint_view_icon;
@@ -252,191 +256,183 @@ impl App {
                     let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
                 }
-                // workspace picker
-                let name = self.data.workspace.clone();
-                let g = ui
-                    .painter()
-                    .layout_no_wrap(name, FontId::proportional(14.0), t.text);
-                let left = if cfg!(target_os = "macos") { 74.0 } else { 4.0 };
-                let wr = Rect::from_min_size(
-                    pos2(full.left() + left, full.center().y - 14.0),
-                    vec2(g.size().x + 58.0, 28.0),
-                );
-                let wresp = ui.interact(wr, ui.id().with("ws_pill"), Sense::click());
-                name_it(&wresp, "Workspace menu");
-                ui.painter().rect_filled(
-                    wr,
-                    7.0,
-                    if wresp.hovered() { t.hover } else { t.sidebar },
-                );
-                let av =
-                    Rect::from_center_size(wr.left_center() + vec2(15.0, 0.0), vec2(18.0, 18.0));
-                ui.painter()
-                    .rect_filled(av, 4.0, rgb(self.data.extra.workspace_color));
-                let letter = self
-                    .data
-                    .workspace
-                    .chars()
-                    .next()
-                    .unwrap_or('W')
-                    .to_uppercase()
-                    .to_string();
-                ui.painter().text(
-                    av.center(),
-                    Align2::CENTER_CENTER,
-                    letter,
-                    FontId::proportional(11.0),
-                    Color32::WHITE,
-                );
-                ui.painter().galley(
-                    pos2(wr.left() + 30.0, wr.center().y - g.size().y / 2.0),
-                    g,
-                    t.text,
-                );
-                let cv = wr.right_center() - vec2(14.0, 1.0);
-                ui.painter().line_segment(
-                    [cv + vec2(-4.0, -2.0), cv + vec2(0.0, 2.0)],
-                    Stroke::new(1.3_f32, t.text2),
-                );
-                ui.painter().line_segment(
-                    [cv + vec2(0.0, 2.0), cv + vec2(4.0, -2.0)],
-                    Stroke::new(1.3_f32, t.text2),
-                );
-                if self.force_menu.as_deref() == Some("workspace") {
-                    let pid = ui.id().with("ws_menu");
-                    ui.memory_mut(|m| m.open_popup(pid));
-                }
-                popup(ui, &wresp, ui.id().with("ws_menu"), 300.0, |ui| {
-                    self.workspace_menu(ui)
-                });
-                // planner shortcut
-                let cr = Rect::from_center_size(
-                    pos2(wr.right() + 18.0, full.center().y),
-                    vec2(28.0, 28.0),
-                );
-                let cresp = ui.interact(cr, ui.id().with("cal_btn"), Sense::click());
-                name_it(&cresp, "Planner shortcut");
-                if cresp.hovered() {
-                    ui.painter().rect_filled(cr, 6.0, t.hover);
-                }
-                line_icon(ui.painter(), Icon::CalendarSmall, cr.center(), t.text2);
-                ui.painter().text(
-                    cr.center() + vec2(0.0, 2.0),
-                    Align2::CENTER_CENTER,
-                    today().day().to_string(),
-                    FontId::proportional(6.5),
-                    t.text2,
-                );
-                if cresp.on_hover_text(tr("Planner")).clicked() {
-                    self.section = Section::Planner;
-                }
-                // back / forward + search with AI Chats
-                let sw = 287.0f32.min(full.width() * 0.25).max(220.0);
-                let sr = Rect::from_center_size(full.center() + vec2(40.0, 0.0), vec2(sw, 28.0));
-                for (i, (glyph, enabled, tip)) in [
-                    ("\u{2190}", !self.nav.back.is_empty(), "Go back"),
-                    ("\u{2192}", !self.nav.fwd.is_empty(), "Go forward"),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    let ar = Rect::from_center_size(
-                        pos2(sr.left() - 40.0 + i as f32 * 24.0, full.center().y),
-                        vec2(24.0, 24.0),
+                let mut left = if cfg!(target_os = "macos") { 74.0 } else { 4.0 };
+                let compact = self.tier == Tier::Compact;
+                if compact {
+                    self.compact_bar(ui, full, full.left() + left);
+                } else {
+                    left += self.sheet_button(ui, pos2(full.left() + left, full.center().y));
+                    // workspace picker (a narrow window keeps room for the search)
+                    let max_name = if self.tier == Tier::Wide {
+                        f32::INFINITY
+                    } else {
+                        140.0
+                    };
+                    let wr = self.workspace_pill(
+                        ui,
+                        pos2(full.left() + left, full.center().y),
+                        max_name,
                     );
-                    let a = ui.interact(ar, ui.id().with(("nav", i)), Sense::click());
-                    name_it(&a, tip);
-                    if a.hovered() && enabled {
-                        ui.painter().rect_filled(ar, 5.0, t.hover);
+                    // planner shortcut
+                    let cr = Rect::from_center_size(
+                        pos2(wr.right() + 18.0, full.center().y),
+                        vec2(28.0, 28.0),
+                    );
+                    let cresp = ui.interact(cr, ui.id().with("cal_btn"), Sense::click());
+                    name_it(&cresp, "Planner shortcut");
+                    if cresp.hovered() {
+                        ui.painter().rect_filled(cr, 6.0, t.hover);
                     }
+                    line_icon(ui.painter(), Icon::CalendarSmall, cr.center(), t.text2);
                     ui.painter().text(
-                        ar.center(),
+                        cr.center() + vec2(0.0, 2.0),
                         Align2::CENTER_CENTER,
-                        glyph,
-                        FontId::proportional(15.0),
-                        if enabled {
-                            t.text2
-                        } else {
-                            Color32::from_rgb(190, 190, 190)
-                        },
+                        today().day().to_string(),
+                        FontId::proportional(6.5),
+                        t.text2,
                     );
-                    if a.on_hover_text(tr(tip)).clicked() && enabled {
-                        if i == 0 {
-                            self.go_back();
-                        } else {
-                            self.go_forward();
+                    if cresp.on_hover_text(tr("Planner")).clicked() {
+                        self.section = Section::Planner;
+                    }
+                    // back / forward + search with AI Chats
+                    let (sw, sx) = if self.tier == Tier::Wide {
+                        (
+                            287.0f32.min(full.width() * 0.25).max(220.0),
+                            full.center().x + 40.0,
+                        )
+                    } else {
+                        // narrow: between the planner button (and the arrows
+                        // left of the search) and what sits at the right
+                        let from = cr.right() + 12.0 + 52.0;
+                        let mut reserve = 60.0 + 28.0 * self.data.extra.pinned_tools.len() as f32;
+                        if self.server_trouble().is_some() {
+                            reserve += 110.0;
+                        }
+                        if self.data.tasks.iter().any(|x| self.data.is_my_timer(x)) {
+                            reserve += 150.0;
+                        }
+                        let to = full.right() - reserve;
+                        let sw = (to - from).clamp(120.0, 220.0);
+                        let lo = from + sw / 2.0;
+                        (sw, (full.center().x + 40.0).min(to - sw / 2.0).max(lo))
+                    };
+                    // too narrow for the AI Chats chip inside it: AI is on the rail
+                    let with_ai = sw >= 200.0;
+                    let sr = Rect::from_center_size(pos2(sx, full.center().y), vec2(sw, 28.0));
+                    for (i, (glyph, enabled, tip)) in [
+                        ("\u{2190}", !self.nav.back.is_empty(), "Go back"),
+                        ("\u{2192}", !self.nav.fwd.is_empty(), "Go forward"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let ar = Rect::from_center_size(
+                            pos2(sr.left() - 40.0 + i as f32 * 24.0, full.center().y),
+                            vec2(24.0, 24.0),
+                        );
+                        let a = ui.interact(ar, ui.id().with(("nav", i)), Sense::click());
+                        name_it(&a, tip);
+                        if a.hovered() && enabled {
+                            ui.painter().rect_filled(ar, 5.0, t.hover);
+                        }
+                        ui.painter().text(
+                            ar.center(),
+                            Align2::CENTER_CENTER,
+                            glyph,
+                            FontId::proportional(15.0),
+                            if enabled {
+                                t.text2
+                            } else {
+                                Color32::from_rgb(190, 190, 190)
+                            },
+                        );
+                        if a.on_hover_text(tr(tip)).clicked() && enabled {
+                            if i == 0 {
+                                self.go_back();
+                            } else {
+                                self.go_forward();
+                            }
                         }
                     }
-                }
-                let ai_r = Rect::from_min_max(
-                    pos2(sr.right() - 94.0, sr.top() + 4.0),
-                    pos2(sr.right() - 4.0, sr.bottom() - 4.0),
-                );
-                let sresp = ui.interact(
-                    Rect::from_min_max(sr.min, pos2(ai_r.left(), sr.bottom())),
-                    ui.id().with("search_pill"),
-                    Sense::click(),
-                );
-                name_it(&sresp, "Search");
-                ui.painter()
-                    .rect_filled(sr, 14.0, if sresp.hovered() { t.hover } else { t.bg });
-                ui.painter().rect_stroke(
-                    sr,
-                    14.0,
-                    Stroke::new(1.0_f32, t.border),
-                    egui::StrokeKind::Inside,
-                );
-                super::icons::line_icon_scaled(
-                    ui.painter(),
-                    Icon::Search,
-                    sr.left_center() + vec2(20.0, 0.0),
-                    t.text2,
-                    0.8,
-                );
-                let sg = ui.painter().layout_no_wrap(
-                    tr("Search").into(),
-                    FontId::proportional(14.0),
-                    t.text3,
-                );
-                let sgw = sg.size().x;
-                ui.painter().galley(
-                    pos2(sr.left() + 32.0, sr.center().y - sg.size().y / 2.0),
-                    sg,
-                    t.text3,
-                );
-                ui.painter().text(
-                    pos2(sr.left() + 38.0 + sgw, sr.center().y),
-                    Align2::LEFT_CENTER,
-                    crate::os::keys("\u{2318}J"),
-                    FontId::proportional(11.5),
-                    Color32::from_rgb(170, 170, 170),
-                );
-                if sresp.clicked() {
-                    self.palette = Some(String::new());
-                }
-                let air = ui.interact(ai_r, ui.id().with("ai_chats"), Sense::click());
-                name_it(&air, "AI Chats");
-                ui.painter().rect_filled(
-                    ai_r,
-                    10.0,
-                    if air.hovered() { t.hover } else { t.sidebar },
-                );
-                ui.painter().text(
-                    ai_r.center() - vec2(8.0, 0.0),
-                    Align2::CENTER_CENTER,
-                    tr("AI Chats"),
-                    FontId::proportional(13.0),
-                    t.text2,
-                );
-                super::icons::line_icon_scaled(
-                    ui.painter(),
-                    Icon::Sparkle,
-                    ai_r.right_center() - vec2(12.0, 0.0),
-                    Color32::from_rgb(171, 74, 186),
-                    0.75,
-                );
-                if air.clicked() {
-                    self.section = Section::Ai;
+                    let ai_r = if with_ai {
+                        Rect::from_min_max(
+                            pos2(sr.right() - 94.0, sr.top() + 4.0),
+                            pos2(sr.right() - 4.0, sr.bottom() - 4.0),
+                        )
+                    } else {
+                        Rect::from_min_max(sr.right_top(), sr.right_bottom())
+                    };
+                    let sresp = ui.interact(
+                        Rect::from_min_max(sr.min, pos2(ai_r.left(), sr.bottom())),
+                        ui.id().with("search_pill"),
+                        Sense::click(),
+                    );
+                    name_it(&sresp, "Search");
+                    ui.painter().rect_filled(
+                        sr,
+                        14.0,
+                        if sresp.hovered() { t.hover } else { t.bg },
+                    );
+                    ui.painter().rect_stroke(
+                        sr,
+                        14.0,
+                        Stroke::new(1.0_f32, t.border),
+                        egui::StrokeKind::Inside,
+                    );
+                    super::icons::line_icon_scaled(
+                        ui.painter(),
+                        Icon::Search,
+                        sr.left_center() + vec2(20.0, 0.0),
+                        t.text2,
+                        0.8,
+                    );
+                    let sg = ui.painter().layout_no_wrap(
+                        tr("Search").into(),
+                        FontId::proportional(14.0),
+                        t.text3,
+                    );
+                    let sgw = sg.size().x;
+                    ui.painter().galley(
+                        pos2(sr.left() + 32.0, sr.center().y - sg.size().y / 2.0),
+                        sg,
+                        t.text3,
+                    );
+                    ui.painter().text(
+                        pos2(sr.left() + 38.0 + sgw, sr.center().y),
+                        Align2::LEFT_CENTER,
+                        crate::os::keys("\u{2318}J"),
+                        FontId::proportional(11.5),
+                        Color32::from_rgb(170, 170, 170),
+                    );
+                    if sresp.clicked() {
+                        self.palette = Some(String::new());
+                    }
+                    if with_ai {
+                        let air = ui.interact(ai_r, ui.id().with("ai_chats"), Sense::click());
+                        name_it(&air, "AI Chats");
+                        ui.painter().rect_filled(
+                            ai_r,
+                            10.0,
+                            if air.hovered() { t.hover } else { t.sidebar },
+                        );
+                        ui.painter().text(
+                            ai_r.center() - vec2(8.0, 0.0),
+                            Align2::CENTER_CENTER,
+                            tr("AI Chats"),
+                            FontId::proportional(13.0),
+                            t.text2,
+                        );
+                        super::icons::line_icon_scaled(
+                            ui.painter(),
+                            Icon::Sparkle,
+                            ai_r.right_center() - vec2(12.0, 0.0),
+                            Color32::from_rgb(171, 74, 186),
+                            0.75,
+                        );
+                        if air.clicked() {
+                            self.section = Section::Ai;
+                        }
+                    }
                 }
                 // right part: pinned personal tools, avatar menu
                 let mut right = ui.new_child(
@@ -500,7 +496,7 @@ impl App {
                 }
                 // a team server that can't be reached (or won't let this
                 // computer in): a quiet word here, Work together on click
-                if let Some(word) = self.server_trouble() {
+                if let Some(word) = self.server_trouble().filter(|_| !compact) {
                     ui.add_space(4.0);
                     let g = ui.painter().layout_no_wrap(
                         word,
@@ -533,7 +529,12 @@ impl App {
                     }
                 }
                 ui.add_space(6.0);
-                let pinned = self.data.extra.pinned_tools.clone();
+                // a compact window has room for the avatar only
+                let pinned = if compact {
+                    vec![]
+                } else {
+                    self.data.extra.pinned_tools.clone()
+                };
                 for id in pinned.iter().rev() {
                     if let Some((tid, label, icon)) = super::menus::TOOLS.iter().find(|x| x.0 == id)
                     {
@@ -550,12 +551,18 @@ impl App {
                     }
                 }
                 let now = now_ts();
-                if let Some(task) = self.data.tasks.iter().find(|x| self.data.is_my_timer(x)) {
+                if let Some(task) = self
+                    .data
+                    .tasks
+                    .iter()
+                    .find(|x| self.data.is_my_timer(x))
+                    .filter(|_| !compact)
+                {
                     // room at the start for the stop square drawn over it
                     let txt = format!(
                         "     {}  {}",
                         fmt_duration(self.data.my_tracked_secs(task, now)),
-                        truncate(&task.name, 22)
+                        truncate(&task.name, if self.tier == Tier::Wide { 22 } else { 10 })
                     );
                     let b = Tint(
                         egui::Button::new(RichText::new(txt).color(Color32::WHITE))
@@ -578,6 +585,64 @@ impl App {
                     ctx.request_repaint_after(std::time::Duration::from_secs(1));
                 }
             });
+    }
+
+    /// The workspace's pill in the top bar, its left middle at `at`, the
+    /// name shortened to `max_name` (infinite: whole), with its menu.
+    pub(super) fn workspace_pill(&mut self, ui: &mut Ui, at: Pos2, max_name: f32) -> Rect {
+        let t = self.t();
+        let mut name = self.data.workspace.clone();
+        if max_name.is_finite() {
+            name = fit_text(ui.painter(), &name, &FontId::proportional(14.0), max_name);
+        }
+        let g = ui
+            .painter()
+            .layout_no_wrap(name, FontId::proportional(14.0), t.text);
+        let wr = Rect::from_min_size(pos2(at.x, at.y - 14.0), vec2(g.size().x + 58.0, 28.0));
+        let wresp = ui.interact(wr, ui.id().with("ws_pill"), Sense::click());
+        name_it(&wresp, "Workspace menu");
+        ui.painter()
+            .rect_filled(wr, 7.0, if wresp.hovered() { t.hover } else { t.sidebar });
+        let av = Rect::from_center_size(wr.left_center() + vec2(15.0, 0.0), vec2(18.0, 18.0));
+        ui.painter()
+            .rect_filled(av, 4.0, rgb(self.data.extra.workspace_color));
+        let letter = self
+            .data
+            .workspace
+            .chars()
+            .next()
+            .unwrap_or('W')
+            .to_uppercase()
+            .to_string();
+        ui.painter().text(
+            av.center(),
+            Align2::CENTER_CENTER,
+            letter,
+            FontId::proportional(11.0),
+            Color32::WHITE,
+        );
+        ui.painter().galley(
+            pos2(wr.left() + 30.0, wr.center().y - g.size().y / 2.0),
+            g,
+            t.text,
+        );
+        let cv = wr.right_center() - vec2(14.0, 1.0);
+        ui.painter().line_segment(
+            [cv + vec2(-4.0, -2.0), cv + vec2(0.0, 2.0)],
+            Stroke::new(1.3_f32, t.text2),
+        );
+        ui.painter().line_segment(
+            [cv + vec2(0.0, 2.0), cv + vec2(4.0, -2.0)],
+            Stroke::new(1.3_f32, t.text2),
+        );
+        if self.force_menu.as_deref() == Some("workspace") {
+            let pid = ui.id().with("ws_menu");
+            ui.memory_mut(|m| m.open_popup(pid));
+        }
+        popup(ui, &wresp, ui.id().with("ws_menu"), 300.0, |ui| {
+            self.workspace_menu(ui)
+        });
+        wr
     }
 
     // ---------------------------------------------------------------- rail
@@ -637,6 +702,10 @@ impl App {
     }
 
     pub(super) fn rail(&mut self, ctx: &egui::Context) {
+        // a compact window is one column: its home screen lists the apps
+        if self.tier == Tier::Compact {
+            return;
+        }
         let t = self.t();
         egui::SidePanel::left("rail")
             .exact_width(58.0)

@@ -1,5 +1,5 @@
-// Layout checks with long names, many items and the smallest window
-// (900x560): everything stays reachable and nothing is cut mid-glyph or
+// Layout checks with long names, many items and the smallest window with
+// the sidebar beside the page (960x560; narrow.rs has the narrower ones): everything stays reachable and nothing is cut mid-glyph or
 // drawn over something else.
 
 use super::*;
@@ -24,7 +24,7 @@ pub(super) fn overlapping(texts: &[(String, Rect)]) -> Vec<(String, String)> {
 
 #[test]
 fn small_window_settings_reach_every_section_and_its_controls() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.open_settings("General");
     h.settle();
     for tab in super::settings::SettingsTab::ALL {
@@ -77,7 +77,7 @@ fn small_window_settings_reach_every_section_and_its_controls() {
 
 #[test]
 fn small_window_settings_people_columns_do_not_overlap() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.data.members.push(Member {
         id: 777,
         name: "Alexandria Montgomery-Featherstonehaugh".into(),
@@ -215,7 +215,7 @@ fn planner_days_share_the_width(w: f32, hh: f32) {
 #[test]
 fn planner_days_share_the_width_and_today_scrolls() {
     planner_days_share_the_width(1440.0, 900.0);
-    planner_days_share_the_width(900.0, 560.0);
+    planner_days_share_the_width(960.0, 560.0);
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn home_fits(w: f32, hh: f32) {
 #[test]
 fn home_cards_fit_and_long_names_do_not_overlap() {
     home_fits(1440.0, 900.0);
-    home_fits(900.0, 560.0);
+    home_fits(960.0, 560.0);
 }
 
 #[test]
@@ -882,7 +882,7 @@ fn chip_clear(h: &Ui1) {
 
 #[test]
 fn small_window_chat_chip_stays_above_the_messages() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     // enough messages to scroll
     let ch = h
         .app
@@ -945,7 +945,7 @@ fn small_window_chat_chip_stays_above_the_messages() {
 
 #[test]
 fn small_window_doc_template_cards_fit_and_shorten() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.open_docs_list();
     let wiki = h.rect("Template Wiki");
     assert!(wiki.right() <= h.size.x, "the third card {:?} fits", wiki);
@@ -997,7 +997,7 @@ fn wheel_down(h: &mut Ui1, at: Pos2, strip: Rect, what: &str) {
 
 #[test]
 fn small_window_sidebar_scrolls_without_a_scroll_bar() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.settle();
     let side = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sidebar"))
         .expect("the sidebar is open")
@@ -1030,7 +1030,7 @@ fn small_window_sidebar_scrolls_without_a_scroll_bar() {
 
 #[test]
 fn small_window_settings_scroll_without_a_scroll_bar() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     // the longest section: taller than a small window
     h.app.open_settings("Notifications");
     h.settle();
@@ -1065,7 +1065,7 @@ fn small_window_settings_scroll_without_a_scroll_bar() {
 fn toast_keeps_its_text_on_one_line_after_a_short_one() {
     // the toast's area remembers its last size and offered only that much
     // room, so a long message after a short one wrapped every few letters
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.toast("Copied");
     h.settle();
     let msg = "Connected. This workspace is now on the server for your team.";
@@ -1271,7 +1271,7 @@ fn planner_columns_end_on_one_line() {
 /// below were widened with it) and every control can be pressed.
 #[test]
 fn small_window_dashboards_stay_inside() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.section = Section::Dashboards;
     h.settle();
     let page = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
@@ -1290,7 +1290,7 @@ fn small_window_dashboards_stay_inside() {
 /// running past the window in one row.
 #[test]
 fn org_chart_cards_wrap_inside_the_window() {
-    for (w, hh) in [(1440.0, 900.0), (900.0, 560.0)] {
+    for (w, hh) in [(1440.0, 900.0), (960.0, 560.0)] {
         let mut h = Ui1::sized(w, hh);
         for k in 0..12u64 {
             h.app.data.members.push(Member {
@@ -1321,7 +1321,7 @@ fn org_chart_cards_wrap_inside_the_window() {
 /// "without dates" doesn't run over the lane choices.
 #[test]
 fn timeline_edge_marks_and_toolbar_do_not_overlap() {
-    for (w, hh) in [(1440.0, 900.0), (900.0, 560.0)] {
+    for (w, hh) in [(1440.0, 900.0), (960.0, 560.0)] {
         let mut h = Ui1::sized(w, hh);
         heavy(&mut h);
         let list = list_id(&h, "Website Redesign");
@@ -1340,7 +1340,7 @@ fn timeline_edge_marks_and_toolbar_do_not_overlap() {
 #[test]
 fn small_window_view_tabs_and_add_view_fit() {
     for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
-        let mut h = Ui1::sized(900.0, 560.0);
+        let mut h = Ui1::sized(960.0, 560.0);
         crate::i18n::set_lang(lang);
         let list = h.app.data.first_list().unwrap();
         h.app.loc = Location::List(list);
@@ -1403,7 +1403,7 @@ fn add_view_menu_stays_put_when_a_view_is_hidden() {
 /// the calendar's "Unscheduled" cards shorten theirs the same way.
 #[test]
 fn timesheet_and_calendar_side_shorten_long_names() {
-    for (w, hh) in [(1440.0, 900.0), (900.0, 560.0)] {
+    for (w, hh) in [(1440.0, 900.0), (960.0, 560.0)] {
         let mut h = Ui1::sized(w, hh);
         heavy(&mut h);
         let id = h
@@ -1467,7 +1467,7 @@ fn timesheet_and_calendar_side_shorten_long_names() {
 #[test]
 fn small_window_doc_header_and_toolbar_fit() {
     for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
-        let mut h = Ui1::sized(900.0, 560.0);
+        let mut h = Ui1::sized(960.0, 560.0);
         crate::i18n::set_lang(lang);
         let doc = h.app.data.docs.first().map(|d| d.id).unwrap();
         h.app.section = Section::Docs;
@@ -1494,11 +1494,11 @@ fn small_window_thread_beside_a_channel_does_not_overlap() {
     h.click("general");
     h.click("1 reply");
     assert!(h.app.chat.thread_open.is_some());
-    h.size = vec2(900.0, 560.0);
+    h.size = vec2(960.0, 560.0);
     h.settle();
     assert!(h.has("Close thread"));
     let texts = h.texts_in(
-        Rect::from_min_max(pos2(320.0, 40.0), pos2(900.0, 560.0)),
+        Rect::from_min_max(pos2(320.0, 40.0), pos2(960.0, 560.0)),
         Seen::Visible,
     );
     let over = overlapping(&texts);
@@ -1526,7 +1526,7 @@ fn small_window_thread_beside_a_channel_does_not_overlap() {
 #[test]
 fn small_window_inbox_and_replies_rows_shorten_their_text() {
     for loc in [Location::Inbox, Location::Replies] {
-        let mut h = Ui1::sized(900.0, 560.0);
+        let mut h = Ui1::sized(960.0, 560.0);
         heavy(&mut h);
         h.app.section = Section::Home;
         h.app.loc = loc;
@@ -1548,7 +1548,7 @@ fn small_window_inbox_and_replies_rows_shorten_their_text() {
 /// ran under Clear.
 #[test]
 fn small_window_docs_list_headers_and_form_footer_fit() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.section = Section::Docs;
     h.app.doc_open = None;
     h.settle();

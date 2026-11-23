@@ -3086,7 +3086,7 @@ fn reply_box_shows_no_enter_hint() {
 #[test]
 fn unread_pill_at_the_sidebar_bottom_scrolls_to_an_unread_dm_below() {
     let pill = UNREAD_PILL;
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.app.section = Section::Home;
     let me = h.app.data.me;
     let later = now_ts() + 100;
@@ -3250,9 +3250,9 @@ fn a_post_card_stacks_its_title_and_text_and_names_where_it_went() {
 fn the_posts_sort_menu_lines_up_with_the_cards() {
     for (w, ko, long) in [
         (1440.0, false, false),
-        (900.0, false, false),
+        (960.0, false, false),
         (1440.0, true, false),
-        (900.0, false, true),
+        (960.0, false, true),
         (1000.0, false, true),
     ] {
         let mut h = Ui1::sized(w, 900.0);
@@ -3748,7 +3748,7 @@ fn files_shows_the_conversations_files_in_one_place() {
     assert!(h.has("File notes.md"), "and a thread reply's");
     assert!(!h.has("Picture beach.jpg"));
     // nothing drawn over anything, nor cut off, in the smallest window too
-    for size in [h.size, vec2(900.0, 560.0)] {
+    for size in [h.size, vec2(960.0, 560.0)] {
         h.size = size;
         h.settle();
         let page = Rect::from_min_max(pos2(320.0, 40.0), h.size.to_pos2());

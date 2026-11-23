@@ -189,22 +189,25 @@ impl App {
     }
 
     /// Pages panel, formatting bar and the editable / rendered body.
-    /// Pages panel, formatting bar and the editable / rendered body.
     pub(super) fn doc_body(&mut self, ui: &mut Ui, idx: usize) {
         let t = self.t();
         let id = self.data.docs[idx].id;
         let root = self.doc_root(id);
         let full = ui.available_rect_before_wrap();
-        let pages_w = 220.0;
+        // a compact window: the page alone (its sub pages are linked in it)
+        let compact = self.tier == super::shell::Tier::Compact;
+        let pages_w = if compact { 0.0 } else { 220.0 };
         let pages = Rect::from_min_max(full.min, pos2(full.left() + pages_w, full.bottom()));
         let main = Rect::from_min_max(pos2(full.left() + pages_w, full.top()), full.max);
-        ui.painter().rect_filled(pages, 0.0, t.sidebar);
-        ui.painter().vline(
-            pages.right(),
-            pages.y_range(),
-            Stroke::new(1.0_f32, t.border),
-        );
-        self.doc_pages_panel(ui, pages, root);
+        if !compact {
+            ui.painter().rect_filled(pages, 0.0, t.sidebar);
+            ui.painter().vline(
+                pages.right(),
+                pages.y_range(),
+                Stroke::new(1.0_f32, t.border),
+            );
+            self.doc_pages_panel(ui, pages, root);
+        }
         // the open page may have been deleted from a menu above
         if !self
             .doc_open
@@ -258,8 +261,14 @@ impl App {
             .id_salt(("doc_scroll", self.data.docs[idx].id))
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                // a compact window: the page has nearly all the width
+                let side = if self.tier == super::shell::Tier::Compact {
+                    16
+                } else {
+                    60
+                };
                 egui::Frame::new()
-                    .inner_margin(egui::Margin::symmetric(60, 24))
+                    .inner_margin(egui::Margin::symmetric(side, 24))
                     .show(ui, |ui| self.doc_page(ui, page, jump));
             });
     }
@@ -624,7 +633,13 @@ impl App {
         let r1 = ui.add(
             egui::TextEdit::singleline(&mut d.title)
                 .id(title_id)
-                .font(FontId::proportional(32.0))
+                .font(FontId::proportional(
+                    if self.tier == super::shell::Tier::Compact {
+                        24.0
+                    } else {
+                        32.0
+                    },
+                ))
                 .frame(false)
                 .hint_text(tr("Untitled"))
                 .desired_width(f32::INFINITY),

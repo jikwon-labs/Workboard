@@ -458,12 +458,14 @@ impl App {
         };
         let t = self.t();
         let mut open = true;
+        // a narrow window: as wide as fits, with a margin each side
+        let pw = 620.0f32.min(ctx.screen_rect().width() - 40.0);
         egui::Window::new("search_palette")
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_TOP, [0.0, 60.0])
-            .fixed_size([620.0, 420.0])
+            .fixed_size([pw, 420.0])
             .show(ctx, |ui| {
                 // the arrows move the highlight, not the text cursor
                 let (down, up) = ui.input_mut(|i| {
@@ -482,13 +484,19 @@ impl App {
                 r.request_focus();
                 let kid = egui::Id::new("palette_kind");
                 let mut kind: u8 = ui.data(|d| d.get_temp(kid)).unwrap_or(0);
-                ui.horizontal(|ui| {
+                let kinds = |ui: &mut Ui| {
                     for (i, label) in SEARCH_KINDS.iter().enumerate() {
                         if ui.selectable_label(kind == i as u8, tr(label)).clicked() {
                             kind = i as u8;
                         }
                     }
-                });
+                };
+                // a narrow window: the kinds wrap instead of widening it
+                if pw < 600.0 {
+                    ui.horizontal_wrapped(kinds);
+                } else {
+                    ui.horizontal(kinds);
+                }
                 ui.data_mut(|d| d.insert_temp(kid, kind));
                 ui.separator();
                 let (rows, arch) = self.kept_search(&q, kind);
@@ -577,7 +585,7 @@ impl App {
                                 title,
                                 FontId::proportional(14.0),
                                 t.text,
-                                w - 200.0,
+                                if w < 500.0 { w * 0.55 } else { w - 200.0 },
                             );
                             paint_fit(
                                 ui,

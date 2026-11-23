@@ -132,79 +132,45 @@ impl App {
     pub(super) fn settings_page(&mut self, ui: &mut Ui) {
         let t = self.t();
         let full = ui.available_rect_before_wrap();
-        let nav_w = 230.0;
-        let nav = Rect::from_min_max(full.min, pos2(full.left() + nav_w, full.bottom()));
-        let body = Rect::from_min_max(pos2(full.left() + nav_w, full.top()), full.max);
-        ui.painter().rect_filled(nav, 0.0, t.sidebar);
-        ui.painter()
-            .vline(nav.right(), nav.y_range(), Stroke::new(1.0_f32, t.border));
-        let mut nui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(nav.shrink(10.0))
-                .layout(Layout::top_down(Align::Min)),
-        );
-        if nui
-            .add(ghost(egui::Button::new(
-                RichText::new(tr("\u{2190}  Back to Workspace")).color(t.text2),
-            )))
-            .clicked()
-        {
-            self.section = Section::Home;
-        }
-        nui.add_space(6.0);
-        let ws = self.data.workspace.clone();
-        nui.label(RichText::new(ws).strong());
-        // a short window can't fit every section: the list scrolls
-        egui::ScrollArea::vertical()
-            .id_salt("settings_nav")
-            .auto_shrink([false, false])
-            .show(&mut nui, |nui| {
-                let mut last_group = "";
-                let manages = self.may_manage();
-                for tab in SettingsTab::ALL {
-                    let (group, label) = (tab.group(), tab.label());
-                    // sections that change the workspace for everyone are the owner's and admins'
-                    if tab.admin_only() && !manages {
-                        continue;
-                    }
-                    if group != last_group {
-                        last_group = group;
-                        nui.add_space(8.0);
-                        nui.label(RichText::new(tr(group)).small().color(t.text3));
-                    }
-                    let sel = self.settings_tab == tab;
-                    let w = nui.available_width();
-                    let (r, resp) = nui.allocate_exact_size(vec2(w, 28.0), Sense::click());
-                    name_it(&resp, &format!("Settings {}", label));
-                    if sel {
-                        nui.painter().rect_filled(r, 6.0, t.selected_bg);
-                    } else if resp.hovered() {
-                        nui.painter().rect_filled(r, 6.0, t.hover);
-                    }
-                    paint_fit(
-                        nui,
-                        r.left_center() + vec2(10.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        tr(label),
-                        FontId::proportional(13.5),
-                        if sel { t.selected_text } else { t.text },
-                        w - 14.0,
-                    );
-                    if resp.clicked() && !sel {
-                        self.settings_tab = tab;
-                        self.settings_state = None;
-                    }
-                }
+        let body = if self.sidebar_over_page() {
+            // a narrow window: the section list is the sidebar drawer
+            // (the home screen's next step in a compact one), the section
+            // has the width
+            self.side_panel(ui, egui::Margin::same(10), false, |app, ui| {
+                app.settings_nav(ui)
             });
+            if self.page_covered() {
+                return;
+            }
+            full
+        } else {
+            let nav_w = 230.0;
+            let nav = Rect::from_min_max(full.min, pos2(full.left() + nav_w, full.bottom()));
+            ui.painter().rect_filled(nav, 0.0, t.sidebar);
+            ui.painter()
+                .vline(nav.right(), nav.y_range(), Stroke::new(1.0_f32, t.border));
+            let mut nui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(nav.shrink(10.0))
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            self.settings_nav(&mut nui);
+            Rect::from_min_max(pos2(full.left() + nav_w, full.top()), full.max)
+        };
         if self.settings_tab.admin_only() && !self.may_manage() {
             // a member lands on their own settings instead
             self.settings_tab = SettingsTab::MySettings;
             self.settings_state = None;
         }
         let label = self.settings_tab.label();
+        let pad = if self.tier == crate::app::shell::Tier::Compact {
+            16.0
+        } else {
+            32.0
+        };
         let mut bui = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(body.shrink2(vec2(32.0, 20.0)))
+                .max_rect(body.shrink2(vec2(pad, 20.0)))
                 .layout(Layout::top_down(Align::Min)),
         );
         bui.label(RichText::new(tr(label)).size(22.0).strong());
@@ -247,6 +213,65 @@ impl App {
                     }
                 }
                 self.settings_state = state;
+            });
+    }
+
+    /// The Settings page's left list: back to the workspace, then its
+    /// sections by group.
+    fn settings_nav(&mut self, nui: &mut Ui) {
+        let t = self.t();
+        if nui
+            .add(ghost(egui::Button::new(
+                RichText::new(tr("\u{2190}  Back to Workspace")).color(t.text2),
+            )))
+            .clicked()
+        {
+            self.section = Section::Home;
+        }
+        nui.add_space(6.0);
+        let ws = self.data.workspace.clone();
+        nui.label(RichText::new(ws).strong());
+        // a short window can't fit every section: the list scrolls
+        egui::ScrollArea::vertical()
+            .id_salt("settings_nav")
+            .auto_shrink([false, false])
+            .show(nui, |nui| {
+                let mut last_group = "";
+                let manages = self.may_manage();
+                for tab in SettingsTab::ALL {
+                    let (group, label) = (tab.group(), tab.label());
+                    // sections that change the workspace for everyone are the owner's and admins'
+                    if tab.admin_only() && !manages {
+                        continue;
+                    }
+                    if group != last_group {
+                        last_group = group;
+                        nui.add_space(8.0);
+                        nui.label(RichText::new(tr(group)).small().color(t.text3));
+                    }
+                    let sel = self.settings_tab == tab;
+                    let w = nui.available_width();
+                    let (r, resp) = nui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+                    name_it(&resp, &format!("Settings {}", label));
+                    if sel {
+                        nui.painter().rect_filled(r, 6.0, t.selected_bg);
+                    } else if resp.hovered() {
+                        nui.painter().rect_filled(r, 6.0, t.hover);
+                    }
+                    paint_fit(
+                        nui,
+                        r.left_center() + vec2(10.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        tr(label),
+                        FontId::proportional(13.5),
+                        if sel { t.selected_text } else { t.text },
+                        w - 14.0,
+                    );
+                    if resp.clicked() && !sel {
+                        self.settings_tab = tab;
+                        self.settings_state = None;
+                    }
+                }
             });
     }
 
@@ -330,10 +355,15 @@ impl App {
                 .color(t.text3),
             );
         }
+        let gap = if self.tier == crate::app::shell::Tier::Compact {
+            10.0
+        } else {
+            24.0
+        };
         egui::Grid::new("spaces_table")
             .num_columns(5)
             .striped(true)
-            .spacing(vec2(24.0, 10.0))
+            .spacing(vec2(gap, 10.0))
             .show(ui, |ui| {
                 // no header over an empty table
                 if spaces.is_empty() {

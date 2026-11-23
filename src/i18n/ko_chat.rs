@@ -223,4 +223,6 @@ pub const T: &[(&str, &str)] = &[
     ("post in {}: {}", "{}에 올리기: {}"),
     ("reply in its thread", "스레드에 답장"),
     ("reply in its thread: {}", "스레드에 답장: {}"),
+    // a compact window's channel header
+    ("Channel tools", "채널 도구"),
 ];

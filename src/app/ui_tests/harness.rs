@@ -38,7 +38,10 @@ impl Ui1 {
         Self::sized(1440.0, 900.0)
     }
 
-    // the smallest window the app allows is 900x560
+    // The smallest window that still has the sidebar beside the page is
+    // 960x560 (the "smallest window" of the layout tests; it was 900x560
+    // before narrower windows got the drawer and one-column layouts, see
+    // shell/narrow.rs). The app allows 360x520 (narrow.rs tests those).
     pub(super) fn sized(w: f32, h: f32) -> Self {
         Self::sized_with(w, h, Data::seed())
     }

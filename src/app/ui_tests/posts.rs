@@ -397,7 +397,7 @@ fn open_in_channel_closes_a_thread_left_open() {
 #[test]
 fn the_sort_drop_down_stays_on_the_page_in_a_narrow_window() {
     for ko in [false, true] {
-        let mut h = Ui1::sized(900.0, 560.0);
+        let mut h = Ui1::sized(960.0, 560.0);
         if ko {
             crate::i18n::set_lang(crate::i18n::Lang::Ko);
         }
@@ -407,7 +407,7 @@ fn the_sort_drop_down_stays_on_the_page_in_a_narrow_window() {
         let ty = h.rect("Post type filter");
         crate::i18n::set_lang(crate::i18n::Lang::En);
         assert!(
-            sort.right() <= 900.0 - 8.0,
+            sort.right() <= 960.0 - 8.0,
             "on the page (ko {ko}): {sort:?}"
         );
         assert!(

@@ -649,6 +649,14 @@ pub struct App {
     goal: GoalPage,
     ws_file: String,
     sidebar_collapsed: bool,
+    /// The window's width band (shell/narrow.rs), read at the start of each frame.
+    tier: shell::Tier,
+    /// The sidebar laid over the page in a medium or compact window.
+    sheet: shell::Sheet,
+    /// The window's size and place as last seen, and when it last changed
+    /// (kept in window.json once it has stood still a moment).
+    win_seen: Option<(crate::winstate::WinState, f64)>,
+    win_saved: Option<crate::winstate::WinState>,
     force_menu: Option<String>,
     inbox_tab: nav::InboxTab,
     channel_find: Option<String>,
@@ -1280,6 +1288,10 @@ impl App {
             goal: GoalPage::default(),
             ws_file,
             sidebar_collapsed: false,
+            tier: Default::default(),
+            sheet: Default::default(),
+            win_seen: None,
+            win_saved: None,
             force_menu: arg("--menu"),
             inbox_tab: nav::InboxTab::Primary,
             channel_find: None,
@@ -3037,6 +3049,13 @@ impl App {
                 }
                 let page = egui::Frame::new().fill(t.bg);
                 match self.section {
+                    Section::Home | Section::Chat | Section::Posts | Section::Meetings
+                        if self.page_covered() =>
+                    {
+                        // a compact window's home screen fills it: no page
+                        // under it (a channel there would count as read)
+                        self.sidebar(ui);
+                    }
                     Section::Home => {
                         self.sidebar(ui);
                         egui::CentralPanel::default()
@@ -3185,12 +3204,20 @@ impl App {
                     self.cal.month = add_months(self.cal.month, 1);
                 }
             }
+            let narrow = self.tier == shell::Tier::Compact;
             let title = if self.cal.week {
                 week_range(sunday_week_start(week_anchor))
+            } else if narrow {
+                // the month's short name leaves Month and Week room
+                self.cal.month.text("%b %Y")
             } else {
                 self.cal.month.text("%B %Y")
             };
-            ui.label(RichText::new(title).size(17.0).strong());
+            ui.label(
+                RichText::new(title)
+                    .size(if narrow { 14.0 } else { 17.0 })
+                    .strong(),
+            );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.selectable_label(!self.cal.week, tr("Month")).clicked() {
                     self.cal.week = false;
@@ -3206,8 +3233,10 @@ impl App {
         ui.data_mut(|d| d.insert_temp(egui::Id::new("cal_week_anchor"), week_anchor));
         ui.add_space(6.0);
         let full = ui.available_rect_before_wrap();
-        let side_w = 230.0;
-        let avail = Rect::from_min_max(full.min, pos2(full.right() - side_w - 10.0, full.bottom()));
+        let compact = self.tier == shell::Tier::Compact;
+        let side_w = if compact { 0.0 } else { 230.0 };
+        let gap = if compact { 0.0 } else { 10.0 };
+        let avail = Rect::from_min_max(full.min, pos2(full.right() - side_w - gap, full.bottom()));
         let side = Rect::from_min_max(pos2(full.right() - side_w, full.top()), full.max);
         let cw = avail.width() / 7.0;
         let head = 26.0;
@@ -3505,80 +3534,92 @@ impl App {
                 color,
             );
         }
-        // Unscheduled / Overdue panel
-        p.rect_filled(side, 8.0, t.column_bg);
-        let mut side_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(side.shrink(10.0))
-                .layout(Layout::top_down(Align::Min)),
-        );
-        let tab: u8 = side_ui
-            .data(|d| d.get_temp(egui::Id::new("cal_side_tab")))
-            .unwrap_or(0);
-        let unscheduled: Vec<&Task> = tasks.iter().filter(|x| x.due.is_none()).collect();
-        let now = now_local();
-        let overdue: Vec<&Task> = tasks
-            .iter()
-            .filter(|x| x.is_overdue_at(now) && !self.data.is_closed(x))
-            .collect();
-        let mut new_tab = tab;
-        side_ui.horizontal(|ui| {
-            if ui
-                .selectable_label(tab == 0, trf!("{} Unscheduled", unscheduled.len()))
-                .clicked()
-            {
-                new_tab = 0;
-            }
-            if ui
-                .selectable_label(tab == 1, trf!("{} Overdue", overdue.len()))
-                .clicked()
-            {
-                new_tab = 1;
-            }
-        });
-        side_ui.data_mut(|d| d.insert_temp(egui::Id::new("cal_side_tab"), new_tab));
-        side_ui.label(
-            RichText::new(tr("Drag a task onto a day to schedule it."))
-                .small()
-                .color(t.text3),
-        );
-        side_ui.add_space(4.0);
-        let list = if tab == 0 { unscheduled } else { overdue };
-        egui::ScrollArea::vertical()
-            .id_salt("cal_side")
-            .auto_shrink([false, false])
-            .show(&mut side_ui, |ui| {
-                for task in list {
-                    let w = ui.available_width();
-                    let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click_and_drag());
-                    if resp.drag_started() {
-                        egui::DragAndDrop::set_payload(ui.ctx(), task.id);
-                        ui.data_mut(|m| m.remove::<NaiveDate>(egui::Id::new("cal_grab")));
-                    }
-                    ui.painter()
-                        .rect_filled(r, 6.0, if resp.hovered() { t.hover } else { t.card });
-                    ui.painter().rect_stroke(
-                        r,
-                        6.0,
-                        Stroke::new(1.0_f32, t.border),
-                        egui::StrokeKind::Inside,
-                    );
-                    let st = self.data.status_of(task);
-                    paint_status_circle(ui.painter(), r.left_center() + vec2(14.0, 0.0), 6.0, &st);
-                    // shortened with an ellipsis, not cut at the card's edge
-                    let font = FontId::proportional(12.5);
-                    let fit = fit_text(ui.painter(), &task.name, &font, r.width() - 38.0);
-                    ui.painter().text(
-                        r.left_center() + vec2(28.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        fit,
-                        font,
-                        t.text,
-                    );
-                    self.task_hit(&resp, task.id, &format!("Unscheduled {}", task.name));
-                    ui.add_space(4.0);
+        // Unscheduled / Overdue panel (none in a compact window: the days take it all)
+        if side.width() > 0.0 {
+            // Unscheduled / Overdue panel
+            p.rect_filled(side, 8.0, t.column_bg);
+            let mut side_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(side.shrink(10.0))
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            let tab: u8 = side_ui
+                .data(|d| d.get_temp(egui::Id::new("cal_side_tab")))
+                .unwrap_or(0);
+            let unscheduled: Vec<&Task> = tasks.iter().filter(|x| x.due.is_none()).collect();
+            let now = now_local();
+            let overdue: Vec<&Task> = tasks
+                .iter()
+                .filter(|x| x.is_overdue_at(now) && !self.data.is_closed(x))
+                .collect();
+            let mut new_tab = tab;
+            side_ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(tab == 0, trf!("{} Unscheduled", unscheduled.len()))
+                    .clicked()
+                {
+                    new_tab = 0;
+                }
+                if ui
+                    .selectable_label(tab == 1, trf!("{} Overdue", overdue.len()))
+                    .clicked()
+                {
+                    new_tab = 1;
                 }
             });
+            side_ui.data_mut(|d| d.insert_temp(egui::Id::new("cal_side_tab"), new_tab));
+            side_ui.label(
+                RichText::new(tr("Drag a task onto a day to schedule it."))
+                    .small()
+                    .color(t.text3),
+            );
+            side_ui.add_space(4.0);
+            let list = if tab == 0 { unscheduled } else { overdue };
+            egui::ScrollArea::vertical()
+                .id_salt("cal_side")
+                .auto_shrink([false, false])
+                .show(&mut side_ui, |ui| {
+                    for task in list {
+                        let w = ui.available_width();
+                        let (r, resp) =
+                            ui.allocate_exact_size(vec2(w, 30.0), Sense::click_and_drag());
+                        if resp.drag_started() {
+                            egui::DragAndDrop::set_payload(ui.ctx(), task.id);
+                            ui.data_mut(|m| m.remove::<NaiveDate>(egui::Id::new("cal_grab")));
+                        }
+                        ui.painter().rect_filled(
+                            r,
+                            6.0,
+                            if resp.hovered() { t.hover } else { t.card },
+                        );
+                        ui.painter().rect_stroke(
+                            r,
+                            6.0,
+                            Stroke::new(1.0_f32, t.border),
+                            egui::StrokeKind::Inside,
+                        );
+                        let st = self.data.status_of(task);
+                        paint_status_circle(
+                            ui.painter(),
+                            r.left_center() + vec2(14.0, 0.0),
+                            6.0,
+                            &st,
+                        );
+                        // shortened with an ellipsis, not cut at the card's edge
+                        let font = FontId::proportional(12.5);
+                        let fit = fit_text(ui.painter(), &task.name, &font, r.width() - 38.0);
+                        ui.painter().text(
+                            r.left_center() + vec2(28.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            fit,
+                            font,
+                            t.text,
+                        );
+                        self.task_hit(&resp, task.id, &format!("Unscheduled {}", task.name));
+                        ui.add_space(4.0);
+                    }
+                });
+        }
         if dragging {
             if let Some(pos) = ui.ctx().pointer_hover_pos() {
                 egui::Area::new(egui::Id::new("cal_drag_ghost"))
@@ -5089,8 +5130,14 @@ impl App {
                             }
                             // the text ends, with an ellipsis, before what's on the
                             // right: the time, Resolve, or Mark read (which it ran under)
+                            // a compact window keeps Mark read closer to the time
+                            let mark_x = if self.tier == shell::Tier::Compact {
+                                166.0
+                            } else {
+                                230.0
+                            };
                             let right = if feed == CommentsPage::Replies && tab == 0 {
-                                236.0
+                                mark_x + 6.0
                             } else if feed == CommentsPage::Assigned {
                                 140.0
                             } else {
@@ -5150,7 +5197,7 @@ impl App {
                             // Replies: mark one read without opening it
                             if feed == CommentsPage::Replies && tab == 0 {
                                 let br = Rect::from_min_size(
-                                    pos2(r.right() - 230.0, r.center().y - 13.0),
+                                    pos2(r.right() - mark_x, r.center().y - 13.0),
                                     vec2(90.0, 26.0),
                                 );
                                 let b = put_over(
@@ -5612,6 +5659,10 @@ impl App {
         }
         let t = self.t();
         theme::apply(ctx, &t);
+        self.update_tier(ctx);
+        if self.persist {
+            self.keep_window_state(ctx);
+        }
         // shortcuts (none on the sign-in screen)
         let signing_in = self.login.is_some();
         self.ask_before_quit(ctx, signing_in);

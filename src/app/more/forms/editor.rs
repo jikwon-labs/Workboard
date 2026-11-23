@@ -121,8 +121,9 @@ impl App {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let w = ui.available_width();
-                        let col = (w - 48.0).clamp(280.0, 720.0);
-                        let pad = ((w - col) / 2.0).max(16.0);
+                        // (a compact window: nearly all of it)
+                        let col = (w - 48.0).clamp(280.0f32.min(w - 24.0), 720.0);
+                        let pad = ((w - col) / 2.0).max(if w < 400.0 { 8.0 } else { 16.0 });
                         ui.add_space(24.0);
                         ui.horizontal(|ui| {
                             ui.add_space(pad);
@@ -383,7 +384,12 @@ impl App {
                 FontId::proportional(12.0),
                 if picked { t.on_primary } else { t.text2 },
             );
-            let kind_w = 172.0;
+            // a compact window: a narrower kind button (its label shortens)
+            let kind_w = if self.tier == crate::app::shell::Tier::Compact {
+                112.0
+            } else {
+                172.0
+            };
             let fld = &mut self.data.extra.forms[fi].fields[i];
             let r = ui.add(
                 field(&mut fld.label)
@@ -425,8 +431,13 @@ impl App {
             }
         });
         ui.add_space(4.0);
+        let indent = if self.tier == crate::app::shell::Tier::Compact {
+            20.0
+        } else {
+            52.0
+        };
         ui.horizontal(|ui| {
-            ui.add_space(52.0);
+            ui.add_space(indent);
             let hint = kind_hint(&self.data.extra.forms[fi].fields[i]);
             let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
             line_icon_scaled(ui.painter(), Icon::ArrowRight, r.center(), t.text3, 0.75);

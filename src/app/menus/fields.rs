@@ -63,13 +63,18 @@ impl App {
             .find(|k| k.0 == kind.as_str())
             .map(|k| k.1)
             .unwrap_or("Text");
-        ui.horizontal(|ui| {
+        // (a narrow window puts the type under the name)
+        ui.horizontal_wrapped(|ui| {
             let r = ui.add(
                 field(name)
                     .hint_text(tr("Field name, e.g. Budget"))
-                    .desired_width(240.0),
+                    .desired_width(240.0f32.min(ui.available_width())),
             );
             name_field(&r, "Field name");
+            // (what's left of this row, not the row's whole width)
+            if ui.available_size_before_wrap().x < 160.0 {
+                ui.end_row();
+            }
             let k = egui::ComboBox::from_id_salt("cf_kind")
                 .selected_text(tr(kind_label))
                 .width(150.0)

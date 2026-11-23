@@ -379,6 +379,12 @@ impl App {
             .iter()
             .filter(|x| x.list_id == lid && x.archived)
             .count();
+        // a narrow window shortens the values to the room beside the names
+        let room = if self.tier == crate::app::shell::Tier::Wide {
+            f32::INFINITY
+        } else {
+            (ui.available_width() - 140.0).max(80.0)
+        };
         egui::Grid::new("list_info")
             .num_columns(2)
             .spacing(vec2(24.0, 8.0))
@@ -399,6 +405,11 @@ impl App {
                     ("Archived tasks", archived.to_string()),
                 ] {
                     ui.label(RichText::new(tr(k)).color(t.text2));
+                    let v = if room.is_finite() {
+                        fit_text(ui.painter(), &v, &FontId::proportional(14.0), room)
+                    } else {
+                        v
+                    };
                     ui.label(RichText::new(v).color(t.text));
                     ui.end_row();
                 }

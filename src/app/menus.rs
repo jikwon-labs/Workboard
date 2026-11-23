@@ -469,7 +469,11 @@ impl App {
                     close = true;
                 }
             });
-        let (min_w, max_w) = d.width;
+        // a narrow window: as wide as fits with a margin on each side (the
+        // frame's padding is outside these widths)
+        let room = screen.width() - 16.0 - 2.0 * DIALOG_PAD;
+        let max_w = d.width.1.min(room);
+        let min_w = d.width.0.min(max_w);
         let shown = egui::Window::new(RichText::new(d.name).size(17.0))
             .id(d.id)
             .title_bar(false)
@@ -493,6 +497,9 @@ impl App {
         (close, shown.and_then(|r| r.inner))
     }
 }
+
+/// The dialog frame's padding on each side (`dialog_frame`).
+const DIALOG_PAD: f32 = 20.0;
 
 pub(super) fn modal_window_id(m: &Modal) -> egui::Id {
     egui::Id::new(("modal_window", std::mem::discriminant(m)))
@@ -1511,7 +1518,11 @@ impl App {
                     .max_height(tall)
                     .min_scrolled_height(tall)
                     .show(ui, |ui| {
-                        ui.set_min_width(min_w - 20.0);
+                        // (in a narrow window, the room it has beside its
+                        // scroll bar)
+                        let room = screen.width() - 16.0 - 2.0 * DIALOG_PAD - 24.0;
+                        ui.set_max_width(ui.available_width().min(room));
+                        ui.set_min_width((min_w - 20.0).min(room));
                         close |= app.modal_body(ui, &t, &mut modal);
                     });
             } else {

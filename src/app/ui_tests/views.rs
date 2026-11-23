@@ -516,8 +516,8 @@ fn property_columns_never_squeeze_the_name_away() {
 
 #[test]
 fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
-    let mut h = Ui1::sized(900.0, 560.0);
-    let page = Rect::from_min_max(pos2(320.0, 0.0), pos2(900.0, 560.0));
+    let mut h = Ui1::sized(960.0, 560.0);
+    let page = Rect::from_min_max(pos2(320.0, 0.0), pos2(960.0, 560.0));
     // columns: the name keeps its room, the property cells start after it
     let row = h.rect("Task Write copy for landing page");
     let due = h.rect("Due date of Write copy for landing page");
@@ -594,7 +594,7 @@ fn narrow_window_list_header_toolbar_and_columns_do_not_overlap() {
 
 #[test]
 fn task_names_use_the_room_up_to_the_columns() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     let row = h.rect("Task Write copy for landing page");
     let cols = crate::app::shell::col_layout(row, &h.app.prefs.hidden_cols, true);
     assert!(

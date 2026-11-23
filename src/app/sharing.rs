@@ -314,11 +314,18 @@ impl App {
                     .member(p.member)
                     .map(|m| m.shown().to_string())
                     .unwrap_or_else(|| p.member.to_string());
+                // a narrow window: the name on its own line above the choices
+                let own_line = ui.available_width() < 380.0;
+                if own_line {
+                    ui.add(egui::Label::new(RichText::new(&name)).truncate());
+                }
                 ui.horizontal(|ui| {
-                    ui.add_sized(
-                        [130.0, 20.0],
-                        egui::Label::new(RichText::new(&name)).truncate(),
-                    );
+                    if !own_line {
+                        ui.add_sized(
+                            [130.0, 20.0],
+                            egui::Label::new(RichText::new(&name)).truncate(),
+                        );
+                    }
                     let now = Level::parse(&p.level);
                     for l in Level::ALL {
                         let r = ui

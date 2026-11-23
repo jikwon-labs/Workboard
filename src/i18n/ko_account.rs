@@ -59,6 +59,7 @@ pub const T: &[(&str, &str)] = &[
     ("you@company.com", "이메일 주소"),
     ("Forgot password?", "비밀번호를 잊으셨나요?"),
     ("XXXX-XXXX-XXXX, or paste the invite link", "XXXX-XXXX-XXXX 또는 초대 링크 붙여넣기"),
+    ("XXXX-XXXX-XXXX", "XXXX-XXXX-XXXX"),
     ("the email you were invited with", "초대받은 이메일"),
     ("Choose a password", "비밀번호 정하기"),
     ("at least {} characters", "{}자 이상"),

@@ -28,7 +28,7 @@ fn open_meetings(h: &mut Ui1) {
 /// the page scrolls to them and they take typing.
 #[test]
 fn meeting_notes_scroll_into_reach_with_many_attendees() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     many_people(&mut h);
     open_meetings(&mut h);
     h.click("Add a meeting");

@@ -1892,7 +1892,7 @@ fn a_board_card_counts_its_notes_and_shapes() {
 /// the zoom bar instead of running under it.
 #[test]
 fn the_name_bar_stays_clear_of_the_zoom_bar_in_a_small_window() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     let wid = template_board(&mut h, "Flow Chart");
     h.app
         .data
@@ -1983,7 +1983,7 @@ fn a_new_note_takes_the_typing() {
 #[test]
 fn the_tool_options_bar_stays_on_the_page_in_a_small_window() {
     for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
-        let mut h = Ui1::sized(900.0, 560.0);
+        let mut h = Ui1::sized(960.0, 560.0);
         template_board(&mut h, "Flow Chart");
         crate::i18n::set_lang(lang);
         for tool in [

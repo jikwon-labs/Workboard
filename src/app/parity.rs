@@ -190,11 +190,29 @@ impl App {
     // ---------------------------------------------------------------- shortcuts
 
     /// Single-key shortcuts (only while no text field has focus):
-    /// T new task, R reminder, N or P notepad, Cmd+\ sidebar, Cmd+[ / ] history.
+    /// T new task, R reminder, N or P notepad, Cmd+\ (Ctrl+Cmd+S) sidebar,
+    /// Cmd+[ / ] history.
     /// The mouse's back / forward buttons also move through the history.
     pub(super) fn single_key_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Backslash)) {
-            self.sidebar_collapsed = !self.sidebar_collapsed;
+            self.toggle_sidebar();
+        }
+        // Ctrl+Cmd+S, the Mac's usual Show / Hide Sidebar (not with Option:
+        // Ctrl+Option+Cmd+S takes a snapshot)
+        if cfg!(target_os = "macos")
+            && ctx.input_mut(|i| {
+                // the key's own modifiers (the frame's are not set in tests)
+                let hit = i.events.iter().any(|e| {
+                matches!(e, egui::Event::Key { key: egui::Key::S, pressed: true, modifiers: m, .. }
+                        if m.ctrl && m.mac_cmd && !m.alt && !m.shift)
+            });
+                hit && i.consume_key(
+                    egui::Modifiers::CTRL | egui::Modifiers::MAC_CMD,
+                    egui::Key::S,
+                )
+            })
+        {
+            self.toggle_sidebar();
         }
         // Cmd+, Settings
         if self.modal.is_none()
@@ -217,7 +235,9 @@ impl App {
                 )
             });
             if back {
-                self.go_back();
+                if !self.compact_back_or_not() {
+                    self.go_back();
+                }
                 return;
             }
             if fwd {
@@ -234,9 +254,12 @@ impl App {
         {
             return;
         }
-        // Cmd+[ / Cmd+]: back / forward, like the top bar arrows
+        // Cmd+[ / Cmd+]: back / forward, like the top bar arrows (in a
+        // compact window, its back button)
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::OpenBracket)) {
-            self.go_back();
+            if !self.compact_back_or_not() {
+                self.go_back();
+            }
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::CloseBracket)) {

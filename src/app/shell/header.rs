@@ -321,6 +321,8 @@ impl App {
             self.level_note(ui, &t, self.loc_level(self.loc));
             self.archived_note(ui, &t);
             let right_start = ui.max_rect().right();
+            // a compact window: the buttons show their icons only (named on hover)
+            let icons_only = self.tier == Tier::Compact;
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let hb = |ui: &mut Ui, text: &str| -> Response {
@@ -337,21 +339,29 @@ impl App {
                     );
                     let w = if label.is_empty() {
                         40.0
+                    } else if icons_only {
+                        28.0
                     } else {
                         g.size().x + 32.0
                     };
                     let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
                     name_it(&resp, if label.is_empty() { "Huddle" } else { label });
+                    let resp = if icons_only && !label.is_empty() {
+                        resp.on_hover_text(tr(label))
+                    } else {
+                        resp
+                    };
                     if resp.hovered() {
                         ui.painter().rect_filled(r, 6.0, t.hover);
                     }
-                    line_icon(
-                        ui.painter(),
-                        kind,
-                        r.left_center() + vec2(12.0, 0.0),
-                        t.text2,
-                    );
-                    if label.is_empty() {
+                    let at = if icons_only && !label.is_empty() {
+                        r.center()
+                    } else {
+                        r.left_center() + vec2(12.0, 0.0)
+                    };
+                    line_icon(ui.painter(), kind, at, t.text2);
+                    if icons_only && !label.is_empty() {
+                    } else if label.is_empty() {
                         let cv = r.right_center() - vec2(9.0, 1.0);
                         ui.painter().line_segment(
                             [cv + vec2(-3.0, -1.5), cv + vec2(0.0, 1.5)],
@@ -376,7 +386,7 @@ impl App {
                         ui,
                         &t,
                         Icon::Dots,
-                        tr("Manage"),
+                        if icons_only { "" } else { tr("Manage") },
                         "Manage",
                         false,
                         0.0,
@@ -638,7 +648,9 @@ impl App {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(16, 8))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                // a compact window: the right-hand chips go on a second row
+                let two_rows = self.tier == Tier::Compact;
+                let row = |ui: &mut Ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     // full chip labels, and whether they all fit in one row; if
                     // not (a narrow window) the chips show only their icon
@@ -780,6 +792,9 @@ impl App {
                         if self.fields_open {
                             self.fields_panel(ui.ctx(), cr.rect.bottom() + 6.0);
                         }
+                    }
+                    if two_rows {
+                        ui.end_row();
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
@@ -957,7 +972,12 @@ impl App {
                             }
                         });
                     });
-                });
+                };
+                if two_rows {
+                    ui.horizontal_wrapped(row);
+                } else {
+                    ui.horizontal(row);
+                }
             });
     }
 }

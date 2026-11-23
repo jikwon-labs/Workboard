@@ -283,7 +283,7 @@ fn work_together_in_a_shared_folder_says_how_teammates_join_and_keeps_the_path_o
 
 #[test]
 fn work_together_fits_a_small_window_and_scrolls() {
-    let mut h = Ui1::sized(900.0, 560.0);
+    let mut h = Ui1::sized(960.0, 560.0);
     h.click("Workspace menu");
     h.click("Work together");
     assert!(matches!(h.app.modal, Some(Modal::Together { .. })));
@@ -1283,7 +1283,7 @@ fn work_together_shows_a_code_that_signs_a_phone_in_as_me() {
 /// people, not under a row that holds the button alone.
 #[test]
 fn settings_people_puts_the_line_beside_invite() {
-    for (w, hh) in [(1440.0, 900.0), (900.0, 560.0)] {
+    for (w, hh) in [(1440.0, 900.0), (960.0, 560.0)] {
         let mut h = Ui1::sized(w, hh);
         h.app.open_settings("People");
         h.settle();

@@ -158,7 +158,7 @@ impl App {
                 };
                 ui.label(RichText::new(status).small().color(t.text3));
                 ui.add_space(4.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let shown = self.sync_rt.phone_code_shown;
                     let toggle = ui.add_enabled(
                         code.is_some(),

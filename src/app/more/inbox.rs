@@ -94,19 +94,28 @@ impl App {
             if resp.hovered() && !sel {
                 ui.painter().rect_filled(r.shrink(4.0), 6.0, t.hover);
             }
-            line_icon(
-                ui.painter(),
-                *icon,
-                r.left_center() + vec2(26.0, 0.0),
-                if sel { t.text } else { t.text2 },
-            );
-            ui.painter().text(
-                r.left_center() + vec2(44.0, 0.0),
-                Align2::LEFT_CENTER,
-                tr(label),
-                FontId::proportional(15.0),
-                if sel { t.text } else { t.text2 },
-            );
+            let color = if sel { t.text } else { t.text2 };
+            if tw >= 120.0 {
+                line_icon(
+                    ui.painter(),
+                    *icon,
+                    r.left_center() + vec2(26.0, 0.0),
+                    color,
+                );
+                ui.painter().text(
+                    r.left_center() + vec2(44.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    tr(label),
+                    FontId::proportional(15.0),
+                    color,
+                );
+            } else {
+                // a compact window: the word alone, in the middle
+                let font = FontId::proportional(14.0);
+                let fit = fit_text(ui.painter(), tr(label), &font, tw - 10.0);
+                ui.painter()
+                    .text(r.center(), Align2::CENTER_CENTER, fit, font, color);
+            }
             if sel {
                 ui.painter().rect_filled(
                     Rect::from_min_max(

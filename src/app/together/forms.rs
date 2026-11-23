@@ -323,7 +323,8 @@ impl App {
             form.mode = modes[0];
         }
         if modes.len() > 1 {
-            ui.horizontal(|ui| {
+            // (they wrap in a narrow window instead of widening it)
+            ui.horizontal_wrapped(|ui| {
                 for m in modes {
                     let label = match m {
                         Mode::Account => "Email and password",
@@ -414,13 +415,13 @@ impl App {
                 }
             }
             Mode::Invite => {
-                field(
-                    ui,
-                    &mut form.code,
-                    "Invite code",
-                    "XXXX-XXXX-XXXX, or paste the invite link",
-                    false,
-                );
+                // a narrow box: the code's shape alone
+                let hint = if ui.available_width() < 340.0 {
+                    "XXXX-XXXX-XXXX"
+                } else {
+                    "XXXX-XXXX-XXXX, or paste the invite link"
+                };
+                field(ui, &mut form.code, "Invite code", hint, false);
                 // a pasted link (or a whole invite mail) fills in everything it has
                 if form.code.contains("workboard://") {
                     let j = wb_net::parse_join(&form.code);
@@ -628,15 +629,21 @@ impl App {
     pub(super) fn account_section(&mut self, ui: &mut Ui, t: &Theme) {
         ui.label(RichText::new(tr("Your account")).strong());
         let mut form = std::mem::take(&mut self.sync_rt.acct);
+        // a compact window: a narrower column of names
+        let label_w = if self.tier == crate::app::shell::Tier::Compact {
+            96.0
+        } else {
+            130.0
+        };
         let field = |ui: &mut Ui, text: &mut String, label: &str, secret: bool| {
             ui.horizontal(|ui| {
                 // names start at one left edge (add_sized centred them), and
                 // the field takes the rest of the row
                 ui.allocate_ui_with_layout(
-                    vec2(130.0, CONTROL_H),
+                    vec2(label_w, CONTROL_H),
                     Layout::left_to_right(Align::Center),
                     |ui| {
-                        ui.set_min_width(130.0);
+                        ui.set_min_width(label_w);
                         ui.label(RichText::new(tr(label)).color(t.text2));
                     },
                 );
@@ -654,7 +661,7 @@ impl App {
         let mut send = None;
         match self.sync_rt.account.clone() {
             Some(email) => {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new(crate::i18n::particles(&trf!(
                             "You sign in with {} on your other computers and phones.",

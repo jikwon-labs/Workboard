@@ -207,9 +207,16 @@ impl App {
                 // window; the seven days share what is left exactly
                 let left_w = (avail.width() * 0.26).clamp(170.0, 260.0);
                 let mut dropped: Option<(u64, Option<NaiveDate>)> = None;
-                // a day with many tasks (overdue ones pile up on today) scrolls
-                egui::ScrollArea::vertical()
-                    .id_salt("planner_week")
+                // a day with many tasks (overdue ones pile up on today)
+                // scrolls; in a narrow window the days keep a readable width
+                // and the week scrolls sideways too
+                let narrow = self.tier != super::shell::Tier::Wide;
+                let area = if narrow {
+                    egui::ScrollArea::both()
+                } else {
+                    egui::ScrollArea::vertical()
+                };
+                area.id_salt("planner_week")
                     .auto_shrink([false, false])
                     .drag_to_scroll(false)
                     .show(ui, |ui| {
@@ -273,7 +280,8 @@ impl App {
                     });
                     // week columns: equal parts of the rest, gaps included
                     let gap = ui.spacing().item_spacing.x;
-                    let col_w = ((ui.available_width() - 7.0 * gap) / 7.0).floor().max(60.0);
+                    let least = if narrow { 110.0 } else { 60.0 };
+                    let col_w = ((ui.available_width() - 7.0 * gap) / 7.0).floor().max(least);
                     for i in 0..7 {
                         let d = week + Duration::days(i);
                         ui.vertical(|ui| {
@@ -808,15 +816,18 @@ impl App {
                                             r.request_focus();
                                         }
                                     } else {
-                                        ui.label(
-                                            RichText::new(if cards[ci].title.is_empty() {
+                                        // shortened before the four buttons at the right
+                                        let shown = fit_text(
+                                            ui.painter(),
+                                            if cards[ci].title.is_empty() {
                                                 tr(&title)
                                             } else {
                                                 &title
-                                            })
-                                            .size(14.5)
-                                            .strong(),
+                                            },
+                                            &FontId::proportional(14.5),
+                                            (ui.available_width() - 120.0).max(40.0),
                                         );
+                                        ui.label(RichText::new(shown).size(14.5).strong());
                                     }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         for (glyph, what, code, on) in [

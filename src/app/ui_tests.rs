@@ -27,6 +27,7 @@ mod look;
 mod media;
 mod meetings;
 mod mini;
+mod narrow;
 mod navigation;
 mod notify_settings;
 mod people;

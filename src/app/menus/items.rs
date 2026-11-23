@@ -227,7 +227,7 @@ impl App {
             .unwrap_or_else(|| tr("Choose a task").into());
         egui::ComboBox::from_id_salt("tt_task")
             .selected_text(cur)
-            .width(380.0)
+            .width(380.0f32.min(ui.available_width()))
             .show_ui(ui, |ui| {
                 for (id, n) in &tasks {
                     ui.selectable_value(task, *id, n);

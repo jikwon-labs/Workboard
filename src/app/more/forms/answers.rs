@@ -42,7 +42,9 @@ impl App {
                                 bottom: 40,
                             })
                             .show(ui, |ui| {
-                                ui.horizontal(|ui| {
+                                // a compact window: the button under the count
+                                let compact = self.tier == crate::app::shell::Tier::Compact;
+                                let head = |ui: &mut Ui| {
                                     ui.vertical(|ui| {
                                         ui.label(
                                             RichText::new(if tasks.len() == 1 {
@@ -62,14 +64,25 @@ impl App {
                                         ui.label(RichText::new(sub).size(13.0).color(t.text2));
                                     });
                                     if self.data.space_of_list(f.list_id).is_some() {
-                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        let side = if self.tier == crate::app::shell::Tier::Compact {
+                                            ui.add_space(6.0);
+                                            Layout::left_to_right(Align::Min)
+                                        } else {
+                                            Layout::right_to_left(Align::Center)
+                                        };
+                                        ui.with_layout(side, |ui| {
                                             let label = trf!("Open {}", self.data.list_name(f.list_id));
                                             if icon_button(ui, &t, Icon::List, &label, "Open the form's List", true).clicked() {
                                                 self.actions.push(Action::Go(Location::List(f.list_id)));
                                             }
                                         });
                                     }
-                                });
+                                };
+                                if compact {
+                                    ui.vertical(head);
+                                } else {
+                                    ui.horizontal(head);
+                                }
                                 ui.add_space(14.0);
                                 if tasks.is_empty() {
                                     self.form_no_answers(ui, &t);

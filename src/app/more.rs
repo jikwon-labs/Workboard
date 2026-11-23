@@ -204,9 +204,19 @@ impl App {
                 let (hr, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
                 // column starts as parts of the width; the last 108 px are the
                 // Remove or Cancel invite button, so a small window narrows the columns instead
-                let (ex, rx, sx) = (0.3, 0.52, 0.68);
+                // a compact window: Name and Role only (Email and Status
+                // have no room)
+                let compact = self.tier == super::shell::Tier::Compact;
+                let (ex, rx, sx) = if compact {
+                    (0.42, 0.42, ((w - 108.0) / w).max(0.43))
+                } else {
+                    (0.3, 0.52, 0.68)
+                };
                 let col_w = |from: f32, to: f32| w * (to - from) - 16.0;
                 for (x, h) in [(0.0, "Name"), (ex, "Email"), (rx, "Role"), (sx, "Status")] {
+                    if compact && (h == "Email" || h == "Status") {
+                        continue;
+                    }
                     ui.painter().text(pos2(hr.left() + w * x + 8.0, hr.center().y), Align2::LEFT_CENTER, tr(h), FontId::proportional(13.0), t.text2);
                 }
                 ui.painter().hline(hr.x_range(), hr.bottom(), Stroke::new(1.0_f32, t.border));
@@ -231,7 +241,9 @@ impl App {
                     if !sub.is_empty() {
                         paint_fit(ui, pos2(r.left() + 44.0, r.center().y + 9.0), Align2::LEFT_CENTER, &sub, FontId::proportional(12.0), t.text3, name_w);
                     }
-                    paint_fit(ui, pos2(r.left() + w * ex + 8.0, r.center().y), Align2::LEFT_CENTER, if m.email.is_empty() { "-" } else { &m.email }, FontId::proportional(13.5), t.text2, col_w(ex, rx));
+                    if !compact {
+                        paint_fit(ui, pos2(r.left() + w * ex + 8.0, r.center().y), Align2::LEFT_CENTER, if m.email.is_empty() { "-" } else { &m.email }, FontId::proportional(13.5), t.text2, col_w(ex, rx));
+                    }
                     let role_w = w * (sx - rx) - 8.0;
                     let role_rect = Rect::from_min_size(pos2(r.left() + w * rx, r.center().y - 13.0), vec2(role_w, 26.0));
                     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(role_rect).layout(Layout::left_to_right(Align::Center)));
@@ -258,7 +270,9 @@ impl App {
                     }
                     let (st, col) = if m.invited { ("Invited", WARN_ORANGE) } else { ("Active", Color32::from_rgb(41, 151, 100)) };
                     let st = if st == "Active" { crate::i18n::tr_ctx("Active (member)", st) } else { tr(st) };
-                    paint_fit(ui, pos2(r.left() + w * sx + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col, w * (1.0 - sx) - 8.0 - 108.0);
+                    if !compact {
+                        paint_fit(ui, pos2(r.left() + w * sx + 8.0, r.center().y), Align2::LEFT_CENTER, st, FontId::proportional(13.0), col, w * (1.0 - sx) - 8.0 - 108.0);
+                    }
                     if m.id != me && m.role != MemberRole::Owner && manages {
                         let br = Rect::from_min_size(pos2(r.right() - 80.0, r.center().y - 12.0), vec2(72.0, 24.0));
                         // someone who hasn't joined yet has an invite to take back

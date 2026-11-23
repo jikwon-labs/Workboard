@@ -166,7 +166,8 @@ impl App {
                     // the system font: in the monospace font the Shift
                     // arrow came from a fallback and was drawn tiny
                     ui.label(RichText::new(crate::os::keys(tr(k))).strong());
-                    ui.label(tr(d));
+                    // wraps in a narrow window instead of running off it
+                    ui.add(egui::Label::new(tr(d)).wrap());
                     ui.end_row();
                 }
             });

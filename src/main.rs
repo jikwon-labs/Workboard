@@ -21,6 +21,7 @@ mod theme;
 mod timefmt;
 mod updater;
 mod widgets;
+mod winstate;
 
 use std::path::PathBuf;
 
@@ -40,25 +41,44 @@ fn window_icon() -> egui::IconData {
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let mut screenshot: Option<PathBuf> = None;
+    // --size 400x700: the window's size at start (to look at narrow layouts)
+    let mut size = winstate::DEFAULT_SIZE;
+    let mut size_given = false;
     let mut i = 1;
     while i < args.len() {
         if args[i] == "--screenshot" && i + 1 < args.len() {
             screenshot = Some(PathBuf::from(&args[i + 1]));
             i += 1;
+        } else if args[i] == "--size" && i + 1 < args.len() {
+            if let Some((w, h)) = args[i + 1].split_once('x') {
+                if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                    size = [w, h];
+                    size_given = true;
+                }
+            }
+            i += 1;
         }
         i += 1;
     }
     let shot = screenshot.is_some();
+    // as it was left last time (not for screenshots, which keep one size)
+    let kept = (!shot && !size_given).then(winstate::load).flatten();
+    if let Some(k) = kept {
+        size = [k.w, k.h];
+    }
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Workboard")
         .with_icon(window_icon())
-        .with_inner_size([1440.0, 900.0])
-        .with_min_inner_size([900.0, 560.0])
+        .with_inner_size(size)
+        .with_min_inner_size(winstate::MIN_SIZE)
         // like the original: no separate title bar, window buttons sit in the header
         .with_fullsize_content_view(true)
         .with_title_shown(false)
         .with_titlebar_shown(false);
+    if let Some(k) = kept {
+        viewport = viewport.with_position([k.x, k.y]);
+    }
     if shot {
         viewport = viewport.with_active(false);
         #[cfg(target_os = "windows")]

@@ -4469,3 +4469,49 @@ fn a_long_author_name_is_shortened_before_the_time() {
         );
     }
 }
+
+/// A long name in the message box's @ list is shortened with "…" inside the
+/// list (it ran past the list's right edge, over the messages behind it).
+#[test]
+fn a_long_name_in_the_mention_list_stays_inside_it() {
+    let long = "Alexandra Konstantinopoulou-Whitfield of the Product Design Team";
+    for (w, hh) in [(1440.0, 900.0), (960.0, 560.0)] {
+        let mut h = Ui1::sized(w, hh);
+        let me = h.app.data.me;
+        h.app
+            .data
+            .members
+            .iter_mut()
+            .find(|m| m.id != me)
+            .unwrap()
+            .name = long.into();
+        let general = h.channel_id("general");
+        h.app.section = Section::Chat;
+        h.app.chat.open = Some(general);
+        h.settle();
+        h.click("Mention someone");
+        let list = h
+            .ctx
+            .memory(|m| m.area_rect(egui::Id::new("chat_mention_popup")))
+            .expect("the @ list is open");
+        let window = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
+        let name: Vec<Rect> = h
+            .texts_in(window, Seen::All)
+            .into_iter()
+            .filter(|(t, r)| {
+                t.starts_with("Alexandra") && (list.top()..=list.bottom()).contains(&r.center().y)
+            })
+            .map(|(_, r)| r)
+            .collect();
+        assert!(!name.is_empty(), "{}: the name is listed", w);
+        for r in name {
+            assert!(
+                r.right() <= list.right() - 4.0,
+                "{}: {:?} past {:?}",
+                w,
+                r,
+                list
+            );
+        }
+    }
+}

@@ -1614,3 +1614,47 @@ fn gantt_toolbar_wraps_in_a_small_window() {
         }
     }
 }
+
+/// A teammate whose name is longer than the Timeline's lane column: the
+/// lane's name is shortened with "…" and keeps clear of its count. It used
+/// to be cut mid-letter by the column and drawn over the count.
+#[test]
+fn timeline_lane_names_are_shortened_clear_of_the_count() {
+    let mut h = Ui1::sized(1440.0, 900.0);
+    let long = "Bartholomew Montgomery-Fitzgerald Worthington";
+    let mut p = h.app.data.members[0].clone();
+    p.id = 9_001;
+    p.name = long.into();
+    p.display_name = String::new();
+    h.app.data.members.push(p);
+    let id = h.task_id("Design new homepage layout");
+    h.app
+        .data
+        .tasks
+        .iter_mut()
+        .find(|x| x.id == id)
+        .unwrap()
+        .assignees = vec![9_001];
+    let list = list_id(&h, "Website Redesign");
+    h.app.loc = Location::List(list);
+    h.app.view = ViewKind::Timeline;
+    h.settle();
+    let lane = h.rect(&format!("Lane {}", long.to_uppercase()));
+    let texts = h.texts_in(lane, Seen::Visible);
+    let name = texts
+        .iter()
+        .find(|(s, _)| s.starts_with("BARTHOLOMEW"))
+        .expect("the lane's name is drawn");
+    assert!(name.0.ends_with('\u{2026}'), "shortened: {:?}", name.0);
+    assert!(
+        name.1.right() <= lane.right(),
+        "inside the column: {name:?}"
+    );
+    assert!(h.cut_texts(lane).is_empty(), "{:?}", h.cut_texts(lane));
+    let over = layout_tests::overlapping(&texts);
+    assert!(over.is_empty(), "{over:?}");
+    assert!(
+        texts.iter().any(|(s, _)| s == "1"),
+        "the count shows: {texts:?}"
+    );
+}

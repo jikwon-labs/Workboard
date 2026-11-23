@@ -288,22 +288,29 @@ impl App {
                                 5.0,
                                 lane.group.color,
                             );
-                            let name = ui.painter().layout_no_wrap(
-                                lane.group.label.clone(),
-                                FontId::proportional(12.5),
-                                t.text,
+                            // a long name is shortened with an ellipsis, so it
+                            // isn't cut mid-letter and leaves the count clear
+                            let count = ui.painter().layout_no_wrap(
+                                lane.bars.len().to_string(),
+                                FontId::proportional(11.5),
+                                t.text3,
                             );
-                            let nw = name.size().x.min(label_w - 70.0);
-                            ui.painter().with_clip_rect(r.shrink(2.0)).galley(
+                            let font = FontId::proportional(12.5);
+                            let room = label_w - 26.0 - 8.0 - count.size().x - 8.0;
+                            let shown = fit_text(ui.painter(), &lane.group.label, &font, room);
+                            if shown != lane.group.label {
+                                resp.on_hover_text(&lane.group.label);
+                            }
+                            let name = ui.painter().layout_no_wrap(shown, font, t.text);
+                            let nw = name.size().x;
+                            ui.painter().galley(
                                 pos2(r.left() + 26.0, cy - name.size().y / 2.0),
                                 name,
                                 t.text,
                             );
-                            ui.painter().text(
-                                pos2(r.left() + 34.0 + nw, cy),
-                                Align2::LEFT_CENTER,
-                                lane.bars.len().to_string(),
-                                FontId::proportional(11.5),
+                            ui.painter().galley(
+                                pos2(r.left() + 34.0 + nw, cy - count.size().y / 2.0),
+                                count,
                                 t.text3,
                             );
                             ui.painter().hline(

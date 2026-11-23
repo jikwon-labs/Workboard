@@ -138,8 +138,11 @@ impl App {
                             // task type label above the title, as in the original
                             taskfields::task_type_pill(ui, &t, win_id, &mut task.milestone);
                             ui.add_space(6.0);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut task.name)
+                            // a long name wraps onto more lines instead of
+                            // being cut at the right; Enter still finishes it
+                            // as it did when the title was one line
+                            let title = ui.add(
+                                egui::TextEdit::multiline(&mut task.name)
                                     .font(FontId::proportional(
                                         if self.tier == super::shell::Tier::Compact {
                                             22.0
@@ -148,8 +151,13 @@ impl App {
                                         },
                                     ))
                                     .frame(false)
+                                    .desired_rows(1)
+                                    .return_key(None)
                                     .desired_width(f32::INFINITY),
                             );
+                            if title.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                title.surrender_focus();
+                            }
                             ui.add_space(10.0);
                             self.task_fields(ui, ctx, t, tid, &mut task, win_id, now, &statuses);
                             ui.add_space(14.0);

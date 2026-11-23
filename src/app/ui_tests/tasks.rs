@@ -2068,3 +2068,39 @@ fn watchers_popup_shortens_a_long_name() {
     assert!(r.right() <= row.right(), "inside the row: {r:?} {row:?}");
     assert!(h.cut_texts(row).is_empty(), "{:?}", h.cut_texts(row));
 }
+
+/// A task name longer than the task window is wide wraps onto more lines
+/// in the window's title. It used to stay on one line, cut mid-letter at
+/// the right with no "…".
+#[test]
+fn task_window_title_wraps_a_long_name() {
+    let long = "A very long task name that goes on and on to see how the task window \
+                shows every word of it when the window is not wide enough";
+    for (w, hh) in [(1440.0, 900.0), (960.0, 560.0), (460.0, 640.0)] {
+        let mut h = Ui1::sized(w, hh);
+        let id = open_design_task(&mut h);
+        h.app
+            .data
+            .tasks
+            .iter_mut()
+            .find(|x| x.id == id)
+            .unwrap()
+            .name = long.into();
+        h.settle();
+        let page = Rect::from_min_size(Pos2::ZERO, h.size);
+        let cut = h.cut_texts(page);
+        assert!(
+            !cut.iter().any(|s| s.starts_with("A very long")),
+            "{w}x{hh}: the title is cut: {cut:?}"
+        );
+        let (r, _) = h.painted_text(long)[0];
+        assert!(r.height() > 40.0, "{w}x{hh}: on more than one line: {r:?}");
+        assert!(r.right() <= w, "{w}x{hh}: inside the window: {r:?}");
+        // Enter finishes the name instead of starting a new line
+        h.click_at(pos2(r.left() + 20.0, r.top() + 10.0));
+        h.key(egui::Key::Enter);
+        h.type_text("x");
+        let name = &task_named(&h, long).name;
+        assert!(!name.contains('\n'), "{w}x{hh}: {name:?}");
+    }
+}

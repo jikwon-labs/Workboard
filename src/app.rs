@@ -3715,10 +3715,33 @@ impl App {
         let rh = 34.0;
         let name_w = 260.0;
         let head = 44.0;
-        ui.horizontal(|ui| {
+        // wraps in a small window: the zoom buttons ran over "without
+        // dates", and at the smallest size everything piled up
+        ui.horizontal_wrapped(|ui| {
             if timebar::zoom_buttons(ui, &mut self.gantt.zoom) {
                 self.gantt.jump = true;
             }
+            let mut right_w = ui.spacing().button_padding.x * 2.0
+                + ui.painter()
+                    .layout_no_wrap(
+                        tr("Export CSV").to_string(),
+                        egui::TextStyle::Button.resolve(ui.style()),
+                        t.text,
+                    )
+                    .size()
+                    .x;
+            if undated > 0 {
+                right_w += ui.spacing().item_spacing.x
+                    + ui.painter()
+                        .layout_no_wrap(
+                            trf!("{} without dates", undated),
+                            egui::TextStyle::Small.resolve(ui.style()),
+                            t.text3,
+                        )
+                        .size()
+                        .x;
+            }
+            crate::widgets::wrap_unless_room(ui, right_w + 12.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
                     .button(tr("Export CSV"))

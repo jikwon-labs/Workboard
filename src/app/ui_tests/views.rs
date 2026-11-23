@@ -1572,3 +1572,45 @@ fn planner_drag_schedules_and_unschedules_a_task() {
     h.settle();
     assert_eq!(due(&h), None, "its date taken off");
 }
+
+/// In a small window the Gantt toolbar wraps: the zoom buttons used to be
+/// drawn over "1 without dates", and at the smallest size Week, Month,
+/// "without dates" and "Export CSV" piled on top of each other.
+#[test]
+fn gantt_toolbar_wraps_in_a_small_window() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        for (w, hh) in [(460.0, 640.0), (360.0, 640.0), (960.0, 560.0)] {
+            let mut h = Ui1::sized(w, hh);
+            let list = list_id(&h, "Website Redesign");
+            h.app.loc = Location::List(list);
+            h.app.view = ViewKind::Gantt;
+            h.settle();
+            crate::i18n::set_lang(lang);
+            h.settle();
+            let undated = trf!("{} without dates", 1);
+            let (chip, _) = h.painted_text(&undated)[0];
+            let mut boxes = vec![("without dates".to_string(), chip)];
+            for name in ["Zoom out", "Zoom in"] {
+                boxes.push((name.to_string(), h.rect(name)));
+            }
+            for name in ["Today", "Day", "Week", "Month", "Export CSV"] {
+                boxes.push((name.to_string(), h.rect(tr(name))));
+            }
+            for (i, (a, ra)) in boxes.iter().enumerate() {
+                assert!(
+                    ra.right() <= w,
+                    "{lang:?} {w}x{hh}: {a} reaches {}",
+                    ra.right()
+                );
+                for (b, rb) in &boxes[i + 1..] {
+                    let o = ra.intersect(*rb);
+                    assert!(
+                        !(o.width() > 0.5 && o.height() > 0.5),
+                        "{lang:?} {w}x{hh}: {a} {ra:?} and {b} {rb:?} overlap"
+                    );
+                }
+            }
+            crate::i18n::set_lang(crate::i18n::Lang::En);
+        }
+    }
+}

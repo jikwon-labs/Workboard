@@ -11,6 +11,7 @@
 
 ## 끝난 일
 
+- [x] **iPad "Workboard Desk" 0.1.25 TestFlight** (2026-11-23, `8dbbfec`): `scripts/ipad-testflight` 로 0.1.25 (1) 을 올렸고 App Store Connect 처리가 끝났다(VALID). 내부 그룹 "Internal" 은 자동 배포라 바로 받는다. 직전 빌드는 0.1.22 였다. iPhone 앱(iPad 에서도 같은 빌드)은 `ios/` 가 그대로라 0.1.24 그대로다.
 - [x] **0.1.25 배포 (Mac, Windows)** (2026-11-23, `ba86362`, 빌드 1079): 채널 안 찾기를 브라우저 찾기창처럼 바꾼 변경(`b544ba8`)이 들어 있다. Mac 은 공증해 업데이트 서버에, Windows 는 Actions 실행 45094828472 의 zip 을 `appcast-windows.xml` 로 올렸다. GitHub Release v0.1.25 에 Mac·Windows zip 을 붙였다. 심볼 원본은 `build/symbols/Workboard-0.1.25-1079`. iPhone 은 `ios/` 가 그대로라 TestFlight 에 내지 않았다(0.1.24 그대로). 그 Windows 실행은 빌드는 성공하고 테스트 2개가 실패했다. 월요일에는 시드 작업의 시작일 줄도 "Today" 라서 날짜 메뉴 대신 그 줄을 잡던 테스트 문제였고(Mac 에서도 같게 실패), 앱 문제가 아니라서 실행 번호를 줘서 올렸다. 테스트는 `36e165a` 로 고쳤다.
 - [x] **AI 도구가 든 새 버전 배포 (Mac, Windows)** (2026-11-21 추가, 2026-11-23 0.1.25 로 끝, `ba86362`): AI 페이지·요약·글쓰기·하위 작업 제안은 새 앱에만 있다. 배포는 요청할 때 `/release` 로 한다. 서버 쪽은 자동 업데이트로 들어가고, Mac mini 에 `ai.json` 을 두어야 켜진다(`docs/macmini/README.md` "AI 켜기"). iPhone 앱에는 아직 AI 도구가 없다(서버의 AI 메시지는 무시한다).
 - [x] **내 앱 주소 바꾸기** (2026-11-21, 사용자 확인): Mac 과 iPhone 에서 서버 주소를 `https://wb.wlrnjs.xyz` 로 (`docs/cloudflare-tunnel.md` "앱에서 주소 바꾸기"). 팀원에게도 알린다.

@@ -1729,21 +1729,31 @@ impl App {
             ui.add_space(4.0);
             ui.label(RichText::new(tr("Channels keep conversations about a topic in one place. Direct messages are for one-on-one talks and calls.")).color(t.text2));
             ui.add_space(18.0);
-            ui.horizontal(|ui| {
-                let w = 170.0 * 2.0 + 150.0 + 16.0;
-                ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
-                let b = ui.add(Tint(primary_btn(&t, tr("#  Create a Channel")).min_size(vec2(170.0, CONTROL_H))));
+            let mut buttons = |ui: &mut Ui, wide: f32, narrow: f32| {
+                let b = ui.add(Tint(primary_btn(&t, tr("#  Create a Channel")).min_size(vec2(wide, CONTROL_H))));
                 name_it(&b, "Create a Channel");
                 if b.clicked() {
                     make = true;
                 }
-                if icon_button_ex(ui, &t, Icon::Send, tr("Message someone"), "Message someone", true, 170.0, t.text, t.text2).clicked() {
+                if icon_button_ex(ui, &t, Icon::Send, tr("Message someone"), "Message someone", true, wide, t.text, t.text2).clicked() {
                     self.new_message_open = true;
                 }
-                if icon_button_ex(ui, &t, Icon::Teams, tr("Work together"), "Work together", true, 150.0, t.text, t.text2).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
+                if icon_button_ex(ui, &t, Icon::Teams, tr("Work together"), "Work together", true, narrow, t.text, t.text2).on_hover_text(tr("Share this workspace so others can chat with you")).clicked() {
                     self.modal = Some(self.together_modal());
                 }
-            });
+            };
+            let w = 170.0 * 2.0 + 150.0 + 16.0;
+            if ui.available_width() >= w {
+                ui.horizontal(|ui| {
+                    ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
+                    buttons(ui, 170.0, 150.0);
+                });
+            } else {
+                // a narrow window: one under another (in a row the last
+                // ran past the window's edge)
+                let bw = (ui.available_width() - 32.0).min(240.0);
+                buttons(ui, bw, bw);
+            }
         });
         if make {
             self.apply_chat(vec![ChatAction::NewChannel("general".into())]);

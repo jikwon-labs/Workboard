@@ -800,3 +800,35 @@ fn channel_find_and_message_chips_keep_the_channel_inside() {
         }
     }
 }
+
+/// Chat with no conversation yet: its three buttons fit the window, one
+/// under another when a row has no room (the third was cut by the edge).
+#[test]
+fn chat_without_channels_fits_its_buttons() {
+    for lang in [Lang::En, Lang::Ko] {
+        for (w, hh) in WIDTHS {
+            let mut h = Ui1::sized(w, hh);
+            set_lang(lang);
+            h.app.data.channels.clear();
+            h.app.section = Section::Chat;
+            h.app.chat.open = None;
+            h.settle();
+            let what = format!("{:?} {}", lang, w);
+            let past = h.past_right_edge();
+            let cut = h.cut_texts(Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2()));
+            let names = ["Create a Channel", "Message someone", "Work together"];
+            let rects: Vec<Rect> = names.iter().map(|n| h.rect(n)).collect();
+            set_lang(Lang::En);
+            assert!(past.is_empty(), "{}: past the right edge {:?}", what, past);
+            assert!(cut.is_empty(), "{}: cut {:?}", what, cut);
+            for (n, r) in names.iter().zip(&rects) {
+                assert!(r.left() >= 0.0 && r.right() <= w, "{}: {} {:?}", what, n, r);
+            }
+            for i in 0..rects.len() {
+                for j in i + 1..rects.len() {
+                    assert!(!rects[i].intersects(rects[j]), "{}: {:?}", what, rects);
+                }
+            }
+        }
+    }
+}

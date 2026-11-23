@@ -991,12 +991,16 @@ fn the_ai_page_closes_with_its_button_or_escape() {
     h.click("Rail AI");
     assert_eq!(h.app.section, Section::Ai);
     h.click("Close AI");
-    assert_eq!(h.app.section, Section::Home, "the X goes back home");
+    assert_eq!(
+        h.app.section,
+        Section::Planner,
+        "the X goes back to the page it was opened from"
+    );
 
     h.click("Rail AI");
     assert_eq!(h.app.section, Section::Ai);
     h.key(egui::Key::Escape);
-    assert_eq!(h.app.section, Section::Home, "Esc does the same");
+    assert_eq!(h.app.section, Section::Planner, "Esc does the same");
 }
 
 #[test]

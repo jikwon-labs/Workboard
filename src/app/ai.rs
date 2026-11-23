@@ -1270,7 +1270,12 @@ impl App {
             && ui.input(|i| i.key_pressed(egui::Key::Escape))
             && !ui.memory(|m| m.has_focus(egui::Id::new(AI_BOX)));
         if close {
-            self.section = Section::Home;
+            // back to the page the AI page was opened from, like the Back arrow
+            self.go_back();
+            if self.section == Section::Ai {
+                // nothing before it in the history
+                self.section = Section::Home;
+            }
         }
     }
 

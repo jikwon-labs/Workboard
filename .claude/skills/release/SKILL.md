@@ -38,7 +38,9 @@ release 빌드 캐시와 Sparkle 을 main 체크아웃에서 복제해 온다(�
     NOTARIZE=1 scripts/bundle.sh
 
 - 공증에 몇 분 걸린다. 백그라운드로 돌리고 끝나면 이어 간다.
-- 결과: `build/Workboard-<버전>-arm64.zip`. 공증 실패면 멈추고 오류를 보고한다. `ALLOW_UNNOTARIZED=1` 은 사용자가 시험용이라고 할 때만.
+- 결과: `build/Workboard-<버전>-arm64.zip`, 심볼 있는 원본 `build/symbols/Workboard-<버전>-<빌드>`.
+- 심볼 원본은 바로 main 체크아웃에 복사해 둔다: `mkdir -p "$MAIN/build/symbols" && cp build/symbols/Workboard-<버전>-* "$MAIN/build/symbols/"`. 워크트리를 지우면 함께 사라지고, 다시 빌드해도 UUID 가 달라 충돌 보고서를 읽을 수 없다.
+- 공증 실패면 멈추고 오류를 보고한다. `ALLOW_UNNOTARIZED=1` 은 사용자가 시험용이라고 할 때만.
 
 ## 4. 업데이트 서버에 올리기
 

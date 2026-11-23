@@ -3153,11 +3153,11 @@ impl App {
                 let mut insert: Option<String> = None;
                 ui.horizontal(|ui| {
                     let gap = ui.spacing().item_spacing.x;
-                    // room for all eight squares and, at the right, Send with
+                    // room for all nine squares and, at the right, Send with
                     // its arrow. A narrower box leaves out B, I, S and </>:
                     // their shortcuts and typed marks still work.
                     let side = crate::widgets::CONTROL_H;
-                    let room = 8.0 * side + 7.0 * TOOL_GAP + 2.0 * gap + SEND_D + 1.0 + ARROW_W;
+                    let room = 9.0 * side + 8.0 * TOOL_GAP + 2.0 * gap + SEND_D + 1.0 + ARROW_W;
                     let formats = ui.available_width() >= room;
                     ui.spacing_mut().item_spacing.x = TOOL_GAP;
                     let tool = |ui: &mut Ui, g: &str, tip: &str| {
@@ -3175,6 +3175,13 @@ impl App {
                     };
                     if tool(ui, "+", "Add files").clicked() {
                         self.pick_media(false);
+                    }
+                    // a photo from the camera, into this box (photo.rs)
+                    if icon_button(ui, &t, Icon::Camera, "", "Take a photo", false)
+                        .on_hover_text(tr("Take a photo"))
+                        .clicked()
+                    {
+                        self.open_camera(false);
                     }
                     let at = tool(ui, "@", "Mention someone");
                     let me = self.data.me;

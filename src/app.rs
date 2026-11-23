@@ -45,6 +45,7 @@ mod notify;
 mod notify_tests;
 mod pages;
 mod parity;
+mod photo;
 mod profile;
 mod push;
 mod schedule;
@@ -636,6 +637,8 @@ pub struct App {
     /// a delete asked of the team server, waiting for its answer
     deleting_ws: Option<delete_ws::DeletingWs>,
     huddle: huddle::HuddleRt,
+    /// The camera while Take a photo is open (photo.rs).
+    photo: photo::PhotoRt,
     /// The small window that stays above other apps (mini.rs).
     mini: mini::MiniUi,
     notify_rt: notify::NotifyRt,
@@ -1284,6 +1287,7 @@ impl App {
             making_ws: None,
             deleting_ws: None,
             huddle: Default::default(),
+            photo: Default::default(),
             mini: Default::default(),
             notify_rt: Default::default(),
             watch_rt: Default::default(),

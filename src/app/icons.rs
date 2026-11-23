@@ -31,6 +31,7 @@ pub(crate) enum Icon {
     Upgrade,
     CheckPlus,
     Video,
+    Camera,
     Mic,
     Phone,
     Robot,
@@ -153,6 +154,7 @@ impl Icon {
         Icon::Upgrade,
         Icon::CheckPlus,
         Icon::Video,
+        Icon::Camera,
         Icon::Mic,
         Icon::Phone,
         Icon::Robot,
@@ -275,6 +277,7 @@ impl Icon {
             "upgrade" => Icon::Upgrade,
             "check_plus" => Icon::CheckPlus,
             "video" => Icon::Video,
+            "camera" => Icon::Camera,
             "mic" => Icon::Mic,
             "phone" => Icon::Phone,
             "robot" => Icon::Robot,
@@ -398,6 +401,7 @@ impl Icon {
             Icon::Upgrade => "upgrade",
             Icon::CheckPlus => "check_plus",
             Icon::Video => "video",
+            Icon::Camera => "camera",
             Icon::Mic => "mic",
             Icon::Phone => "phone",
             Icon::Robot => "robot",
@@ -1035,6 +1039,21 @@ pub(crate) fn line_icon(p: &egui::Painter, kind: Icon, c: Pos2, color: Color32) 
                 c + vec2(4.0, 1.5),
             ];
             p.add(egui::Shape::line(pts, s));
+        }
+        Icon::Camera => {
+            // a body with the viewfinder's bump on top, and the lens
+            let pts = vec![
+                c + vec2(-7.5, -3.5),
+                c + vec2(-3.5, -3.5),
+                c + vec2(-2.0, -6.0),
+                c + vec2(2.0, -6.0),
+                c + vec2(3.5, -3.5),
+                c + vec2(7.5, -3.5),
+                c + vec2(7.5, 6.5),
+                c + vec2(-7.5, 6.5),
+            ];
+            p.add(egui::Shape::closed_line(pts, s));
+            p.circle_stroke(c + vec2(0.0, 1.5), 3.0, s);
         }
         Icon::Mic => {
             p.rect_stroke(

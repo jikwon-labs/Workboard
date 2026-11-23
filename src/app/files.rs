@@ -492,13 +492,29 @@ impl Files {
 
     /// Start checking and copying a file (or pasted PNG) for the message box.
     pub fn add(&mut self, path: Option<PathBuf>, png: Option<Vec<u8>>, remote: &Remote) -> Pending {
-        let local = self.next_local;
-        self.next_local += 1;
         let name = path
             .as_ref()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "Pasted image.png".into());
+        self.add_named(path, png, name, remote)
+    }
+
+    /// Start checking and copying a file made here (a photo from the
+    /// camera) under `name`, whose ending says what it is.
+    pub fn add_bytes(&mut self, bytes: Vec<u8>, name: &str, remote: &Remote) -> Pending {
+        self.add_named(None, Some(bytes), name.to_string(), remote)
+    }
+
+    fn add_named(
+        &mut self,
+        path: Option<PathBuf>,
+        png: Option<Vec<u8>>,
+        name: String,
+        remote: &Remote,
+    ) -> Pending {
+        let local = self.next_local;
+        self.next_local += 1;
         let folder = match remote {
             Remote::Folder(f) => Some(f.join("files")),
             _ => None,
@@ -1332,7 +1348,12 @@ fn prepare(
         (Some(p), _) => (p.to_path_buf(), None),
         (None, Some(bytes)) => {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-            let t = dir.join(format!(".paste-{:x}.png", wb_sync::random_u64()));
+            // a pasted PNG, or a photo kept as a BMP (made a JPEG below)
+            let ext = Path::new(name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("png");
+            let t = dir.join(format!(".paste-{:x}.{}", wb_sync::random_u64(), ext));
             std::fs::write(&t, bytes).map_err(|e| e.to_string())?;
             (t.clone(), Some(t))
         }
@@ -1654,6 +1675,9 @@ impl App {
                     match &result {
                         Ok(a) => {
                             self.files.upload(a, &remote);
+                            // under the name it goes by (a photo's BMP, a
+                            // HEIC: now a JPEG)
+                            p.name = a.name.clone();
                             p.att = Some(a.clone());
                         }
                         Err(e) => p.error = Some(e.clone()),
@@ -1937,6 +1961,20 @@ impl App {
         path: Option<PathBuf>,
         png: Option<Vec<u8>>,
     ) -> bool {
+        self.add_to_box(thread, |files, remote| files.add(path, png, remote))
+    }
+
+    /// Put a photo taken here (BMP bytes, see media::bmp_from_rgba) in a
+    /// message box as `name`; it goes as a JPEG.
+    pub(super) fn add_photo(&mut self, thread: bool, bmp: Vec<u8>, name: &str) -> bool {
+        self.add_to_box(thread, |files, remote| files.add_bytes(bmp, name, remote))
+    }
+
+    fn add_to_box(
+        &mut self,
+        thread: bool,
+        add: impl FnOnce(&mut Files, &Remote) -> Pending,
+    ) -> bool {
         let count = self.chat.composer(thread).files.len();
         if count >= MAX_PER_MESSAGE {
             self.toast(trf!(
@@ -1946,7 +1984,7 @@ impl App {
             return false;
         }
         let remote = self.media_remote();
-        let p = self.files.add(path, png, &remote);
+        let p = add(&mut self.files, &remote);
         self.chat.composer_mut(thread).files.push(p);
         true
     }

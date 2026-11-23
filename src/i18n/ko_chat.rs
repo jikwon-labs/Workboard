@@ -177,6 +177,13 @@ pub const T: &[(&str, &str)] = &[
     ("Sent", "보냈습니다"),
     ("Send now", "지금 보내기"),
     ("Messages you schedule show up here until they are sent.", "예약한 메시지가 보내지기 전까지 여기에 나옵니다."),
+    // a photo from the camera (photo.rs)
+    ("Take a photo", "사진 찍기"),
+    ("Take photo", "촬영"),
+    ("Starting the camera...", "카메라를 켜는 중..."),
+    ("The camera stopped.", "카메라가 멈췄습니다."),
+    ("Workboard isn't allowed to use the camera. Turn it on in System Settings > Privacy & Security > Camera.", "Workboard가 카메라를 쓸 수 없습니다. 시스템 설정 > 개인정보 보호 및 보안 > 카메라에서 켜 주세요."),
+    ("No camera found on this computer.", "이 컴퓨터에서 카메라를 찾지 못했습니다."),
     // slash commands, webhooks, workflows
     ("APP", "앱"),
     ("Add \u{00AF}\\_(\u{30C4})_/\u{00AF} to your message", "메시지 끝에 \u{00AF}\\_(\u{30C4})_/\u{00AF} 붙이기"),

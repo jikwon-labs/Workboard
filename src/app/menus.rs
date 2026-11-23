@@ -84,6 +84,11 @@ pub(super) enum Modal {
     Drafts,
     /// My messages waiting to be posted.
     Scheduled,
+    /// The camera's live picture, to take a photo for the channel's (or
+    /// the thread's) message box (photo.rs).
+    Camera {
+        thread: bool,
+    },
     /// Schedule the message in the box for a date and time.
     ScheduleAt {
         date: Option<NaiveDate>,
@@ -1481,6 +1486,10 @@ impl App {
         if !matches!(self.modal, Some(Modal::Reminder { .. })) {
             self.reminder_about = (None, None);
         }
+        // the camera is on only while its window is open
+        if self.camera_on() && !matches!(self.modal, Some(Modal::Camera { .. })) {
+            self.stop_camera();
+        }
         let Some(mut modal) = self.modal.take() else {
             return;
         };
@@ -1521,6 +1530,7 @@ impl App {
             Modal::Integrations { .. } => tr("Integrations").into(),
             Modal::Workflows { .. } => tr("Workflows").into(),
             Modal::ScheduleAt { .. } => tr("Schedule message").into(),
+            Modal::Camera { .. } => tr("Take a photo").into(),
             Modal::Forward { .. } => tr("Forward message").into(),
             Modal::Share { .. } => tr("Share").into(),
             Modal::CustomizeNav => tr("Customize navigation").into(),
@@ -1750,6 +1760,7 @@ impl App {
                 close = self.integrations_body(ui, t, *channel, form)
             }
             Modal::ScheduleAt { date, time } => close = self.schedule_at_body(ui, t, date, time),
+            Modal::Camera { thread } => close = self.camera_body(ui, t, *thread),
             Modal::Forward { ch, msg, to, note } => {
                 close = self.forward_body(ui, *ch, *msg, to, note);
             }

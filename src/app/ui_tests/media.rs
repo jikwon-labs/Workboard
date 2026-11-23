@@ -847,3 +847,51 @@ fn a_picture_still_going_up_can_be_sent() {
     h.settle();
     assert!(h.has("Picture big.png"));
 }
+
+/// The camera beside + takes a photo for the message box. Its window shows
+/// the camera's picture (a test pattern here); Take photo puts that in the
+/// box as a JPEG and turns the camera off, and Cancel or the window's close
+/// button turn it off leaving the box as it was.
+#[test]
+fn a_photo_from_the_camera_goes_in_the_message_box() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("Take a photo");
+    assert!(h.has("Camera preview"));
+    assert!(h.app.camera_on());
+    h.click("Cancel");
+    assert!(h.app.modal.is_none());
+    assert!(!h.app.camera_on(), "off once its window is gone");
+    h.click("Take a photo");
+    h.click("Close");
+    h.settle();
+    assert!(h.app.modal.is_none());
+    assert!(!h.app.camera_on());
+    assert!(h.app.chat.channel.files.is_empty());
+    h.click("Take a photo");
+    h.until("the camera's picture", |h| h.app.photo.shown.is_some());
+    h.settle();
+    h.click("Take photo");
+    assert!(h.app.modal.is_none());
+    assert!(!h.app.camera_on());
+    h.until("the photo ready in the message box", |h| {
+        h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty()
+    });
+    let att = h.app.pending_ready(false).1[0].clone();
+    assert!(
+        att.name.starts_with("Photo ") && att.name.ends_with(".jpg"),
+        "{}",
+        att.name
+    );
+    assert_eq!((att.kind, att.w, att.h), (MediaKind::Image, 1920, 1080));
+    h.settle();
+    assert!(h.has(&format!("Attachment {}", att.name)));
+    // sent like any picture
+    h.click("Message composer");
+    h.key(egui::Key::Enter);
+    let ch = h.app.data.channels.iter().find(|c| c.id == cid).unwrap();
+    let m = ch.messages.last().unwrap();
+    assert_eq!(m.attachments.len(), 1);
+    assert_eq!(m.attachments[0].name, att.name);
+}

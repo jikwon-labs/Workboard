@@ -23,7 +23,7 @@ pub mod quality;
 pub mod screen;
 pub mod video;
 pub use screen::{ScreenTrouble, Share, Source, SourceKind};
-pub use video::{Picture, Video};
+pub use video::{start_preview, Feed, Picture, Video};
 
 use futures_util::StreamExt;
 use livekit::options::TrackPublishOptions;

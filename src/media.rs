@@ -124,6 +124,36 @@ pub fn converted_for_sending(path: &Path) -> Option<(Vec<u8>, &'static str)> {
     converted(path, CONVERTED_MAX)
 }
 
+/// A picture (RGBA, row after row) as a 24-bit BMP file: how a photo from
+/// the camera is kept on its way into a message, where it then goes as a
+/// JPEG like any BMP (CONVERTED_EXTS). See-through pixels come out solid.
+pub fn bmp_from_rgba(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
+    let (w, h) = (w as usize, h as usize);
+    // each row is padded to whole 4 bytes
+    let row = (w * 3 + 3) & !3;
+    let size = 54 + row * h;
+    let mut out = Vec::with_capacity(size);
+    // the file header, then BITMAPINFOHEADER: one plane, 24 bits a pixel,
+    // no compression, 72 dpi, the bottom row first (a positive height)
+    out.extend_from_slice(b"BM");
+    let words = |out: &mut Vec<u8>, vs: &[u32]| {
+        for v in vs {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+    };
+    words(&mut out, &[size as u32, 0, 54, 40, w as u32, h as u32]);
+    out.extend_from_slice(&[1, 0, 24, 0]);
+    words(&mut out, &[0, (row * h) as u32, 2835, 2835, 0, 0]);
+    for y in (0..h).rev() {
+        let start = out.len();
+        for px in rgba[y * w * 4..(y + 1) * w * 4].chunks_exact(4) {
+            out.extend_from_slice(&[px[2], px[1], px[0]]);
+        }
+        out.resize(start + row, 0);
+    }
+    out
+}
+
 /// "1:05", "12:30", "1:02:03".
 pub fn clock(secs: f32) -> String {
     let s = secs.max(0.0).round() as u64;
@@ -1116,6 +1146,43 @@ mod mac {
             }
         }
     }
+}
+
+/// A photo from the camera goes as a JPEG of the same size, whatever the
+/// system (ImageIO on macOS, the `image` crate elsewhere).
+#[cfg(test)]
+#[test]
+fn a_camera_photo_becomes_a_jpeg_of_its_size() {
+    let (w, h) = (62u32, 40u32);
+    let rgba: Vec<u8> = (0..w * h)
+        .flat_map(|i| {
+            if i % w < w / 2 && i / w < h / 2 {
+                [220, 20, 20, 255]
+            } else {
+                [20, 20, 220, 255]
+            }
+        })
+        .collect();
+    let bmp = bmp_from_rgba(w, h, &rgba);
+    // three bytes a pixel, rows padded to 188 bytes
+    assert_eq!(bmp.len(), 54 + 188 * 40);
+    let dir = std::env::temp_dir().join(format!("wb-media-bmp-{:x}", wb_sync::random_u64()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join("Photo.bmp");
+    std::fs::write(&p, &bmp).unwrap();
+    let (jpeg, ext) = converted_for_sending(&p).expect("converted");
+    assert_eq!(ext, "jpg");
+    let j = dir.join("Photo.jpg");
+    std::fs::write(&j, jpeg).unwrap();
+    assert_eq!(probe(&j, MediaKind::Image).unwrap(), (w, h, 0.0));
+    // red at the top left only: neither upside down nor mirrored
+    let t = thumbnail(&j, MediaKind::Image, w).unwrap();
+    let at = |x: u32, y: u32| &t.px[((y * t.w + x) * 4) as usize..][..3];
+    assert!(at(5, 5)[0] > 170 && at(5, 5)[2] < 90, "{:?}", at(5, 5));
+    for (x, y) in [(5, 35), (55, 5), (55, 35)] {
+        assert!(at(x, y)[2] > 170 && at(x, y)[0] < 90, "{:?}", at(x, y));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[cfg(all(test, not(target_os = "macos")))]

@@ -253,6 +253,7 @@ pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             }),
         ),
         ("customize nav", Box::new(move || Modal::CustomizeNav)),
+        ("camera", Box::new(move || Modal::Camera { thread: false })),
         (
             "customize sidebar",
             Box::new(move || Modal::CustomizeSidebar),

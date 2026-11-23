@@ -319,7 +319,9 @@ pub fn start_feed(
                 }
                 Video::Camera => {
                     eprintln!("workboard camera: starting");
-                    match run_camera(&source, &limits, &s, &show) {
+                    let started = Instant::now();
+                    let out = |buf| send(&source, buf, started, &show);
+                    match read_camera(quality::CAMERA_WIDTH, &limits, &s, out) {
                         Ok(()) => eprintln!("workboard camera: stopped"),
                         Err(e) => {
                             eprintln!("workboard camera: {}", e);
@@ -396,11 +398,49 @@ const PRIVACY_HINT: &str = if cfg!(windows) {
     ""
 };
 
-fn run_camera(
-    source: &NativeVideoSource,
+/// The camera on its own, outside a call (a photo for a message): `show`
+/// gets each picture, at most `width` wide and about FPS a second, then
+/// None when it stops; `trouble` gets a message when the camera can't be
+/// used. It runs until the Feed is dropped.
+pub fn start_preview(
+    video: Video,
+    width: u32,
+    show: impl Fn(Option<Picture>) + Send + 'static,
+    trouble: impl Fn(String) + Send + 'static,
+) -> Feed {
+    let (feed, s, finished) = Feed::new();
+    std::thread::Builder::new()
+        .name("workboard-camera".into())
+        .spawn(move || {
+            let limits = Limits::new(Kind::Camera);
+            limits.set((width, FPS as u32));
+            let out = |buf: I420Buffer| show(Some(i420_to_picture(&buf)));
+            match video {
+                Video::Pattern(rgb) => run_pattern(rgb, width, &limits, &s, |buf, _| out(buf)),
+                Video::Camera => {
+                    if let Err(e) = read_camera(width, &limits, &s, out) {
+                        eprintln!("workboard camera: {}", e);
+                        if !s.load(Ordering::Relaxed) {
+                            trouble(e);
+                        }
+                    }
+                }
+            }
+            show(None);
+            finished.store(true, Ordering::Relaxed);
+        })
+        .expect("start camera thread");
+    feed
+}
+
+/// Read the camera until stopped: each picture goes to `out`, at most
+/// `limits.width()` wide and no more often than `limits.gap()`. The
+/// camera is set to the smallest picture at least `width` wide.
+fn read_camera(
+    width: u32,
     limits: &Limits,
     stop: &AtomicBool,
-    preview: &impl Fn(Picture),
+    mut out: impl FnMut(I420Buffer),
 ) -> Result<(), String> {
     use nokhwa::pixel_format::RgbFormat;
     use nokhwa::utils::{ApiBackend, FrameFormat, RequestedFormat, RequestedFormatType};
@@ -416,7 +456,7 @@ fn run_camera(
     let want = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
     let mut cam = nokhwa::Camera::new(first.index().clone(), want)
         .map_err(|e| format!("Couldn't open the camera: {}{}", e, PRIVACY_HINT))?;
-    // the smallest picture at least as wide as the top layer (else the
+    // the smallest picture at least `width` wide (else the
     // widest there is), at the fewest frames a second that still covers
     // what is sent: it's scaled to fit, and frames beyond CAMERA_FPS would
     // only be read and thrown away
@@ -427,7 +467,7 @@ fn run_camera(
             .collect();
         let pick = usual
             .iter()
-            .filter(|f| f.resolution().width() >= quality::CAMERA_WIDTH)
+            .filter(|f| f.resolution().width() >= width)
             .min_by_key(|f| (f.resolution().width(), f.frame_rate()))
             .or_else(|| {
                 usual
@@ -444,7 +484,6 @@ fn run_camera(
         .map_err(|e| format!("Couldn't start the camera: {}{}", e, PRIVACY_HINT))?;
     let fmt = cam.camera_format();
     let (w, h) = (fmt.resolution().width(), fmt.resolution().height());
-    let started = Instant::now();
     let mut last = Instant::now() - limits.gap();
     while !stop.load(Ordering::Relaxed) {
         let raw = cam
@@ -471,7 +510,7 @@ fn run_camera(
                 rgb_to_i420(img.as_raw(), img.width(), img.height(), max)
             }
         };
-        send(source, buf, started, preview);
+        out(buf);
     }
     let _ = cam.stop_stream();
     Ok(())
@@ -554,5 +593,28 @@ mod tests {
         l.set(quality::limits(Kind::Camera, quality::Network::Poor));
         assert_eq!((l.width(), l.fps()), (640, 10));
         assert_eq!(l.gap(), Duration::from_millis(100));
+    }
+
+    /// The camera outside a call (a photo): its pictures come at the width
+    /// asked for, and stop (with a last None) once the feed is dropped.
+    #[test]
+    fn a_preview_without_a_call_shows_pictures_until_dropped() {
+        let (tx, rx) = mpsc::channel();
+        let feed = start_preview(
+            Video::Pattern([30, 60, 210]),
+            640,
+            move |p| {
+                let _ = tx.send(p);
+            },
+            |e| panic!("{}", e),
+        );
+        let wait = Duration::from_secs(5);
+        let p = rx.recv_timeout(wait).unwrap().expect("a picture");
+        assert_eq!((p.width, p.height), (640, 360));
+        assert!(p.average()[2] > 170, "{:?}", p.average());
+        drop(feed);
+        while let Some(p) = rx.recv_timeout(wait).expect("the preview stops") {
+            assert_eq!(p.width, 640);
+        }
     }
 }

@@ -94,7 +94,10 @@ if security find-identity -v -p codesigning | grep -qF "$ID"; then
   for part in "${SPARKLE_PARTS[@]}"; do
     codesign --force --options runtime --timestamp --sign "$ID" "$part"
   done
-  # 마이크·카메라 권한(entitlements)을 붙여 서명한다
+  # 푸시 권한을 허락하는 Developer ID 프로필(Apple 개발자 계정의 "Workboard Mac Developer ID", 2031-08 만료).
+  # 이 인증서(K6599UJ4KM)로 서명할 때만 맞는다. 다른 SIGN_IDENTITY 로는 앱이 실행되지 않는다.
+  cp Resources/Workboard.provisionprofile "$APP/Contents/embedded.provisionprofile"
+  # 마이크·카메라·푸시 권한(entitlements)을 붙여 서명한다
   codesign --force --options runtime --timestamp --entitlements Resources/Workboard.entitlements --sign "$ID" "$APP"
   codesign --verify --strict --deep "$APP"
   SIGNED_WITH_ID=1

@@ -452,8 +452,9 @@ pub enum Msg {
     Resync,
     Ping,
     Pong,
-    /// iPhone: this device's Apple push token (hex), so the server can notify
-    /// it of new messages while the app isn't connected. `env` is
+    /// iPhone and Mac: this device's Apple push token (hex), so the server
+    /// can notify it of new messages while the app isn't connected
+    /// (`platform` "ios" or "macos"; a watch connection may send it too). `env` is
     /// "development" or "production" (which APNs host the token belongs to).
     /// An empty token stops notifications to this device. Servers from before
     /// it ignore the message.

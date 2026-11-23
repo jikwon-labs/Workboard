@@ -857,11 +857,34 @@ pub(crate) fn note_msg(p: &Value) -> Msg {
     }
 }
 
+/// A device's watch connection, counted in Hub::watching while it lasts.
+struct Watched(Arc<Hub>, String);
+
+impl Watched {
+    fn new(hub: &Arc<Hub>, device: &str) -> Watched {
+        *hub.watching.locked().entry(device.to_string()).or_insert(0) += 1;
+        Watched(hub.clone(), device.to_string())
+    }
+}
+
+impl Drop for Watched {
+    fn drop(&mut self) {
+        let mut w = self.0.watching.locked();
+        if let Some(n) = w.get_mut(&self.1) {
+            *n -= 1;
+            if *n == 0 {
+                w.remove(&self.1);
+            }
+        }
+    }
+}
+
 /// A watch connection (hello with `watch`): a computer where this workspace
 /// isn't open hears of `member`'s new messages, the ones an iPhone gets a
 /// push for, and nothing else. It isn't counted online (no green dot, and
 /// the person's iPhone still gets its pushes) and takes no changes; it only
-/// answers ping.
+/// answers ping and keeps the Mac's push token (`push_token`), which gets no
+/// pushes while the connection lasts.
 async fn watching(
     mut socket: WebSocket,
     hub: Arc<Hub>,
@@ -879,6 +902,7 @@ async fn watching(
     if !send(&mut socket, &Msg::Watching.to_json()).await {
         return;
     }
+    let _watched = Watched::new(&hub, &device);
     let silent = Duration::from_secs(wb_net::SILENT_SECS + 15);
     'conn: loop {
         tokio::select! {
@@ -925,11 +949,34 @@ async fn watching(
                 };
                 match m {
                     Message::Close(_) => break,
-                    Message::Text(t) if matches!(Msg::parse(t.as_str()), Some(Msg::Ping)) => {
-                        if !send(&mut socket, &Msg::Pong.to_json()).await {
-                            break;
+                    Message::Text(t) => match Msg::parse(t.as_str()) {
+                        Some(Msg::Ping) => {
+                            if !send(&mut socket, &Msg::Pong.to_json()).await {
+                                break;
+                            }
                         }
-                    }
+                        // without choices (the Mac doesn't have this
+                        // workspace's at hand): the ones it sent when the
+                        // workspace was open stay
+                        Some(Msg::PushToken {
+                            token,
+                            platform,
+                            env,
+                            workspace,
+                            prefs,
+                        }) => {
+                            let prefs = prefs.or_else(|| hub.push_prefs(&device, &token));
+                            hub.set_push_token(
+                                &device,
+                                &token,
+                                &platform,
+                                &env,
+                                workspace.as_deref(),
+                                prefs,
+                            );
+                        }
+                        _ => {}
+                    },
                     _ => {}
                 }
             }

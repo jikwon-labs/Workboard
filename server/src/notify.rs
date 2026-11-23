@@ -121,13 +121,17 @@ impl Hub {
             return;
         }
         let online = self.online.locked().clone();
+        // a computer hearing of them on a watch connection shows them itself
+        let watching = self.watching.locked().clone();
         // each device's notifications, sent in order
         let mut per_device: BTreeMap<String, Vec<(push::PushToken, Value)>> = BTreeMap::new();
         for (device, tok) in &saved.push {
             let Some(d) = saved.devices.get(device) else {
                 continue;
             };
-            if online.get(device).is_some_and(|n| *n > 0) {
+            if online.get(device).is_some_and(|n| *n > 0)
+                || watching.get(device).is_some_and(|n| *n > 0)
+            {
                 continue;
             }
             // what this phone asked to be told about
@@ -151,7 +155,7 @@ impl Hub {
             let (hub, sender) = (self.clone(), sender.clone());
             jobs::run(&format!("push:{}", device), move || {
                 for (tok, payload) in list {
-                    match sender.send(&tok.env, &tok.token, &payload) {
+                    match sender.send(&tok.platform, &tok.env, &tok.token, &payload) {
                         push::Outcome::Sent => {}
                         push::Outcome::Gone => {
                             // the app was removed (or the token was never good): forget it
@@ -174,7 +178,18 @@ impl Hub {
         }
     }
 
-    /// An iPhone's push token (`push_token`), and its name for this workspace.
+    /// The choices kept with `device`'s push token, while it is `token`.
+    pub(crate) fn push_prefs(&self, device: &str, token: &str) -> Option<wb_net::PushPrefs> {
+        let g = self.state();
+        let t = g.saved.push.get(device)?;
+        if t.token.eq_ignore_ascii_case(token.trim()) {
+            t.prefs.clone()
+        } else {
+            None
+        }
+    }
+
+    /// A device's push token (`push_token`), and its name for this workspace.
     pub(crate) fn set_push_token(
         &self,
         device: &str,

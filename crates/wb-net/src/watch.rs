@@ -12,6 +12,9 @@
 // and asks again every OLD_SERVER_SECS, so it starts working once that server
 // is updated. Signed out there (`auth` error) or the workspace deleted: it
 // says so once and stops.
+//
+// The Mac's push token for that workspace (`set_push`) goes on it after each
+// `watching`, so the workspace can notify the Mac while the app is quit.
 
 use super::*;
 use crate::bell::Bell;
@@ -47,6 +50,8 @@ pub enum Watch {
 /// What the watch thread is told.
 enum Ctl {
     Stop,
+    /// Send this `push_token` now and after each connect.
+    Push(Msg),
     /// The server sent something on the connection of this bell (bell.rs).
     Readable(u64),
 }
@@ -85,6 +90,12 @@ impl Watcher {
         Watcher { stop, rx }
     }
 
+    /// This device's `push_token` for the workspace: sent once signed in,
+    /// and again after each reconnect.
+    pub fn set_push(&self, msg: Msg) {
+        let _ = self.stop.send(Ctl::Push(msg));
+    }
+
     /// Everything heard since the last call.
     pub fn events(&self) -> Vec<Watch> {
         self.rx.try_iter().collect()
@@ -121,13 +132,14 @@ enum Ended {
 }
 
 /// Wait `secs`; false when asked to stop.
-fn pause(srx: &Receiver<Ctl>, secs: u64) -> bool {
+fn pause(srx: &Receiver<Ctl>, secs: u64, push: &mut Option<Msg>) -> bool {
     let until = Instant::now() + Duration::from_secs(secs);
     loop {
         match srx.recv_timeout(until.saturating_duration_since(Instant::now())) {
             Err(mpsc::RecvTimeoutError::Timeout) => return true,
             // the bell of a connection that is over
             Ok(Ctl::Readable(_)) => {}
+            Ok(Ctl::Push(m)) => *push = Some(m),
             Ok(Ctl::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return false,
         }
     }
@@ -135,10 +147,13 @@ fn pause(srx: &Receiver<Ctl>, secs: u64) -> bool {
 
 fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<Ctl>, ring: Sender<Ctl>, line: Heard) {
     let mut tries: u32 = 0;
+    let mut push = None;
     loop {
         let ended = match connect(&addr) {
             Ok(mut ws) => {
-                let e = watch_session(&mut ws, &sign_in, &srx, &ring, &line, &mut tries);
+                let e = watch_session(
+                    &mut ws, &sign_in, &srx, &ring, &line, &mut tries, &mut push,
+                );
                 let _ = ws.close(None);
                 let _ = ws.flush();
                 e
@@ -151,7 +166,7 @@ fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<Ctl>, ring: Sender<Ctl
             Ended::Done(w) => {
                 line.emit(w);
                 // stay until let go
-                while let Ok(Ctl::Readable(_)) = srx.recv() {}
+                while let Ok(Ctl::Readable(_) | Ctl::Push(_)) = srx.recv() {}
                 return;
             }
             Ended::Again(Some(s)) => s,
@@ -160,7 +175,7 @@ fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<Ctl>, ring: Sender<Ctl
                 (1u64 << tries.min(6)).min(MAX_BACKOFF_SECS)
             }
         };
-        if !pause(&srx, secs) {
+        if !pause(&srx, secs, &mut push) {
             return;
         }
     }
@@ -173,6 +188,7 @@ fn watch_session(
     ring: &Sender<Ctl>,
     line: &Heard,
     tries: &mut u32,
+    push: &mut Option<Msg>,
 ) -> Ended {
     let Ok(bell) = Bell::start(ws.get_ref(), ring.clone(), Ctl::Readable) else {
         return Ended::Again(None);
@@ -217,6 +233,12 @@ fn watch_session(
                     bell.reading();
                 }
                 Ctl::Readable(_) => {}
+                Ctl::Push(m) => {
+                    if watching && send(ws, &m).is_err() {
+                        return Ended::Again(None);
+                    }
+                    *push = Some(m);
+                }
             }
         }
         if watching && last_ping.elapsed() >= Duration::from_secs(PING_SECS) {
@@ -253,6 +275,11 @@ fn watch_session(
             Some(Msg::Watching) => {
                 watching = true;
                 *tries = 0;
+                if let Some(m) = push.as_ref() {
+                    if send(ws, m).is_err() {
+                        return Ended::Again(None);
+                    }
+                }
                 if !line.emit(Watch::Started) {
                     return Ended::Stop;
                 }

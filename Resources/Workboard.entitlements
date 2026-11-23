@@ -5,5 +5,11 @@
   <!-- hardened runtime 에서 마이크(Talk to Text, Huddle)와 카메라(Huddle, Clips)를 쓰려면 필요하다 -->
   <key>com.apple.security.device.audio-input</key><true/>
   <key>com.apple.security.device.camera</key><true/>
+  <!-- 앱이 꺼져 있어도 팀 서버가 Apple 푸시로 알림을 보낸다(server/src/push.rs, src/app/push.rs).
+       Apple 개발자 계정의 App ID local.workboard.app(푸시 켬)과 Developer ID 프로필
+       Resources/Workboard.provisionprofile 이 이 세 줄을 허락한다. 프로필 없이 이 권한으로 서명하면 앱이 실행되지 않는다. -->
+  <key>com.apple.application-identifier</key><string>K6599UJ4KM.local.workboard.app</string>
+  <key>com.apple.developer.team-identifier</key><string>K6599UJ4KM</string>
+  <key>com.apple.developer.aps-environment</key><string>production</string>
 </dict>
 </plist>

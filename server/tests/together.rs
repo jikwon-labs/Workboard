@@ -3509,10 +3509,22 @@ fn webhooks_and_slash_commands_post_under_their_names() {
 struct FakePush {
     sent: std::sync::Mutex<Vec<(String, String, Value)>>,
     gone: std::sync::Mutex<Vec<String>>,
+    /// (token, platform) of each notification
+    platforms: std::sync::Mutex<Vec<(String, String)>>,
 }
 
 impl workboard_server::push::Sender for FakePush {
-    fn send(&self, env: &str, token: &str, payload: &Value) -> workboard_server::push::Outcome {
+    fn send(
+        &self,
+        platform: &str,
+        env: &str,
+        token: &str,
+        payload: &Value,
+    ) -> workboard_server::push::Outcome {
+        self.platforms
+            .lock()
+            .unwrap()
+            .push((token.to_string(), platform.to_string()));
         self.sent
             .lock()
             .unwrap()
@@ -3906,6 +3918,120 @@ fn a_computer_watching_a_workspace_hears_only_its_persons_new_messages() {
     heard_until(&w, &mut got, "the watcher refused", |g| {
         g.iter().any(|e| matches!(e, wb_net::Watch::Refused(_)))
     });
+    server.stop();
+}
+
+/// A Mac sends its token like a phone: while its app is quit it gets pushes
+/// (to the Mac app's topic), while it watches the workspace it gets none,
+/// and a watch connection's token without choices keeps the ones the open
+/// workspace sent.
+#[test]
+fn a_quit_mac_gets_pushes_and_a_watching_mac_does_not() {
+    let home = TempHome::new("mac-push");
+    let fake = Arc::new(FakePush::default());
+    let server = Server::start_with(
+        &home,
+        0,
+        workboard_server::Options {
+            push: Some(fake.clone()),
+            ..Default::default()
+        },
+    );
+    let port = server.port;
+    let (mut a, _b) = two_apps(port);
+    let mac = "d4".repeat(32);
+    let ws = "646174612e6a736f6e".to_string();
+    let code = a.invite(3, Role::Member);
+    let mut c = App::join(port, &code);
+    c.wait("Cy's Mac gets the team's copy", |_| true);
+    c.client.send(Msg::PushToken {
+        token: mac.clone(),
+        platform: "macos".into(),
+        env: "production".into(),
+        workspace: Some(ws.clone()),
+        prefs: Some(wb_net::PushPrefs {
+            keywords: vec!["deploy".into()],
+            ..Default::default()
+        }),
+    });
+    let (device, token) = (c.device.clone(), c.token.clone().unwrap());
+    wait_for("the Mac's token in server.json", || {
+        saved_tokens(&home).contains(&(device.clone(), mac.clone()))
+    });
+    let kept = || {
+        workboard_server::load_saved(&home)
+            .unwrap()
+            .push
+            .remove(&device)
+            .unwrap()
+    };
+    assert_eq!(kept().platform, "macos");
+    // connected: nothing pushed
+    let dm = |id: u64, text: &str| {
+        let text = text.to_string();
+        move |d: &mut Value| {
+            let chans = d["channels"].as_array_mut().unwrap();
+            if !chans.iter().any(|c| c["id"] == 20) {
+                chans.push(json!({"id": 20, "name": "", "kind": "Direct", "topic": "", "members": [1, 3], "messages": [], "last_read": 0}));
+            }
+            let c = chans.iter_mut().find(|c| c["id"] == 20).unwrap();
+            c["messages"].as_array_mut().unwrap().push(
+                json!({"id": id, "author": 1, "text": text, "ts": now() / 1000}),
+            );
+        }
+    };
+    a.change(dm(21, "while open"));
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(fake.to(&mac).is_empty(), "the open app shows it itself");
+
+    // the app quit: the DM is pushed, to the Mac app's topic, naming the workspace
+    let before = connections(port);
+    drop(c);
+    wait_for("the Mac's connection gone", || connections(port) < before);
+    a.change(dm(22, "lunch?"));
+    wait_for("the DM pushed to the quit Mac", || fake.to(&mac).len() == 1);
+    assert_eq!(fake.to(&mac)[0]["aps"]["alert"]["body"], "lunch?");
+    assert_eq!(fake.to(&mac)[0]["ws"], ws);
+    assert!(fake
+        .platforms
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|(t, p)| t != &mac || p == "macos"));
+
+    // another workspace open: this one is watched, with the token again
+    // (no choices): the watcher tells, no push, and the choices stay
+    let addr = format!("127.0.0.1:{}", port);
+    let w = wb_net::Watcher::start(&addr, &device, &token, None, Arc::new(|| {}));
+    w.set_push(Msg::PushToken {
+        token: mac.clone(),
+        platform: "macos".into(),
+        env: "production".into(),
+        workspace: Some(ws.clone()),
+        prefs: None,
+    });
+    let mut got = vec![];
+    heard_until(&w, &mut got, "watching", |g| {
+        g.contains(&wb_net::Watch::Started)
+    });
+    a.change(dm(23, "still there?"));
+    heard_until(&w, &mut got, "the DM at the watching Mac", |g| {
+        note_count(g) == 1
+    });
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(fake.to(&mac).len(), 1, "no push while watching");
+    assert_eq!(
+        kept().prefs.map(|p| p.keywords),
+        Some(vec!["deploy".to_string()]),
+        "the open workspace's choices stay"
+    );
+
+    // the app quit again: pushes again
+    let before = connections(port);
+    drop(w);
+    wait_for("the watch connection gone", || connections(port) < before);
+    a.change(dm(24, "ok bye"));
+    wait_for("the DM pushed again", || fake.to(&mac).len() == 2);
     server.stop();
 }
 

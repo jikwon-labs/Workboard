@@ -482,6 +482,7 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         ai: None,
         ai_allowance: Default::default(),
         online: Mutex::new(Default::default()),
+        watching: Mutex::new(Default::default()),
         members_online: Mutex::new(Default::default()),
         presence: watch::channel(vec![]).0,
         typing: broadcast::channel(64).0,

@@ -1286,3 +1286,25 @@ fn a_summary_says_who_and_what() {
     assert!(n.body.starts_with("Alex Kim: message 0\n"), "{:?}", n.body);
     assert!(a.toast.as_ref().unwrap().0.contains("Alex Kim: message"));
 }
+
+/// A banner the server pushed while the app was quit (push.rs): a click
+/// opens the conversation, in this workspace or in the one it names.
+#[test]
+fn a_pushed_banner_opens_its_conversation() {
+    let mut a = app();
+    let dm = dm_with_alex(&a);
+    let here = super::push::ws_key(&a.ws_file).unwrap();
+    a.open_target(&format!("push:{}:{}", here, dm));
+    assert_eq!(a.section, Section::Chat);
+    assert_eq!(a.chat.open, Some(dm));
+    // a thread reply, sent without a workspace (a server from before it)
+    assert_eq!(a.open_pushed(&format!(":{}:7", dm)), format!("chat:{}:7", dm));
+    // another workspace: that one opens first
+    let other = super::push::ws_key("workspace-42.json").unwrap();
+    assert_eq!(
+        a.open_pushed(&format!("{}:{}", other, dm)),
+        format!("ws:workspace-42.json:chat:{}", dm)
+    );
+    // no conversation: the Inbox
+    assert_eq!(a.open_pushed(&format!("{}:", here)), "inbox");
+}

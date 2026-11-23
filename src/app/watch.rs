@@ -29,6 +29,8 @@ struct Watching {
     /// None once the server turned it away
     watcher: Option<wb_net::Watcher>,
     started: bool,
+    /// handed this Mac's push token (push.rs)
+    pushed: bool,
 }
 
 #[derive(Default)]
@@ -220,8 +222,22 @@ impl App {
                     name,
                     watcher: Some(watcher),
                     started: false,
+                    pushed: false,
                 },
             );
+        }
+    }
+
+    /// Hand this Mac's push token to the watchers that don't have it yet.
+    pub(super) fn watch_push(&mut self, token: &str) {
+        for (file, w) in self.watch_rt.on.iter_mut() {
+            if w.pushed {
+                continue;
+            }
+            if let Some(watcher) = &w.watcher {
+                watcher.set_push(super::push::token_msg(token, file, None));
+                w.pushed = true;
+            }
         }
     }
 

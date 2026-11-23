@@ -293,6 +293,8 @@ impl App {
                         };
                         save_token(&addr, &device, &t);
                     }
+                    // this Mac's push token again, as on every welcome
+                    self.push_rt.sent = None;
                     if self.sync_rt.resign.take().is_some() {
                         self.toast(tr("Signed in again."));
                     }

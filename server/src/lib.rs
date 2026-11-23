@@ -610,7 +610,7 @@ struct Hub {
     /// the largest file /files takes
     max_file: u64,
     claim_wait: Duration,
-    /// sends iPhone notifications; None when push isn't set up
+    /// sends iPhone and Mac notifications; None when push isn't set up
     pusher: Option<Arc<dyn push::Sender>>,
     /// sends outgoing webhooks and slash commands (hooks.rs)
     poster: Arc<dyn hooks::Poster>,
@@ -620,6 +620,9 @@ struct Hub {
     ai_allowance: Arc<ai::Allowance>,
     /// device id -> its open connections (connected devices get no pushes)
     online: Mutex<std::collections::HashMap<String, usize>>,
+    /// device id -> its open watch connections (no pushes either, but not
+    /// counted online)
+    watching: Mutex<std::collections::HashMap<String, usize>>,
     /// member id -> their open connections; `presence` holds its keys
     members_online: Mutex<BTreeMap<u64, usize>>,
     /// the members with an open connection, sorted: each connection tells
@@ -716,6 +719,7 @@ impl Hub {
             ai: options.ai.clone(),
             ai_allowance: Default::default(),
             online: Mutex::new(Default::default()),
+            watching: Mutex::new(Default::default()),
             members_online: Mutex::new(Default::default()),
             presence: watch::channel(vec![]).0,
             typing: broadcast::channel(64).0,
@@ -969,7 +973,7 @@ pub struct Options {
     pub max_file: u64,
     /// How long a claim on an empty server holds without its workspace.
     pub claim_wait: Duration,
-    /// What sends iPhone notifications. None: APNs as apns.json or WB_APNS_*
+    /// What sends iPhone and Mac notifications. None: APNs as apns.json or WB_APNS_*
     /// say (or nothing when they don't).
     pub push: Option<Arc<dyn push::Sender>>,
     /// What sends outgoing webhooks and slash commands. None: curl.
@@ -995,11 +999,15 @@ impl Default for Options {
 fn apns_sender(home: &Path) -> Option<Arc<dyn push::Sender>> {
     match push::load_apns(home).and_then(push::Apns::new) {
         Ok(a) => {
-            println!("iPhone notifications on (APNs, topic {})", a.topic());
+            println!(
+                "iPhone and Mac notifications on (APNs, topics {} and {})",
+                a.topic("ios"),
+                a.topic("macos")
+            );
             Some(Arc::new(a))
         }
         Err(why) => {
-            println!("iPhone notifications off: {}", why);
+            println!("iPhone and Mac notifications off: {}", why);
             None
         }
     }

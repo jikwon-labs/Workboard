@@ -740,6 +740,11 @@ impl App {
 
     /// Opens what a notice is about (a banner click, a toast click).
     pub(super) fn open_target(&mut self, target: &str) {
+        // a banner the server pushed while the app was quit (push.rs)
+        if let Some(rest) = target.strip_prefix("push:") {
+            let t = self.open_pushed(rest);
+            return self.open_target(&t);
+        }
         // from another workspace (watch.rs)
         if let Some((file, inner)) = super::watch::split_target(target) {
             let (file, inner) = (file.to_string(), inner.to_string());

@@ -46,6 +46,7 @@ mod notify_tests;
 mod pages;
 mod parity;
 mod profile;
+mod push;
 mod schedule;
 mod settings;
 mod sharing;
@@ -640,6 +641,8 @@ pub struct App {
     notify_rt: notify::NotifyRt,
     /// watchers on the other team workspaces (watch.rs)
     watch_rt: watch::WatchRt,
+    /// this Mac's push token on its way to the servers (push.rs)
+    push_rt: push::PushRt,
     /// Where each workspace file lives (team server, shared folder, this computer), read once.
     ws_places: HashMap<String, &'static str>,
     create_text: String,
@@ -1280,6 +1283,7 @@ impl App {
             mini: Default::default(),
             notify_rt: Default::default(),
             watch_rt: Default::default(),
+            push_rt: Default::default(),
             ws_places: HashMap::new(),
             create_text: String::new(),
             new_message_open: false,
@@ -5751,6 +5755,7 @@ impl App {
             self.deleting_ws_tick();
             self.sync_tick(ctx);
             self.watch_tick(Some(ctx));
+            self.push_tick(Some(ctx));
         }
         // after sync_tick, whose merges also leave a save due, so the wake-up
         // for it is asked for in this frame

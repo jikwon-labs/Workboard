@@ -1,7 +1,9 @@
-// Push notifications to iPhones through Apple's push service (APNs).
+// Push notifications to iPhones and Macs through Apple's push service (APNs).
 //
 // The iPhone app sends `push_token {token, platform: "ios", env}` after every
-// welcome. The server keeps the newest token of each device in server.json
+// welcome; the Mac app sends `platform: "macos"` (so it hears of new messages
+// while it is quit), on its connection to the open workspace and on the watch
+// connections of the others. The server keeps the newest token of each device in server.json
 // (Saved::push) and, when a push from an app brings chat messages the team's
 // copy didn't have, notifies:
 //   - in a DM: every member of it except the author, for every message;
@@ -13,8 +15,8 @@
 //     nothing, keywords, paused notifications, DMs, mentions or replies off;
 // never the author (nor the member whose app sent the copy), never someone a
 // private channel is closed to, never for messages that came back from
-// someone's Trash, and never a device that is connected right now (the app
-// shows those itself). At most MAX_PER_DEVICE notifications go
+// someone's Trash, and never a device that is connected right now, not even
+// by a watch connection (the app shows those itself). At most MAX_PER_DEVICE notifications go
 // to one device per merge; the rest become one "N more new messages".
 //
 // Set up by an apns.json in the server folder (like mail.json):
@@ -24,11 +26,15 @@
 //                                           relative to the server folder)
 //     "key_id": "ABC123DEFG",              the key's id
 //     "team_id": "ABCDE12345",             the Apple developer team id
-//     "topic": "com.example.workboard"     the iPhone app's bundle id
+//     "topic": "com.example.workboard",    the iPhone app's bundle id
+//     "mac_topic": "local.workboard.app"   the Mac app's (optional: this is
+//                                           the default)
 //   }
 //
-// or the environment variables WB_APNS_KEY, WB_APNS_KEY_ID, WB_APNS_TEAM_ID
-// and WB_APNS_TOPIC (each wins over the file). Without all four nothing is
+// or the environment variables WB_APNS_KEY, WB_APNS_KEY_ID, WB_APNS_TEAM_ID,
+// WB_APNS_TOPIC and WB_APNS_MAC_TOPIC (each wins over the file). The key must
+// be one for the whole team (not one Apple ties to the iPhone app alone) for
+// Macs to get notifications. Without all four nothing is
 // sent and the server says so once when it starts. It reads the setup when it
 // starts, so restart it after changing either.
 //
@@ -94,6 +100,22 @@ pub fn token_ok(token: &str) -> bool {
     (16..=200).contains(&token.len()) && token.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// The Mac app's bundle id (scripts/bundle.sh), the topic of Mac tokens
+/// unless apns.json says `mac_topic`.
+pub const MAC_TOPIC: &str = "local.workboard.app";
+
+/// The platforms tokens are kept for: "ios" or "macos" (None: neither).
+pub fn norm_platform(platform: &str) -> Option<&'static str> {
+    let p = platform.trim();
+    if p.eq_ignore_ascii_case("ios") {
+        Some("ios")
+    } else if p.eq_ignore_ascii_case("macos") {
+        Some("macos")
+    } else {
+        None
+    }
+}
+
 /// The env an app may say; anything else counts as production.
 pub fn norm_env(env: &str) -> &'static str {
     if env.trim().eq_ignore_ascii_case("development") || env.trim().eq_ignore_ascii_case("sandbox")
@@ -113,6 +135,9 @@ pub struct ApnsCfg {
     pub key_id: String,
     pub team_id: String,
     pub topic: String,
+    /// the Mac app's bundle id (MAC_TOPIC when empty)
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub mac_topic: String,
 }
 
 /// The APNs setup from apns.json and WB_APNS_* (these win). Err says why
@@ -149,7 +174,11 @@ pub fn load_apns(home: &Path) -> Result<ApnsCfg, String> {
         key_id: pick("WB_APNS_KEY_ID", &f.key_id),
         team_id: pick("WB_APNS_TEAM_ID", &f.team_id),
         topic: pick("WB_APNS_TOPIC", &f.topic),
+        mac_topic: pick("WB_APNS_MAC_TOPIC", &f.mac_topic),
     };
+    if cfg.mac_topic.is_empty() {
+        cfg.mac_topic = MAC_TOPIC.into();
+    }
     let missing: Vec<&str> = [
         ("key", &cfg.key),
         ("key_id", &cfg.key_id),
@@ -187,7 +216,8 @@ pub enum Outcome {
 
 /// Whatever delivers notifications; tests use a fake one.
 pub trait Sender: Send + Sync + std::fmt::Debug {
-    fn send(&self, env: &str, token: &str, payload: &Value) -> Outcome;
+    /// `platform` is "ios" or "macos" (`norm_platform`).
+    fn send(&self, platform: &str, env: &str, token: &str, payload: &Value) -> Outcome;
 }
 
 /// The real sender: APNs over HTTP/2 with token-based auth.
@@ -205,6 +235,7 @@ impl std::fmt::Debug for Apns {
             .field("key_id", &self.cfg.key_id)
             .field("team_id", &self.cfg.team_id)
             .field("topic", &self.cfg.topic)
+            .field("mac_topic", &self.cfg.mac_topic)
             .finish()
     }
 }
@@ -271,9 +302,13 @@ impl Apns {
         Ok(t)
     }
 
-    /// The bundle id notifications go to.
-    pub fn topic(&self) -> &str {
-        &self.cfg.topic
+    /// The bundle id notifications to `platform` go to.
+    pub fn topic(&self, platform: &str) -> &str {
+        if platform == "macos" {
+            &self.cfg.mac_topic
+        } else {
+            &self.cfg.topic
+        }
     }
 
     fn forget_jwt(&self) {
@@ -338,7 +373,7 @@ pub fn outcome(status: u16, body: &str) -> Outcome {
 }
 
 impl Sender for Apns {
-    fn send(&self, env: &str, token: &str, payload: &Value) -> Outcome {
+    fn send(&self, platform: &str, env: &str, token: &str, payload: &Value) -> Outcome {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -350,7 +385,7 @@ impl Sender for Apns {
         let url = format!("https://{}/3/device/{}", apns_host(env), token);
         let headers = [
             ("authorization", format!("bearer {}", jwt)),
-            ("apns-topic", self.cfg.topic.clone()),
+            ("apns-topic", self.topic(platform).to_string()),
             ("apns-push-type", "alert".to_string()),
             ("apns-priority", "10".to_string()),
         ];
@@ -1061,6 +1096,10 @@ mod tests {
         assert_eq!(apns_host("production"), "api.push.apple.com");
         assert_eq!(apns_host("anything"), "api.push.apple.com");
         assert!(token_ok(&"ab".repeat(32)) && !token_ok("xyz") && !token_ok(""));
+        assert_eq!(norm_platform(" iOS"), Some("ios"));
+        assert_eq!(norm_platform("macos"), Some("macos"));
+        assert_eq!(norm_platform("android"), None);
+        assert_eq!(norm_platform(""), None);
     }
 
     #[test]
@@ -1096,6 +1135,11 @@ mod tests {
             "relative to the server folder"
         );
         let apns = Apns::new(cfg).unwrap();
+        // Mac tokens go to the Mac app's bundle id unless apns.json names another
+        assert_eq!(apns.topic("ios"), "com.example.wb");
+        assert_eq!(apns.topic("macos"), MAC_TOPIC);
+        std::fs::write(home.join(APNS_FILE), r#"{"key": "AuthKey_TEST.p8", "key_id": "KEY123", "team_id": "TEAM45", "topic": "com.example.wb", "mac_topic": "com.example.mac"}"#).unwrap();
+        assert_eq!(load_apns(&home).unwrap().mac_topic, "com.example.mac");
         let t = apns.jwt(1_000_000).unwrap();
         let parts: Vec<&str> = t.split('.').collect();
         let dec = |s: &str| {

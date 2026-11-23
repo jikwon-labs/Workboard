@@ -211,13 +211,19 @@ impl Saved {
         }
         if !self.devices.contains_key(device)
             || !push::token_ok(&token)
-            || !platform.trim().eq_ignore_ascii_case("ios")
         {
             return false;
         }
+        let Some(platform) = push::norm_platform(platform) else {
+            return false;
+        };
         let env = push::norm_env(env);
         if self.push.get(device).is_some_and(|t| {
-            t.token == token && t.env == env && t.workspace == workspace && t.prefs == prefs
+            t.token == token
+                && t.platform == platform
+                && t.env == env
+                && t.workspace == workspace
+                && t.prefs == prefs
         }) {
             return false;
         }
@@ -228,7 +234,7 @@ impl Saved {
             device.to_string(),
             push::PushToken {
                 token,
-                platform: "ios".into(),
+                platform: platform.into(),
                 env: env.into(),
                 updated: now_ms(),
                 workspace,

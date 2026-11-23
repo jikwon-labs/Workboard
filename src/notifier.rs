@@ -9,6 +9,14 @@
 // back to `osascript`; those show under Script Editor and a click does not
 // open anything.
 //
+// While the app is quit, the team server sends banners through Apple's push
+// service (server/src/push.rs). `start_push` asks Apple for this Mac's push
+// token, which works only in the installed app signed with its provisioning
+// profile (scripts/bundle.sh); `push_token` has it once it came. Clicking
+// such a banner launches the app, and `take_clicked` gives
+// "push:WS:CHANNEL[:THREAD]" (WS: the workspace key the app sent with the
+// token, src/app/push.rs).
+//
 // Windows: toast notifications, a count drawn over the taskbar button and
 // flashing the taskbar button (`win` below).
 //
@@ -23,6 +31,20 @@ pub fn post(title: &str, body: &str, target: &str, sound: bool) {
     win::post(title, body, target, sound);
     #[cfg(not(any(target_os = "macos", windows)))]
     let _ = (title, body, target, sound);
+}
+
+/// Ask Apple for this Mac's push token (once; the installed app only).
+pub fn start_push() {
+    #[cfg(target_os = "macos")]
+    mac::start_push();
+}
+
+/// This Mac's push token (hex), once Apple gave it.
+pub fn push_token() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    return mac::push_token();
+    #[cfg(not(target_os = "macos"))]
+    None
 }
 
 /// What banners the person clicked since the last call (their targets).
@@ -96,11 +118,14 @@ mod mac {
     extern "C" {}
 
     static CLICKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    /// This Mac's push token, from Apple
+    static TOKEN: Mutex<Option<String>> = Mutex::new(None);
 
     thread_local! {
         /// Whether this process may use UNUserNotificationCenter: None until checked.
         static CENTER_OK: Cell<Option<bool>> = const { Cell::new(None) };
         static ASKED: Cell<bool> = const { Cell::new(false) };
+        static PUSH_STARTED: Cell<bool> = const { Cell::new(false) };
         static BADGE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     }
 
@@ -199,6 +224,119 @@ mod mac {
         });
     }
 
+    pub fn start_push() {
+        if !on_main_thread() || !center_ok() || PUSH_STARTED.with(|s| s.replace(true)) {
+            return;
+        }
+        extern "C" fn registered(_this: &Object, _cmd: Sel, _app: *mut Object, token: *mut Object) {
+            unsafe {
+                if token.is_null() {
+                    return;
+                }
+                let bytes: *const u8 = msg_send![token, bytes];
+                let len: usize = msg_send![token, length];
+                if bytes.is_null() || len == 0 {
+                    return;
+                }
+                let hex: String = std::slice::from_raw_parts(bytes, len)
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect();
+                eprintln!("push notifications while the app is quit: ready");
+                // for trying a push by hand (docs/server-design.md "Mac")
+                if std::env::var_os("WB_SHOW_PUSH_TOKEN").is_some() {
+                    eprintln!("push token: {}", hex);
+                }
+                *TOKEN.lock().unwrap_or_else(|e| e.into_inner()) = Some(hex);
+            }
+        }
+        extern "C" fn failed(_this: &Object, _cmd: Sel, _app: *mut Object, err: *mut Object) {
+            unsafe {
+                let why: *mut Object = if err.is_null() {
+                    null_mut()
+                } else {
+                    msg_send![err, localizedDescription]
+                };
+                eprintln!(
+                    "no push notifications while the app is quit: {}",
+                    from_ns(why).unwrap_or_default()
+                );
+            }
+        }
+        unsafe {
+            // the delegate first: a click on a banner that launched the app
+            // comes to it
+            center();
+            let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+            let d: *mut Object = msg_send![app, delegate];
+            if d.is_null() {
+                return;
+            }
+            // the answers go to the app's delegate (winit's): add them to its class
+            let cls = (*d).class() as *const Class as *mut Class;
+            let types = c"v@:@@".as_ptr();
+            let imp: objc::runtime::Imp = std::mem::transmute(
+                registered as extern "C" fn(&Object, Sel, *mut Object, *mut Object),
+            );
+            objc::runtime::class_addMethod(
+                cls,
+                sel!(application:didRegisterForRemoteNotificationsWithDeviceToken:),
+                imp,
+                types,
+            );
+            let imp: objc::runtime::Imp = std::mem::transmute(
+                failed as extern "C" fn(&Object, Sel, *mut Object, *mut Object),
+            );
+            objc::runtime::class_addMethod(
+                cls,
+                sel!(application:didFailToRegisterForRemoteNotificationsWithError:),
+                imp,
+                types,
+            );
+            let _: () = msg_send![app, registerForRemoteNotifications];
+        }
+    }
+
+    pub fn push_token() -> Option<String> {
+        TOKEN.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// What a pushed banner opens: "push:WS:CHANNEL[:THREAD]" from its
+    /// "ws", "channel" and "parent" (server/src/push.rs `payload`).
+    unsafe fn pushed_target(info: *mut Object) -> Option<String> {
+        let aps: *mut Object = msg_send![info, objectForKey: ns("aps")];
+        if aps.is_null() {
+            return None;
+        }
+        let number = |key: &str| -> Option<u64> {
+            let n: *mut Object = msg_send![info, objectForKey: ns(key)];
+            if n.is_null() {
+                return None;
+            }
+            let ok: BOOL = msg_send![n, respondsToSelector: sel!(unsignedLongLongValue)];
+            if ok == objc::runtime::NO {
+                return None;
+            }
+            let v: u64 = msg_send![n, unsignedLongLongValue];
+            Some(v)
+        };
+        let ws: *mut Object = msg_send![info, objectForKey: ns("ws")];
+        let ok: BOOL = if ws.is_null() {
+            objc::runtime::NO
+        } else {
+            msg_send![ws, isKindOfClass: class!(NSString)]
+        };
+        let ws = if ok == YES { from_ns(ws) } else { None };
+        let mut t = format!("push:{}:", ws.unwrap_or_default());
+        if let Some(ch) = number("channel") {
+            t.push_str(&ch.to_string());
+            if let Some(p) = number("parent") {
+                t.push_str(&format!(":{}", p));
+            }
+        }
+        Some(t)
+    }
+
     pub fn take_clicked() -> Vec<String> {
         std::mem::take(&mut *CLICKED.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -219,7 +357,7 @@ mod mac {
                 let content: *mut Object = msg_send![req, content];
                 let info: *mut Object = msg_send![content, userInfo];
                 let t: *mut Object = msg_send![info, objectForKey: ns("target")];
-                if let Some(t) = from_ns(t) {
+                if let Some(t) = from_ns(t).or_else(|| pushed_target(info)) {
                     CLICKED.lock().unwrap_or_else(|e| e.into_inner()).push(t);
                 }
                 let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];

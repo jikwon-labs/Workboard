@@ -2339,3 +2339,45 @@ fn undo_keeps_the_newest_steps_of_each_board() {
         Some((_, WbUndo::Stroke(249)))
     ));
 }
+
+/// In the smallest window the zoom bar goes under the board's name bar, so
+/// it no longer covers the star and the board menu beside the name.
+#[test]
+fn whiteboard_zoom_bar_keeps_clear_of_the_name_bar() {
+    for (w, hh) in [
+        (360.0, 640.0),
+        (460.0, 640.0),
+        (700.0, 640.0),
+        (1440.0, 900.0),
+    ] {
+        let mut h = Ui1::sized(w, hh);
+        h.app.new_whiteboard();
+        h.app.section = Section::Whiteboards;
+        h.app.sweep.wb.new = None;
+        h.settle();
+        let wid = h.app.sweep.wb.open.unwrap();
+        let name_bar = [
+            h.rect("Whiteboard name"),
+            h.rect(&format!("Star wb:{wid}")),
+            h.rect("Board menu"),
+        ];
+        let zoom = [
+            h.rect("Zoom out"),
+            h.rect("Zoom to 100%"),
+            h.rect("Zoom in"),
+            h.rect("Reset view"),
+        ];
+        for a in name_bar.iter().chain(&zoom) {
+            assert!(a.right() <= w, "{w}x{hh}: {a:?} past the edge");
+        }
+        for a in name_bar {
+            for b in zoom {
+                let o = a.intersect(b);
+                assert!(
+                    !(o.width() > 0.5 && o.height() > 0.5),
+                    "{w}x{hh}: {a:?} under the zoom bar's {b:?}"
+                );
+            }
+        }
+    }
+}

@@ -25,6 +25,16 @@ const TOOL: f32 = 40.0;
 /// The zoom (percent) button in the zoom bar, and the whole bar.
 const PCT_W: f32 = 54.0;
 const ZOOM_W: f32 = 6.0 + BTN + PCT_W + BTN + 9.0 + BTN + 6.0;
+/// The name bar's buttons and padding beside the name.
+const NAME_REST: f32 = 6.0 + 4.0 + BTN + 2.0 + BTN + 6.0;
+/// The narrowest the board's name field gets.
+const NAME_MIN: f32 = 120.0;
+
+/// A page too narrow for the name bar and the zoom bar side by side: the
+/// zoom bar goes under the name bar, at the right (it covered the star).
+fn zoom_below(rect: Rect) -> bool {
+    rect.width() - 2.0 * EDGE - ZOOM_W - 8.0 - NAME_REST < NAME_MIN
+}
 /// The tools, top to bottom: (tool, icon, name).
 const TOOLS: [(WbTool, Icon, &str); 6] = [
     (WbTool::Select, Icon::Move, "Select"),
@@ -185,9 +195,13 @@ impl App {
             .x;
         // as wide as the name, but in a narrow window clear of the zoom bar
         // (a long name ran under it)
-        let rest = 6.0 + 4.0 + BTN + 2.0 + BTN + 6.0;
-        let room = rect.width() - 2.0 * EDGE - ZOOM_W - 8.0 - rest;
-        let name_w = (text_w + 24.0).clamp(120.0, room.min(300.0).max(120.0));
+        let rest = NAME_REST;
+        let room = if zoom_below(rect) {
+            rect.width() - 2.0 * EDGE - rest
+        } else {
+            rect.width() - 2.0 * EDGE - ZOOM_W - 8.0 - rest
+        };
+        let name_w = (text_w + 24.0).clamp(NAME_MIN, room.min(300.0).max(NAME_MIN));
         let w = name_w + rest;
         let bar = Rect::from_min_size(rect.min + vec2(EDGE, EDGE), vec2(w, BAR_H));
         card(ui, t, bar, 12.0, ui.id().with(("wb_name_bar", wid)));
@@ -416,10 +430,12 @@ impl App {
     /// to the starting view.
     fn wb_zoom_bar(&mut self, ui: &mut Ui, t: &Theme, rect: Rect, origin: Pos2, wid: u64) {
         let w = ZOOM_W;
-        let bar = Rect::from_min_size(
-            pos2(rect.right() - EDGE - w, rect.top() + EDGE),
-            vec2(w, BAR_H),
-        );
+        let top = if zoom_below(rect) {
+            rect.top() + EDGE + BAR_H + 8.0
+        } else {
+            rect.top() + EDGE
+        };
+        let bar = Rect::from_min_size(pos2(rect.right() - EDGE - w, top), vec2(w, BAR_H));
         card(ui, t, bar, 12.0, ui.id().with(("wb_zoom_bar", wid)));
         self.sweep.wb.bars.push(bar);
         let mut view = self.sweep.wb.view.get(&wid).copied().unwrap_or_default();

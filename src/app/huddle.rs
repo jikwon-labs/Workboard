@@ -687,10 +687,9 @@ impl App {
 
     /// The "Share your screen" chooser above the bar: the displays and
     /// windows, or how to give the Screen Recording permission. `width`:
-    /// how wide it is (narrower in the small window, see mini.rs).
-    /// The "Share your screen" chooser, `width` wide (narrower in a narrow
-    /// window) and its bottom at `bottom` (the huddle bar's top), or 200
-    /// over the window's bottom.
+    /// how wide it is (narrower in the small window, see mini.rs, and in a
+    /// narrow window). `bottom`: where its bottom goes (the huddle bar's
+    /// top), else 200 over the window's bottom.
     pub(super) fn share_menu(
         &mut self,
         ctx: &egui::Context,

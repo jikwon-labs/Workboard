@@ -27,7 +27,8 @@
 // workspace, turn its features on or off, and make, change or delete custom
 // fields, automations, templates and teams, or who a Slack user comes in
 // as (`extra.slack_map`, set by Import from Slack). Admins may do all of
-// that, but the owner's own entry stays the owner's (`guard_entries`). And
+// that, but the owner's own entry stays the owner's (`guard_entries`) and
+// only the owner renames or recolours the workspace (`OWNER_VALUES`). And
 // chat messages and task comments stay their authors' (`guard_authors`): a
 // plain member can't write as someone else or change or delete what someone
 // else wrote.
@@ -73,6 +74,10 @@ impl PutBack {
 /// That is every shared setting (`wb_sync::SHARED_VALUES`), so one added
 /// there is the owner's and admins' to change until said otherwise here.
 pub const ADMIN_VALUES: &[&str] = wb_sync::SHARED_VALUES;
+
+/// Of those, what only the owner changes, not an admin: the workspace's
+/// name and colour.
+pub const OWNER_VALUES: &[&str] = &["workspace", "extra.workspace_color"];
 
 /// Team-wide collections only the owner and admins add to, change or
 /// delete from: custom fields, automations, templates and teams. Everyone
@@ -453,7 +458,13 @@ impl Cx {
             put_path(data, path, team_map);
         }
         self.guard_authors(canon, data, member);
-        for path in ADMIN_VALUES {
+        self.guard_values(canon, data, ADMIN_VALUES);
+    }
+
+    /// Shared settings `paths` stay as the team has them: a newer change of
+    /// theirs is dropped (and they're told when it changed anything).
+    fn guard_values(&mut self, canon: &Value, data: &mut Value, paths: &[&str]) {
+        for path in paths {
             let theirs = self.dmeta.values.get(*path).copied().unwrap_or(0);
             let team_stamp = self.cmeta.values.get(*path).copied().unwrap_or(0);
             let team_value = get_path(canon, path).cloned();
@@ -472,7 +483,8 @@ impl Cx {
 impl Cx {
     /// An admin: they bring people in and take them out, but `owners`'
     /// entries (name, email, role) stay as the owner has them, and the owner
-    /// can't be taken out of the list.
+    /// can't be taken out of the list. The workspace's name and colour stay
+    /// the owner's too (see `guard`).
     fn guard_entries(&mut self, canon: &Value, data: &mut Value, owners: &[u64]) {
         let team = array_at(canon, "members");
         for &id in owners {
@@ -1079,7 +1091,10 @@ pub fn guard(
         cx.guard_people(canon, data, member);
         cx.keep_visible(canon, data, member);
     } else if !owners.is_empty() {
+        // an admin, while the workspace has an owner (one without keeps
+        // its admins in charge of everything)
         cx.guard_entries(canon, data, owners);
+        cx.guard_values(canon, data, OWNER_VALUES);
     }
     let meta = std::mem::take(&mut cx.dmeta);
     set_meta(data, &meta);

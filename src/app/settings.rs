@@ -82,7 +82,8 @@ impl SettingsTab {
     }
 
     /// Changes the whole workspace for everyone: on a team server only its
-    /// owner and admins see it (the server keeps it too).
+    /// owner and admins see it (the server keeps it too), and General (the
+    /// workspace's name and colour) only its owner.
     fn admin_only(self) -> bool {
         use SettingsTab::*;
         matches!(
@@ -93,12 +94,20 @@ impl SettingsTab {
 }
 
 impl App {
+    /// Whether I see `tab` in Settings (see [`SettingsTab::admin_only`]).
+    fn may_open_settings(&self, tab: SettingsTab) -> bool {
+        match tab {
+            SettingsTab::General => self.may_rename_workspace(),
+            _ => !tab.admin_only() || self.may_manage(),
+        }
+    }
+
     pub(super) fn open_settings(&mut self, label: &str) {
         let tab = SettingsTab::from_label(label).unwrap_or_default();
-        self.settings_tab = if tab.admin_only() && !self.may_manage() {
-            SettingsTab::MySettings
-        } else {
+        self.settings_tab = if self.may_open_settings(tab) {
             tab
+        } else {
+            SettingsTab::MySettings
         };
         self.settings_state = None;
         // a photo picked last time and not saved doesn't come back
@@ -157,8 +166,8 @@ impl App {
             self.settings_nav(&mut nui);
             Rect::from_min_max(pos2(full.left() + nav_w, full.top()), full.max)
         };
-        if self.settings_tab.admin_only() && !self.may_manage() {
-            // a member lands on their own settings instead
+        if !self.may_open_settings(self.settings_tab) {
+            // a member (or an admin, for General) lands on their own settings instead
             self.settings_tab = SettingsTab::MySettings;
             self.settings_state = None;
         }
@@ -242,11 +251,10 @@ impl App {
             .auto_shrink([false, false])
             .show(nui, |nui| {
                 let mut last_group = "";
-                let manages = self.may_manage();
                 for tab in SettingsTab::ALL {
                     let (group, label) = (tab.group(), tab.label());
                     // sections that change the workspace for everyone are the owner's and admins'
-                    if tab.admin_only() && !manages {
+                    if !self.may_open_settings(tab) {
                         continue;
                     }
                     if group != last_group {

@@ -5773,7 +5773,8 @@ fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version
         "nothing turned down: {:?}",
         b.put_back
     );
-    // once admin, the same changes go through
+    // once admin, the same changes go through, but the workspace's name
+    // and colour stay the owner's
     a.client.send(Msg::SetRole {
         member: 2,
         role: Role::Admin,
@@ -5787,17 +5788,35 @@ fn a_plain_member_cant_change_people_or_team_settings_and_gets_the_teams_version
         m.push(json!({"id": 9005, "name": "Dee", "email": "dee@team.io", "role": "Member", "invited": true}));
         m[2]["name"] = json!("Cy C.");
         d["workspace"] = json!("Team 2");
+        d["extra"]["workspace_color"] = json!([4, 5, 6]);
+        d["extra"]["apps"]["priorities"] = json!(false);
         d["extra"]["teams"][0]["members"] = json!([1, 2]);
     });
-    a.wait("an admin's changes reach Ann", |d| {
-        d["workspace"] == "Team 2"
-            && d["extra"]["teams"][0]["members"] == json!([1, 2])
+    // (not told again so soon after the last time: PUT_BACK_QUIET_SECS)
+    let admins_way = |d: &Value| {
+        d["extra"]["teams"][0]["members"] == json!([1, 2])
+            && d["extra"]["apps"]["priorities"] == false
             && d["members"][2]["name"] == "Cy C."
             && d["members"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|m| m["id"] == 9005)
+            && d["workspace"] == "Team"
+            && d["extra"]["workspace_color"] == json!([9, 9, 9])
+    };
+    a.wait(
+        "an admin's changes reach Ann, but not the rename",
+        admins_way,
+    );
+    b.wait("Bo gets the workspace's name and colour back", admins_way);
+    // the owner renames it
+    a.change(|d| {
+        d["workspace"] = json!("Team 2");
+        d["extra"]["workspace_color"] = json!([4, 5, 6]);
+    });
+    b.wait("the owner's rename reaches Bo", |d| {
+        d["workspace"] == "Team 2" && d["extra"]["workspace_color"] == json!([4, 5, 6])
     });
     server.stop();
 }

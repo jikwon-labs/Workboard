@@ -122,11 +122,33 @@ fn a_member_on_a_server_sees_no_invite_or_workspace_settings() {
     h.key(egui::Key::Escape);
     h.app.open_settings("General");
     h.settle();
-    assert!(h.has("Settings General") && h.has("Workspace name"));
     assert!(h.has("Settings Automations") && h.has("Settings Custom fields"));
+    // but not the workspace's name and colour: those are the owner's
+    assert!(!h.has("Settings General") && !h.has("Workspace name"));
+    assert!(h.has("Full name"), "lands on their own settings");
     h.app.section = Section::Teams;
     h.settle();
     assert!(h.has("Delete team"));
+    // reached anyway, the dialog only says who can change them
+    h.app.section = Section::Home;
+    h.app.modal = Some(Modal::WorkspaceSettings {
+        name: h.app.data.workspace.clone(),
+    });
+    h.settle();
+    assert!(h.has("Only the owner of this workspace can change its name and color."));
+    assert!(!h.has("Workspace name"));
+    let name = h.app.data.workspace.clone();
+    h.click("Close");
+    assert!(h.app.modal.is_none() && h.app.data.workspace == name);
+    // the owner has General
+    h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.app.open_settings("My settings");
+    h.settle();
+    h.click("Settings General");
+    assert!(h.has("Workspace name"));
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    h.settle();
+    assert!(!h.has("Workspace name"), "an admin is taken off General");
     // before the server is reached, the role in People decides
     h.app.section = Section::Home;
     h.app.sync_rt.role = None;
@@ -149,6 +171,19 @@ fn a_member_on_a_server_sees_no_invite_or_workspace_settings() {
         .role = "Owner".into();
     h.settle();
     assert!(h.has("Rail Invite"));
+    // General too: the owner's, not an admin's
+    h.app.open_settings("General");
+    h.settle();
+    assert!(h.has("Settings General") && h.has("Workspace name"));
+    h.app
+        .data
+        .members
+        .iter_mut()
+        .find(|m| m.id == me)
+        .unwrap()
+        .role = "Admin".into();
+    h.settle();
+    assert!(!h.has("Settings General") && h.has("Settings Automations"));
 }
 
 #[test]

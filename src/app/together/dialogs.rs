@@ -77,12 +77,12 @@ impl App {
             .unwrap_or_else(|| tr("Someone").into())
     }
 
-    /// Whether I may bring new people into the workspace and change its
-    /// name and colour. On a team server
-    /// only its owner and admins: what the server last said, or before it
-    /// is reached the role in People (which follows the server's). Alone or
-    /// in a shared folder anyone may, as the People page there lets anyone
-    /// manage people.
+    /// Whether I may bring new people into the workspace and change what
+    /// it has for everyone (features, fields, automations...). On a team
+    /// server only its owner and admins: what the server last said, or
+    /// before it is reached the role in People (which follows the server's).
+    /// Alone or in a shared folder anyone may, as the People page there lets
+    /// anyone manage people.
     pub(crate) fn may_manage(&self) -> bool {
         let server = self.on_server();
         if !server {
@@ -91,6 +91,22 @@ impl App {
         match self.sync_rt.role {
             Some(r) => r.manages(),
             None => self.i_manage(),
+        }
+    }
+
+    /// Whether I may rename or recolour the workspace: on a team server
+    /// only its owner (the server keeps it too), found as in
+    /// [`Self::may_manage`]. Alone or in a shared folder anyone may.
+    pub(crate) fn may_rename_workspace(&self) -> bool {
+        if !self.on_server() {
+            return true;
+        }
+        match self.sync_rt.role {
+            Some(r) => r == Role::Owner,
+            None => self
+                .data
+                .member(self.data.me)
+                .is_some_and(|m| m.role == MemberRole::Owner),
         }
     }
 

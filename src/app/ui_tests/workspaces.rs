@@ -268,18 +268,20 @@ fn only_an_owner_deletes_a_team_server_workspace_and_never_the_first() {
             server: Some(server.into()),
         })
     };
-    // a plain member: no way to delete it, and nothing said about it
+    // an admin: no General (name, colour, deleting), and nothing said about it
     h.app.data.extra.shared = shared("127.0.0.1:1/w/abc");
     h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
     h.app.sync_rt.role = Some(wb_net::Role::Admin);
     h.app.open_settings("General");
     h.frame(vec![]);
-    assert!(h.has("Workspace name"));
+    assert!(!h.has("Workspace name"));
     assert!(!h.has("Delete workspace...") && !h.has("Delete workspace"));
 
     // the owner, signed in
     h.app.sync_rt.role = Some(wb_net::Role::Owner);
+    h.app.open_settings("General");
     h.frame(vec![]);
+    assert!(h.has("Workspace name"));
     assert!(h.has("It is deleted from the team server for everyone."));
     h.click("Delete workspace...");
     assert!(h.has("It is deleted from the team server for everyone: their apps lose it too. The server keeps a copy for 30 days, which whoever runs the server can bring back."));

@@ -1607,6 +1607,22 @@ impl App {
                     });
                 });
             }
+            Modal::WorkspaceSettings { .. } if !self.may_rename_workspace() => {
+                // reached by a link or a stale screen: on a server the
+                // workspace's name and colour are the owner's (the server
+                // keeps them too)
+                ui.label(tr(
+                    "Only the owner of this workspace can change its name and color.",
+                ));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(tr("Close")).clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            }
             Modal::Invite { emails, role } => close = self.invite_body(ui, t, emails, role),
             Modal::WorkspaceSettings { name } => close = self.workspace_settings_body(ui, t, name),
             Modal::NewWorkspace {

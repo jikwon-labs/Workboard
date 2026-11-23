@@ -207,7 +207,7 @@ impl App {
                             );
                         });
                     if huddle {
-                        self.share_menu(ctx, &t, 380.0);
+                        self.share_menu(ctx, &t, 380.0, None);
                     }
                     return;
                 }
@@ -217,7 +217,7 @@ impl App {
                 });
                 if huddle {
                     let w = (ctx.screen_rect().width() - 40.0).clamp(240.0, 380.0);
-                    self.share_menu(ctx, &t, w);
+                    self.share_menu(ctx, &t, w, None);
                 }
                 let (close, front, docked, outer, inner) = ctx.input(|i| {
                     let v = i.viewport();

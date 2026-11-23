@@ -119,6 +119,10 @@ pub struct HuddleRt {
     pub(super) opened_settings: bool,
     /// How wide (physical pixels) each picture was drawn, as last told to the call.
     pub(super) views: HashMap<String, f32>,
+    /// Where the bar goes over the conversation's message box, set by Chat
+    /// when it draws one: the pass it was drawn in, and the box's left and
+    /// right and the top of its Message / Post / Ask tabs.
+    pub(super) dock: Option<(u64, Rect)>,
 }
 
 impl Default for HuddleRt {
@@ -160,6 +164,7 @@ impl Default for HuddleRt {
             },
             opened_settings: false,
             views: HashMap::new(),
+            dock: None,
         }
     }
 }
@@ -454,7 +459,7 @@ impl App {
 
     /// Everyone's video above the bar: shared screens large on top, then
     /// cameras, others first, then you.
-    fn huddle_videos(&mut self, ctx: &egui::Context, t: &Theme) {
+    fn huddle_videos(&mut self, ctx: &egui::Context, t: &Theme, bottom: egui::Pos2) {
         if self.huddle.pictures.is_empty() {
             self.tell_view_sizes(HashMap::new());
             return;
@@ -465,7 +470,7 @@ impl App {
             self.tell_view_sizes(HashMap::new());
             return;
         };
-        self.huddle_videos_large(ctx, t, screens, cameras);
+        self.huddle_videos_large(ctx, t, screens, cameras, bottom);
     }
 
     /// Puts the pictures that came in since the last frame on the screen's
@@ -539,6 +544,7 @@ impl App {
         t: &Theme,
         screens: Vec<(String, String)>,
         cameras: Vec<(String, String)>,
+        bottom: egui::Pos2,
     ) {
         // a clicked video shows large and the rest small; otherwise tiles get
         // smaller when many people send video (and when a screen is shared)
@@ -569,7 +575,8 @@ impl App {
         let mut clicked: Option<String> = None;
         egui::Area::new(egui::Id::new("huddle_videos"))
             .order(egui::Order::Middle)
-            .anchor(Align2::CENTER_BOTTOM, [0.0, -210.0])
+            .pivot(Align2::CENTER_BOTTOM)
+            .fixed_pos(bottom)
             .show(ctx, |ui| {
                 card_frame(&t)
                     .fill(t.card)
@@ -681,7 +688,16 @@ impl App {
     /// The "Share your screen" chooser above the bar: the displays and
     /// windows, or how to give the Screen Recording permission. `width`:
     /// how wide it is (narrower in the small window, see mini.rs).
-    pub(super) fn share_menu(&mut self, ctx: &egui::Context, t: &Theme, width: f32) {
+    /// The "Share your screen" chooser, `width` wide (narrower in a narrow
+    /// window) and its bottom at `bottom` (the huddle bar's top), or 200
+    /// over the window's bottom.
+    pub(super) fn share_menu(
+        &mut self,
+        ctx: &egui::Context,
+        t: &Theme,
+        width: f32,
+        bottom: Option<egui::Pos2>,
+    ) {
         if !self.huddle.share_menu {
             return;
         }
@@ -689,10 +705,17 @@ impl App {
         let mut close = false;
         let mut settings = false;
         let mut again = false;
-        egui::Area::new(egui::Id::new("huddle_share_menu"))
-            .order(egui::Order::Foreground)
-            .anchor(Align2::CENTER_BOTTOM, [0.0, -200.0])
-            .show(ctx, |ui| {
+        // inside the window with its margins (it started left of a narrow
+        // window, the start of every line cut)
+        let screen = ctx.screen_rect();
+        let width = width.min(screen.width() - 28.0 - 16.0).max(160.0);
+        let area =
+            egui::Area::new(egui::Id::new("huddle_share_menu")).order(egui::Order::Foreground);
+        let area = match bottom {
+            Some(at) => area.pivot(Align2::CENTER_BOTTOM).fixed_pos(at),
+            None => area.anchor(Align2::CENTER_BOTTOM, [0.0, -200.0]),
+        };
+        area.show(ctx, |ui| {
                 card_frame(&t)
                     .fill(t.card)
                     .inner_margin(egui::Margin::same(14))
@@ -726,7 +749,7 @@ impl App {
                                     .color(t.text2),
                                 );
                                 ui.add_space(6.0);
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     if ui.button(tr("Open System Settings")).clicked() {
                                         settings = true;
                                     }
@@ -1017,11 +1040,23 @@ impl App {
         let green = HUDDLE_GREEN;
         let mut press = HuddlePress::default();
         let mut small = false;
-        self.huddle_videos(ctx, &t);
-        self.share_menu(ctx, &t, 380.0);
-        egui::Area::new(egui::Id::new("huddle_bar"))
+        // over Chat's message box, as wide as it at most (it covered the
+        // top of the box's tabs, and the sidebar beside a narrow page);
+        // elsewhere near the window's bottom, inside the window
+        let screen = ctx.screen_rect();
+        let (at, max_w) = match self.huddle.dock {
+            Some((pass, r)) if pass == ctx.cumulative_pass_nr() => {
+                (pos2(r.center().x, r.top() - 6.0), r.width())
+            }
+            _ => (
+                pos2(screen.center().x, screen.bottom() - 132.0),
+                screen.width() - 16.0,
+            ),
+        };
+        let bar = egui::Area::new(egui::Id::new("huddle_bar"))
             .order(egui::Order::Middle)
-            .anchor(Align2::CENTER_BOTTOM, [0.0, -132.0])
+            .pivot(Align2::CENTER_BOTTOM)
+            .fixed_pos(at)
             .show(ctx, |ui| {
                 card_frame(&t)
                     .fill(t.card)
@@ -1033,7 +1068,10 @@ impl App {
                         color: Color32::from_black_alpha(40),
                     })
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
+                        // what doesn't fit in a narrow window goes on
+                        // another row (it ran past both edges)
+                        ui.set_max_width(max_w - 28.0);
+                        ui.horizontal_wrapped(|ui| {
                             let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
                             ui.painter().circle_filled(r.center(), 13.0, green);
                             super::shell::line_icon(
@@ -1081,6 +1119,10 @@ impl App {
                         });
                     });
             });
+        // the videos and the screen chooser above the bar
+        let top = pos2(at.x, bar.response.rect.top() - 8.0);
+        self.huddle_videos(ctx, &t, top);
+        self.share_menu(ctx, &t, 380.0, Some(top));
         // the huddle floats over the page but under dialogs: put an open
         // dialog (and its dimmed background) back on top
         if let Some(m) = &self.modal {

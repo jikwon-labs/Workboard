@@ -2562,7 +2562,7 @@ impl App {
                 self.focus_on_open(ui.ctx(), "chat", cid, egui::Id::new(super::files::CHAT_BOX));
             }
             let composer_top = ui.cursor().top();
-            egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 2 }).show(ui, |ui| {
+            let composer = egui::Frame::new().inner_margin(egui::Margin { left: 20, right: 12, top: 4, bottom: 2 }).show(ui, |ui| {
                 let target = match channel.kind {
                     ChannelKind::Channel => channel.name.clone(),
                     ChannelKind::Direct => self.channel_label(&channel),
@@ -2575,6 +2575,12 @@ impl App {
                 }
                 self.typing_row(ui, &channel, None);
             });
+            // the huddle bar goes over the box, clear of its tabs
+            let r = composer.response.rect;
+            self.huddle.dock = Some((
+                ui.ctx().cumulative_pass_nr(),
+                Rect::from_x_y_ranges(r.left() + 12.0..=r.right() - 4.0, composer_top..=composer_top),
+            ));
             composer_took(ui, ("chat_composer_h", cid), composer_top);
         });
         // only the part they will go to lights up: the thread beside the

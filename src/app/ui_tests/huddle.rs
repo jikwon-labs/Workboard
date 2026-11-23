@@ -310,3 +310,128 @@ fn huddle_shares_a_screen_and_shows_others_screens_large() {
     assert!(h.rect(&format!("Video of {}", other.name)).width() > small.width() * 1.5);
     assert_eq!(h.app.huddle.views.len(), 1);
 }
+
+/// In a huddle in #general on a server, with two others there.
+fn in_huddle(h: &mut Ui1) {
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    let me = h.app.data.me;
+    let others: Vec<u64> = h
+        .app
+        .data
+        .members
+        .iter()
+        .filter(|m| m.id != me)
+        .map(|m| m.id)
+        .take(2)
+        .collect();
+    let general = h.channel_id("general");
+    h.app.huddle.channel = Some(general);
+    h.app.huddle.joined = true;
+    let person = |id: u64, dev: &str, me: bool| wb_voice::Person {
+        identity: format!("{}-{}", id, dev),
+        name: String::new(),
+        me,
+        speaking: !me,
+        muted: false,
+        heard: 0.0,
+        camera: false,
+        screen: false,
+    };
+    h.app.huddle.people = vec![person(me, "dev1", true)];
+    for (i, id) in others.iter().enumerate() {
+        h.app
+            .huddle
+            .people
+            .push(person(*id, &format!("dev{}", i + 2), false));
+    }
+    h.app.section = Section::Chat;
+    h.app.chat.open = Some(general);
+    h.settle();
+}
+
+/// The huddle bar sits over the message box, clear of its Message / Post /
+/// Ask tabs and of the sidebar, inside the window however narrow (it
+/// covered the top of the tabs, the sidebar's "Today & Overdue" beside a
+/// narrow page, and ran past both edges of a compact window); the screen
+/// chooser and its no-permission note fit the window too (they started left
+/// of it).
+#[test]
+fn huddle_bar_and_screen_chooser_fit_the_window() {
+    use crate::i18n::{set_lang, Lang};
+    for lang in [Lang::En, Lang::Ko] {
+        for (w, hh) in [
+            (1440.0, 900.0),
+            (960.0, 560.0),
+            (700.0, 640.0),
+            (460.0, 640.0),
+            (360.0, 640.0),
+        ] {
+            for chooser in [None, Some(false), Some(true)] {
+                let mut h = Ui1::sized(w, hh);
+                set_lang(lang);
+                in_huddle(&mut h);
+                if let Some(denied) = chooser {
+                    h.app.huddle.share_menu = true;
+                    if denied {
+                        h.app.huddle.screen_problem = Some(wb_voice::ScreenTrouble::NotAllowed);
+                    }
+                    h.settle();
+                }
+                let what = format!("{:?} {}x{} chooser {:?}", lang, w, hh, chooser);
+                let window = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
+                let bar = h
+                    .ctx
+                    .memory(|m| m.area_rect(egui::Id::new("huddle_bar")))
+                    .unwrap_or_else(|| panic!("{}: the bar", what));
+                let tabs: Vec<Rect> = ["Message", "Post", "Ask"]
+                    .iter()
+                    .map(|n| h.rect(n))
+                    .collect();
+                let today = h
+                    .has(tr("Today & Overdue"))
+                    .then(|| h.rect(tr("Today & Overdue")));
+                let menu = h
+                    .ctx
+                    .memory(|m| m.area_rect(egui::Id::new("huddle_share_menu")));
+                let cut = h.cut_texts(window);
+                set_lang(Lang::En);
+                assert!(window.contains_rect(bar), "{}: bar {:?}", what, bar);
+                for t in &tabs {
+                    assert!(
+                        !bar.intersects(*t),
+                        "{}: bar {:?} over a tab {:?}",
+                        what,
+                        bar,
+                        t
+                    );
+                }
+                if let Some(r) = today {
+                    assert!(
+                        !bar.intersects(r),
+                        "{}: bar {:?} over the sidebar {:?}",
+                        what,
+                        bar,
+                        r
+                    );
+                }
+                if chooser.is_some() {
+                    let m = menu.unwrap_or_else(|| panic!("{}: the chooser", what));
+                    assert!(window.contains_rect(m), "{}: chooser {:?}", what, m);
+                    assert!(
+                        !m.intersects(bar),
+                        "{}: chooser {:?} over the bar {:?}",
+                        what,
+                        m,
+                        bar
+                    );
+                }
+                assert!(cut.is_empty(), "{}: cut {:?}", what, cut);
+            }
+        }
+    }
+}

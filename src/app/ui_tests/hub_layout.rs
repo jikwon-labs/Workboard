@@ -269,3 +269,33 @@ fn notifications_test_button_stays_clear_of_its_sentence() {
         assert_fits(&h, page(&h), at);
     });
 }
+
+/// The Planner in a narrow window: "To schedule" and the seven days go one
+/// under another, each the page's width, so no day is cut at the window's
+/// edge; the week's dates go under the buttons when they don't fit.
+#[test]
+fn narrow_planner_stacks_its_days() {
+    each_size(|w, hh, at| {
+        let mut h = Ui1::sized(w, hh);
+        let mut x = task_named(&h, "Design new homepage layout").clone();
+        x.id = 31_200;
+        x.name = LONG_NAME.into();
+        x.assignees = vec![h.app.data.me];
+        x.due = Some(today());
+        x.parent = None;
+        h.app.data.tasks.push(x);
+        h.app.section = Section::Planner;
+        h.settle();
+        let week = h.app.planner_week;
+        for i in 0..7 {
+            let name = format!(
+                "Add task on {}",
+                (week + chrono::Duration::days(i)).format("%a %-d")
+            );
+            h.scroll_into_view(&name);
+            let r = h.rect(&name);
+            assert!(r.right() <= w, "{at}: {name} {r:?}");
+            assert_fits(&h, page(&h), &format!("{at} at {name}"));
+        }
+    });
+}

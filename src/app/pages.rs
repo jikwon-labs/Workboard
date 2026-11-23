@@ -186,7 +186,8 @@ impl App {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(20, 14))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                // the week's dates go under the buttons in a narrow window
+                ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(tr("Planner")).size(20.0).strong());
                     ui.add_space(16.0);
                     if ui.button(tr("Today")).clicked() {
@@ -199,7 +200,7 @@ impl App {
                     if fwd {
                         self.planner_week = week + Duration::days(7);
                     }
-                    ui.label(RichText::new(week_range(week)).size(15.0));
+                    ui.add(egui::Label::new(RichText::new(week_range(week)).size(15.0)).extend());
                 });
                 ui.add_space(10.0);
                 // (id, due day, due time): a task is copied only for its chip
@@ -215,27 +216,31 @@ impl App {
                     .map(|x| (x.id, x.due, x.due_moment()))
                     .collect();
                 let avail = ui.available_rect_before_wrap();
+                // a narrow window has no room for seven readable days side
+                // by side (the last one in view was cut mid-letter): "To
+                // schedule" and the days go one under another, each the
+                // page's width, and the page scrolls down
+                let stack = self.tier != super::shell::Tier::Wide;
                 // the "To schedule" column gives up room first in a small
                 // window; the seven days share what is left exactly
-                let left_w = (avail.width() * 0.26).clamp(170.0, 260.0);
+                let left_w = if stack {
+                    // beside the scroll bar
+                    avail.width() - 12.0
+                } else {
+                    (avail.width() * 0.26).clamp(170.0, 260.0)
+                };
                 let mut dropped: Option<(u64, Option<NaiveDate>)> = None;
                 // a day with many tasks (overdue ones pile up on today)
-                // scrolls; in a narrow window the days keep a readable width
-                // and the week scrolls sideways too
-                let narrow = self.tier != super::shell::Tier::Wide;
-                let area = if narrow {
-                    egui::ScrollArea::both()
-                } else {
-                    egui::ScrollArea::vertical()
-                };
-                area.id_salt("planner_week")
+                // scrolls
+                egui::ScrollArea::vertical()
+                    .id_salt("planner_week")
                     .auto_shrink([false, false])
                     .drag_to_scroll(false)
                     .show(ui, |ui| {
                 // the "To schedule" box and the days (their names included)
-                // end on one line
-                let col_h = avail.height() - 12.0;
-                ui.horizontal_top(|ui| {
+                // end on one line; stacked, each is as tall as it needs
+                let col_h = if stack { 0.0 } else { avail.height() - 12.0 };
+                let mut week_ui = |ui: &mut Ui| {
                     // unscheduled list
                     ui.vertical(|ui| {
                         ui.set_width(left_w);
@@ -246,7 +251,7 @@ impl App {
                             .stroke(Stroke::new(1.0_f32, t.border))
                             .corner_radius(10)
                             .inner_margin(egui::Margin::same(10));
-                        let inner_h = col_h - frame.total_margin().sum().y;
+                        let inner_h = (col_h - frame.total_margin().sum().y).max(0.0);
                         let (_, payload) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
                             ui.set_width(left_w - 20.0);
                             ui.set_min_height(inner_h);
@@ -291,11 +296,18 @@ impl App {
                         }
                     });
                     // week columns: equal parts of the rest, gaps included
+                    // (stacked: the page's width each)
                     let gap = ui.spacing().item_spacing.x;
-                    let least = if narrow { 110.0 } else { 60.0 };
-                    let col_w = ((ui.available_width() - 7.0 * gap) / 7.0).floor().max(least);
+                    let col_w = if stack {
+                        left_w
+                    } else {
+                        ((ui.available_width() - 7.0 * gap) / 7.0).floor().max(60.0)
+                    };
                     for i in 0..7 {
                         let d = week + Duration::days(i);
+                        if stack {
+                            ui.add_space(8.0);
+                        }
                         ui.vertical(|ui| {
                             ui.set_width(col_w);
                             let top = ui.cursor().top();
@@ -315,7 +327,7 @@ impl App {
                                 .stroke(Stroke::new(1.0_f32, t.border))
                                 .corner_radius(8)
                                 .inner_margin(egui::Margin::same(6));
-                            let inner_h = col_h - head_h - frame.total_margin().sum().y;
+                            let inner_h = (col_h - head_h - frame.total_margin().sum().y).max(0.0);
                             let (_, payload) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
                                 ui.set_width(col_w - 12.0);
                                 ui.set_min_height(inner_h);
@@ -350,7 +362,12 @@ impl App {
                             }
                         });
                     }
-                });
+                };
+                if stack {
+                    ui.vertical(|ui| week_ui(ui));
+                } else {
+                    ui.horizontal_top(|ui| week_ui(ui));
+                }
                     });
                 if let Some((id, due)) = dropped {
                     if let Some(mut task) = self.task(id).cloned() {

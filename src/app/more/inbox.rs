@@ -152,59 +152,97 @@ impl App {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(18, 10))
             .show(ui, |ui| {
+                let label =
+                    ["Filter", "Comments", "Mentions", "Assigned"][self.inbox_filter as usize % 4];
+                // the buttons on the right go on a row of their own when
+                // they leave the filter no room (it ran under Reminder):
+                // as wide as they were last frame, the filter as its words
+                let tools_id = ui.id().with("inbox_tools_w");
+                let tools_w: f32 = ui.data(|d| d.get_temp(tools_id)).unwrap_or(0.0);
+                let words = ui
+                    .painter()
+                    .layout_no_wrap(tr(label).to_string(), FontId::proportional(14.0), t.text)
+                    .size()
+                    .x;
+                let filter_w = 18.0 + 16.0 + 6.0 + words;
+                let gap = ui.spacing().item_spacing.x;
+                let one_row = ui.available_width() >= filter_w + 2.0 * gap + tools_w;
+                let mut tools = |s: &mut Self, ui: &mut Ui| {
+                    let w = ui
+                        .with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            s.inbox_tools(ui, has_items, &mut clear_all);
+                            ui.min_rect().width()
+                        })
+                        .inner;
+                    if (w - tools_w).abs() > 0.5 {
+                        ui.data_mut(|d| d.insert_temp(tools_id, w));
+                        ui.ctx().request_repaint();
+                    }
+                };
                 ui.horizontal(|ui| {
-                    let label = ["Filter", "Comments", "Mentions", "Assigned"]
-                        [self.inbox_filter as usize % 4];
-                    // framed like the buttons on the right of this row
-                    let fr = icon_button(ui, &t, Icon::Filter, tr(label), label, true);
-                    popup(ui, &fr, ui.id().with("inbox_filter"), 180.0, |ui| {
-                        for (i, l) in ["Everything", "Comments", "Mentions", "Assigned to me"]
-                            .iter()
-                            .enumerate()
-                        {
-                            if ui
-                                .selectable_label(self.inbox_filter == i as u8, tr(l))
-                                .clicked()
-                            {
-                                self.inbox_filter = i as u8;
-                                close_popup(ui);
-                            }
-                        }
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let can_clear = has_items && self.inbox_tab != InboxTab::Cleared;
-                        if ui
-                            .add_enabled_ui(can_clear, |ui| {
-                                icon_button(
-                                    ui,
-                                    &t,
-                                    Icon::Check,
-                                    crate::i18n::tr_ctx("Clear all (inbox)", "Clear all"),
-                                    "Clear all",
-                                    true,
-                                )
-                            })
-                            .inner
-                            .clicked()
-                            && can_clear
-                        {
-                            clear_all = true;
-                        }
-                        if icon_button(ui, &t, Icon::Settings, "", "Notification settings", true)
-                            .on_hover_text(tr("Notification settings"))
-                            .clicked()
-                        {
-                            self.modal = Some(Modal::Notifications);
-                        }
-                        if icon_button(ui, &t, Icon::Alarm, tr("Reminder"), "Reminder", true)
-                            .clicked()
-                        {
-                            self.modal = Some(Modal::reminder(String::new(), today()));
-                        }
-                    });
+                    self.inbox_filter_button(ui, label);
+                    if one_row {
+                        tools(self, ui);
+                    }
                 });
+                if !one_row {
+                    ui.horizontal(|ui| tools(self, ui));
+                }
             });
         clear_all
+    }
+
+    /// The Inbox's filter button (saying what it shows) and its menu.
+    fn inbox_filter_button(&mut self, ui: &mut Ui, label: &str) {
+        let t = self.t();
+        // framed like the buttons on the right of this row
+        let fr = icon_button(ui, &t, Icon::Filter, tr(label), label, true);
+        popup(ui, &fr, ui.id().with("inbox_filter"), 180.0, |ui| {
+            for (i, l) in ["Everything", "Comments", "Mentions", "Assigned to me"]
+                .iter()
+                .enumerate()
+            {
+                if ui
+                    .selectable_label(self.inbox_filter == i as u8, tr(l))
+                    .clicked()
+                {
+                    self.inbox_filter = i as u8;
+                    close_popup(ui);
+                }
+            }
+        });
+    }
+
+    /// Clear all, notification settings and Reminder, right to left.
+    fn inbox_tools(&mut self, ui: &mut Ui, has_items: bool, clear_all: &mut bool) {
+        let t = self.t();
+        let can_clear = has_items && self.inbox_tab != InboxTab::Cleared;
+        if ui
+            .add_enabled_ui(can_clear, |ui| {
+                icon_button(
+                    ui,
+                    &t,
+                    Icon::Check,
+                    crate::i18n::tr_ctx("Clear all (inbox)", "Clear all"),
+                    "Clear all",
+                    true,
+                )
+            })
+            .inner
+            .clicked()
+            && can_clear
+        {
+            *clear_all = true;
+        }
+        if icon_button(ui, &t, Icon::Settings, "", "Notification settings", true)
+            .on_hover_text(tr("Notification settings"))
+            .clicked()
+        {
+            self.modal = Some(Modal::Notifications);
+        }
+        if icon_button(ui, &t, Icon::Alarm, tr("Reminder"), "Reminder", true).clicked() {
+            self.modal = Some(Modal::reminder(String::new(), today()));
+        }
     }
 
     /// What an empty tab says, and the way on from it.

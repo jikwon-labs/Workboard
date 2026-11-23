@@ -724,3 +724,54 @@ fn clicking_the_time_in_create_reminder_types_there_not_in_the_name() {
     assert_eq!(r.text, "Pay rent", "the time went into the name");
     assert_eq!(r.due_ts, crate::timefmt::reminder_ts(today(), "14:30"));
 }
+
+/// The row under the Inbox's tabs keeps the filter (saying what it shows)
+/// clear of Reminder, notification settings and Clear all: those go on a
+/// row of their own when there is no room beside it (the filter's words ran
+/// under Reminder in a narrow window).
+#[test]
+fn inbox_filter_stays_clear_of_the_buttons_beside_it() {
+    use crate::i18n::{set_lang, Lang};
+    for lang in [Lang::En, Lang::Ko] {
+        for (w, hh) in [
+            (360.0, 640.0),
+            (460.0, 640.0),
+            (700.0, 640.0),
+            (960.0, 560.0),
+            (1440.0, 900.0),
+        ] {
+            for f in 0..4u8 {
+                let mut h = Ui1::sized(w, hh);
+                set_lang(lang);
+                h.app.section = Section::Home;
+                h.app.loc = Location::Inbox;
+                h.app.inbox_filter = f;
+                h.settle();
+                let what = format!("{:?} {} filter {}", lang, w, f);
+                let filter = ["Filter", "Comments", "Mentions", "Assigned"][f as usize];
+                let names = [filter, "Reminder", "Notification settings", "Clear all"];
+                let rects: Vec<Rect> = names.iter().map(|n| h.rect(n)).collect();
+                let window = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
+                let cut = h.cut_texts(window);
+                set_lang(Lang::En);
+                for (n, r) in names.iter().zip(&rects) {
+                    assert!(window.contains_rect(*r), "{}: {} {:?}", what, n, r);
+                }
+                for i in 0..rects.len() {
+                    for j in i + 1..rects.len() {
+                        assert!(
+                            !rects[i].intersects(rects[j]),
+                            "{}: {} {:?} and {} {:?}",
+                            what,
+                            names[i],
+                            rects[i],
+                            names[j],
+                            rects[j]
+                        );
+                    }
+                }
+                assert!(cut.is_empty(), "{}: cut {:?}", what, cut);
+            }
+        }
+    }
+}

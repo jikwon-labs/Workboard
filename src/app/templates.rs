@@ -800,8 +800,43 @@ impl App {
         name_field(&r, "Search templates");
         ui.add_space(6.0);
         let mut pick = None;
-        let narrow = ui.available_width() < 500.0;
-        let mut row = |ui: &mut Ui| {
+        // team templates are made, renamed and deleted by the owner and
+        // admins on a server; everyone uses them
+        let manages = self.may_manage();
+        // the categories and "+ New task template" side by side when they
+        // fit (measured, in either language); else the categories wrap and
+        // the button goes on a line under them
+        let text_w = |s: &str| {
+            ui.painter()
+                .layout_no_wrap(
+                    s.to_string(),
+                    egui::TextStyle::Button.resolve(ui.style()),
+                    t.text,
+                )
+                .size()
+                .x
+        };
+        let pad = 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x;
+        let cats_w: f32 = Category::ALL
+            .iter()
+            .map(|c| text_w(tr(c.label())) + pad)
+            .sum();
+        let new_w = if manages {
+            text_w(tr("+ New task template")) + pad + 8.0
+        } else {
+            0.0
+        };
+        let one_row = cats_w + new_w <= ui.available_width();
+        let mut new_button = |ui: &mut Ui| {
+            let r = ui.add(ghost(egui::Button::new(
+                RichText::new(tr("+ New task template")).color(t.text2),
+            )));
+            name_it(&r, "New task template");
+            if r.clicked() {
+                pick = Some(Pick::NewTask);
+            }
+        };
+        let mut cats = |ui: &mut Ui| {
             for cat in Category::ALL {
                 let r = ui.selectable_label(c.cat == cat, tr(cat.label()));
                 name_it(&r, &format!("Template category {}", cat.label()));
@@ -809,27 +844,19 @@ impl App {
                     c.cat = cat;
                 }
             }
-            // team templates are made, renamed and deleted by the owner and
-            // admins on a server; everyone uses them
-            let manages = self.may_manage();
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if !manages {
-                    return;
-                }
-                let r = ui.add(ghost(egui::Button::new(
-                    RichText::new(tr("+ New task template")).color(t.text2),
-                )));
-                name_it(&r, "New task template");
-                if r.clicked() {
-                    pick = Some(Pick::NewTask);
+        };
+        if one_row {
+            ui.horizontal(|ui| {
+                cats(ui);
+                if manages {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| new_button(ui));
                 }
             });
-        };
-        if narrow {
-            // the categories wrap; "+ New task template" goes under them
-            ui.horizontal_wrapped(|ui| row(ui));
         } else {
-            ui.horizontal(|ui| row(ui));
+            ui.horizontal_wrapped(|ui| cats(ui));
+            if manages {
+                new_button(ui);
+            }
         }
         ui.add_space(6.0);
         ui.separator();

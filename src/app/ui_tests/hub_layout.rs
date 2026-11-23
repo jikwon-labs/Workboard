@@ -177,3 +177,35 @@ fn teams_analytics_cards_shorten_long_names() {
         );
     });
 }
+
+/// Settings > Templates and the Template Center: the category tabs and
+/// "+ New task template" share a row only when they fit; else the button
+/// goes on a line under the tabs instead of over "Docs".
+#[test]
+fn template_tabs_and_new_task_template_do_not_overlap() {
+    each_size(|w, hh, at| {
+        for dialog in [false, true] {
+            let mut h = Ui1::sized(w, hh);
+            if dialog {
+                h.app
+                    .open_templates(crate::app::templates::Category::All, None);
+            } else {
+                h.app.section = Section::Settings;
+                h.app.settings_tab = crate::app::settings::SettingsTab::Templates;
+                h.app.settings_state = None;
+            }
+            h.settle();
+            let at = format!("{at} {}", if dialog { "dialog" } else { "page" });
+            let new = h.rect("New task template");
+            assert!(new.right() <= w, "{at}: {new:?}");
+            for cat in ["All templates", "Lists & Spaces", "Tasks", "Docs"] {
+                let r = h.rect(&format!("Template category {cat}"));
+                assert!(!r.intersects(new), "{at}: {cat} {r:?} under {new:?}");
+            }
+            if !dialog {
+                let over = overlapping(&h.texts_in(page(&h), Seen::Visible));
+                assert!(over.is_empty(), "{at}: overlapping {over:?}");
+            }
+        }
+    });
+}

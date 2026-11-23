@@ -267,30 +267,44 @@ impl App {
                             );
                         }
                         ui.add(egui::Label::new(RichText::new(&g.name).size(26.0).strong()).wrap());
-                        // wrapped under the pill when it doesn't fit beside
-                        // it: one long line widened the whole page past a
-                        // narrow window's edge
-                        ui.horizontal_wrapped(|ui| {
-                            if let Some(p) = row.pace {
-                                pace_pill(ui, t, p);
+                        // beside the pill, wrapping in its own column there
+                        // (one long line widened the whole page past a
+                        // narrow window's edge); under it when that column
+                        // would be too narrow to read
+                        let line = match (row.pace, row.expect) {
+                            (Some(Pace::Done), _) => {
+                                trf!("All {} targets met", g.targets.len())
                             }
-                            let line = match (row.pace, row.expect) {
-                                (Some(Pace::Done), _) => {
-                                    trf!("All {} targets met", g.targets.len())
-                                }
-                                (Some(_), Some(e)) => trf!(
-                                    "{}% of the time used, {}% done · {}",
-                                    e,
-                                    row.pct,
-                                    pace_text(row.pct, e)
-                                ),
-                                _ => tr("Add a start and due date to see the pace").into(),
-                            };
-                            ui.add(
-                                egui::Label::new(RichText::new(line).size(13.0).color(t.text2))
-                                    .wrap(),
-                            );
-                        });
+                            (Some(_), Some(e)) => trf!(
+                                "{}% of the time used, {}% done · {}",
+                                e,
+                                row.pct,
+                                pace_text(row.pct, e)
+                            ),
+                            _ => tr("Add a start and due date to see the pace").into(),
+                        };
+                        let text =
+                            egui::Label::new(RichText::new(line).size(13.0).color(t.text2)).wrap();
+                        match row.pace {
+                            Some(p) if info_w < 300.0 => {
+                                pace_pill(ui, t, p);
+                                ui.add(text);
+                            }
+                            Some(p) => {
+                                ui.horizontal_top(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 10.0;
+                                    pace_pill(ui, t, p);
+                                    // its first line level with the pill's text
+                                    ui.vertical(|ui| {
+                                        ui.add_space(2.0);
+                                        ui.add(text);
+                                    });
+                                });
+                            }
+                            None => {
+                                ui.add(text);
+                            }
+                        }
                         // the owner, due date and start in chips, as many
                         // to a line as fit: egui's wrapping can't move a
                         // framed chip down, and three side by side widened

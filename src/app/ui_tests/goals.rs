@@ -1782,3 +1782,33 @@ fn a_milestone_noted_on_two_computers_shows_once() {
         "the first one stays, on every computer"
     );
 }
+
+/// A goal's pace sentence sits beside its pill, wrapping in its own column
+/// there, or on a line under the pill in a narrow window; it never wraps
+/// round under the pill.
+#[test]
+fn the_pace_sentence_is_beside_or_under_its_pill() {
+    use super::hub_layout::{each_size, page};
+    each_size(|w, hh, at| {
+        let mut h = Ui1::sized(w, hh);
+        h.app.data = two_goals().0.app.data.clone();
+        let a = h.app.data.extra.goals[0].id;
+        h.app.section = Section::Goals;
+        h.app.goal.open = Some(a);
+        h.settle();
+        let pill = h.rect("At risk");
+        let pace: Vec<Rect> = h
+            .texts_in(page(&h), Seen::Visible)
+            .into_iter()
+            .filter(|(s, _)| s.contains('%') && s.contains('\u{b7}'))
+            .map(|(_, r)| r)
+            .collect();
+        assert!(!pace.is_empty(), "{at}: the pace sentence");
+        for r in pace {
+            assert!(
+                r.left() >= pill.right() || r.top() >= pill.bottom() - 1.0,
+                "{at}: the pace sentence {r:?} wraps under the pill {pill:?}"
+            );
+        }
+    });
+}

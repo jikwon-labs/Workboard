@@ -110,12 +110,16 @@ impl App {
                             5.0,
                             &st,
                         );
-                        let chars = ((w - 40.0) / 6.5) as usize;
+                        // shortened to the room between the status circle
+                        // and the close mark (a count of letters let wide
+                        // ones, Korean, run to the next chip)
+                        let font = FontId::proportional(11.5);
+                        let name = fit_text(ui.painter(), &task.name, &font, w - 20.0 - 18.0);
                         ui.painter().text(
                             r.left_center() + vec2(20.0, 0.0),
                             Align2::LEFT_CENTER,
-                            truncate(&task.name, chars),
-                            FontId::proportional(11.5),
+                            name,
+                            font,
                             t.text,
                         );
                         let xr = Rect::from_center_size(

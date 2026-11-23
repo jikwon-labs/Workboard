@@ -449,3 +449,41 @@ fn a_popup_closes_when_its_button_scrolls_away() {
     assert!(!shown, "the page scrolled the button away");
     assert!(!h.has(item), "the menu went with its button");
 }
+
+#[test]
+fn recent_tray_names_stay_inside_their_chips() {
+    // a long name of wide letters (Korean ones in the app's fonts) was
+    // cut by a count of letters, so its "..." ran up against the next
+    // chip's status circle
+    let mut h = Ui1::sized(960.0, 560.0);
+    let names = [
+        "WWW MMM WWW MMM WWW MMM WWW MMM WWW MMM",
+        "MMMM WWWW MMMM WWWW MMMM WWWW MMMM WWWW MMMM",
+        "A very long task name that goes on and on to see how it fits",
+    ];
+    let mut ids = vec![];
+    for (i, n) in names.iter().enumerate() {
+        let id = h.app.data.tasks[i].id;
+        h.app.data.tasks[i].name = n.to_string();
+        ids.push(id);
+    }
+    h.app.recent = ids;
+    h.settle();
+    let strip = Rect::from_min_max(pos2(0.0, h.size.y - 40.0), h.size.to_pos2());
+    let mut shown: Vec<(String, Rect)> = h
+        .texts_in(strip, Seen::Visible)
+        .into_iter()
+        .filter(|(t, _)| t.chars().count() > 3)
+        .collect();
+    shown.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+    assert!(shown.len() >= 3, "the chips show: {:?}", shown);
+    for pair in shown.windows(2) {
+        // the next chip's status circle sits 15 points before its name
+        assert!(
+            pair[0].1.right() + 15.0 <= pair[1].1.left(),
+            "{:?} runs into the next chip {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+}

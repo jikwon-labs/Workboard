@@ -127,6 +127,7 @@ mod canon;
 mod curl;
 pub mod hooks;
 mod jobs;
+pub mod joins;
 mod livekit;
 mod mine;
 mod notify;

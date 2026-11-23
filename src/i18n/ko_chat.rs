@@ -11,6 +11,9 @@ pub const T: &[(&str, &str)] = &[
     // call and huddle messages (kept in English, shown in the reader's language)
     ("Started a call", "통화를 시작했습니다"),
     ("Started a huddle", "허들을 시작했습니다"),
+    // what the server posts for someone who joined (server/src/joins.rs)
+    ("Joined the workspace.", "워크스페이스에 들어왔습니다."),
+    ("Hi! I just joined the workspace.", "안녕하세요! 워크스페이스에 새로 가입했습니다."),
     // who else is writing in the conversation (under the message box)
     ("{} is typing...", "{}님이 입력 중..."),
     ("{} and {} are typing...", "{}님과 {}님이 입력 중..."),

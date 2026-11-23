@@ -365,20 +365,34 @@ impl Hub {
     }
 
     /// `member` signed in, so they've joined: if their entry still says
-    /// invited, everyone's People shows them as a member from now on.
-    pub(crate) fn joined(&self, member: u64) {
-        let mut g = self.state();
-        // looked at first: most sign-ins change nothing, and the copy is
-        // only copied to change it
-        if !still_invited(g.canon.as_deref(), member) {
-            return;
-        }
-        if g.canon
-            .as_mut()
-            .map(Arc::make_mut)
-            .is_some_and(|c| mark_joined(c, member))
-        {
+    /// invited, everyone's People shows them as a member from now on, and
+    /// the team hears it from them (`joins::join_news`): in the default
+    /// channels, and in a direct message with each teammate.
+    pub(crate) fn joined(self: &Arc<Self>, member: u64) {
+        let news = {
+            let mut g = self.state();
+            // looked at first: most sign-ins change nothing, and the copy is
+            // only copied to change it
+            if !still_invited(g.canon.as_deref(), member) {
+                return;
+            }
+            if !g
+                .canon
+                .as_mut()
+                .map(Arc::make_mut)
+                .is_some_and(|c| mark_joined(c, member))
+            {
+                return;
+            }
             self.broadcast_canon(&mut g, false);
+            g.canon
+                .as_deref()
+                .and_then(|c| joins::join_news(c, member, now_ms(), || wb_sync::random_u64() >> 12))
+        };
+        // as if their app said it: the same checks, and the people told
+        // are notified (iPhones too) as for any message
+        if let Some(copy) = news {
+            self.push(member, "joined", copy);
         }
     }
 

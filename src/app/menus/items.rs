@@ -75,11 +75,33 @@ impl App {
             {
                 self.dirty = true;
             }
+            // anyone may join or leave; only who may delete it changes others
+            // (and whether it's a default channel: the server keeps both)
+            let manager = self.may_manage_channel(&self.data.channels[ci]);
+            if !self.data.channels[ci].private {
+                ui.add_space(6.0);
+                let mut on = self.data.channels[ci].is_default();
+                let b = ui.add_enabled(manager, Check::new(&mut on, tr("Default channel")));
+                let b = if manager {
+                    b
+                } else {
+                    b.on_disabled_hover_text(tr(
+                        "Only whoever made this channel, or an admin, can change this.",
+                    ))
+                };
+                if b.changed() && manager {
+                    self.data.channels[ci].default_channel = Some(on);
+                    self.dirty = true;
+                }
+                ui.label(
+                    RichText::new(tr("When someone joins the workspace, it's announced here."))
+                        .color(t.text3)
+                        .small(),
+                );
+            }
             ui.add_space(6.0);
             ui.label(tr("Members"));
             let members = self.data.members.clone();
-            // anyone may join or leave; only who may delete it changes others
-            let manager = self.may_manage_channel(&self.data.channels[ci]);
             let me = self.data.me;
             ui.horizontal_wrapped(|ui| {
                 for m in &members {

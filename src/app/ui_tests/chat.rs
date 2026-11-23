@@ -1437,6 +1437,96 @@ fn only_the_workspace_owner_renames_a_channel_on_a_server() {
     assert_eq!(name_of(&h), "website-redesign-x");
 }
 
+/// #general is a default channel from the start (the server announces
+/// someone joining there); in Channel settings whoever made a channel, or
+/// an admin, turns it on or off, and anyone else finds the box greyed out.
+/// A private channel has no such box.
+#[test]
+fn a_channels_maker_or_an_admin_makes_it_a_default_channel() {
+    let mut h = Ui1::new();
+    let general = h.channel_id("general");
+    let cid = h.channel_id("website-redesign");
+    let ch = |h: &Ui1, id: u64| {
+        h.app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap()
+            .clone()
+    };
+    assert!(ch(&h, general).is_default());
+    assert!(!ch(&h, cid).is_default());
+    // Alex's channel, on a team server, and I'm a plain member
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .creator = 2;
+    h.app.data.extra.shared = Some(crate::sync::SharedCfg {
+        folder: String::new(),
+        device: "dev1".into(),
+        tag: 5,
+        server: Some("127.0.0.1:1".into()),
+    });
+    h.app.sync_rt.net_status = Some(wb_net::Status::Connected);
+    h.app.sync_rt.role = Some(wb_net::Role::Member);
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    // the pointer is on the window, as it is for a person
+    h.hover(egui::pos2(10.0, 10.0));
+    assert!(h.has("When someone joins the workspace, it's announced here."));
+    h.click("Default channel");
+    assert_eq!(ch(&h, cid).default_channel, None, "a plain member can't");
+    h.key(egui::Key::Escape);
+    // an admin can
+    h.app.sync_rt.role = Some(wb_net::Role::Admin);
+    h.app.modal = Some(Modal::ChannelSettings(cid));
+    h.settle();
+    h.click("Default channel");
+    assert_eq!(ch(&h, cid).default_channel, Some(true));
+    assert!(ch(&h, cid).is_default());
+    h.key(egui::Key::Escape);
+    // and turn #general off: it stays off
+    h.app.modal = Some(Modal::ChannelSettings(general));
+    h.settle();
+    h.click("Default channel");
+    assert_eq!(ch(&h, general).default_channel, Some(false));
+    assert!(!ch(&h, general).is_default());
+    h.key(egui::Key::Escape);
+    // a private channel is never one
+    let secret = h.app.create_channel("hush", true, false);
+    h.app.modal = Some(Modal::ChannelSettings(secret));
+    h.settle();
+    assert!(h.has("Members"));
+    assert!(!h.has("Default channel"));
+}
+
+/// What the server posts for someone who joined (`event` "joined") reads
+/// in my language; the same words typed by someone stay as they were.
+#[test]
+fn a_join_message_from_the_server_reads_in_my_language() {
+    let mut m: crate::model::Message = serde_json::from_value(serde_json::json!({
+        "id": 1, "author": 2, "text": "Hi! I just joined the workspace.", "ts": 1, "event": "joined"
+    }))
+    .unwrap();
+    crate::i18n::set_lang(crate::i18n::Lang::Ko);
+    assert_eq!(
+        crate::app::chat::shown_text(&m),
+        "안녕하세요! 워크스페이스에 새로 가입했습니다."
+    );
+    m.text = "Joined the workspace.".into();
+    assert_eq!(
+        crate::app::chat::shown_text(&m),
+        "워크스페이스에 들어왔습니다."
+    );
+    m.event = None;
+    assert_eq!(crate::app::chat::shown_text(&m), "Joined the workspace.");
+    crate::i18n::set_lang(crate::i18n::Lang::En);
+}
+
 #[test]
 fn someone_elses_channel_can_be_joined_but_not_deleted_or_its_people_changed() {
     let mut h = Ui1::new();

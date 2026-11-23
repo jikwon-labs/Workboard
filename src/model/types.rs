@@ -491,6 +491,11 @@ pub struct Message {
     /// chat"), as it stood then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<GoalCard>,
+    /// Posted by the server for its author rather than typed: "joined" when
+    /// they joined the workspace (server/src/joins.rs). Its text is kept in
+    /// English and shown in the reader's language (`shown_text`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
 }
 
 /// The message a forwarded one carries: what it said, who wrote it, when
@@ -598,6 +603,23 @@ pub struct Channel {
     /// any member) and the server's owner and admins may delete it.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub creator: u64,
+    /// Marked in Channel settings as a default channel (see `is_default`).
+    /// Left out until first changed; turning it off writes `false` rather
+    /// than leaving it out, so #general can be turned off and it never goes
+    /// back to missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_channel: Option<bool>,
+}
+
+impl Channel {
+    /// A default channel: when someone joins the workspace, the server says
+    /// so in it in their name (server/src/joins.rs). A public channel marked
+    /// so; #general is one until it is turned off.
+    pub fn is_default(&self) -> bool {
+        self.kind == ChannelKind::Channel
+            && !self.private
+            && self.default_channel.unwrap_or(self.name == "general")
+    }
 }
 
 /// The messages I've seen in a conversation, to tell new ones by id rather

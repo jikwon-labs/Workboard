@@ -493,6 +493,99 @@ fn signing_in_takes_invited_off_the_person() {
     server.stop();
 }
 
+/// What `author` said in conversation `ch` that the server posted when they
+/// joined (`event` "joined").
+fn join_news_in(ch: Option<&Value>, author: u64) -> Vec<String> {
+    ch.map(|c| {
+        c["messages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|m| m["author"] == author && m["event"] == "joined")
+            .map(|m| m["text"].as_str().unwrap_or("").to_string())
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// The direct message between exactly these two people.
+fn dm_of(d: &Value, a: u64, b: u64) -> Option<&Value> {
+    d["channels"].as_array()?.iter().find(|c| {
+        let mut m: Vec<u64> = c["members"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_u64())
+            .collect();
+        m.sort_unstable();
+        c["kind"] == "Direct" && m == [a.min(b), a.max(b)]
+    })
+}
+
+/// Someone invited who joins says so, in their name: in #general and every
+/// other channel marked default, and in a direct message with each teammate
+/// who has joined (made for them). Someone still invited hears nothing, and
+/// signing in again says nothing more.
+#[test]
+fn someone_joining_says_so_in_the_default_channels_and_to_each_teammate() {
+    use workboard_server::joins::{HELLO_TEXT, JOINED_TEXT};
+    let home = TempHome::new("joinnews");
+    let server = Server::start_at(&home, 0);
+    let mut data = workspace();
+    data["members"][1]["invited"] = json!(true);
+    data["members"][2]["invited"] = json!(true);
+    let chans = data["channels"].as_array_mut().unwrap();
+    chans.push(json!({"id": 20, "name": "random", "kind": "Channel", "topic": "", "members": [], "messages": [], "last_read": 0}));
+    chans.push(json!({"id": 30, "name": "news", "kind": "Channel", "topic": "", "members": [], "messages": [], "last_read": 0, "default_channel": true}));
+    let mut a = App::connect(server.port, Some(data));
+    a.until("A is the owner", |a| a.role == Some(Role::Owner));
+    a.wait("A's copy on the server", |d| channel(d, 30).is_some());
+
+    let code = a.invite(2, Role::Member);
+    let mut b = App::join(server.port, &code);
+    b.until("B signed in", |b| b.member == Some(2));
+    a.wait("Ann hears Bo joined", |d| {
+        join_news_in(channel(d, 10), 2) == [JOINED_TEXT]
+            && join_news_in(channel(d, 30), 2) == [JOINED_TEXT]
+            && join_news_in(dm_of(d, 1, 2), 2) == [HELLO_TEXT]
+    });
+    assert!(
+        join_news_in(channel(&a.data, 20), 2).is_empty(),
+        "#random isn't a default channel"
+    );
+    assert!(dm_of(&a.data, 2, 3).is_none(), "Cy hasn't joined yet");
+    b.wait("Bo's own copy has it", |d| {
+        join_news_in(dm_of(d, 1, 2), 2) == [HELLO_TEXT]
+    });
+
+    let code = a.invite(3, Role::Member);
+    let mut c = App::join(server.port, &code);
+    c.until("C has a token", |c| c.token.is_some());
+    let (token, device) = (c.token.clone(), c.device.clone());
+    a.wait("Ann hears Cy joined", |d| {
+        join_news_in(channel(d, 10), 3) == [JOINED_TEXT]
+            && join_news_in(dm_of(d, 1, 3), 3) == [HELLO_TEXT]
+    });
+    b.wait("so does Bo", |d| {
+        join_news_in(dm_of(d, 2, 3), 3) == [HELLO_TEXT]
+    });
+    drop(c);
+    let mut again = App::start(
+        server.port,
+        Value::Null,
+        SignIn {
+            token,
+            device,
+            ..Default::default()
+        },
+    );
+    again.until("C back", |c| c.member == Some(3));
+    round_trip(&mut b, &mut a, "after Cy came back", 3040);
+    assert_eq!(join_news_in(channel(&a.data, 10), 3), [JOINED_TEXT]);
+    assert_eq!(join_news_in(dm_of(&a.data, 1, 3), 3), [HELLO_TEXT]);
+    server.stop();
+}
+
 /// Another device of `a`'s person, signed in with a code `a` shows (the
 /// phone link), holding the team's copy.
 fn second_device(port: u16, a: &mut App) -> App {
@@ -4703,7 +4796,7 @@ fn hidden_items_never_leak_through_deltas() {
 }
 
 /// A channel Ann (1) made: Bo (2), a plain member, can join and leave it but
-/// can't delete it, add or remove others, or drop who made it by sending a
+/// can't delete it, add or remove others, make it a default channel, or drop who made it by sending a
 /// copy from an older app. In a channel from before makers were kept, anyone
 /// in it may.
 #[test]
@@ -4729,6 +4822,7 @@ fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
             .unwrap();
         c["members"] = json!([1, 2]);
         c["name"] = json!("renamed by Bo");
+        c["default_channel"] = json!(true);
         c.as_object_mut().unwrap().remove("creator");
     });
     a.wait("B joins at A", |d| {
@@ -4738,6 +4832,11 @@ fn only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members() {
     assert_eq!(c["members"], json!([1, 3, 2]), "B joined, Cy stays");
     assert_eq!(c["creator"], 1, "the maker stays");
     assert_eq!(c["name"], "ann's", "only the owner renames it");
+    assert!(
+        c.get("default_channel").is_none(),
+        "nor makes it a default channel: {}",
+        c
+    );
     // B deletes it: nothing happens for the team; B deletes the old one: gone
     b.change(|d| {
         d["channels"]

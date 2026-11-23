@@ -302,6 +302,9 @@ pub const T: &[(&str, &str)] = &[
     ("Hides it from your sidebar until a new message arrives. Nothing is deleted.", "새 메시지가 올 때까지 사이드바에서 숨깁니다. 아무것도 삭제되지 않습니다."),
     ("Only whoever made this channel, or an admin, can delete it.", "이 채널을 만든 사람이나 관리자만 삭제할 수 있습니다."),
     ("Only whoever made this channel, or an admin, can change who else is in it.", "이 채널을 만든 사람이나 관리자만 다른 사람의 참여 여부를 바꿀 수 있습니다."),
+    ("Default channel", "기본 채널"),
+    ("When someone joins the workspace, it's announced here.", "누군가 워크스페이스에 들어오면 여기에 알립니다."),
+    ("Only whoever made this channel, or an admin, can change this.", "이 채널을 만든 사람이나 관리자만 바꿀 수 있습니다."),
     ("Delete #{} for everyone? It goes to your Trash with its messages, and restoring it brings it back for the whole team.", "모든 사람에게서 #{} 채널을 삭제할까요? 메시지와 함께 내 휴지통으로 옮겨지며, 복원하면 팀 전체에 다시 나타납니다."),
     // automation scope
     ("Runs in the whole Workspace", "워크스페이스 전체에서 실행됩니다"),

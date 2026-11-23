@@ -208,6 +208,7 @@ impl App {
         if let Some(c) = self.data.channels.iter_mut().find(|c| c.id == ch) {
             c.messages.push(Message {
                 goal: None,
+                event: None,
                 edited: None,
                 imported: None,
                 preview: None,

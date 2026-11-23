@@ -346,6 +346,7 @@ impl App {
             private,
             list,
             creator: me,
+            default_channel: None,
         });
         self.section = Section::Chat;
         self.chat.open = Some(id);

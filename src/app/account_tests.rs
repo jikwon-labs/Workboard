@@ -614,6 +614,7 @@ fn a_message_in_a_workspace_not_open_is_announced_and_opens_it() {
         members: vec![me, sam],
         messages: vec![Message {
             goal: None,
+            event: None,
             id: 9101,
             author: sam,
             text: "got a minute?".into(),

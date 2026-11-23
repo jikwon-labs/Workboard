@@ -847,6 +847,7 @@ impl App {
         let mentions = self.chat_mentions(&text, ch, picked);
         let m = Message {
             goal: None,
+            event: None,
             edited: None,
             imported: None,
             preview: None,
@@ -4665,6 +4666,7 @@ impl App {
         let mentions = self.chat_mentions(&text, ch, &picked);
         let m = Message {
             goal: None,
+            event: None,
             edited: None,
             imported: None,
             preview: None,
@@ -5319,6 +5321,12 @@ pub(super) fn shown_post_title(m: &Message) -> Option<String> {
 pub(super) fn shown_text(m: &Message) -> String {
     match m.text.as_str() {
         t @ ("Started a call" | "Started a huddle") if m.call.is_some() => tr(t).to_string(),
+        // what the server posted for someone who joined (server/src/joins.rs)
+        t @ ("Joined the workspace." | "Hi! I just joined the workspace.")
+            if m.event.as_deref() == Some("joined") =>
+        {
+            tr(t).to_string()
+        }
         t => t.to_string(),
     }
 }

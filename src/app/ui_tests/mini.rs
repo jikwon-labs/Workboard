@@ -10,6 +10,7 @@ fn message_from(h: &mut Ui1, ch: u64, author: u64, text: &str) -> u64 {
     let c = h.app.data.channels.iter_mut().find(|c| c.id == ch).unwrap();
     c.messages.push(Message {
         goal: None,
+        event: None,
         edited: None,
         imported: None,
         preview: None,

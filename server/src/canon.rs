@@ -268,9 +268,9 @@ pub fn may_manage_channel(ch: &Value, member: u64, role: Role) -> bool {
 /// Before merging a copy from `member`, for the team's channels: who made
 /// one stays (an older app or the iPhone may drop the field); and unless
 /// they may manage it (`may_manage_channel`), they can't delete it (their
-/// tombstone for it is dropped), make it private or a DM, or add or remove
-/// anyone but themselves (its member list stays the team's, with only their
-/// own place changed).
+/// tombstone for it is dropped), make it private or a DM, turn its
+/// `default_channel` on or off, or add or remove anyone but themselves (its
+/// member list stays the team's, with only their own place changed).
 pub(crate) fn guard_channels(canon: &Value, data: &mut Value, member: u64, role: Role) {
     let Some(team) = canon.get("channels").and_then(|c| c.as_array()) else {
         return;
@@ -322,8 +322,10 @@ pub(crate) fn guard_channels(canon: &Value, data: &mut Value, member: u64, role:
                 continue;
             }
             // whether it's private (or a DM) decides who sees it at all:
-            // the app makes a channel private only when it is made
-            for k in ["private", "kind"] {
+            // the app makes a channel private only when it is made. And
+            // whether someone joining is announced in it (`joins.rs`) is
+            // for whoever manages it, as who else is in it
+            for k in ["private", "kind", "default_channel"] {
                 match t.get(k) {
                     Some(v) => {
                         c.insert(k.into(), v.clone());

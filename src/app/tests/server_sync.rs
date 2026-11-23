@@ -673,6 +673,7 @@ fn on_a_server_what_i_may_no_longer_see_leaves_my_copy_without_deleting_it() {
         .messages
         .push(Message {
             goal: None,
+            event: None,
             id: 7301,
             author: me,
             text: "my last words".into(),

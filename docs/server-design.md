@@ -299,6 +299,15 @@ ClickUp Brain 처럼 팀 서버가 Anthropic Claude 에게 물어 앱의 AI 도�
 - **앱.** 서버가 `ai_ready` 를 보낸 워크스페이스에서만 AI 도구가 보인다(연결이 잠깐 끊긴 동안에는 그대로 두고, 그동안 요청은 바로 실패를 알린다). 요청마다 작업(job)을 두고, 보여 주는 창이나 AI 페이지가 없어지면 서버에 `ai_stop` 을 보낸다. 연결이 끊기면 진행 중인 답은 "연결이 끊겼다"로 끝난다. 글쓰기 답을 넣을 때 그 사이 글이 바뀌었으면(선택한 부분이 그 자리에 없고, 옮겨 간 곳이 한 군데로 정해지지 않으면) 넣지 않고 복사하라고 알린다. AI 대화는 앱을 닫거나 다른 워크스페이스를 열면 사라진다(다른 워크스페이스의 서버로 이전 대화가 가지 않게).
 - **검증:** 서버 단위 13개(SSE 읽기, 요청 모양, 한국어 단어, 질문 문맥과 숨김, 긴 대화는 오래된 차례부터 빼기, 문서가 많아도 작업 목록이 남음, 요약, 글쓰기·하위 작업, 한도, 설정, `base_url`, 로컬 가짜 API 를 상대로 한 실제 curl 스트리밍·오류·끊김·중단), 서버 통합 3개(`the_ai_answers_in_pieces_from_what_the_asker_may_see`: 조각 전달, 비공개 채널 거절, 질문 문맥 분리, 실패; `an_ai_answer_stops_when_the_app_stops_it_or_leaves`; `ai_requests_without_an_ai_or_beyond_the_hour_are_turned_down`), 앱 단위 4개(답 넣기 위치, 하위 작업 읽기, 인용 링크), UI 클릭 12개(`src/app/ui_tests/ai.rs`: 서버 없음, 질문·인용 링크·이어 묻기·제안, 실패 후 다시, 요약과 중단, 스레드, 문서 글쓰기 3가지, 빈 페이지 초안, 하위 작업·설명 초안, 연결 끊김, 한국어, 메시지 인용, 다른 워크스페이스는 대화를 못 봄). 가짜 Anthropic API(SSE)를 띄워 실제 서버·앱으로 모든 화면을 확인했다(2026-11-21).
 
+### 새로 들어온 사람 알리기 (2026-11-24)
+
+초대된 사람(멤버 항목이 `invited: true`)이 처음 접속하면 서버가 그 사람을 들어온 것으로 바꾸면서(`Hub::joined`), 그 사람 이름으로 팀에 알린다(`server/src/joins.rs`). Mac·iPhone 어느 쪽으로 들어와도 같다.
+
+- **기본 채널.** 공개 채널마다 `default_channel`(채널 설정의 "기본 채널" 체크)이 있다. 없으면 #general 만 기본이다. 끄면 `false` 로 남는다. 기본 채널마다 "Joined the workspace." 를 올린다. 새로 들어온 사람이 모든 공개 채널에 들어가는 것(앱의 `become_member`)은 그대로다. 체크는 그 채널을 관리하는 사람(만든 사람, owner·admin)만 바꾸고, 서버는 다른 사람이 바꾼 값을 팀의 것으로 되돌린다(`guard_channels`).
+- **DM.** 이미 들어온 팀원마다(아직 초대 중인 사람은 빼고) 둘만의 DM 에 "Hi! I just joined the workspace." 를 올린다. 둘의 DM 이 없으면 만든다.
+- **방식.** 그 사람의 앱이 보낸 것처럼 변경분 사본(`schedule::with_message` 와 같은 모양)을 만들어 `push` 로 합친다. 그래서 다른 push 와 같은 검사를 거치고, 받는 사람에게 알림(iPhone 푸시 포함)이 간다. 메시지에는 `event: "joined"` 가 붙고 글은 영어로 저장되며, Mac 앱은 읽는 사람의 언어로 보인다(통화 메시지와 같은 방식). iPhone 앱은 아직 영어 그대로 보인다. 한 번 들어온 사람은 `invited` 가 꺼져 있어 다시 접속해도 알리지 않는다.
+- **검증:** 서버 단위 5개(`joins.rs`), 서버 통합 `someone_joining_says_so_in_the_default_channels_and_to_each_teammate`(기본 채널·DM·초대 중인 사람·다시 접속), `only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members` 에 기본 채널 되돌리기 추가, 앱 UI 클릭 `a_channels_maker_or_an_admin_makes_it_a_default_channel`, 한국어 표시 `a_join_message_from_the_server_reads_in_my_language`.
+
 ### 보안 점검 (2026-11-18)
 
 서버가 Cloudflare Tunnel 로 인터넷에 열린 뒤 전수 점검을 했다(인증, 동기화 권한, HTTP·파일, 그 밖의 메시지·DoS). 고친 것마다 공격을 그대로 재현하는 테스트를 두었다(고치기 전 코드에서 실패하는 것을 확인했다).

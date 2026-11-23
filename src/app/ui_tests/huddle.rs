@@ -86,6 +86,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
     let id = h.app.data.new_id();
     h.app.data.channels[0].messages.push(Message {
         goal: None,
+        event: None,
         edited: None,
         imported: None,
         preview: None,

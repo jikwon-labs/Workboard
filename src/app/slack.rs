@@ -611,6 +611,7 @@ fn pick_export() -> Option<PathBuf> {
 pub(super) fn new_message(id: u64, author: u64, text: String, ts: i64) -> Message {
     Message {
         goal: None,
+        event: None,
         id,
         author,
         text,

@@ -554,6 +554,7 @@ impl Data {
         // chat
         let msg = |d: &mut Data, author: u64, text: &str, ago: i64| Message {
             goal: None,
+            event: None,
             id: d.new_id(),
             author,
             text: text.into(),

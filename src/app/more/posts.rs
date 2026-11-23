@@ -343,8 +343,9 @@ impl App {
     fn post_filters(&mut self, ui: &mut Ui, pad: f32, cw: f32) {
         let t = self.t();
         let mut sort_below = false;
-        // a compact window: the chips wrap onto more rows
-        let wrap = self.tier == crate::app::shell::Tier::Compact;
+        // a compact window, or a narrow page beside a profile: the chips
+        // wrap onto more rows (on one row they ran past the page's edge)
+        let wrap = self.tier == crate::app::shell::Tier::Compact || cw < 700.0;
         let row = |ui: &mut Ui| {
             let row_left = ui.cursor().left();
             ui.add_space(pad);
@@ -568,6 +569,17 @@ impl App {
                     ui.set_width(cw - 28.0);
                     // the frame sits in a horizontal row; stack its contents top to bottom
                     ui.vertical(|ui| {
+                        let meta = trf!(
+                            "{} in {} \u{2022} {}",
+                            tr(if m.post_type.is_empty() {
+                                "Announcement"
+                            } else {
+                                &m.post_type
+                            }),
+                            cname,
+                            fmt_ago(m.ts)
+                        );
+                        let mut meta_below = true;
                         ui.horizontal(|ui| {
                             // the author's avatar and name open their profile
                             if let Some(a) = self.data.member(m.author) {
@@ -581,33 +593,39 @@ impl App {
                                     self.chat.profile = Some(m.author);
                                 }
                             }
+                            // the room left of "Open in channel"
+                            let gap = ui.spacing().item_spacing.x;
+                            let room = ui.available_width()
+                                - text_width(ui, tr("Open in channel"), egui::TextStyle::Body)
+                                - 2.0 * gap;
                             // "Someone" for a person no longer here, as in the channel
-                            let name = egui::Label::new(RichText::new(self.who(m.author)).strong());
-                            if self.data.member(m.author).is_some() {
-                                if ui
-                                    .add(name.sense(Sense::click()))
-                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .clicked()
-                                {
-                                    self.chat.profile = Some(m.author);
-                                }
-                            } else {
-                                ui.add(name);
-                            }
-                            ui.label(
-                                RichText::new(trf!(
-                                    "{} in {} \u{2022} {}",
-                                    tr(if m.post_type.is_empty() {
-                                        "Announcement"
+                            let name = egui::Label::new(RichText::new(self.who(m.author)).strong())
+                                .truncate();
+                            let name_r = ui
+                                .scope(|ui| {
+                                    ui.set_max_width(room.max(40.0));
+                                    if self.data.member(m.author).is_some() {
+                                        if ui
+                                            .add(name.sense(Sense::click()))
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                            .clicked()
+                                        {
+                                            self.chat.profile = Some(m.author);
+                                        }
                                     } else {
-                                        &m.post_type
-                                    }),
-                                    cname,
-                                    fmt_ago(m.ts)
-                                ))
-                                .small()
-                                .color(t.text3),
-                            );
+                                        ui.add(name);
+                                    }
+                                })
+                                .response
+                                .rect;
+                            // the kind, channel and time beside the name, or
+                            // under it when there is no room (it ran under
+                            // "Open in channel")
+                            let meta_w = text_width(ui, &meta, egui::TextStyle::Small);
+                            if meta_w <= room - name_r.width() - gap {
+                                ui.label(RichText::new(&meta).small().color(t.text3));
+                                meta_below = false;
+                            }
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if ui.link(tr("Open in channel")).clicked() {
                                     // as the Inbox opens one (an old
@@ -620,6 +638,9 @@ impl App {
                                 }
                             });
                         });
+                        if meta_below {
+                            ui.label(RichText::new(&meta).small().color(t.text3));
+                        }
                         ui.label(
                             RichText::new(
                                 crate::app::chat::shown_post_title(&m).unwrap_or_default(),
@@ -646,6 +667,14 @@ impl App {
                 });
         });
     }
+}
+
+/// How wide `text` is on one line in `style`.
+fn text_width(ui: &Ui, text: &str, style: egui::TextStyle) -> f32 {
+    let font = style.resolve(ui.style());
+    ui.fonts(|f| f.layout_no_wrap(text.to_string(), font, Color32::WHITE))
+        .size()
+        .x
 }
 
 /// "Sort:" and the Newest / Oldest menu, laid out right to left.

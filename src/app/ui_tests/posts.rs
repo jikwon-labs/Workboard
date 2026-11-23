@@ -1220,3 +1220,59 @@ fn a_long_post_title_keeps_the_conversation_inside_the_window() {
         "the toolbar fits: {more:?}"
     );
 }
+
+/// A post card in a narrow window, by someone with a long name in a channel
+/// with a long one: the kind, channel and time go under the name when there
+/// is no room beside it (they ran under "Open in channel"), and the filter
+/// chips wrap instead of running off the page.
+#[test]
+fn a_post_cards_header_and_the_filters_fit_a_narrow_window() {
+    use crate::i18n::{set_lang, Lang};
+    for lang in [Lang::En, Lang::Ko] {
+        for w in [360.0, 460.0, 700.0, 960.0, 1440.0] {
+            let mut h = Ui1::sized(w, 640.0);
+            set_lang(lang);
+            let gen = h.channel_id("general");
+            h.app.data.members[1].name = "Alexandra Konstantinopoulou-Whitfield".into();
+            let author = h.app.data.members[1].id;
+            add_post(
+                &mut h,
+                gen,
+                author,
+                "Office move",
+                "Monday",
+                "Announcement",
+                60,
+            );
+            let me = h.app.data.me;
+            add_post(&mut h, gen, me, "Lunch", "Pizza", "Question", 30);
+            h.app.section = Section::Posts;
+            h.settle();
+            // down to the cards, under the post box
+            let mid = pos2(w - 40.0, 500.0);
+            h.frame(vec![egui::Event::PointerMoved(mid)]);
+            for _ in 0..6 {
+                h.frame(vec![egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(0.0, -200.0),
+                    modifiers: Default::default(),
+                }]);
+            }
+            h.settle();
+            let open_name = tr("Open in channel").to_string();
+            assert!(h.has(&open_name), "{:?} {}: the cards", lang, w);
+            let page = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
+            let texts = h.texts_in(page, Seen::Visible);
+            let over = super::layout_tests::overlapping(&texts);
+            let cut = h.cut_texts(page);
+            let past = h.past_right_edge();
+            let open = h.rect(&open_name);
+            set_lang(Lang::En);
+            let what = format!("{:?} {}", lang, w);
+            assert!(over.is_empty(), "{}: overlapping {:?}", what, over);
+            assert!(cut.is_empty(), "{}: cut {:?}", what, cut);
+            assert!(past.is_empty(), "{}: past the right edge {:?}", what, past);
+            assert!(open.right() <= w, "{}: {:?}", what, open);
+        }
+    }
+}

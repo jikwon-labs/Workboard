@@ -610,7 +610,9 @@ impl App {
         }
         // what I'm looking at right now isn't news
         let focused = !self.notify_rt.away;
-        fresh.retain(|n| !(focused && self.target_visible(&n.target)));
+        fresh.retain(|n| {
+            !(focused && self.target_visible(&n.target)) && !self.mini_shows(&n.target)
+        });
         if fresh.len() > BURST {
             // a big batch (back from offline): one summary, and calls on their own
             let (calls, rest): (Vec<Note>, Vec<Note>) =
@@ -659,6 +661,28 @@ impl App {
             (Some("task"), Some(id)) => self.open_task == Some(id),
             _ => false,
         }
+    }
+
+    /// Whether the small window shows what a notice opens, and is looked
+    /// at: in front, or with the app in front (it stays above it), and not
+    /// in the Dock.
+    pub(super) fn mini_shows(&self, target: &str) -> bool {
+        let mut p = target.split(':');
+        let (Some("chat"), Some(ch)) = (p.next(), p.next().and_then(|x| x.parse::<u64>().ok()))
+        else {
+            return false;
+        };
+        let Some(m) = self.mini.channel else {
+            return false;
+        };
+        (self.mini.focused || !self.notify_rt.away)
+            && !self.mini.minimized
+            && self
+                .data
+                .channels
+                .iter()
+                .find(|c| c.id == m)
+                .is_some_and(|c| self.conversation(c).iter().any(|d| d.id == ch))
     }
 
     /// Announces one thing.
@@ -1079,11 +1103,12 @@ impl App {
     /// the Dock badge.
     pub(super) fn notify_tick(&mut self, ctx: Option<&egui::Context>) {
         if let Some(ctx) = ctx {
-            // the thread's own window or the small window in front counts
-            // as the app's
+            // the thread's own window in front counts as the app's (the
+            // small window doesn't: notices for other conversations would
+            // go to the main window's toast, behind another app; its own
+            // conversation is quiet by `mini_shows`)
             self.notify_rt.away = !ctx.input(|i| i.viewport().focused.unwrap_or(true))
-                && !self.chat.thread_window_focused
-                && !self.mini.focused;
+                && !self.chat.thread_window_focused;
         }
         for target in crate::notifier::take_clicked() {
             self.open_target(&target);

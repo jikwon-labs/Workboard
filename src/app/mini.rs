@@ -34,6 +34,8 @@ pub(super) struct MiniUi {
     now_at: Option<Rect>,
     /// It is the window in front: its messages count as read.
     pub(super) focused: bool,
+    /// It is in the Dock: nothing in it is seen.
+    pub(super) minimized: bool,
     /// The messages go down to the newest on the next frame.
     to_bottom: bool,
     /// The input method fixes for its own input (ime.rs).
@@ -58,6 +60,7 @@ struct MiniOut {
     open_main: bool,
     closed: bool,
     focused: bool,
+    minimized: bool,
     at: Option<Rect>,
 }
 
@@ -82,6 +85,7 @@ impl App {
         }
         self.mini.channel = None;
         self.mini.focused = false;
+        self.mini.minimized = false;
     }
 
     /// Closes the small window and forgets what was written in it: signed
@@ -215,23 +219,26 @@ impl App {
                     let w = (ctx.screen_rect().width() - 40.0).clamp(240.0, 380.0);
                     self.share_menu(ctx, &t, w);
                 }
-                let (close, front, outer, inner) = ctx.input(|i| {
+                let (close, front, docked, outer, inner) = ctx.input(|i| {
                     let v = i.viewport();
                     (
                         v.close_requested(),
                         v.focused.unwrap_or(false),
+                        v.minimized.unwrap_or(false),
                         v.outer_rect,
                         v.inner_rect,
                     )
                 });
                 out.closed |= close;
                 out.focused = front;
+                out.minimized = docked;
                 if let (Some(o), Some(i)) = (outer, inner) {
                     out.at = Some(Rect::from_min_size(o.min, i.size()));
                 }
             },
         );
         self.mini.focused = out.focused && !out.closed;
+        self.mini.minimized = out.minimized;
         if out.at.is_some() {
             self.mini.now_at = out.at;
         }
@@ -256,7 +263,10 @@ impl App {
         }
         // read as it comes in while it is in front, or while the app is
         // (it stays in sight above the main window); not after "Mark unread"
-        if (self.mini.focused || !self.notify_rt.away) && self.chat.keep_unread != Some(cid) {
+        if (self.mini.focused || !self.notify_rt.away)
+            && !self.mini.minimized
+            && self.chat.keep_unread != Some(cid)
+        {
             let due = self
                 .data
                 .channels
@@ -267,6 +277,9 @@ impl App {
                 self.mark_read(cid);
                 if self.persist {
                     self.dirty = true;
+                    // this frame's saving and syncing are done already: the
+                    // next frame takes it, at once
+                    ctx.request_repaint();
                 }
             }
         }

@@ -731,6 +731,9 @@ impl App {
             self.ai_forget();
             self.sync_rt = Default::default();
             self.leave_huddle();
+            // its conversation is the workspace's left (ids repeat between
+            // workspaces, so it would show and send to another one)
+            self.forget_mini();
         }
     }
 

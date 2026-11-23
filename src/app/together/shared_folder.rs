@@ -582,6 +582,7 @@ impl App {
         self.data_changed();
         // a huddle in the workspace left ends there (its conversation isn't here)
         self.leave_huddle();
+        self.forget_mini();
         Ok(())
     }
 

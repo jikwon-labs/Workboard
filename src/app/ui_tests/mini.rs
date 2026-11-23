@@ -463,3 +463,86 @@ fn signing_out_closes_the_small_window() {
     assert_eq!(h.app.mini.channel, None);
     assert!(!h.has("Small window message box"));
 }
+
+#[test]
+fn another_workspace_closes_the_small_window_and_forgets_its_draft() {
+    let guard = crate::app::tests::HOME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let home = temp_home("home-mini-ws");
+    std::fs::create_dir_all(&home).unwrap();
+    crate::app::tests::point_home(&home);
+    let mut h = Ui1::new();
+    let general = h.channel_id("general");
+    h.app.open_mini(general);
+    h.app.mini.text = "for the first workspace".into();
+    h.settle();
+    assert!(h.has("Small window message box"));
+    // a new workspace opens in its place: its #general may have the same id
+    h.click("Workspace menu");
+    h.click("Create Workspace");
+    h.type_text("Second");
+    h.click("Next");
+    h.click("Create");
+    h.settle();
+    assert_eq!(h.app.data.workspace, "Second");
+    assert_eq!(h.app.mini.channel, None);
+    assert!(h.app.mini.text.is_empty());
+    assert!(!h.has("Small window message box"));
+    drop(guard);
+}
+
+#[test]
+fn what_the_small_window_shows_makes_no_toast() {
+    let mut h = Ui1::new();
+    let me = h.app.data.me;
+    let other = someone_else(&h);
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members.contains(&other.id))
+        .map(|c| c.id)
+        .unwrap_or_else(|| {
+            let id = 9_999;
+            let mut c = h.app.data.channels[0].clone();
+            c.id = id;
+            c.kind = ChannelKind::Direct;
+            c.private = false;
+            c.members = vec![me, other.id];
+            c.messages.clear();
+            h.app.data.channels.push(c);
+            id
+        });
+    h.click("Rail Home");
+    h.settle();
+    // without the small window a direct message shows a toast
+    message_from(&mut h, dm, other.id, "toast for this one");
+    h.app.notify_rt.pending = true;
+    h.settle();
+    assert!(
+        h.app
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.0.contains("toast for this one")),
+        "{:?}",
+        h.app.toast
+    );
+    h.app.toast = None;
+    // shown in the small window: no toast, and read
+    h.app.open_mini(dm);
+    h.settle();
+    message_from(&mut h, dm, other.id, "already in sight");
+    h.app.notify_rt.pending = true;
+    h.settle();
+    assert!(
+        !h.app
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.0.contains("already in sight")),
+        "{:?}",
+        h.app.toast
+    );
+    assert!(h.has("already in sight"));
+}

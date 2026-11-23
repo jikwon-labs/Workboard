@@ -379,6 +379,12 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - **빠른 찾기의 연산자**(`SearchQuery`): `has:file(s)`, `has:link(s)`, `from:이름`(`me`, 이름이나 표시 이름의 공백 뺀 앞부분, 이름의 아무 단어 앞부분, 봇 메시지는 봇 이름). 연산자가 있으면 메시지 결과만 보여 주고 글자가 없어도 된다.
 - **검증:** `ChatFilterTests` 5개, UI 테스트 `ChatFiltersUITests` 3개. 가짜 서버 `/admin/say` 에 `&file=`·`&kind=Image`·`&reply=` 를 더했다.
 
+## 한글 기울임과 조합 중 서식 (2026-11-23)
+
+- **한글 기울임:** Apple 에는 기울임 한글(일본어·중국어도) 글꼴이 없어서 SwiftUI `.italic()`·UIKit `traitItalic` 이 한글을 세운 채로 그렸다. 문서 보기·문서 편집기·채팅에서 `*기울임*` 의 한글이 보통 글자로 보였다(영어만 기울었다). 이제 글꼴 행렬에 약 12도 기울기를 넣은 글꼴로 그린다(WorkboardKit `Slant.swift`). Core Text 가 한글을 그리는 대체 글꼴에도 같은 행렬을 넘겨서 모든 글자가 기운다. 영어도 SF 이탤릭 대신 같은 기울인 SF 라서 섞여도 기울기가 같다. SwiftUI 에서는 기울임 구간에 글꼴을 직접 넣으므로, 그 줄의 글자 스타일(본문 `.body`, 문서 제목은 `.title2`·`.title3` 굵게, `.headline`)과 Dynamic Type 크기를 넘긴다(`Italics.swift`). 바깥에서 `.font(...)` 로 다른 크기를 씌운 곳에 `ChatText`·`MarkdownBody` 를 쓰면 기울임 구간만 넘긴 스타일 크기로 남으니 스타일도 같이 넘긴다.
+- **편집기에서 조합 중인 한글:** 편집기는 한글 조합 중에는 서식을 다시 그리지 않는다(음절이 끊긴다). 그런데 새 글자의 서식(`typingAttributes`)을 늘 보통으로 두어서, B 버튼을 누르고 한글을 치면 조합 중인 글자가 보통으로 보였다. 이제 커서 자리에 글자 하나를 넣어 본 서식(`typingLook`)을 쓰고, 조합이 커서 이동으로 끝나면(글자가 바뀌지 않아 `textViewDidChange` 가 오지 않는다) `textViewDidChangeSelection` 에서 다시 그린다.
+- **검증:** `SlantTests` 2개(대체 글꼴까지 행렬이 가는지, 기울임 구간에만 글꼴이 들어가는지). 시뮬레이터 스크린샷으로 문서 보기·편집기·채팅의 한글 기울임, 굵게+기울임, `setMarkedText` 로 흉내 낸 조합 중 굵게·기울임을 봤다. 실제 한글 키보드로 친 것은 UI 테스트 러너가 이 Mac(Xcode 16.4, iOS 18.6 시뮬레이터)에서 시작하지 못해 못 봤다(`docs/macbook/README.md`).
+
 ## 설계와 달라진 점
 
 1. **merge 도 Swift 로 옮겼다(1단계 설계 6번 변경).** 프로토콜에 "push 가 반영됐다"는 확인이 없어서, 다시 얹을 변경을 언제 지울지 알 수 없었다. 이제 iOS 는 맥 앱처럼 `merge(내 것, [정본])` 을 한다. Rust 정적 라이브러리 방식은 크로스 컴파일과 FFI 부담에 비해 이득이 적어 쓰지 않았다.

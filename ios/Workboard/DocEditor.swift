@@ -48,6 +48,8 @@ struct DocEditor: UIViewRepresentable {
         weak var textView: UITextView?
         /// a bar action is replacing the text: not a typed Return
         var applying = false
+        /// the text changed while Korean was being composed and isn't restyled yet
+        var stale = false
 
         init(_ parent: DocEditor) { self.parent = parent }
 
@@ -150,7 +152,14 @@ struct DocEditor: UIViewRepresentable {
             textView = tv
             parent.text = tv.text
             // restyling while Korean is being composed would cut the syllable
-            if tv.markedTextRange == nil { restyle(tv) }
+            if tv.markedTextRange == nil { restyle(tv) } else { stale = true }
+        }
+
+        func textViewDidChangeSelection(_ tv: UITextView) {
+            guard !applying, tv.markedTextRange == nil else { return }
+            // a syllable finished by moving the cursor changes no text, so
+            // restyle here; otherwise only what the next letter looks like
+            if stale { restyle(tv) } else { tv.typingAttributes = typingLook(tv) }
         }
 
         func textView(_ tv: UITextView, shouldChangeTextIn range: NSRange, replacementText rep: String) -> Bool {
@@ -168,13 +177,36 @@ struct DocEditor: UIViewRepresentable {
         /// Draws the formatting over the plain text without changing it.
         func restyle(_ tv: UITextView) {
             textView = tv
+            stale = false
+            tv.textStorage.beginEditing()
+            Self.style(tv.textStorage)
+            tv.textStorage.endEditing()
+            tv.typingAttributes = typingLook(tv)
+        }
+
+        /// What a letter typed at the cursor looks like: bold between the
+        /// marks the Bold button puts in, a heading on a "# " line. Korean
+        /// being composed is drawn in it, since restyling waits until the
+        /// syllable is done (it showed plain inside **…** until then).
+        func typingLook(_ tv: UITextView) -> [NSAttributedString.Key: Any] {
+            let ns = tv.text as NSString
+            let sel = tv.selectedRange
+            guard sel.location != NSNotFound, NSMaxRange(sel) <= ns.length else {
+                return [.font: Self.baseFont, .foregroundColor: UIColor.label]
+            }
+            let probe = NSMutableAttributedString(string: ns.replacingCharacters(in: sel, with: "a"))
+            Self.style(probe)
+            return probe.attributes(at: sel.location, effectiveRange: nil)
+        }
+
+        /// The formatting of `storage`'s Markdown, drawn over it.
+        static func style(_ storage: NSMutableAttributedString) {
             let base = Self.baseFont
-            let storage = tv.textStorage
             let whole = NSRange(location: 0, length: storage.length)
             let mono = UIFont.monospacedSystemFont(ofSize: base.pointSize * 0.9, weight: .regular)
-            storage.beginEditing()
             storage.setAttributes([.font: base, .foregroundColor: UIColor.label], range: whole)
-            for run in DocFormat.runs(tv.text) where NSMaxRange(run.range) <= storage.length && run.range.length > 0 {
+            var italic: [NSRange] = []
+            for run in DocFormat.runs(storage.string) where NSMaxRange(run.range) <= storage.length && run.range.length > 0 {
                 let r = run.range
                 switch run.style {
                 case .heading(let n):
@@ -185,9 +217,7 @@ struct DocEditor: UIViewRepresentable {
                         storage.addAttribute(.font, value: Self.font(f as? UIFont ?? base, adding: .traitBold), range: sub)
                     }
                 case .italic:
-                    storage.enumerateAttribute(.font, in: r) { f, sub, _ in
-                        storage.addAttribute(.font, value: Self.font(f as? UIFont ?? base, adding: .traitItalic), range: sub)
-                    }
+                    italic.append(r)
                 case .strike:
                     storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: r)
                 case .done:
@@ -202,8 +232,13 @@ struct DocEditor: UIViewRepresentable {
                     storage.addAttribute(.foregroundColor, value: UIColor.tertiaryLabel, range: r)
                 }
             }
-            storage.endEditing()
-            tv.typingAttributes = [.font: base, .foregroundColor: UIColor.label]
+            // last, so the slant goes on whatever size and weight the text
+            // got; a slanted font, since traitItalic leaves Korean upright
+            for r in italic {
+                storage.enumerateAttribute(.font, in: r) { f, sub, _ in
+                    storage.addAttribute(.font, value: Slant.font(f as? UIFont ?? base), range: sub)
+                }
+            }
         }
 
         static func font(_ f: UIFont, adding trait: UIFontDescriptor.SymbolicTraits) -> UIFont {

@@ -1269,19 +1269,25 @@ struct NewPostSheet: View {
 struct ChatText: View {
     let text: String
     var edited = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// One line's marks, italics leaning in Korean too.
+    func inline(_ s: String) -> Text {
+        Text(Slant.italics(ChatFormat.inline(s), style: .body, size: typeSize))
+    }
 
     var body: some View {
         let blocks = ChatFormat.blocks(text)
         let tail = edited ? Text(text.isEmpty ? "(edited)" : " (edited)").font(.caption).foregroundColor(.secondary) : Text("")
         if blocks.count <= 1, case .text(let t)? = blocks.first ?? .text("") {
-            Text(ChatFormat.inline(t)) + tail
+            inline(t) + tail
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(blocks.enumerated()), id: \.offset) { i, b in
                     let last = i == blocks.count - 1
                     switch b {
                     case .text(let t):
-                        Text(ChatFormat.inline(t)) + (last ? tail : Text(""))
+                        inline(t) + (last ? tail : Text(""))
                     case .code(let c):
                         (Text(c).font(.system(.callout, design: .monospaced)) + (last ? tail : Text("")))
                             .padding(.horizontal, 8).padding(.vertical, 6)
@@ -1290,13 +1296,13 @@ struct ChatText: View {
                     case .quote(let q):
                         HStack(alignment: .top, spacing: 8) {
                             RoundedRectangle(cornerRadius: 1.5).fill(Color(.separator)).frame(width: 3)
-                            Text(ChatFormat.inline(q)).foregroundStyle(.secondary) + (last ? tail : Text(""))
+                            inline(q).foregroundStyle(.secondary) + (last ? tail : Text(""))
                         }
                         .fixedSize(horizontal: false, vertical: true)
                     case .bullet(let t):
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text("\u{2022}")
-                            Text(ChatFormat.inline(t)) + (last ? tail : Text(""))
+                            inline(t) + (last ? tail : Text(""))
                         }
                     }
                 }

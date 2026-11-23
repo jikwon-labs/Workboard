@@ -300,6 +300,7 @@ struct DocDetailView: View {
 /// checkboxes, quotes, code blocks and inline bold, italics, code and links.
 struct MarkdownBody: View {
     let text: String
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     enum Line: Hashable {
         case heading(Int, String), bullet(String), number(String, String), check(Bool, String), quote(String), code(String), rule, text(String), blank
@@ -332,16 +333,19 @@ struct MarkdownBody: View {
         return out
     }
 
-    func inline(_ s: String) -> Text {
+    /// One line's marks in the font of `style`, italics leaning in Korean too.
+    func inline(_ s: String, _ style: UIFont.TextStyle = .body, bold: Bool = false) -> Text {
         let a = (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
-        return Text(a)
+        return Text(Slant.italics(a, style: style, bold: bold, size: typeSize))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
                 switch l {
-                case .heading(let n, let s): inline(s).font(n == 1 ? .title2.bold() : n == 2 ? .title3.bold() : .headline).padding(.top, 4)
+                case .heading(let n, let s):
+                    inline(s, n == 1 ? .title2 : n == 2 ? .title3 : .headline, bold: n < 3)
+                        .font(n == 1 ? .title2.bold() : n == 2 ? .title3.bold() : .headline).padding(.top, 4)
                 case .bullet(let s): HStack(alignment: .firstTextBaseline, spacing: 8) { Text("\u{2022}"); inline(s) }
                 case .number(let n, let s): HStack(alignment: .firstTextBaseline, spacing: 6) { Text("\(n).").monospacedDigit(); inline(s) }
                 case .check(let on, let s):

@@ -1861,3 +1861,29 @@ fn the_pace_sentence_is_beside_or_under_its_pill() {
         }
     });
 }
+
+/// The Goals page before there are any goals fits every window size: the
+/// picture gives up its sides, and the three steps go one under another in
+/// a narrow window instead of running past its right edge.
+#[test]
+fn the_empty_goals_page_fits_every_window_size() {
+    use super::hub_layout::{assert_fits, each_size, page};
+    each_size(|w, hh, at| {
+        let mut h = Ui1::sized(w, hh);
+        h.app.data.extra.goals.clear();
+        h.app.section = Section::Goals;
+        h.settle();
+        assert_fits(&h, page(&h), &format!("{at} top"));
+        for _ in 0..30 {
+            h.frame(vec![egui::Event::PointerMoved(pos2(w / 2.0, hh / 2.0))]);
+            h.frame(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -200.0),
+                modifiers: Default::default(),
+            }]);
+        }
+        h.settle();
+        assert!(!h.painted_text(tr("Record progress")).is_empty(), "{at}");
+        assert_fits(&h, page(&h), &format!("{at} bottom"));
+    });
+}

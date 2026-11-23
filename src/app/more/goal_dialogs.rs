@@ -817,8 +817,11 @@ impl App {
                 ui.vertical_centered(|ui| {
                     let w = ui.available_width().min(760.0);
                     ui.set_max_width(w);
-                    let (r, _) = ui.allocate_exact_size(vec2(380.0, 170.0), Sense::hover());
-                    paint_goal_picture(ui.painter(), r, &t);
+                    // narrower than the picture: its middle, the confetti at
+                    // its sides cut off (it widened the page past the window)
+                    let (r, _) = ui.allocate_exact_size(vec2(380.0_f32.min(w), 170.0), Sense::hover());
+                    let pic = Rect::from_center_size(r.center(), vec2(380.0, 170.0));
+                    paint_goal_picture(&ui.painter().with_clip_rect(r), pic, &t);
                     ui.add_space(20.0);
                     ui.label(RichText::new(tr("Set your first goal")).size(28.0).strong());
                     ui.add_space(6.0);
@@ -879,9 +882,19 @@ impl App {
                         ("Record progress", "It fills in as you record, with a note at 25, 50 and 75%"),
                     ];
                     let sw = (w - gap * 2.0) / 3.0;
-                    ui.horizontal_top(|ui| {
+                    // side by side in a wide page, one under another in a
+                    // narrow one (they ran past its right edge)
+                    let layout = if cols == 3 {
+                        Layout::left_to_right(Align::Min)
+                    } else {
+                        Layout::top_down(Align::Min)
+                    };
+                    ui.with_layout(layout, |ui| {
                         ui.spacing_mut().item_spacing.x = gap;
                         for (i, (title, body)) in steps.iter().enumerate() {
+                            if cols != 3 && i > 0 {
+                                ui.add_space(10.0);
+                            }
                             ui.vertical(|ui| {
                                 ui.set_width(if cols == 3 { sw } else { w });
                                 ui.horizontal(|ui| {

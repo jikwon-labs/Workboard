@@ -4421,3 +4421,51 @@ fn on_an_ipad_opening_a_conversation_leaves_the_keyboard_down() {
     assert_eq!(h.app.section, Section::Chat);
     assert_eq!(h.ctx.memory(|m| m.focused()), None);
 }
+
+/// A message by someone with a long name: the name is shortened with "…"
+/// and the time stays beside it, in the window (the name pushed the time
+/// and the rest of the row past a narrow window's edge).
+#[test]
+fn a_long_author_name_is_shortened_before_the_time() {
+    for w in [360.0, 460.0, 700.0, 960.0] {
+        let mut h = Ui1::sized(w, 640.0);
+        let general = h.channel_id("general");
+        let author = h
+            .app
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == general)
+            .unwrap()
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.author != h.app.data.me)
+            .unwrap()
+            .author;
+        let long = "Alexandra Konstantinopoulou-Whitfield of the Product Design Team";
+        h.app
+            .data
+            .members
+            .iter_mut()
+            .find(|m| m.id == author)
+            .unwrap()
+            .name = long.into();
+        h.app.section = Section::Chat;
+        h.app.chat.open = Some(general);
+        h.settle();
+        let past = h.past_right_edge();
+        assert!(past.is_empty(), "{}: past the right edge {:?}", w, past);
+        let name = h
+            .painted_text(long)
+            .first()
+            .map(|(r, _)| *r)
+            .unwrap_or_else(|| panic!("{}: the name is shown", w));
+        assert!(
+            name.right() < w - 60.0,
+            "{}: room for the time {:?}",
+            w,
+            name
+        );
+    }
+}

@@ -3829,17 +3829,24 @@ impl App {
                     ui.horizontal(|ui| {
                         // a webhook's or command's message shows its name
                         let name = m.bot.clone().unwrap_or_else(|| self.who(m.author));
-                        let label = egui::Label::new(RichText::new(name).strong());
-                        if let Some(p) = person {
-                            let r = ui
-                                .add(label.sense(Sense::click()))
-                                .on_hover_cursor(egui::CursorIcon::PointingHand);
-                            if r.clicked() {
-                                acts.push(ChatAction::Profile(p));
+                        // a long name is shortened with "…", leaving room for
+                        // the time after it (it pushed the time and the rest
+                        // of the row past a narrow window's edge)
+                        let label = egui::Label::new(RichText::new(name).strong()).truncate();
+                        let name_w = (ui.available_width() - 70.0).max(60.0);
+                        ui.scope(|ui| {
+                            ui.set_max_width(name_w);
+                            if let Some(p) = person {
+                                let r = ui
+                                    .add(label.sense(Sense::click()))
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                                if r.clicked() {
+                                    acts.push(ChatAction::Profile(p));
+                                }
+                            } else {
+                                ui.add(label);
                             }
-                        } else {
-                            ui.add(label);
-                        }
+                        });
                         if m.bot.is_some() {
                             egui::Frame::new()
                                 .fill(t.column_bg)

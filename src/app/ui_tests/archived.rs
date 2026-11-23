@@ -335,3 +335,44 @@ fn inbox_marks_comments_on_archived_tasks() {
     h.click("Inbox Later");
     assert!(!h.painted_text(&format!("{} (archived)", name)).is_empty());
 }
+
+/// An archived List's page header in a smaller window: the "Archived" note
+/// and Restore keep clear of the buttons on the right. They used to be
+/// drawn over the huddle button and Automate.
+#[test]
+fn archived_note_and_restore_keep_clear_of_the_header_buttons() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        for (w, hh) in [
+            (1440.0, 900.0),
+            (960.0, 560.0),
+            (700.0, 640.0),
+            (460.0, 640.0),
+        ] {
+            let mut h = Ui1::sized(w, hh);
+            layout_tests::heavy(&mut h);
+            let web = list_id(&h, "Website Redesign");
+            h.app.set_list_archived(web, true);
+            h.app.section = Section::Home;
+            h.app.loc = Location::List(web);
+            h.settle();
+            crate::i18n::set_lang(lang);
+            h.settle();
+            h.settle();
+            let restore = h.rect("Restore archived here");
+            let (note, _) = h.painted_text(tr("Archived"))[0];
+            for b in ["Huddle", "Automate", "Ask", "Share", "Manage"] {
+                let Some(r) = h.tree.iter().rev().find(|(n, _)| n == b).map(|(_, r)| *r) else {
+                    continue;
+                };
+                for (what, x) in [("Restore", restore), ("Archived", note)] {
+                    let o = x.intersect(r);
+                    assert!(
+                        !(o.width() > 0.5 && o.height() > 0.5),
+                        "{lang:?} {w}x{hh}: {what} {x:?} over {b} {r:?}"
+                    );
+                }
+            }
+            crate::i18n::set_lang(crate::i18n::Lang::En);
+        }
+    }
+}

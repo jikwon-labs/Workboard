@@ -144,14 +144,59 @@ impl App {
                         .x
                 })
                 .collect();
-            let room_for = |k: usize, ui: &Ui| {
+            // the "View only" and "Archived" notes and Restore after the
+            // crumbs take room too (they were drawn under the buttons)
+            let notes_w = {
+                let small = egui::TextStyle::Small.resolve(ui.style());
+                let body = egui::TextStyle::Body.resolve(ui.style());
+                let w = |s: &str, f: &FontId| {
+                    ui.painter()
+                        .layout_no_wrap(s.to_string(), f.clone(), t.text)
+                        .size()
+                        .x
+                };
+                let mut n = 0.0;
+                match self.loc_level(self.loc) {
+                    crate::sync::Level::View => n += w(tr("View only"), &small) + 12.0 + sp,
+                    crate::sync::Level::Comment => n += w(tr("Can comment"), &small) + 12.0 + sp,
+                    _ => {}
+                }
+                if self.data.location_archived(self.loc) {
+                    n += w(tr("Archived"), &small) + 12.0 + sp;
+                    n += w(tr("Restore"), &body) + 2.0 * ui.spacing().button_padding.x + sp;
+                }
+                n
+            };
+            let room_with = |k: usize, ui: &Ui, right_w: f32| {
                 let fixed = k as f32 * (18.0 + 2.0 * sp)
                     + (k.saturating_sub(1)) as f32 * (6.0 + sp)
                     + (10.0 + sp)
                     + 30.0
+                    + notes_w
                     + if personal { 20.0 } else { 0.0 };
                 ui.available_width() - right_w - fixed - 12.0
             };
+            // the buttons on the right with their words: when even the last
+            // crumb doesn't fit beside them, they show their icons only, as
+            // in a compact window (the notes and Restore ran under them)
+            let squeezed = self.tier != Tier::Compact && {
+                let label_w = |s: &str| {
+                    ui.painter()
+                        .layout_no_wrap(tr(s).to_string(), FontId::proportional(14.5), t.text)
+                        .size()
+                        .x
+                        + 4.0
+                };
+                let mut w = 40.0 + label_w("Share") + 32.0 + label_w("Ask") + 32.0 + 12.0;
+                if matches!(self.loc, Location::List(_)) {
+                    w += label_w("Manage") + 40.0;
+                }
+                if self.may_manage() {
+                    w += label_w("Automate") + 32.0;
+                }
+                room_with(1, ui, w) < 48.0
+            };
+            let room_for = |k: usize, ui: &Ui| room_with(k, ui, right_w);
             // too narrow for every level: keep only the last ones
             let mut skip = 0;
             while n - skip > 1 && room_for(n - skip, ui) < 48.0 * (n - skip) as f32 {
@@ -322,7 +367,7 @@ impl App {
             self.archived_note(ui, &t);
             let right_start = ui.max_rect().right();
             // a compact window: the buttons show their icons only (named on hover)
-            let icons_only = self.tier == Tier::Compact;
+            let icons_only = self.tier == Tier::Compact || squeezed;
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let hb = |ui: &mut Ui, text: &str| -> Response {

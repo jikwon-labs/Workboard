@@ -158,3 +158,79 @@ fn one_action_item_makes_a_task() {
     h.click("Create a task from the action item");
     assert!(h.app.data.tasks.iter().any(|x| x.name == "Book the room"));
 }
+
+/// Below a wide window the Meetings page is one column: the meeting open
+/// takes the page (a way back leads to the list) instead of a sliver beside
+/// the list. A long name wraps instead of being cut, and a time that can't
+/// be read says so under the row, clear of Delete and the field.
+#[test]
+fn meeting_page_fits_every_window_size() {
+    use crate::i18n::{set_lang, Lang};
+    const LONG: &str =
+        "Weekly product planning meeting about the launch dates and the work still left";
+    for (w, hh) in [
+        (1440.0, 900.0),
+        (960.0, 560.0),
+        (700.0, 640.0),
+        (460.0, 640.0),
+        (360.0, 640.0),
+    ] {
+        for lang in [Lang::En, Lang::Ko] {
+            set_lang(lang);
+            let mut h = Ui1::sized(w, hh);
+            open_meetings(&mut h);
+            h.click("Add a meeting");
+            let id = h.app.meeting_open.unwrap();
+            let m = h.app.data.extra.meetings.last_mut().unwrap();
+            m.title = LONG.into();
+            m.time = "abc".into();
+            h.settle();
+            let at = format!("{}x{} {:?}", w, hh, lang);
+            let one_column = w < 960.0;
+            assert_eq!(
+                h.has(&format!("Open meeting {}", LONG)),
+                !one_column,
+                "{}: the list beside the meeting",
+                at
+            );
+            // the meeting has the page's width
+            let agenda = h.rect("Meeting agenda");
+            let room = if one_column { w - 130.0 } else { 250.0 };
+            assert!(agenda.width() >= room, "{}: agenda {:?}", at, agenda);
+            let page = Rect::from_min_max(pos2(agenda.left() - 4.0, 40.0), h.size.to_pos2());
+            let cut = h.cut_texts(page);
+            assert!(cut.is_empty(), "{}: cut {:?}", at, cut);
+            let over = layout_tests::overlapping(&h.texts_in(page, Seen::Visible));
+            assert!(over.is_empty(), "{}: overlapping {:?}", at, over);
+            // Delete is clear of the time field and the warning
+            let del = h.rect_in(tr("Delete"), page);
+            let time = h.rect("Meeting time");
+            assert!(!del.intersects(time), "{}: {:?} over {:?}", at, del, time);
+            for (r, _) in h.painted_text(tr("Use a time like 14:30")) {
+                assert!(!del.intersects(r), "{}: {:?} over {:?}", at, del, r);
+                assert!(r.right() <= agenda.right() + 1.0, "{}: {:?}", at, r);
+            }
+            assert!(
+                h.past_right_edge().is_empty(),
+                "{}: {:?}",
+                at,
+                h.past_right_edge()
+            );
+            if one_column {
+                // back to the list, which then has the page
+                h.click("Back to all meetings");
+                assert_eq!(h.app.meeting_open, None, "{}", at);
+                let row = h.rect(&format!("Open meeting {}", LONG));
+                assert!(
+                    row.right() <= w && row.width() >= w - 140.0,
+                    "{}: {:?}",
+                    at,
+                    row
+                );
+                h.click(&format!("Open meeting {}", LONG));
+                assert_eq!(h.app.meeting_open, Some(id), "{}", at);
+            }
+        }
+    }
+    set_lang(Lang::En);
+}

@@ -63,6 +63,7 @@ pub const T: &[(&str, &str)] = &[
     ("No meetings yet", "아직 회의가 없어요"),
     ("Pick a meeting or create one to keep the agenda and notes together.", "회의를 선택하거나 새로 만들어 안건과 메모를 한곳에 모으세요."),
     ("Use a time like 14:30", "14:30 처럼 시각을 입력하세요"),
+    ("All meetings", "모든 회의"),
     ("at", "시각"),
     ("Attendees", "참석자"),
     ("Agenda", "안건"),

@@ -323,101 +323,129 @@ impl App {
 
     pub(super) fn meetings_page(&mut self, ui: &mut Ui) {
         let t = self.t();
-        // laid out as the hub sidebars (hubs/side.rs): its name, a search,
-        // then a heading with + over every meeting, soonest first
-        egui::SidePanel::left("meet_list")
-            .resizable(true)
-            .default_width(255.0)
-            .width_range(200.0..=400.0)
-            .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
-            .show_inside(ui, |ui| {
-                use super::hubs::side::{
-                    side_empty, side_heading, side_row, side_search, side_title_row,
-                };
-                side_title_row(ui, &t, tr("Meetings"), false);
-                let mut q = self.sweep.side_find.remove("meetings").unwrap_or_default();
-                side_search(ui, &t, &mut q, tr("Find a meeting"), "Find a meeting");
-                if side_heading(
-                    ui,
-                    &t,
-                    tr("Meetings"),
-                    Some(("Add a meeting", tr("New meeting"))),
-                ) {
-                    let id = self.data.new_id();
-                    self.data.extra.meetings.push(Meeting {
-                        id,
-                        title: tr("New meeting").into(),
-                        date: today(),
-                        time: "10:00".into(),
-                        attendees: vec![self.data.me],
-                        agenda: String::new(),
-                        notes: String::new(),
-                    });
-                    self.meeting_open = Some(id);
-                    self.dirty = true;
-                }
-                let ql = q.trim().to_lowercase();
-                let mut ms: Vec<Meeting> = self
-                    .data
-                    .extra
-                    .meetings
-                    .iter()
-                    .filter(|m| ql.is_empty() || m.title.to_lowercase().contains(&ql))
-                    .cloned()
-                    .collect();
-                ms.sort_by_key(meeting_order);
-                if ms.is_empty() {
-                    side_empty(
-                        ui,
-                        &t,
-                        if ql.is_empty() {
-                            tr("No meetings yet")
-                        } else {
-                            tr("No meeting has that name")
-                        },
-                    );
-                }
-                egui::ScrollArea::vertical()
-                    .id_salt("meet_side_list")
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        for m in &ms {
-                            let sel = self.meeting_open == Some(m.id);
-                            let (r, resp) =
-                                side_row(ui, &t, &format!("Open meeting {}", m.title), sel, 44.0);
-                            let title = if m.title.trim().is_empty() {
-                                tr("Untitled")
-                            } else {
-                                m.title.as_str()
-                            };
-                            let shown = fit_text(
-                                ui.painter(),
-                                title,
-                                &FontId::proportional(14.0),
-                                r.width() - 20.0,
-                            );
-                            ui.painter().text(
-                                r.left_top() + vec2(10.0, 14.0),
-                                Align2::LEFT_CENTER,
-                                shown,
-                                FontId::proportional(14.0),
-                                if sel { t.text } else { t.text2 },
-                            );
-                            ui.painter().text(
-                                r.left_top() + vec2(10.0, 31.0),
-                                Align2::LEFT_CENTER,
-                                format!("{} \u{2022} {}", fmt_date(m.date), m.time),
-                                FontId::proportional(11.5),
-                                if m.date < today() { t.text3 } else { t.text2 },
-                            );
-                            if resp.clicked() {
-                                self.meeting_open = Some(m.id);
-                            }
-                        }
-                    });
-                self.sweep.side_find.insert("meetings", q);
+        let open = self
+            .meeting_open
+            .filter(|id| self.data.extra.meetings.iter().any(|m| m.id == *id));
+        // a window without room for both is one column: the list, or the
+        // meeting open with a way back to the list
+        let one_column = self.tier != super::shell::Tier::Wide;
+        if one_column && open.is_none() {
+            egui::CentralPanel::default()
+                .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
+                .show_inside(ui, |ui| self.meetings_list(ui));
+            return;
+        }
+        if !one_column {
+            egui::SidePanel::left("meet_list")
+                .resizable(true)
+                .default_width(255.0)
+                .width_range(200.0..=400.0)
+                .frame(side_panel_frame(&t, egui::Margin::symmetric(8, 6)))
+                .show_inside(ui, |ui| self.meetings_list(ui));
+        }
+        self.meeting_body(ui, one_column);
+    }
+
+    /// The Meetings list, laid out as the hub sidebars (hubs/side.rs): its
+    /// name, a search, then a heading with + over every meeting, soonest
+    /// first.
+    fn meetings_list(&mut self, ui: &mut Ui) {
+        let t = self.t();
+        use super::hubs::side::{side_empty, side_heading, side_row, side_search, side_title_row};
+        side_title_row(ui, &t, tr("Meetings"), false);
+        let mut q = self.sweep.side_find.remove("meetings").unwrap_or_default();
+        side_search(ui, &t, &mut q, tr("Find a meeting"), "Find a meeting");
+        if side_heading(
+            ui,
+            &t,
+            tr("Meetings"),
+            Some(("Add a meeting", tr("New meeting"))),
+        ) {
+            let id = self.data.new_id();
+            self.data.extra.meetings.push(Meeting {
+                id,
+                title: tr("New meeting").into(),
+                date: today(),
+                time: "10:00".into(),
+                attendees: vec![self.data.me],
+                agenda: String::new(),
+                notes: String::new(),
             });
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::symmetric(32, 20))).show_inside(ui, |ui| {
+            self.meeting_open = Some(id);
+            self.dirty = true;
+        }
+        let ql = q.trim().to_lowercase();
+        let mut ms: Vec<Meeting> = self
+            .data
+            .extra
+            .meetings
+            .iter()
+            .filter(|m| ql.is_empty() || m.title.to_lowercase().contains(&ql))
+            .cloned()
+            .collect();
+        ms.sort_by_key(meeting_order);
+        if ms.is_empty() {
+            side_empty(
+                ui,
+                &t,
+                if ql.is_empty() {
+                    tr("No meetings yet")
+                } else {
+                    tr("No meeting has that name")
+                },
+            );
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("meet_side_list")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for m in &ms {
+                    let sel = self.meeting_open == Some(m.id);
+                    let (r, resp) =
+                        side_row(ui, &t, &format!("Open meeting {}", m.title), sel, 44.0);
+                    let title = if m.title.trim().is_empty() {
+                        tr("Untitled")
+                    } else {
+                        m.title.as_str()
+                    };
+                    let shown = fit_text(
+                        ui.painter(),
+                        title,
+                        &FontId::proportional(14.0),
+                        r.width() - 20.0,
+                    );
+                    ui.painter().text(
+                        r.left_top() + vec2(10.0, 14.0),
+                        Align2::LEFT_CENTER,
+                        shown,
+                        FontId::proportional(14.0),
+                        if sel { t.text } else { t.text2 },
+                    );
+                    ui.painter().text(
+                        r.left_top() + vec2(10.0, 31.0),
+                        Align2::LEFT_CENTER,
+                        format!("{} \u{2022} {}", fmt_date(m.date), m.time),
+                        FontId::proportional(11.5),
+                        if m.date < today() { t.text3 } else { t.text2 },
+                    );
+                    if resp.clicked() {
+                        self.meeting_open = Some(m.id);
+                    }
+                }
+            });
+        self.sweep.side_find.insert("meetings", q);
+    }
+
+    /// The meeting open (or a hint to pick one); `one_column` leads with a
+    /// way back to the list, which isn't beside it.
+    fn meeting_body(&mut self, ui: &mut Ui, one_column: bool) {
+        let t = self.t();
+        let margin = if one_column {
+            egui::Margin::symmetric(16, 12)
+        } else {
+            egui::Margin::symmetric(32, 20)
+        };
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(t.bg).inner_margin(margin)).show_inside(ui, |ui| {
             // many attendees push the agenda and notes down: they scroll
             egui::ScrollArea::vertical().id_salt("meet_body").auto_shrink([false, false]).show(ui, |ui| {
             let Some(idx) = self.meeting_open.and_then(|id| self.data.extra.meetings.iter().position(|m| m.id == id)) else {
@@ -425,13 +453,42 @@ impl App {
                 ui.vertical_centered(|ui| ui.label(RichText::new(tr("Pick a meeting or create one to keep the agenda and notes together.")).color(t.text2)));
                 return;
             };
+            if one_column {
+                // back to the list, laid out as a form's header (the arrow,
+                // then the hub's name)
+                let mut back = false;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    back |= icon_button(ui, &t, Icon::ChevronLeft, "", "Back to all meetings", false)
+                        .on_hover_text(tr("All meetings"))
+                        .clicked();
+                    let crumb = ui.add(ghost(egui::Button::new(RichText::new(tr("Meetings")).size(13.0).color(t.text2))));
+                    name_it(&crumb, "Meetings crumb");
+                    back |= crumb.clicked();
+                });
+                if back {
+                    self.meeting_open = None;
+                    return;
+                }
+            }
             let members = self.data.members.clone();
             let mut delete = false;
             let mut make_tasks: Vec<String> = vec![];
             {
                 let m = &mut self.data.extra.meetings[idx];
                 let mut ch = false;
-                ch |= ui.add(egui::TextEdit::singleline(&mut m.title).font(FontId::proportional(26.0)).frame(false).desired_width(f32::INFINITY)).changed();
+                // a long name wraps instead of running out of the page; it
+                // stays one line of text (Return ends the editing)
+                let te = ui.add(egui::TextEdit::multiline(&mut m.title).font(FontId::proportional(26.0)).frame(false).desired_rows(1).desired_width(f32::INFINITY));
+                name_it(&te, "Meeting name");
+                if te.changed() {
+                    if m.title.contains('\n') {
+                        m.title = m.title.replace('\n', "");
+                        te.surrender_focus();
+                    }
+                    ch = true;
+                }
+                let mut bad_time = false;
                 ui.horizontal(|ui| {
                     let mut d = Some(m.date);
                     let r = icon_button(ui, &t, Icon::Calendar, &fmt_date(m.date), "Meeting date", true);
@@ -457,15 +514,18 @@ impl App {
                             }
                         }
                     }
-                    if at.is_none() && !te.has_focus() {
-                        ui.label(RichText::new(tr("Use a time like 14:30")).small().color(t.danger));
-                    }
+                    bad_time = at.is_none() && !te.has_focus();
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.add(ghost(egui::Button::new(RichText::new(tr("Delete")).color(t.danger)))).clicked() {
                             delete = true;
                         }
                     });
                 });
+                // under the row, where it has the page's width (beside the
+                // field it ran under Delete)
+                if bad_time {
+                    ui.add(egui::Label::new(RichText::new(tr("Use a time like 14:30")).small().color(t.danger)).wrap());
+                }
                 ui.add_space(6.0);
                 ui.label(RichText::new(tr("Attendees")).color(t.text2));
                 ui.horizontal_wrapped(|ui| {

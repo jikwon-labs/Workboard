@@ -15,6 +15,7 @@ mod entity_ops;
 mod filter_model;
 mod filter_panel;
 
+pub(crate) use bulk::BULK_PAGE;
 pub use filter_model::*;
 
 /// Space icons offered in Color & Icon ("" = the first letter of the name).

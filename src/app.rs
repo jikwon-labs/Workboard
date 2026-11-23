@@ -3071,33 +3071,40 @@ impl App {
                     }
                     Section::Home => {
                         self.sidebar(ui);
-                        egui::CentralPanel::default()
-                            .frame(page)
-                            .show_inside(ui, |ui| match self.loc {
-                                Location::Home => self.home(ui),
-                                Location::Inbox => self.inbox_page(ui),
-                                Location::Replies => self.comments_page(ui, CommentsPage::Replies),
-                                Location::Assigned => {
-                                    self.comments_page(ui, CommentsPage::Assigned)
-                                }
-                                _ => {
-                                    self.header(ui);
-                                    let rect = ui.available_rect_before_wrap();
-                                    ui.scope_builder(
-                                        egui::UiBuilder::new()
-                                            .max_rect(rect.shrink2(vec2(16.0, 0.0))),
-                                        |ui| match self.view {
-                                            ViewKind::Overview => self.overview_view(ui),
-                                            ViewKind::List => self.list_view(ui),
-                                            ViewKind::Board => self.board_view(ui),
-                                            ViewKind::Calendar => self.calendar_view(ui),
-                                            ViewKind::Gantt => self.gantt_view(ui),
-                                            ViewKind::Timeline => self.timeline_view(ui),
-                                            ViewKind::Table => self.table_view(ui),
-                                        },
-                                    );
-                                }
-                            });
+                        let shown =
+                            egui::CentralPanel::default()
+                                .frame(page)
+                                .show_inside(ui, |ui| match self.loc {
+                                    Location::Home => self.home(ui),
+                                    Location::Inbox => self.inbox_page(ui),
+                                    Location::Replies => {
+                                        self.comments_page(ui, CommentsPage::Replies)
+                                    }
+                                    Location::Assigned => {
+                                        self.comments_page(ui, CommentsPage::Assigned)
+                                    }
+                                    _ => {
+                                        self.header(ui);
+                                        let rect = ui.available_rect_before_wrap();
+                                        ui.scope_builder(
+                                            egui::UiBuilder::new()
+                                                .max_rect(rect.shrink2(vec2(16.0, 0.0))),
+                                            |ui| match self.view {
+                                                ViewKind::Overview => self.overview_view(ui),
+                                                ViewKind::List => self.list_view(ui),
+                                                ViewKind::Board => self.board_view(ui),
+                                                ViewKind::Calendar => self.calendar_view(ui),
+                                                ViewKind::Gantt => self.gantt_view(ui),
+                                                ViewKind::Timeline => self.timeline_view(ui),
+                                                ViewKind::Table => self.table_view(ui),
+                                            },
+                                        );
+                                    }
+                                });
+                        // the bar of bulk actions keeps to the page
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new(parity::BULK_PAGE), shown.response.rect)
+                        });
                     }
                     Section::Chat => {
                         self.sidebar(ui);

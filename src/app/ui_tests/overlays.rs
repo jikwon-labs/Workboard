@@ -248,3 +248,92 @@ fn long_task_menus_scroll_to_their_last_items() {
         );
     }
 }
+
+/// Where the area shown in the last frame that holds `p` is (the topmost
+/// one other than `not`).
+fn area_at(h: &Ui1, p: Pos2, not: egui::Id) -> Option<Rect> {
+    h.ctx.memory(|m| {
+        m.areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|l| l.order == egui::Order::Foreground && l.id != not)
+            .filter_map(|l| m.area_rect(l.id))
+            .filter(|r| r.contains(p))
+            .min_by(|a, b| a.area().total_cmp(&b.area()))
+    })
+}
+
+#[test]
+fn bulk_bar_keeps_to_the_page_and_its_popups_clear_it() {
+    let bar_id = egui::Id::new("bulk_bar");
+    for (w, hh) in SMALL {
+        let mut h = Ui1::sized(w, hh);
+        let list = h.app.data.first_list().unwrap();
+        h.app.section = Section::Home;
+        h.app.loc = Location::List(list);
+        h.app.view = ViewKind::List;
+        let tid = h.task_id("Set up analytics dashboard");
+        h.app.selected.insert(tid);
+        h.settle();
+        let bar = h
+            .ctx
+            .memory(|m| m.area_rect(bar_id))
+            .expect("the bar shows");
+        // inside the window, its ends not cut
+        assert!(
+            window(&h).contains_rect(bar),
+            "at {}: bar {:?} wider than the window",
+            w,
+            bar
+        );
+        for name in ["Clear selection", "Archive", "Delete"] {
+            let r = h.rect_in(name, bar);
+            assert!(
+                window(&h).contains_rect(r),
+                "at {}: {} {:?} cut",
+                w,
+                name,
+                r
+            );
+        }
+        let label = h.painted_text("1 task selected");
+        assert!(
+            label.iter().any(|(r, _)| window(&h).contains_rect(*r)),
+            "at {}: the count is cut",
+            w
+        );
+        // beside the sidebar, it stays off the sidebar
+        if w >= 960.0 {
+            let side = h.rect("Create");
+            assert!(
+                bar.left() > side.right(),
+                "at {}: bar {:?} over the sidebar {:?}",
+                w,
+                bar,
+                side
+            );
+        }
+        // a popup opened from it is above it, not under its top edge
+        for (button, item) in [("Status", "IN PROGRESS"), ("Priority", "Urgent")] {
+            let b = h.rect_in(button, bar);
+            h.click_at(b.center());
+            let shown = h.painted_text(item);
+            assert!(!shown.is_empty(), "at {}: {} opens", w, button);
+            let menu = shown
+                .iter()
+                .find_map(|(r, _)| area_at(&h, r.center(), bar_id))
+                .unwrap_or_else(|| panic!("at {}: no {} popup", w, button));
+            assert!(
+                menu.bottom() <= bar.top() + 0.5,
+                "at {}: the {} popup {:?} runs under the bar {:?}",
+                w,
+                button,
+                menu,
+                bar
+            );
+            h.key(egui::Key::Escape);
+            h.app.selected.insert(tid);
+            h.settle();
+        }
+    }
+}

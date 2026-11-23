@@ -3,6 +3,10 @@
 
 use super::*;
 
+/// Where the last frame drew the Home page beside the sidebar (the bulk
+/// bar's room), kept in egui's memory under this id.
+pub(crate) const BULK_PAGE: &str = "bulk_bar_page";
+
 // ---------------------------------------------------------------- bulk edit
 
 impl App {
@@ -26,16 +30,37 @@ impl App {
         let t = self.t();
         let ids: Vec<u64> = self.selected.iter().copied().collect();
         let first = self.task(ids[0]).cloned();
-        egui::Area::new(egui::Id::new("bulk_bar"))
+        // over the page only, not the sidebar beside it, and as wide as the
+        // page leaves room for: the buttons wrap onto more rows when not
+        let page = ctx
+            .data(|d| d.get_temp::<Rect>(egui::Id::new(BULK_PAGE)))
+            .unwrap_or_else(|| ctx.screen_rect());
+        let page = page.intersect(ctx.screen_rect());
+        let max_w = (page.width() - 24.0 - 28.0).max(120.0);
+        let bar_id = egui::Id::new("bulk_bar");
+        // a popup from the bar opens above the whole bar (it has its rows'
+        // height), not into its top edge or over its other rows
+        let bar_rect = ctx.memory(|m| m.area_rect(bar_id));
+        let above_bar = |r: &egui::Response| {
+            let mut r = r.clone();
+            if let Some(bar) = bar_rect {
+                r.rect.min.y = bar.top();
+                r.rect.max.y = bar.bottom();
+            }
+            r
+        };
+        egui::Area::new(bar_id)
             .order(egui::Order::Foreground)
-            .anchor(Align2::CENTER_BOTTOM, [0.0, -22.0])
+            .pivot(Align2::CENTER_BOTTOM)
+            .fixed_pos(pos2(page.center().x, page.bottom() - 16.0))
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(Color32::from_rgb(32, 32, 36))
                     .corner_radius(10)
                     .inner_margin(egui::Margin::symmetric(14, 8))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
+                        ui.set_max_width(max_w);
+                        ui.horizontal_wrapped(|ui| {
                             ui.style_mut().visuals.override_text_color = Some(Color32::WHITE);
                             ui.style_mut().visuals.widgets.inactive.weak_bg_fill =
                                 Color32::from_rgb(52, 52, 58);
@@ -67,7 +92,7 @@ impl App {
                                 .unwrap_or_else(default_statuses);
                             let r = ui.button(tr("Status"));
                             let mut pick_status: Option<String> = None;
-                            popup(ui, &r, pid.with("bs"), 180.0, |ui| {
+                            popup(ui, &above_bar(&r), pid.with("bs"), 180.0, |ui| {
                                 for st in &statuses {
                                     if menu_row(
                                         ui,
@@ -92,7 +117,7 @@ impl App {
                                 .iter()
                                 .filter_map(|id| self.task(*id).cloned())
                                 .collect();
-                            popup(ui, &r, pid.with("ba"), 200.0, |ui| {
+                            popup(ui, &above_bar(&r), pid.with("ba"), 200.0, |ui| {
                                 // ticked when every selected task has them: a click then removes
                                 for m in &members {
                                     let ring = t.card;
@@ -124,7 +149,7 @@ impl App {
                                 .filter(|g| sel_tasks.iter().all(|x| x.tags.contains(g)))
                                 .cloned()
                                 .collect();
-                            popup(ui, &r, pid.with("bt"), 220.0, |ui| {
+                            popup(ui, &above_bar(&r), pid.with("bt"), 220.0, |ui| {
                                 // tags every selected task has show ticked
                                 let mut common = tag_before.clone();
                                 if super::listview::tag_menu(ui, &t, &all_tags, &mut common) {
@@ -134,7 +159,7 @@ impl App {
                             let r = ui.button(tr("Due date"));
                             let mut due: Option<NaiveDate> = None;
                             let mut due_set = false;
-                            popup(ui, &r, pid.with("bd"), DATE_MENU_W, |ui| {
+                            popup(ui, &above_bar(&r), pid.with("bd"), DATE_MENU_W, |ui| {
                                 if date_menu(ui, &t, pid.with("bdc"), &mut due) {
                                     due_set = true;
                                 }
@@ -142,14 +167,14 @@ impl App {
                             let r = ui.button(tr("Start date"));
                             let mut start: Option<NaiveDate> = None;
                             let mut start_set = false;
-                            popup(ui, &r, pid.with("bsd"), DATE_MENU_W, |ui| {
+                            popup(ui, &above_bar(&r), pid.with("bsd"), DATE_MENU_W, |ui| {
                                 if date_menu(ui, &t, pid.with("bsdc"), &mut start) {
                                     start_set = true;
                                 }
                             });
                             let r = ui.button(tr("Repeat"));
                             let mut recur: Option<Option<String>> = None;
-                            popup(ui, &r, pid.with("brc"), 160.0, |ui| {
+                            popup(ui, &above_bar(&r), pid.with("brc"), 160.0, |ui| {
                                 for (v, label) in RECUR {
                                     if menu_row_plain(ui, &t, tr(label), false).clicked() {
                                         recur = Some(if v.is_empty() {
@@ -164,7 +189,7 @@ impl App {
                             let mut pick_pr: Option<u8> = None;
                             if self.data.extra.apps.priorities {
                                 let r = ui.button(tr("Priority"));
-                                popup(ui, &r, pid.with("bp"), 160.0, |ui| {
+                                popup(ui, &above_bar(&r), pid.with("bp"), 160.0, |ui| {
                                     pick_pr = priority_pick(ui, &t, 0);
                                 });
                             }

@@ -750,7 +750,16 @@ fn delivery_footer(ui: &mut Ui, t: &Theme) -> (bool, bool) {
         .size()
         .x
         + 48.0;
-    let text_w = (w - 16.0 - ROW_RIGHT - button_w - 16.0).max(120.0);
+    // too narrow for the sentence beside the button: the button goes
+    // under the sentence and its link
+    let beside = w - 16.0 - ROW_RIGHT - button_w - 16.0;
+    let stacked = beside < 160.0;
+    let text_w = if stacked {
+        w - 16.0 - ROW_RIGHT
+    } else {
+        beside
+    };
+    const BUTTON_H: f32 = 32.0;
     let help_g = ui.painter().layout(
         tr(help).to_string(),
         FontId::proportional(12.5),
@@ -760,7 +769,12 @@ fn delivery_footer(ui: &mut Ui, t: &Theme) -> (bool, bool) {
     let link_g =
         ui.painter()
             .layout_no_wrap(tr(open).to_string(), FontId::proportional(12.5), t.text);
-    let h = (12.0 + help_g.size().y + 4.0 + link_g.size().y + 12.0).max(56.0);
+    let text_h = help_g.size().y + 4.0 + link_g.size().y;
+    let h = if stacked {
+        12.0 + text_h + 10.0 + BUTTON_H + 12.0
+    } else {
+        (12.0 + text_h + 12.0).max(56.0)
+    };
     let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
     ui.painter().hline(
         rect.x_range(),
@@ -768,7 +782,11 @@ fn delivery_footer(ui: &mut Ui, t: &Theme) -> (bool, bool) {
         Stroke::new(1.0_f32, t.border),
     );
     let x = rect.left() + 16.0;
-    let top = rect.center().y - (help_g.size().y + 4.0 + link_g.size().y) / 2.0;
+    let top = if stacked {
+        rect.top() + 12.0
+    } else {
+        rect.center().y - text_h / 2.0
+    };
     let help_h = help_g.size().y;
     ui.painter().galley(pos2(x, top), help_g, t.text2);
     let link_size = link_g.size();
@@ -795,15 +813,24 @@ fn delivery_footer(ui: &mut Ui, t: &Theme) -> (bool, bool) {
         color,
         0.6,
     );
-    let room = Rect::from_min_max(
-        pos2(rect.right() - ROW_RIGHT - button_w, rect.top()),
-        pos2(rect.right() - ROW_RIGHT, rect.bottom()),
-    );
-    let mut sub = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(room)
-            .layout(Layout::right_to_left(Align::Center)),
-    );
+    let (room, layout) = if stacked {
+        (
+            Rect::from_min_max(
+                pos2(x, rect.bottom() - 12.0 - BUTTON_H),
+                pos2(rect.right() - ROW_RIGHT, rect.bottom() - 12.0),
+            ),
+            Layout::left_to_right(Align::Center),
+        )
+    } else {
+        (
+            Rect::from_min_max(
+                pos2(rect.right() - ROW_RIGHT - button_w, rect.top()),
+                pos2(rect.right() - ROW_RIGHT, rect.bottom()),
+            ),
+            Layout::right_to_left(Align::Center),
+        )
+    };
+    let mut sub = ui.new_child(egui::UiBuilder::new().max_rect(room).layout(layout));
     let test = icon_button(
         &mut sub,
         t,

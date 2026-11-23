@@ -246,3 +246,26 @@ fn settings_templates_run_to_the_bottom_of_the_page() {
         assert!(seen > 0, "{w}x{hh}: the templates");
     }
 }
+
+/// Settings > Notifications: in a narrow window "Send a test notification"
+/// goes under the sentence about turning banners on, instead of over it.
+#[test]
+fn notifications_test_button_stays_clear_of_its_sentence() {
+    each_size(|w, hh, at| {
+        let mut h = Ui1::sized(w, hh);
+        h.app.section = Section::Settings;
+        h.app.settings_tab = crate::app::settings::SettingsTab::Notifications;
+        h.app.settings_state = None;
+        h.settle();
+        h.scroll_into_view("Send a test notification");
+        let b = h.rect("Send a test notification");
+        assert!(b.right() <= w, "{at}: {b:?}");
+        let label = tr("Send a test notification");
+        for (s, r) in h.texts_in(page(&h), Seen::Visible) {
+            if s != label && s.len() > 3 {
+                assert!(!r.intersects(b), "{at}: {s:?} {r:?} under the button {b:?}");
+            }
+        }
+        assert_fits(&h, page(&h), at);
+    });
+}

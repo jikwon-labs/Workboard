@@ -1096,7 +1096,7 @@ fn date_menu_fills_its_width_and_its_rows_line_up() {
     let first = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
     let start = first - Duration::days(first.weekday().num_days_from_sunday() as i64);
     let day = |h: &Ui1, i: i64| h.rect(&format!("Day {}", start + Duration::days(i)));
-    let (today_row, tomorrow) = (h.rect("Today"), h.rect("Tomorrow"));
+    let (today_row, tomorrow) = (h.date_menu_rect("Today"), h.rect("Tomorrow"));
     // the options and the month share the menu's width and their rows
     assert!(
         (day(&h, 6).right() - today_row.left() - DATE_MENU_W).abs() < 0.5,
@@ -1145,7 +1145,7 @@ fn date_menu_fills_its_width_and_its_rows_line_up() {
         next
     );
     // with a date set, Clear takes the last row, level with the last week
-    h.click("Today");
+    h.click_at(h.date_menu_rect("Today").center());
     h.app.apply_actions();
     h.click("Subtask due Pick hero image");
     let clear = h.rect("Clear");

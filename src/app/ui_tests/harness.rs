@@ -504,6 +504,25 @@ impl Ui1 {
             .unwrap_or_else(|| panic!("nothing named {:?} in {:?}", name, area))
     }
 
+    /// The control with this name in the open date menu: the one nearest
+    /// today's day cell. A task row can show the same word (a seed task
+    /// starts on this week's Monday, so on Mondays its row says "Today").
+    pub(super) fn date_menu_rect(&self, name: &str) -> Rect {
+        let day = self
+            .rect(&format!("Day {}", crate::model::today()))
+            .center();
+        self.tree
+            .iter()
+            .filter(|(n, _)| n == name)
+            .map(|(_, r)| *r)
+            .min_by(|a, b| {
+                a.center()
+                    .distance(day)
+                    .total_cmp(&b.center().distance(day))
+            })
+            .unwrap_or_else(|| panic!("nothing named {:?}", name))
+    }
+
     // every painted text with this exact content: (position, color)
     pub(super) fn painted_text(&self, text: &str) -> Vec<(Rect, Color32)> {
         let mut out = vec![];

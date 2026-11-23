@@ -1284,7 +1284,7 @@ fn subtask_rows_set_due_make_top_level_and_delete() {
             .map(|t| (t.id, t.parent, t.due))
     };
     h.click("Subtask due Pick hero image");
-    h.click("Today");
+    h.click_at(h.date_menu_rect("Today").center());
     h.app.apply_actions();
     assert_eq!(sub(&h, "Pick hero image").unwrap().2, Some(today()));
     let p = h.find("Subtask due Wireframe hero section").unwrap();

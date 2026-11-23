@@ -1735,3 +1735,34 @@ fn priority_group_pills_are_readable() {
     }
     assert!(seen >= 2, "the High and Normal groups are drawn");
 }
+
+/// The inline "+ Add task" row in the smallest window: Save fits inside it.
+/// It used to be cut by the right edge, the field being at least 200 wide.
+#[test]
+fn inline_add_task_row_fits_a_small_window() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        for (w, hh) in [(360.0, 640.0), (460.0, 640.0), (960.0, 560.0)] {
+            let mut h = Ui1::sized(w, hh);
+            let list = list_id(&h, "Website Redesign");
+            h.app.loc = Location::List(list);
+            h.app.view = ViewKind::List;
+            h.settle();
+            crate::i18n::set_lang(lang);
+            h.settle();
+            let add = h
+                .tree
+                .iter()
+                .find(|(n, _)| n.starts_with("Add Task in "))
+                .map(|(n, _)| n.clone())
+                .unwrap();
+            h.scroll_into_view(&add);
+            h.click(&add);
+            h.settle();
+            for name in [tr("Save"), tr("Cancel")] {
+                let r = h.rect(name);
+                assert!(r.right() <= w - 8.0, "{lang:?} {w}x{hh}: {name} at {r:?}");
+            }
+            crate::i18n::set_lang(crate::i18n::Lang::En);
+        }
+    }
+}

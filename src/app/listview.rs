@@ -681,7 +681,12 @@ impl App {
             let r = ui.add(
                 field(text)
                     .hint_text(tr("Subtask name"))
-                    .desired_width((w - 300.0).max(200.0)),
+                    .desired_width(add_field_w(
+                        ui,
+                        &t,
+                        w - (14.0 + 26.0 + 40.0),
+                        (w - 300.0).max(200.0),
+                    )),
             );
             name_field(&r, "Subtask name");
             focus_once(ui, &r);
@@ -718,6 +723,28 @@ impl App {
             self.sub_adding = None;
         }
     }
+}
+
+/// How wide the field of an inline "add a task" row may be: `want`, but no
+/// more than leaves room for Cancel and Save after it in `room` (in a
+/// narrow window Save was cut by the right edge).
+fn add_field_w(ui: &Ui, t: &Theme, room: f32, want: f32) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let pad = 2.0 * ui.spacing().button_padding.x;
+    let buttons: f32 = ["Cancel", "Save"]
+        .iter()
+        .map(|s| {
+            ui.painter()
+                .layout_no_wrap(tr(s).to_string(), font.clone(), t.text)
+                .size()
+                .x
+                + pad
+                + ui.spacing().item_spacing.x
+        })
+        .sum();
+    // the field's own margins and the row's right edge
+    let fits = room - buttons - ui.spacing().item_spacing.x - 2.0 * 6.0 - 12.0;
+    want.min(fits).max(60.0)
 }
 
 /// Tag picker: existing tags to toggle, and a field for a new one.
@@ -1087,7 +1114,7 @@ impl App {
                 let r = ui.add(
                     field(&mut text)
                         .hint_text(tr("Task Name"))
-                        .desired_width((w - 240.0).max(200.0)),
+                        .desired_width(add_field_w(ui, &t, w - 36.0, (w - 240.0).max(200.0))),
                 );
                 focus_once(ui, &r);
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {

@@ -1051,6 +1051,7 @@ impl App {
             },
         );
         self.doc_open = Some(id);
+        self.doc_title_select = Some(id);
         self.section = Section::Docs;
         self.dirty = true;
     }

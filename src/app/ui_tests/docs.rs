@@ -960,3 +960,70 @@ fn meetings_list_can_be_dragged_wider() {
         after
     );
 }
+
+#[test]
+fn a_new_docs_stand_in_title_is_replaced_by_typing() {
+    let mut h = Ui1::new();
+    let title = |h: &Ui1, id: u64| {
+        h.app
+            .data
+            .docs
+            .iter()
+            .find(|d| d.id == id)
+            .unwrap()
+            .title
+            .clone()
+    };
+    // a new doc: the title has the cursor with "Untitled" selected
+    h.click("Rail More");
+    h.click("Docs");
+    h.click("New Doc");
+    let id = h.app.doc_open.unwrap();
+    h.type_text("Plan");
+    assert_eq!(title(&h, id), "Plan", "typing replaces the stand-in name");
+    h.key(egui::Key::Backspace);
+    assert_eq!(
+        title(&h, id),
+        "Pla",
+        "Backspace takes letters off the title"
+    );
+
+    // clicked into later (here: the middle of the word), it is selected again
+    h.app.new_doc(None);
+    h.settle();
+    let id = h.app.doc_open.unwrap();
+    h.ctx
+        .memory_mut(|m| m.request_focus(egui::Id::new(("doc_body", id))));
+    h.settle();
+    h.click("Doc title");
+    h.type_text("Notes");
+    assert_eq!(title(&h, id), "Notes");
+
+    // a title someone typed is not selected when clicked
+    h.ctx
+        .memory_mut(|m| m.request_focus(egui::Id::new(("doc_body", id))));
+    h.settle();
+    h.click("Doc title");
+    h.type_text("x");
+    assert_ne!(title(&h, id), "x", "a real title keeps its text");
+    assert!(title(&h, id).contains("Notes"));
+
+    // a new sub page's "Page 1" is replaced the same way
+    h.click("+  Add page");
+    let page = h.app.doc_open.unwrap();
+    assert_ne!(page, id);
+    h.type_text("Agenda");
+    assert_eq!(title(&h, page), "Agenda");
+}
+
+#[test]
+fn stand_in_titles() {
+    use crate::app::docs::is_stand_in_title;
+    assert!(is_stand_in_title("Untitled"));
+    assert!(is_stand_in_title("Page 3"));
+    assert!(is_stand_in_title("Page 12"));
+    assert!(!is_stand_in_title("Page"));
+    assert!(!is_stand_in_title("Page one"));
+    assert!(!is_stand_in_title("Plan"));
+    assert!(!is_stand_in_title(""));
+}

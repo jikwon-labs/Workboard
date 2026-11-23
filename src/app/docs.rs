@@ -131,6 +131,7 @@ impl App {
             tags: vec![],
         });
         self.doc_open = Some(id);
+        self.doc_title_select = Some(id);
         // a new page is for writing: open it in Edit, not the last page's View
         self.doc_preview = false;
         self.dirty = true;
@@ -619,13 +620,33 @@ impl App {
             ..
         } = page;
         let d = &mut self.data.docs[idx];
+        let title_id = egui::Id::new(("doc_title", d.id));
         let r1 = ui.add(
             egui::TextEdit::singleline(&mut d.title)
+                .id(title_id)
                 .font(FontId::proportional(32.0))
                 .frame(false)
                 .hint_text(tr("Untitled"))
                 .desired_width(f32::INFINITY),
         );
+        name_field(&r1, "Doc title");
+        // the name a new doc or page starts with is a stand-in: when the
+        // title gets the cursor (made just now, or clicked), select it all
+        // so typing replaces it instead of going into the middle of it
+        let fresh = self.doc_title_select == Some(d.id);
+        if fresh {
+            self.doc_title_select = None;
+        }
+        if (fresh || r1.gained_focus()) && is_stand_in_title(&d.title) {
+            let n = d.title.chars().count();
+            let mut st = egui::TextEdit::load_state(ui.ctx(), title_id).unwrap_or_default();
+            st.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(n),
+            )));
+            st.store(ui.ctx(), title_id);
+            ui.memory_mut(|m| m.request_focus(title_id));
+        }
         if r1.changed() {
             d.updated = now_ts();
             // typing in a doc: saved and sent like any change, but what's
@@ -1126,6 +1147,17 @@ impl App {
             }
         }
     }
+}
+
+/// Whether a doc title is still the name it was made with: "Untitled"
+/// (in English or the app's language) or a new page's "Page 2".
+pub(super) fn is_stand_in_title(title: &str) -> bool {
+    let page = |p: &str| {
+        p.strip_prefix(title.trim_end_matches(|c: char| c.is_ascii_digit()))
+            .is_some_and(|rest| rest == "{}")
+            && title.ends_with(|c: char| c.is_ascii_digit())
+    };
+    title == "Untitled" || title == tr("Untitled") || page("Page {}") || page(tr("Page {}"))
 }
 
 /// Moves the text cursor of a text field and gives it focus.

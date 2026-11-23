@@ -612,6 +612,9 @@ pub struct App {
     section: Section,
     recent: Vec<u64>,
     doc_open: Option<u64>,
+    /// A doc just made: its title gets the cursor with the name it was
+    /// given ("Untitled", "Page 2") selected, so typing replaces it.
+    doc_title_select: Option<u64>,
     planner_week: NaiveDate,
     sheet_week: NaiveDate,
     assignee_filter: Option<u64>,
@@ -1241,6 +1244,7 @@ impl App {
             },
             recent: vec![],
             doc_open: None,
+            doc_title_select: None,
             planner_week,
             sheet_week: sunday_week_start(t),
             assignee_filter: None,

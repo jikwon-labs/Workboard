@@ -671,3 +671,73 @@ fn compact_channel_intro_fits_and_its_tools_open_from_the_header() {
         assert!(h.past_right_edge().is_empty(), "{:?}", h.past_right_edge());
     }
 }
+
+/// A profile (someone else's with a long name, and mine) opened in Chat, on
+/// the Posts page or in People leaves the page room to read: laid over it
+/// in a compact window, narrower in a medium one. It took most of a compact
+/// window and squeezed the conversation beside it to 70 points, every line
+/// cut mid-glyph.
+#[test]
+fn profile_leaves_the_page_room_in_narrow_windows() {
+    for lang in [Lang::En, Lang::Ko] {
+        for w in [360.0, 460.0, 700.0, 960.0, 1440.0] {
+            for place in ["chat", "posts", "people"] {
+                let mut h = Ui1::sized(w, 640.0);
+                set_lang(lang);
+                let me = h.app.data.me;
+                let other = h.app.data.members.iter().find(|m| m.id != me).unwrap().id;
+                let m = h
+                    .app
+                    .data
+                    .members
+                    .iter_mut()
+                    .find(|m| m.id == other)
+                    .unwrap();
+                m.name = "Alexandra Konstantinopoulou-Whitfield".into();
+                m.title = "Product designer and user researcher".into();
+                let general = h.channel_id("general");
+                match place {
+                    "chat" => {
+                        h.app.section = Section::Chat;
+                        h.app.chat.open = Some(general);
+                    }
+                    "posts" => h.app.section = Section::Posts,
+                    _ => h.app.section = Section::People,
+                }
+                for who in [other, me] {
+                    if place == "people" {
+                        h.app.people_profile = Some(who);
+                    } else {
+                        h.app.chat.profile = Some(who);
+                    }
+                    h.settle();
+                    let what = format!("{:?} {} {} profile {}", lang, w, place, who);
+                    let page = Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2());
+                    let cut = h.cut_texts(page);
+                    let past = h.past_right_edge();
+                    let close = h.rect("Close profile");
+                    let composer = h
+                        .has("Message composer")
+                        .then(|| h.rect("Message composer"));
+                    set_lang(Lang::En);
+                    assert!(cut.is_empty(), "{}: cut texts: {:?}", what, cut);
+                    assert!(past.is_empty(), "{}: past the right edge: {:?}", what, past);
+                    assert!(close.right() <= w, "{}: {:?}", what, close);
+                    if h.app.tier == Tier::Compact {
+                        // over the page, the window's width
+                        let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("profile_over")));
+                        let r = r.unwrap_or_else(|| panic!("{}: laid over the page", what));
+                        assert!(r.width() > w - 40.0, "{}: {:?}", what, r);
+                    } else if place == "chat" {
+                        // beside it, with room for the message box
+                        let c = composer.unwrap_or_else(|| panic!("{}: the message box", what));
+                        assert!(c.width() >= 200.0, "{}: message box {:?}", what, c);
+                        assert!(c.right() <= close.left(), "{}: {:?} {:?}", what, c, close);
+                    }
+                    set_lang(lang);
+                }
+                set_lang(Lang::En);
+            }
+        }
+    }
+}

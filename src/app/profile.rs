@@ -114,155 +114,186 @@ impl App {
             return false;
         };
         let t = self.t();
-        let me = self.data.me;
         let mut close = false;
-        egui::SidePanel::right("profile")
-            .exact_width(PROFILE_W)
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(t.column_bg)
-                    .inner_margin(egui::Margin::symmetric(14, 10)),
-            )
-            .show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.set_height(30.0);
-                    ui.label(RichText::new(tr("Profile")).size(15.0).strong());
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if icon_button(ui, &t, Icon::Close, "", "Close profile", false)
-                            .on_hover_text(tr("Close"))
-                            .clicked()
-                        {
-                            close = true;
-                        }
+        let frame = egui::Frame::new()
+            .fill(t.column_bg)
+            .inner_margin(egui::Margin::symmetric(14, 10));
+        if self.tier == super::shell::Tier::Compact {
+            // one column: the profile is laid over the page instead of
+            // beside it (beside it, it squeezed the page to a sliver whose
+            // every line was cut)
+            let over = ui.max_rect();
+            egui::Area::new(egui::Id::new("profile_over"))
+                .order(egui::Order::Middle)
+                .fixed_pos(over.min)
+                .constrain(false)
+                .movable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.set_clip_rect(over);
+                    let mut inner = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(over)
+                            .layout(Layout::top_down(Align::Min)),
+                    );
+                    inner.painter().rect_filled(over, 0.0, t.column_bg);
+                    // clicks on it stay off the page under it
+                    ui.allocate_rect(over, Sense::click());
+                    frame.show(&mut inner, |ui| {
+                        ui.set_min_size(over.size() - vec2(28.0, 20.0));
+                        self.profile_side_body(ui, &m, &mut close);
                     });
                 });
-                ui.add_space(18.0);
-                ui.vertical_centered(|ui| {
-                    let (r, _) = ui.allocate_exact_size(vec2(112.0, 112.0), Sense::hover());
-                    paint_avatar(ui.painter(), r.center(), 52.0, &m, t.column_bg);
-                    ui.add_space(10.0);
-                    ui.label(RichText::new(m.shown()).size(20.0).strong().color(t.text));
-                    // the full name too when they go by a display name
-                    if m.shown() != m.name && !m.name.trim().is_empty() {
-                        ui.label(RichText::new(&m.name).color(t.text2));
-                    }
-                    if !m.title.trim().is_empty() {
-                        ui.label(RichText::new(m.title.trim()).color(t.text2));
-                    }
-                    if m.invited {
-                        ui.label(RichText::new(tr("Invited")).small().color(t.text3));
-                    } else if let Some(on) = self.is_online(id) {
-                        ui.horizontal(|ui| {
-                            let label = tr(if on { "Online" } else { "Offline" });
-                            let w = 14.0
-                                + ui.fonts(|f| {
-                                    f.layout_no_wrap(
-                                        label.to_string(),
-                                        FontId::proportional(13.0),
-                                        t.text2,
-                                    )
-                                    .size()
-                                    .x
-                                });
-                            ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
-                            let (d, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
-                            ui.painter().circle_filled(
-                                d.center(),
-                                4.0,
-                                if on {
-                                    Color32::from_rgb(0x2e, 0xa0, 0x43)
-                                } else {
-                                    t.text3
-                                },
-                            );
-                            ui.label(RichText::new(label).size(13.0).color(t.text2));
-                        });
-                    }
-                    if !m.status_text.trim().is_empty() {
-                        ui.add_space(4.0);
-                        ui.label(RichText::new(m.status_text.trim()).color(t.text));
-                    }
-                });
-                ui.add_space(14.0);
-                ui.separator();
-                ui.add_space(6.0);
-                for (label, value) in [
-                    ("Email", m.email.trim().to_string()),
-                    ("Role", super::menus::role_text(m.role.name()).to_string()),
-                ] {
-                    if value.is_empty() {
-                        continue;
-                    }
-                    ui.label(RichText::new(tr(label)).small().color(t.text3));
-                    ui.add(egui::Label::new(RichText::new(value).color(t.text)).selectable(true));
-                    ui.add_space(8.0);
-                }
-                ui.add_space(6.0);
-                let w = ui.available_width();
-                if id == me {
-                    if icon_button_ex(
-                        ui,
-                        &t,
-                        Icon::Edit,
-                        tr("Edit profile"),
-                        "Edit profile",
-                        true,
-                        w,
-                        t.text,
-                        t.text2,
-                    )
-                    .clicked()
-                    {
-                        self.open_profile();
-                    }
-                } else if !m.invited
-                    && icon_button_ex(
-                        ui,
-                        &t,
-                        Icon::Chat,
-                        tr("Message"),
-                        &format!("Message {}", m.shown()),
-                        true,
-                        w,
-                        t.text,
-                        t.text2,
-                    )
-                    .clicked()
-                {
-                    // the conversation with them, given the room
-                    self.section = Section::Chat;
-                    self.apply_chat(vec![super::chat::ChatAction::Dm(id)]);
-                    close = true;
-                }
-                if self.may_rename(&m) {
-                    ui.add_space(6.0);
-                    if icon_button_ex(
-                        ui,
-                        &t,
-                        Icon::Edit,
-                        tr("Change name"),
-                        &format!("Change name of {}", m.shown()),
-                        true,
-                        w,
-                        t.text,
-                        t.text2,
-                    )
-                    .clicked()
-                    {
-                        self.modal = Some(Modal::MemberName {
-                            id,
-                            name: m.name.clone(),
-                            display: m.display_name.clone(),
-                        });
-                    }
-                }
-            });
+        } else {
+            // in a small window it narrows to leave the page 340, as the
+            // thread does
+            let avail = ui.available_width();
+            let w = (avail - 340.0).clamp(240.0, PROFILE_W);
+            egui::SidePanel::right("profile")
+                .exact_width(w)
+                .resizable(false)
+                .frame(frame)
+                .show_inside(ui, |ui| self.profile_side_body(ui, &m, &mut close));
+        }
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape))
             && self.modal.is_none()
             && !self.menu_was_open
             && ui.memory(|mm| mm.focused().is_none());
         !(close || escape)
+    }
+
+    /// What `profile_side` shows of `m`; `close` is set when it should close.
+    fn profile_side_body(&mut self, ui: &mut Ui, m: &Member, close: &mut bool) {
+        let t = self.t();
+        let me = self.data.me;
+        let id = m.id;
+        ui.horizontal(|ui| {
+            ui.set_height(30.0);
+            ui.label(RichText::new(tr("Profile")).size(15.0).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if icon_button(ui, &t, Icon::Close, "", "Close profile", false)
+                    .on_hover_text(tr("Close"))
+                    .clicked()
+                {
+                    *close = true;
+                }
+            });
+        });
+        ui.add_space(18.0);
+        ui.vertical_centered(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(112.0, 112.0), Sense::hover());
+            paint_avatar(ui.painter(), r.center(), 52.0, &m, t.column_bg);
+            ui.add_space(10.0);
+            ui.label(RichText::new(m.shown()).size(20.0).strong().color(t.text));
+            // the full name too when they go by a display name
+            if m.shown() != m.name && !m.name.trim().is_empty() {
+                ui.label(RichText::new(&m.name).color(t.text2));
+            }
+            if !m.title.trim().is_empty() {
+                ui.label(RichText::new(m.title.trim()).color(t.text2));
+            }
+            if m.invited {
+                ui.label(RichText::new(tr("Invited")).small().color(t.text3));
+            } else if let Some(on) = self.is_online(id) {
+                ui.horizontal(|ui| {
+                    let label = tr(if on { "Online" } else { "Offline" });
+                    let w = 14.0
+                        + ui.fonts(|f| {
+                            f.layout_no_wrap(label.to_string(), FontId::proportional(13.0), t.text2)
+                                .size()
+                                .x
+                        });
+                    ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
+                    let (d, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
+                    ui.painter().circle_filled(
+                        d.center(),
+                        4.0,
+                        if on {
+                            Color32::from_rgb(0x2e, 0xa0, 0x43)
+                        } else {
+                            t.text3
+                        },
+                    );
+                    ui.label(RichText::new(label).size(13.0).color(t.text2));
+                });
+            }
+            if !m.status_text.trim().is_empty() {
+                ui.add_space(4.0);
+                ui.label(RichText::new(m.status_text.trim()).color(t.text));
+            }
+        });
+        ui.add_space(14.0);
+        ui.separator();
+        ui.add_space(6.0);
+        for (label, value) in [
+            ("Email", m.email.trim().to_string()),
+            ("Role", super::menus::role_text(m.role.name()).to_string()),
+        ] {
+            if value.is_empty() {
+                continue;
+            }
+            ui.label(RichText::new(tr(label)).small().color(t.text3));
+            ui.add(egui::Label::new(RichText::new(value).color(t.text)).selectable(true));
+            ui.add_space(8.0);
+        }
+        ui.add_space(6.0);
+        let w = ui.available_width();
+        if id == me {
+            if icon_button_ex(
+                ui,
+                &t,
+                Icon::Edit,
+                tr("Edit profile"),
+                "Edit profile",
+                true,
+                w,
+                t.text,
+                t.text2,
+            )
+            .clicked()
+            {
+                self.open_profile();
+            }
+        } else if !m.invited
+            && icon_button_ex(
+                ui,
+                &t,
+                Icon::Chat,
+                tr("Message"),
+                &format!("Message {}", m.shown()),
+                true,
+                w,
+                t.text,
+                t.text2,
+            )
+            .clicked()
+        {
+            // the conversation with them, given the room
+            self.section = Section::Chat;
+            self.apply_chat(vec![super::chat::ChatAction::Dm(id)]);
+            *close = true;
+        }
+        if self.may_rename(&m) {
+            ui.add_space(6.0);
+            if icon_button_ex(
+                ui,
+                &t,
+                Icon::Edit,
+                tr("Change name"),
+                &format!("Change name of {}", m.shown()),
+                true,
+                w,
+                t.text,
+                t.text2,
+            )
+            .clicked()
+            {
+                self.modal = Some(Modal::MemberName {
+                    id,
+                    name: m.name.clone(),
+                    display: m.display_name.clone(),
+                });
+            }
+        }
     }
 
     /// Edit profile (My settings) for me. Without an email of my own it

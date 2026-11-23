@@ -2959,21 +2959,24 @@ impl App {
             builder,
             |ctx, class| {
                 if class == egui::ViewportClass::Embedded {
-                    egui::Window::new("thread_window")
+                    let frame = frame
+                        .stroke(Stroke::new(1.0_f32, t.border))
+                        .corner_radius(10);
+                    // inside a window too small for it: as high and wide
+                    // as fits (its reply box and "Also send to" at the
+                    // bottom ran out of a short one)
+                    let room = ctx.screen_rect().shrink(8.0).size() - frame.total_margin().sum();
+                    let win = egui::Window::new("thread_window")
                         .title_bar(false)
                         .collapsible(false)
                         .default_size([THREAD_W + 40.0, 600.0])
                         // over the right of the app's window, where the panel was
                         .default_pos(ctx.screen_rect().right_top() + vec2(-THREAD_W - 80.0, 60.0))
-                        .frame(
-                            frame
-                                .stroke(Stroke::new(1.0_f32, t.border))
-                                .corner_radius(10),
-                        )
-                        .show(ctx, |ui| {
-                            ui.set_min_height(560.0);
-                            self.thread_body(ui, cid, &channel, tid, &parent, true, &mut acts);
-                        });
+                        .frame(frame);
+                    crate::widgets::window_inside(win, ctx, &frame).show(ctx, |ui| {
+                        ui.set_min_height(560.0f32.min(room.y));
+                        self.thread_body(ui, cid, &channel, tid, &parent, true, &mut acts);
+                    });
                     closed = self.escape_closes_thread(ctx, false);
                     return;
                 }

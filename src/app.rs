@@ -5372,7 +5372,10 @@ impl App {
                                     }
                                 });
                             });
-                            let name_edit = ui.add(field(&mut st.name).desired_width(160.0));
+                            // (narrower in a narrow window: the kind and the
+                            // remove button stay inside it)
+                            let name_w = (ui.available_width() - 175.0).clamp(80.0, 160.0);
+                            let name_edit = ui.add(field(&mut st.name).desired_width(name_w));
                             if name_edit.changed() {
                                 changed = true;
                             }

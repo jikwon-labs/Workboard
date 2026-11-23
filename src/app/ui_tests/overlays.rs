@@ -337,3 +337,82 @@ fn bulk_bar_keeps_to_the_page_and_its_popups_clear_it() {
         }
     }
 }
+
+/// general's message with replies (the seed's thread).
+fn thread_parent(a: &App) -> (u64, u64) {
+    let c = a
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    let m = c.messages.iter().find(|m| !m.replies.is_empty()).unwrap();
+    (c.id, m.id)
+}
+
+#[test]
+fn floating_windows_and_small_dialogs_stay_inside_small_windows() {
+    // the thread window ran past the bottom of a 960x560 window (its
+    // "Also send to #general" cut) and, like the notepad and the status
+    // editor, a little past the right edge of a 360 one
+    let setups: Vec<(&str, fn(&mut App))> = vec![
+        ("thread window", |a| {
+            let (g, m) = thread_parent(a);
+            a.section = Section::Chat;
+            a.chat.open = Some(g);
+            a.chat.thread_open = Some(m);
+            a.chat.thread_window = Some(g);
+        }),
+        ("notepad", |a| a.notepad_open = true),
+        ("status editor", |a| {
+            a.edit_statuses = Some(a.data.spaces[0].id)
+        }),
+        ("new message", |a| a.new_message_open = true),
+        ("bulk delete", |a| {
+            let t = a.data.tasks[0].id;
+            a.selected = [t].into_iter().collect();
+            a.confirm_bulk_delete = true;
+        }),
+        ("rename", |a| {
+            let l = a.data.first_list().unwrap();
+            a.rename = Some((Target::List(l), "Website Redesign".into()));
+        }),
+        ("delete space", |a| {
+            a.confirm_delete = Some(Target::Space(a.data.spaces[0].id))
+        }),
+        ("create task", |a| a.open_quick_add(None)),
+    ];
+    let mut bad = vec![];
+    for (w, hh) in SMALL {
+        for (name, open) in &setups {
+            let mut h = Ui1::sized(w, hh);
+            super::layout_tests::heavy(&mut h);
+            h.settle();
+            open(&mut h.app);
+            h.settle();
+            h.settle();
+            let screen = window(&h);
+            let areas: Vec<(egui::LayerId, Rect)> = h.ctx.memory(|m| {
+                m.areas()
+                    .visible_layer_ids()
+                    .into_iter()
+                    .filter(|l| matches!(l.order, egui::Order::Middle | egui::Order::Foreground))
+                    .filter_map(|l| m.area_rect(l.id).map(|r| (l, r)))
+                    .collect()
+            });
+            let mut seen = false;
+            for (l, r) in areas {
+                // the dimmed page behind a dialog fills the window
+                if r == screen || r.width() < 1.0 {
+                    continue;
+                }
+                seen = true;
+                if !screen.expand(0.5).contains_rect(r) {
+                    bad.push(format!("{} at {}x{}: {:?} {:?}", name, w, hh, l.id, r));
+                }
+            }
+            assert!(seen, "{} at {}: nothing floating shown", name, w);
+        }
+    }
+    assert!(bad.is_empty(), "{:#?}", bad);
+}

@@ -110,6 +110,20 @@ pub fn menu_fits<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     }
 }
 
+/// A floating window kept inside the app's window with a margin: no larger
+/// than the room there (`frame` is the window's frame, whose margins egui
+/// leaves out of its own limit, so it reached past the edge), and moved
+/// back inside when it would reach out.
+pub fn window_inside<'a>(
+    w: egui::Window<'a>,
+    ctx: &egui::Context,
+    frame: &egui::Frame,
+) -> egui::Window<'a> {
+    let room = ctx.screen_rect().shrink(8.0);
+    w.constrain_to(room)
+        .max_size(room.size() - frame.total_margin().sum())
+}
+
 /// Opens a popup to the right of `resp` when it is clicked, its top level
 /// with the button's and moved up as far as it must to stay in the window;
 /// shows `add` while open. For the left bar: below its button a popup

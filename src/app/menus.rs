@@ -2616,15 +2616,17 @@ impl App {
             return;
         }
         let mut open = true;
-        egui::Window::new(tr("Notepad"))
+        let win = egui::Window::new(tr("Notepad"))
             .id(egui::Id::new("Notepad"))
             .open(&mut open)
             .default_size([360.0, 420.0])
             // below the page header and toolbar it used to cover; no collapse
             // arrow (egui's own, larger than the app's arrows); it closes with x
             .default_pos([ctx.screen_rect().right() - 400.0, 170.0])
-            .collapsible(false)
-            .show(ctx, |ui| {
+            .collapsible(false);
+        crate::widgets::window_inside(win, ctx, &egui::Frame::window(&ctx.style())).show(
+            ctx,
+            |ui| {
                 // Write: the plain text; List: each line with its checkbox and a
                 // button that turns it into a task ("- [ ] " lines are checklist items)
                 let mode_id = egui::Id::new("notepad_list");
@@ -2729,7 +2731,8 @@ impl App {
                         self.need_a_list();
                     }
                 }
-            });
+            },
+        );
         if !open {
             self.notepad_open = false;
         }

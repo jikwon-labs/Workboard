@@ -741,3 +741,62 @@ fn profile_leaves_the_page_room_in_narrow_windows() {
         }
     }
 }
+
+/// The widths the narrow layout checks look at.
+const WIDTHS: [(f32, f32); 5] = [
+    (360.0, 640.0),
+    (460.0, 640.0),
+    (700.0, 640.0),
+    (960.0, 560.0),
+    (1440.0, 900.0),
+];
+
+/// A channel with its find box open (finding something, nothing, a file,
+/// someone) or one kind of message picked: the find box and the chip go on
+/// the next row when there is no room, so the conversation stays in the
+/// window (they widened it past the edge, cutting the messages, the message
+/// box's hint and the chip).
+#[test]
+fn channel_find_and_message_chips_keep_the_channel_inside() {
+    use crate::app::chat::ChannelPanel;
+    for lang in [Lang::En, Lang::Ko] {
+        for (w, hh) in WIDTHS {
+            let mut states: Vec<(Option<&str>, ChannelPanel)> =
+                ["homepage", "zzzz", "has:file", "from:alex"]
+                    .into_iter()
+                    .map(|q| (Some(q), ChannelPanel::All))
+                    .collect();
+            for p in [
+                ChannelPanel::Pinned,
+                ChannelPanel::Replies,
+                ChannelPanel::Tasks,
+                ChannelPanel::Saved,
+                ChannelPanel::Files,
+                ChannelPanel::Links,
+            ] {
+                states.push((None, p));
+                states.push((Some("homepage"), p));
+            }
+            for (q, p) in states {
+                let mut h = Ui1::sized(w, hh);
+                set_lang(lang);
+                let general = h.channel_id("general");
+                h.app.section = Section::Chat;
+                h.app.chat.open = Some(general);
+                h.app.channel_find = q.map(String::from);
+                h.app.channel_panel = p;
+                h.settle();
+                let what = format!("{:?} {} find {:?} {:?}", lang, w, q, p);
+                let past = h.past_right_edge();
+                let cut = h.cut_texts(Rect::from_min_max(pos2(0.0, 0.0), h.size.to_pos2()));
+                set_lang(Lang::En);
+                assert!(past.is_empty(), "{}: past the right edge {:?}", what, past);
+                assert!(cut.is_empty(), "{}: cut {:?}", what, cut);
+                if q.is_some() {
+                    let r = h.rect("Close find");
+                    assert!(r.right() <= w, "{}: {:?}", what, r);
+                }
+            }
+        }
+    }
+}

@@ -1634,33 +1634,62 @@ impl App {
         // the chips start under the Channel tab and clear the line above,
         // level with the box on the right
         ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            if ui
-                .add(
-                    egui::Button::new(
-                        RichText::new(tr("Add bookmarks, notes, and more"))
-                            .size(13.5)
-                            .color(t.text2),
+        // in a narrow window what doesn't fit goes on the next row (on one
+        // row they widened the conversation past the window's edge)
+        let indent = egui::Frame::new().inner_margin(egui::Margin {
+            left: 16,
+            ..Default::default()
+        });
+        indent.show(ui, |ui| {
+            let mut below = false;
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new(tr("Add bookmarks, notes, and more"))
+                                .size(13.5)
+                                .color(t.text2),
+                        )
+                        .corner_radius(14),
                     )
-                    .corner_radius(14),
-                )
-                .clicked()
-            {
-                self.modal = Some(Modal::Bookmark {
-                    title: String::new(),
-                    url: String::new(),
-                });
-            }
-            self.panel_chip(ui);
-            if let Some(mut q) = self.channel_find.take() {
-                let (s, close) = find_bar(ui, &t, find_id, &mut q, count);
-                step = s;
-                if !close {
-                    self.channel_find = Some(q);
+                    .clicked()
+                {
+                    self.modal = Some(Modal::Bookmark {
+                        title: String::new(),
+                        url: String::new(),
+                    });
                 }
+                self.panel_chip(ui);
+                // the find bar is at least 200 wide (and its margin): under
+                // the chips when they leave less room
+                // (a wrapping row's available width is the whole row's)
+                let room =
+                    ui.max_rect().right() - ui.min_rect().right() - ui.spacing().item_spacing.x;
+                below = room < 214.0;
+                if !below {
+                    step = self.channel_find_bar(ui, find_id, count);
+                }
+            });
+            if below {
+                ui.horizontal(|ui| step = self.channel_find_bar(ui, find_id, count));
             }
         });
+        step
+    }
+
+    /// The find bar of `channel_chips`, while it is open.
+    fn channel_find_bar(
+        &mut self,
+        ui: &mut Ui,
+        find_id: egui::Id,
+        count: Option<(Option<usize>, usize)>,
+    ) -> Option<isize> {
+        let t = self.t();
+        let mut q = self.channel_find.take()?;
+        let (step, close) = find_bar(ui, &t, find_id, &mut q, count);
+        if !close {
+            self.channel_find = Some(q);
+        }
         step
     }
 

@@ -79,6 +79,37 @@ pub fn popup<R>(
     )
 }
 
+/// A menu's items (a right-click menu, a "..." menu), in a scroll area as
+/// high as the window when they were taller than it last frame: egui only
+/// moves a menu up to keep it inside, so the last items of a taller one ran
+/// off the bottom. (A menu grows only as its content did, so ordinary menus
+/// are laid out without the scroll area, as before.)
+pub fn menu_fits<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let screen = ui.ctx().screen_rect();
+    let margin = egui::Frame::menu(ui.style()).total_margin().sum().y;
+    let room = (screen.height() - 16.0 - margin).max(80.0);
+    let tall_id = ui.id().with("__menu_tall");
+    let tall: f32 = ui.data(|d| d.get_temp(tall_id)).unwrap_or(0.0);
+    if tall > room {
+        egui::ScrollArea::vertical()
+            .id_salt("menu_fits")
+            .max_height(room)
+            .show(ui, |ui| {
+                let r = add(ui);
+                let h = ui.min_rect().height();
+                ui.data_mut(|d| d.insert_temp(tall_id, h));
+                r
+            })
+            .inner
+    } else {
+        let top = ui.min_rect().top();
+        let r = add(ui);
+        let h = ui.min_rect().bottom() - top;
+        ui.data_mut(|d| d.insert_temp(tall_id, h));
+        r
+    }
+}
+
 /// Opens a popup to the right of `resp` when it is clicked, its top level
 /// with the button's and moved up as far as it must to stay in the window;
 /// shows `add` while open. For the left bar: below its button a popup

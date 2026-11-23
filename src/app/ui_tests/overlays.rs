@@ -168,3 +168,83 @@ fn tall_dialogs_scroll_to_their_buttons() {
         );
     }
 }
+
+/// The control named `name` nearest `x` (a menu's item, not the page's).
+fn nearest(h: &Ui1, name: &str, x: f32) -> Option<Rect> {
+    h.tree
+        .iter()
+        .filter(|(n, _)| n == name)
+        .map(|(_, r)| *r)
+        .min_by(|a, b| {
+            (a.center().x - x)
+                .abs()
+                .total_cmp(&(b.center().x - x).abs())
+        })
+}
+
+/// Turns the mouse wheel over `at` until the item `name` of the menu near
+/// `at` is wholly in the window; where it is then.
+fn wheel_to(h: &mut Ui1, at: Pos2, name: &str) -> Option<Rect> {
+    for _ in 0..12 {
+        if let Some(r) = nearest(h, name, at.x) {
+            if window(h).contains_rect(r) {
+                return Some(r);
+            }
+        }
+        h.frame(vec![egui::Event::PointerMoved(at)]);
+        h.frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -120.0),
+            modifiers: Default::default(),
+        }]);
+        h.settle();
+    }
+    None
+}
+
+#[test]
+fn long_task_menus_scroll_to_their_last_items() {
+    // a task's menu is taller than a 960x560 window: the items under
+    // "Remind me" (Start timer, Save as template, Archive, Delete) ran off
+    // the bottom
+    for how in ["right click", "row button", "card button"] {
+        let mut h = Ui1::sized(960.0, 560.0);
+        let name = match how {
+            "right click" => {
+                h.right_click("Task Set up analytics dashboard", 60.0);
+                "Set up analytics dashboard"
+            }
+            "row button" => {
+                h.hover(h.find("Task Set up analytics dashboard").unwrap());
+                h.click("Task options Set up analytics dashboard");
+                "Set up analytics dashboard"
+            }
+            _ => {
+                h.app.view = ViewKind::Board;
+                h.settle();
+                h.click("Card options Design new homepage layout");
+                "Design new homepage layout"
+            }
+        };
+        let tid = h.task_id(name);
+        assert!(h.has("Remind me"), "{}: the menu opens", how);
+        // (its first items show wherever it opened)
+        let x = h.rect("Remind me").center().x;
+        let at = nearest(&h, "Open", x).unwrap().center();
+        let delete = wheel_to(&mut h, at, "Delete");
+        assert!(
+            delete.is_some(),
+            "{}: Delete never comes into the window",
+            how
+        );
+        for item in ["Start timer", "Archive"] {
+            assert!(h.has(item), "{}: {} in the menu", how, item);
+        }
+        h.click_at(delete.unwrap().center());
+        assert!(
+            !h.app.data.tasks.iter().any(|t| t.id == tid && !t.archived) || h.app.modal.is_some(),
+            "{}: Delete deletes the task",
+            how
+        );
+    }
+}

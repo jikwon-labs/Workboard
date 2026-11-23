@@ -1821,6 +1821,11 @@ impl App {
     /// The doc's menu (right click in the Docs list, the sidebar and the
     /// pages panel; the header's "..." button). `rename` adds a title field.
     pub(super) fn doc_menu(&mut self, ui: &mut Ui, id: u64, rename: bool) {
+        // taller than the window: it scrolls instead of running off it
+        crate::widgets::menu_fits(ui, |ui| self.doc_menu_items(ui, id, rename));
+    }
+
+    fn doc_menu_items(&mut self, ui: &mut Ui, id: u64, rename: bool) {
         let Some(d) = self.data.docs.iter().find(|d| d.id == id).cloned() else {
             return;
         };
@@ -1958,6 +1963,11 @@ impl App {
 
     /// A sub page's menu in the pages panel.
     fn page_menu(&mut self, ui: &mut Ui, id: u64) {
+        // taller than the window: it scrolls instead of running off it
+        crate::widgets::menu_fits(ui, |ui| self.page_menu_items(ui, id));
+    }
+
+    fn page_menu_items(&mut self, ui: &mut Ui, id: u64) {
         ui.set_min_width(200.0);
         if ui.button(tr("Open")).clicked() {
             self.doc_open = Some(id);

@@ -8,6 +8,11 @@ use super::*;
 impl App {
     /// The task menu (right click on a row or card, and the row's "..." button).
     pub(crate) fn task_menu(&mut self, ui: &mut Ui, tid: u64) {
+        // taller than the window: it scrolls instead of running off it
+        crate::widgets::menu_fits(ui, |ui| self.task_menu_items(ui, tid));
+    }
+
+    fn task_menu_items(&mut self, ui: &mut Ui, tid: u64) {
         let t = self.t();
         let Some(task) = self.task(tid).cloned() else {
             return;
@@ -278,6 +283,11 @@ impl App {
     /// `create` adds "Create new"; a sidebar row leaves it out because its
     /// own "+" does the same (Favorites and Settings have no "+").
     pub(crate) fn list_menu(&mut self, ui: &mut Ui, lid: u64, create: bool) {
+        // taller than the window: it scrolls instead of running off it
+        crate::widgets::menu_fits(ui, |ui| self.list_menu_items(ui, lid, create));
+    }
+
+    fn list_menu_items(&mut self, ui: &mut Ui, lid: u64, create: bool) {
         let t = self.t();
         let loc = Location::List(lid);
         ui.set_min_width(200.0);
@@ -390,6 +400,11 @@ impl App {
     /// `create` adds "Create new"; a sidebar row leaves it out because its
     /// own "+" does the same (Favorites and Settings have no "+").
     pub(crate) fn folder_menu(&mut self, ui: &mut Ui, fid: u64, create: bool) {
+        // taller than the window: it scrolls instead of running off it
+        crate::widgets::menu_fits(ui, |ui| self.folder_menu_items(ui, fid, create));
+    }
+
+    fn folder_menu_items(&mut self, ui: &mut Ui, fid: u64, create: bool) {
         let t = self.t();
         let floc = Location::Folder(fid);
         let Some(sid) = self
@@ -472,6 +487,11 @@ impl App {
 
     /// The "+" on a sidebar list, and the list menu's "Create new".
     pub(crate) fn list_create_menu(&mut self, ui: &mut Ui, lid: u64) {
+        // taller than the window: it scrolls instead of running off it
+        crate::widgets::menu_fits(ui, |ui| self.list_create_menu_items(ui, lid));
+    }
+
+    fn list_create_menu_items(&mut self, ui: &mut Ui, lid: u64) {
         ui.set_min_width(200.0);
         let sid = self.data.space_of_list(lid).map(|s| s.id);
         let folder = self
@@ -532,6 +552,11 @@ impl App {
     /// `create` adds "Create new"; a sidebar row leaves it out because its
     /// own "+" does the same (Favorites and Settings have no "+").
     pub(crate) fn space_menu(&mut self, ui: &mut Ui, sid: u64, create: bool) {
+        // taller than the window: it scrolls instead of running off it
+        crate::widgets::menu_fits(ui, |ui| self.space_menu_items(ui, sid, create));
+    }
+
+    fn space_menu_items(&mut self, ui: &mut Ui, sid: u64, create: bool) {
         let level = self.space_level(sid);
         if level < crate::sync::Level::Full {
             self.limited_space_menu(ui, sid, level);

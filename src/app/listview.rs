@@ -481,6 +481,11 @@ impl App {
 
     /// The group header's menu ("..." or right click).
     pub(super) fn group_menu(&mut self, ui: &mut Ui, g: &Group) {
+        // taller than the window: it scrolls instead of running off it
+        crate::widgets::menu_fits(ui, |ui| self.group_menu_items(ui, g));
+    }
+
+    fn group_menu_items(&mut self, ui: &mut Ui, g: &Group) {
         ui.set_min_width(200.0);
         let collapsed = self.collapsed.contains(&g.key);
         if ui

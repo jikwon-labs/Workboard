@@ -1658,3 +1658,45 @@ fn timeline_lane_names_are_shortened_clear_of_the_count() {
         "the count shows: {texts:?}"
     );
 }
+
+/// The Calendar's week view in the smallest window: the week's dates keep
+/// clear of the Week / Month toggle, which moves to the next row when they
+/// don't fit. The dates used to sit under the toggle.
+#[test]
+fn calendar_week_dates_keep_clear_of_the_toggle() {
+    for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+        for (w, hh) in [(360.0, 640.0), (460.0, 640.0), (960.0, 560.0)] {
+            for week in [true, false] {
+                let mut h = Ui1::sized(w, hh);
+                let list = list_id(&h, "Website Redesign");
+                h.app.loc = Location::List(list);
+                h.app.view = ViewKind::Calendar;
+                h.app.cal.week = week;
+                h.settle();
+                crate::i18n::set_lang(lang);
+                h.settle();
+                h.settle();
+                let toggles = [h.rect(tr("Week")), h.rect(tr("Month"))];
+                let today = h.rect(tr("Today"));
+                let band = Rect::from_x_y_ranges(
+                    0.0..=w,
+                    today.top() - 2.0..=toggles[0].bottom().max(today.bottom()) + 2.0,
+                );
+                for (s, r) in h.texts_in(band, Seen::Visible) {
+                    assert!(r.right() <= w, "{lang:?} {w}x{hh}: {s:?} reaches {r:?}");
+                    for tg in toggles {
+                        if tg.contains(r.center()) {
+                            continue;
+                        }
+                        let o = r.intersect(tg);
+                        assert!(
+                            !(o.width() > 0.5 && o.height() > 0.5),
+                            "{lang:?} {w}x{hh} week {week}: {s:?} {r:?} under {tg:?}"
+                        );
+                    }
+                }
+                crate::i18n::set_lang(crate::i18n::Lang::En);
+            }
+        }
+    }
+}

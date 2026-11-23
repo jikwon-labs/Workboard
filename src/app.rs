@@ -3205,7 +3205,8 @@ impl App {
             .data(|d| d.get_temp(egui::Id::new("cal_week_anchor")))
             .unwrap_or(td);
         let mut week_anchor = week_anchor;
-        ui.horizontal(|ui| {
+        // wraps in a small window: the week's dates ran under Week / Month
+        ui.horizontal_wrapped(|ui| {
             if ui.button(tr("Today")).clicked() {
                 self.cal.month = NaiveDate::from_ymd_opt(td.year(), td.month(), 1).unwrap();
                 week_anchor = td;
@@ -3234,11 +3235,33 @@ impl App {
             } else {
                 self.cal.month.text("%B %Y")
             };
-            ui.label(
-                RichText::new(title)
-                    .size(if narrow { 14.0 } else { 17.0 })
-                    .strong(),
-            );
+            let title = RichText::new(title)
+                .size(if narrow { 14.0 } else { 17.0 })
+                .strong();
+            let title_w = egui::WidgetText::from(title.clone())
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Body,
+                )
+                .size()
+                .x;
+            crate::widgets::wrap_unless_room(ui, title_w);
+            ui.add(egui::Label::new(title).extend());
+            let button = egui::TextStyle::Button.resolve(ui.style());
+            let toggles_w = ["Week", "Month"]
+                .iter()
+                .map(|s| {
+                    ui.painter()
+                        .layout_no_wrap(tr(s).to_string(), button.clone(), t.text)
+                        .size()
+                        .x
+                        + 2.0 * ui.spacing().button_padding.x
+                })
+                .sum::<f32>()
+                + 2.0 * ui.spacing().item_spacing.x;
+            crate::widgets::wrap_unless_room(ui, toggles_w);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.selectable_label(!self.cal.week, tr("Month")).clicked() {
                     self.cal.week = false;

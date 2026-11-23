@@ -875,19 +875,30 @@ impl App {
             .collect();
         // tall enough that "Use template" shows without scrolling in a 900 pt window
         let h = (ui.ctx().screen_rect().height() - 300.0).clamp(230.0, 560.0);
+        // in Settings the page scrolls: the list and the picked one take
+        // their full height there (a list scrolling in the scrolling page
+        // stopped short, cutting its last row above empty space)
+        let in_page = App::in_settings_page(ui);
+        let scrolled = |ui: &mut Ui, id: &str, body: &mut dyn FnMut(&mut Ui)| {
+            if in_page {
+                body(ui);
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt(id)
+                    .max_height(h)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| body(ui));
+            }
+        };
         let left_w = 250.0;
         // a narrow window: the list, then the picked one in its place with a
         // way back to the list
         let stacked = ui.available_width() < 600.0;
         if stacked {
             if c.pick.is_none() {
-                egui::ScrollArea::vertical()
-                    .id_salt("tc_list")
-                    .max_height(h)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        pick = self.template_list(ui, t, &entries, None);
-                    });
+                scrolled(ui, "tc_list", &mut |ui| {
+                    pick = self.template_list(ui, t, &entries, None);
+                });
             } else {
                 let r = ui.add(ghost(egui::Button::new(
                     RichText::new(tr("\u{2190}  All templates")).color(t.text2),
@@ -898,37 +909,30 @@ impl App {
                     c.renaming = None;
                     c.confirm_delete = false;
                 }
-                egui::ScrollArea::vertical()
-                    .id_salt("tc_detail")
-                    .max_height(h)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        close = self.template_detail(ui, t, c);
-                    });
+                scrolled(ui, "tc_detail", &mut |ui| {
+                    close = self.template_detail(ui, t, c);
+                });
             }
         } else {
+            let col_h = if in_page { 0.0 } else { h };
             ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(vec2(left_w, h), Layout::top_down(Align::Min), |ui| {
-                    ui.set_min_size(vec2(left_w, h));
-                    egui::ScrollArea::vertical()
-                        .id_salt("tc_list")
-                        .max_height(h)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
+                ui.allocate_ui_with_layout(
+                    vec2(left_w, col_h),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_min_size(vec2(left_w, col_h));
+                        scrolled(ui, "tc_list", &mut |ui| {
                             if let Some(p) = self.template_list(ui, t, &entries, c.pick.as_ref()) {
                                 pick = Some(p);
                             }
                         });
-                });
+                    },
+                );
                 ui.separator();
                 ui.vertical(|ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("tc_detail")
-                        .max_height(h)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            close = self.template_detail(ui, t, c);
-                        });
+                    scrolled(ui, "tc_detail", &mut |ui| {
+                        close = self.template_detail(ui, t, c);
+                    });
                 });
             });
         }
@@ -1048,8 +1052,13 @@ impl App {
             .inner_margin(egui::Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                // kept short so where-to and Use stay in view
-                let h = (ui.ctx().screen_rect().height() - 600.0).clamp(80.0, 200.0);
+                // kept short so where-to and Use stay in view (all of it on
+                // the Settings page, which scrolls)
+                let h = if App::in_settings_page(ui) {
+                    f32::INFINITY
+                } else {
+                    (ui.ctx().screen_rect().height() - 600.0).clamp(80.0, 200.0)
+                };
                 egui::ScrollArea::vertical()
                     .id_salt("tc_preview")
                     .max_height(h)

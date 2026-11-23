@@ -209,3 +209,40 @@ fn template_tabs_and_new_task_template_do_not_overlap() {
         }
     });
 }
+
+/// Settings > Templates scrolls with the page: the templates run on to the
+/// bottom of the window instead of stopping in a box of their own above
+/// empty space with the last one cut.
+#[test]
+fn settings_templates_run_to_the_bottom_of_the_page() {
+    for (w, hh) in [(960.0, 560.0), (1440.0, 900.0), (700.0, 640.0)] {
+        let mut h = Ui1::sized(w, hh);
+        h.app.section = Section::Settings;
+        h.app.settings_tab = crate::app::settings::SettingsTab::Templates;
+        h.app.settings_state = None;
+        h.settle();
+        // a template's name cut off at the bottom is cut by the page's
+        // own edge, not by a box ending above it
+        let names: Vec<String> = crate::app::templates::builtins()
+            .iter()
+            .map(|b| tr(b.en).to_string())
+            .collect();
+        let mut seen = 0;
+        super::harness::each_text(&h.shapes, |ts, clip| {
+            let r = ts.visual_bounding_rect();
+            if !names.iter().any(|n| n == ts.galley.text()) || r.top() >= clip.bottom() {
+                return;
+            }
+            seen += 1;
+            if r.bottom() > clip.bottom() + 0.5 {
+                assert!(
+                    clip.bottom() >= hh - 40.0,
+                    "{w}x{hh}: {:?} cut at {}, above the page's bottom",
+                    ts.galley.text(),
+                    clip.bottom()
+                );
+            }
+        });
+        assert!(seen > 0, "{w}x{hh}: the templates");
+    }
+}

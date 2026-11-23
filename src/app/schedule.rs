@@ -1,4 +1,5 @@
-// Schedule message: the clock next to Send keeps a message to post later.
+// Schedule message: the small arrow joined to Send keeps a message to
+// post later.
 // On a team server the server keeps it and posts it at its time, even
 // while this computer is asleep (server/src/schedule.rs); its list comes
 // back in `scheduled` answers. Without a server this computer keeps it in

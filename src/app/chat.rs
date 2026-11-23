@@ -691,6 +691,37 @@ const TOOL_GAP: f32 = 4.0;
 /// How wide the message box's round Send button is.
 const SEND_D: f32 = 30.0;
 
+/// How wide the small arrow joined to Send is (it schedules the message).
+const ARROW_W: f32 = 18.0;
+
+/// Send, or the arrow joined to it: a filled button with corners of its
+/// own that lightens under the pointer inside those corners (where Tint's
+/// tint would stick out of them).
+fn send_part(
+    ui: &mut Ui,
+    text: RichText,
+    fill: Color32,
+    round: egui::CornerRadius,
+    size: egui::Vec2,
+    enabled: bool,
+) -> egui::Response {
+    let b = egui::Button::new(text)
+        .fill(fill)
+        .corner_radius(round)
+        .min_size(size);
+    let r = ui.add_enabled(enabled, b);
+    if r.enabled() && r.hovered() {
+        let tint = hover_fill(ui);
+        let tint = if r.is_pointer_button_down_on() {
+            tint.gamma_multiply(1.5)
+        } else {
+            tint
+        };
+        ui.painter().rect_filled(r.rect, round, tint);
+    }
+    r
+}
+
 /// The B, I, S and </> buttons of a message box; `prefix` tells the
 /// boxes apart for the tests ("" or "reply ").
 fn format_buttons(ui: &mut Ui, t: &Theme, id: egui::Id, text: &mut String, prefix: &str) {
@@ -3122,11 +3153,11 @@ impl App {
                 let mut insert: Option<String> = None;
                 ui.horizontal(|ui| {
                     let gap = ui.spacing().item_spacing.x;
-                    // room for all eight squares and, at the right, the clock
-                    // (once there is text) and Send. A narrower box leaves out
-                    // B, I, S and </>: their shortcuts and typed marks still work.
+                    // room for all eight squares and, at the right, Send with
+                    // its arrow. A narrower box leaves out B, I, S and </>:
+                    // their shortcuts and typed marks still work.
                     let side = crate::widgets::CONTROL_H;
-                    let room = 8.0 * side + 7.0 * TOOL_GAP + 2.0 * gap + side + SEND_D;
+                    let room = 8.0 * side + 7.0 * TOOL_GAP + 2.0 * gap + SEND_D + 1.0 + ARROW_W;
                     let formats = ui.available_width() >= room;
                     ui.spacing_mut().item_spacing.x = TOOL_GAP;
                     let tool = |ui: &mut Ui, g: &str, tip: &str| {
@@ -3221,30 +3252,34 @@ impl App {
                                 || !self.chat.channel.files.is_empty()
                                 || (self.composer_mode == ComposerMode::Post
                                     && !self.chat.post_title.trim().is_empty()));
-                        let b = Tint(
-                            egui::Button::new(RichText::new(label).color(if ready {
-                                t.on_primary
-                            } else {
-                                t.text3
-                            }))
-                            .fill(if ready { t.primary } else { t.hover })
-                            // round: a circle around the paper plane, a pill around "Post"
-                            .corner_radius(15)
-                            .min_size(if label.is_empty() {
-                                vec2(SEND_D, SEND_D)
-                            } else {
-                                vec2(34.0, SEND_D)
-                            }),
-                        );
-                        let sent = ui.add(b);
-                        // the clock: send it later (schedule.rs), plain messages only
-                        if self.composer_mode == ComposerMode::Message
-                            && !self.chat.channel.text.trim().is_empty()
-                        {
-                            let clock =
-                                icon_button(ui, &t, Icon::Clock, "", "Schedule message", false)
-                                    .on_hover_text(tr("Schedule message"));
-                            popup(ui, &clock, egui::Id::new("schedule_popup"), 220.0, |ui| {
+                        let fill = |on: bool| if on { t.primary } else { t.hover };
+                        let ink = |on: bool| if on { t.on_primary } else { t.text3 };
+                        // a message: Send and, joined to its right, the small
+                        // arrow that sends it later (schedule.rs), plain text only
+                        let split = self.composer_mode == ComposerMode::Message;
+                        if split {
+                            ui.spacing_mut().item_spacing.x = 1.0;
+                            let later = !self.chat.channel.text.trim().is_empty();
+                            let round = egui::CornerRadius {
+                                ne: 15,
+                                se: 15,
+                                ..Default::default()
+                            };
+                            let arrow = send_part(
+                                ui,
+                                RichText::new(""),
+                                fill(later),
+                                round,
+                                vec2(ARROW_W, SEND_D),
+                                later,
+                            )
+                            .on_hover_text(tr("Schedule message"));
+                            name_it(&arrow, "Schedule message");
+                            let c = arrow.rect.center() + vec2(-1.0, 0.5);
+                            let stroke = Stroke::new(1.5_f32, ink(later));
+                            ui.painter().line_segment([c + vec2(-3.5, -2.0), c], stroke);
+                            ui.painter().line_segment([c, c + vec2(3.5, -2.0)], stroke);
+                            popup(ui, &arrow, egui::Id::new("schedule_popup"), 220.0, |ui| {
                                 ui.label(RichText::new(tr("Send later")).small().color(t.text2));
                                 for (label, at) in super::schedule::schedule_choices(now_ts()) {
                                     if menu_row_plain(ui, &t, tr(label), false).clicked() {
@@ -3258,14 +3293,27 @@ impl App {
                                 }
                             });
                         }
+                        // round: a circle around the paper plane, a pill
+                        // around "Post"; flat where the arrow joins it
+                        let round = if split {
+                            egui::CornerRadius {
+                                nw: 15,
+                                sw: 15,
+                                ..Default::default()
+                            }
+                        } else {
+                            egui::CornerRadius::same(15)
+                        };
+                        let size = if label.is_empty() {
+                            vec2(SEND_D, SEND_D)
+                        } else {
+                            vec2(34.0, SEND_D)
+                        };
+                        let text = RichText::new(label).color(ink(ready));
+                        let sent = send_part(ui, text, fill(ready), round, size, true);
                         if label.is_empty() {
                             name_it(&sent, "Send");
-                            line_icon(
-                                ui.painter(),
-                                Icon::Send,
-                                sent.rect.center(),
-                                if ready { t.on_primary } else { t.text3 },
-                            );
+                            line_icon(ui.painter(), Icon::Send, sent.rect.center(), ink(ready));
                         }
                         if (sent.clicked() || enter) && ready {
                             let text = self.chat.channel.text.trim().to_string();

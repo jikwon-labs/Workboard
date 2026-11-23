@@ -390,9 +390,9 @@ fn compact_thread_is_laid_over_the_conversation() {
 }
 
 /// The message box's tools are squares as big as the emoji button. At the
-/// smallest window eight of them, the clock and Send are too wide for the
-/// row, so B, I, S and </> are left out (their shortcuts still work); a
-/// little wider, they are back and still clear of the clock.
+/// smallest window eight of them and Send with its arrow are too wide for
+/// the row, so B, I, S and </> are left out (their shortcuts still work); a
+/// little wider, they are back and still clear of Send.
 #[test]
 fn compact_message_box_tools_fit_beside_send() {
     for (w, formats) in [(360.0, false), (400.0, true)] {
@@ -400,18 +400,14 @@ fn compact_message_box_tools_fit_beside_send() {
         go_home(&mut h);
         h.click("general");
         h.click("Message composer");
-        // with text in the box the clock shows too
         h.type_text("Hello");
         assert_eq!(h.has("Bold"), formats, "{w}");
         assert_eq!(h.has("Code"), formats, "{w}");
         let task = h.rect("Create task");
-        let clock = h.rect("Schedule message");
         let send = h.rect("Send");
-        assert!(
-            task.right() + 4.0 <= clock.left(),
-            "{w}: {task:?} {clock:?}"
-        );
-        assert!(clock.right() < send.left(), "{w}: {clock:?} {send:?}");
+        let arrow = h.rect("Schedule message");
+        assert!(task.right() + 4.0 <= send.left(), "{w}: {task:?} {send:?}");
+        assert!(send.right() <= arrow.left(), "{w}: {send:?} {arrow:?}");
         for name in ["Add files", "Mention someone", "Emoji", "Create task"] {
             let r = h.rect(name);
             assert_eq!(r.width(), r.height(), "{w}: {name} {r:?}");

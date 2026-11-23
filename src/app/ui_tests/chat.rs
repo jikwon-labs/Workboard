@@ -2600,9 +2600,9 @@ fn drafts_are_listed_and_saved_with_the_workspace() {
     assert_eq!(h2.app.chat.channel.text, "half a thought");
 }
 
-/// The clock next to Send keeps the message for later; Scheduled messages
-/// lists it with Send now, Edit and Cancel. Without a server this computer
-/// posts it when its time comes.
+/// The small arrow joined to Send keeps the message for later; Scheduled
+/// messages lists it with Send now, Edit and Cancel. Without a server this
+/// computer posts it when its time comes.
 #[test]
 fn schedule_a_message_and_send_edit_or_cancel_it() {
     let mut h = Ui1::new();
@@ -2673,6 +2673,35 @@ fn schedule_a_message_and_send_edit_or_cancel_it() {
     h.click("Scheduled messages");
     h.click(&format!("Cancel {}", id));
     assert!(h.app.scheduled().is_empty());
+}
+
+/// Send and its arrow are one button split in two: the arrow sits right
+/// against Send, as tall and narrower, and offers its times only once
+/// there is text to schedule. A post has no arrow.
+#[test]
+fn the_arrow_joined_to_send_waits_for_text() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let send = h.rect("Send");
+    let arrow = h.rect("Schedule message");
+    assert!(
+        (arrow.left() - send.right()).abs() <= 1.5,
+        "{send:?} {arrow:?}"
+    );
+    assert_eq!(arrow.height(), send.height());
+    assert!(arrow.width() < send.width(), "{send:?} {arrow:?}");
+    assert!((arrow.center().y - send.center().y).abs() < 0.5);
+    h.click("Schedule message");
+    assert!(!h.has("In 1 hour"), "nothing to schedule yet");
+    h.click("Message composer");
+    h.type_text("later");
+    h.click("Schedule message");
+    assert!(h.has("In 1 hour"));
+    h.key(egui::Key::Escape);
+    h.app.composer_mode = crate::app::chat::ComposerMode::Post;
+    h.settle();
+    assert!(!h.has("Schedule message"), "a post goes now");
+    assert!(h.has("Post"));
 }
 
 /// Built-in slash commands, the "/" list, and plain text that only starts

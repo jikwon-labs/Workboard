@@ -2104,3 +2104,43 @@ fn task_window_title_wraps_a_long_name() {
         assert!(!name.contains('\n'), "{w}x{hh}: {name:?}");
     }
 }
+
+/// A file attached to a task with a name of wide letters: the name on the
+/// tile and the one under it are shortened with "…" to the tile's width.
+/// The tile's name used to spill out of both sides (it was shortened by
+/// counting letters) and the one under it was cut mid-letter.
+#[test]
+fn attachment_tile_names_fit_the_tile() {
+    let mut h = Ui1::sized(1440.0, 900.0);
+    let id = open_design_task(&mut h);
+    let name = "WWWWWWWWWWWWWWWWWWWWWWWWWWWW-MEMO-FINAL.pdf";
+    let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    t.attachments.push(Attachment {
+        file: "no-such-file".into(),
+        name: name.into(),
+        kind: MediaKind::File,
+        bytes: 10,
+        w: 0,
+        h: 0,
+        secs: 0.0,
+        thumb: None,
+    });
+    h.settle();
+    let label = format!("Attachment {name}");
+    h.scroll_into_view(&label);
+    let tile = h.rect(&label);
+    let texts: Vec<(String, Rect)> = h
+        .texts_in(tile, Seen::Touching)
+        .into_iter()
+        .filter(|(s, _)| s.starts_with("WWW"))
+        .collect();
+    assert_eq!(texts.len(), 2, "on the tile and under it: {texts:?}");
+    for (s, r) in &texts {
+        assert!(s.ends_with('\u{2026}'), "shortened: {s:?}");
+        assert!(
+            r.left() >= tile.left() - 0.5 && r.right() <= tile.right() + 0.5,
+            "{s:?} at {r:?} spills out of {tile:?}"
+        );
+    }
+    assert!(h.cut_texts(tile).is_empty(), "{:?}", h.cut_texts(tile));
+}

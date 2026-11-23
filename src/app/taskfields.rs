@@ -1241,11 +1241,13 @@ impl App {
                     if a.kind == MediaKind::File {
                         hover_bg(ui, &resp, pic, 8.0);
                     }
-                    ui.painter().with_clip_rect(rect).text(
+                    // shortened with an ellipsis, not cut mid-letter
+                    let font = FontId::proportional(11.5);
+                    ui.painter().text(
                         pos2(rect.left(), pic.bottom() + 9.0),
                         Align2::LEFT_CENTER,
-                        &a.name,
-                        FontId::proportional(11.5),
+                        fit_text(ui.painter(), &a.name, &font, rect.width()),
+                        font,
                         t.text2,
                     );
                     let hover = ui.rect_contains_pointer(rect);

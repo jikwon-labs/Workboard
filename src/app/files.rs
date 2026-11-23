@@ -1242,12 +1242,14 @@ pub(super) fn paint_file_tile(painter: &egui::Painter, rect: Rect, name: &str, t
         FontId::proportional(if small { 13.0 } else { 16.0 }),
         t.text2,
     );
-    let room = ((rect.width() - 8.0) / if small { 5.5 } else { 6.5 }).max(4.0) as usize;
+    // shortened to the tile's width as drawn (counting letters let a name
+    // of wide letters, Korean, spill out of both sides)
+    let font = FontId::proportional(if small { 9.5 } else { 11.0 });
     painter.text(
         rect.center() + vec2(0.0, if small { 12.0 } else { 14.0 }),
         Align2::CENTER_CENTER,
-        crate::widgets::truncate(name, room + 1),
-        FontId::proportional(if small { 9.5 } else { 11.0 }),
+        crate::widgets::fit_text(painter, name, &font, rect.width() - 12.0),
+        font,
         t.text3,
     );
 }

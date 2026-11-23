@@ -307,11 +307,16 @@ pub fn menu_row_named(
             .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
     }
     lead(ui.painter(), rect.left_center() + vec2(14.0, 0.0));
+    // a long label (a person's name) is shortened with an ellipsis, clear of
+    // the tick a picked row has at its right, instead of running past the
+    // popup's edge
+    let font = FontId::proportional(13.0);
+    let room = rect.width() - 30.0 - if selected { 30.0 } else { 10.0 };
     ui.painter().text(
         rect.left_center() + vec2(30.0, 0.0),
         Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(13.0),
+        fit_text(ui.painter(), label, &font, room),
+        font,
         t.text,
     );
     resp
@@ -327,11 +332,13 @@ pub fn menu_row_plain(ui: &mut Ui, t: &Theme, label: &str, selected: bool) -> Re
         ui.painter()
             .rect_filled(rect, 5.0, if selected { t.selected_bg } else { t.hover });
     }
+    let font = FontId::proportional(13.0);
+    let room = rect.width() - 10.0 - if selected { 30.0 } else { 10.0 };
     ui.painter().text(
         rect.left_center() + vec2(10.0, 0.0),
         Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(13.0),
+        fit_text(ui.painter(), label, &font, room),
+        font,
         t.text,
     );
     resp

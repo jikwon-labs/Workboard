@@ -2037,3 +2037,34 @@ fn delete_tasks_dialog_puts_delete_before_cancel() {
     let cancel = h.rect("Cancel");
     assert!(del.right() <= cancel.left(), "{:?} then {:?}", del, cancel);
 }
+
+/// A teammate with a long name to try the task window's layout with.
+fn long_named_teammate(h: &mut Ui1) -> &'static str {
+    let long = "Bartholomew Montgomery-Fitzgerald Worthington";
+    let mut p = h.app.data.members[0].clone();
+    p.id = 9_001;
+    p.name = long.into();
+    p.display_name = String::new();
+    h.app.data.members.push(p);
+    long
+}
+
+/// The task's Watchers popup: a long name is shortened with "…" inside the
+/// popup. It used to run past the popup and be cut by its border.
+#[test]
+fn watchers_popup_shortens_a_long_name() {
+    let mut h = Ui1::sized(960.0, 560.0);
+    let long = long_named_teammate(&mut h);
+    h.settle();
+    open_design_task(&mut h);
+    h.click("Watchers");
+    let row = h.rect(&format!("Watcher {long}"));
+    let texts = h.texts_in(row, Seen::Visible);
+    let (name, r) = texts
+        .iter()
+        .find(|(s, _)| s.starts_with("Bartholomew"))
+        .expect("the name is drawn");
+    assert!(name.ends_with('\u{2026}'), "shortened: {name:?}");
+    assert!(r.right() <= row.right(), "inside the row: {r:?} {row:?}");
+    assert!(h.cut_texts(row).is_empty(), "{:?}", h.cut_texts(row));
+}

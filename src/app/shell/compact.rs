@@ -163,20 +163,21 @@ impl App {
                 let g = ui.painter().layout_no_wrap(name, font, t.primary);
                 let br = Rect::from_min_size(
                     pos2(left, full.center().y - 14.0),
-                    vec2(g.size().x + 30.0, 28.0),
+                    vec2(g.size().x + 26.0, 28.0),
                 );
                 let resp = ui.interact(br, ui.id().with("compact_back"), Sense::click());
                 name_it(&resp, "Back");
                 if resp.hovered() {
                     ui.painter().rect_filled(br, 6.0, t.hover);
                 }
-                let c = br.left_center() + vec2(12.0, 0.0);
+                // the chevron close after the window buttons, as on the iPhone
+                let c = br.left_center() + vec2(8.0, 0.0);
                 ui.painter().line(
                     vec![c + vec2(3.5, -6.0), c + vec2(-2.5, 0.0), c + vec2(3.5, 6.0)],
                     Stroke::new(2.0_f32, t.primary),
                 );
                 ui.painter().galley(
-                    pos2(br.left() + 24.0, br.center().y - g.size().y / 2.0),
+                    pos2(br.left() + 20.0, br.center().y - g.size().y / 2.0),
                     g,
                     t.primary,
                 );

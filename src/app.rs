@@ -6216,7 +6216,8 @@ fn place_traffic_lights(frame: &eframe::Frame) {
             return;
         }
         let close_rect: NSRect = msg_send![close, frame];
-        // the buttons sit at the bottom of this strip: centre them 20 px from the top
+        // a strip that ends 20 px plus half a button from the top, the buttons
+        // put at its bottom (below) so their centres are 20 px from the top
         let height = 20.0 + close_rect.size.height / 2.0;
         let win_rect: NSRect = msg_send![window, frame];
         let mut c_rect: NSRect = msg_send![container, frame];
@@ -6227,13 +6228,15 @@ fn place_traffic_lights(frame: &eframe::Frame) {
             c_rect.origin.y = win_rect.size.height - height;
             let _: () = msg_send![container, setFrame: c_rect];
         }
-        // close at 13 px from the left edge, buttons 20 px apart
+        // close at 13 px from the left edge, buttons 20 px apart, at the
+        // strip's bottom (macOS 26 and later lift them 9 px off it on their own,
+        // which left them 5 px above the header's middle)
         let space = 20.0;
         for (i, b) in [close, mini, zoom].iter().enumerate() {
             let r: NSRect = msg_send![*b, frame];
             let origin = NSPoint {
                 x: 13.0 + space * i as f64,
-                y: r.origin.y,
+                y: 0.0,
             };
             if (r.origin.x - origin.x).abs() > 0.5 || (r.origin.y - origin.y).abs() > 0.5 {
                 let _: () = msg_send![*b, setFrameOrigin: origin];

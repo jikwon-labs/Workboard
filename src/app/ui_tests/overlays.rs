@@ -487,3 +487,51 @@ fn recent_tray_names_stay_inside_their_chips() {
         );
     }
 }
+
+#[test]
+fn the_large_pictures_long_name_stops_before_close_in_a_narrow_window() {
+    // a picture still on its way, opened large in a 360 point window: its
+    // long name ran under the Close button
+    for w in [360.0, 460.0] {
+        let mut h = Ui1::sized(w, 640.0);
+        let name = "A-very-long-file-name-for-the-final-design-draft-revised.png";
+        let g = h.channel_id("general");
+        let mut m = crate::app::slack::new_message(
+            h.app.data.new_id(),
+            h.app.data.me,
+            String::new(),
+            now_ts(),
+        );
+        m.attachments.push(Attachment {
+            file: "no-such-file".into(),
+            name: name.into(),
+            kind: MediaKind::Image,
+            bytes: 10,
+            w: 400,
+            h: 300,
+            secs: 0.0,
+            thumb: None,
+        });
+        let mid = m.id;
+        let c = h.app.data.channels.iter_mut().find(|c| c.id == g).unwrap();
+        c.messages.push(m);
+        h.app.section = Section::Chat;
+        h.app.chat.open = Some(g);
+        h.app.viewer = Some(crate::app::files::Viewer::new(g, mid, 0));
+        h.settle();
+        let close = h.rect("Close");
+        let shown = h
+            .texts_in(Rect::EVERYTHING, Seen::Visible)
+            .into_iter()
+            .filter(|(_, r)| r.top() < 40.0)
+            .find(|(t, _)| t.starts_with("A-very"))
+            .expect("the name over the picture");
+        assert!(
+            shown.1.right() <= close.left(),
+            "at {}: the name {:?} runs under Close {:?}",
+            w,
+            shown,
+            close
+        );
+    }
+}

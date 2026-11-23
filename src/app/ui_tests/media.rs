@@ -281,6 +281,75 @@ fn a_picture_opened_large_zooms_in_and_moves() {
     assert!(h.app.viewer.is_none());
 }
 
+/// The large picture's name runs along the top after the macOS window
+/// buttons (they stay over the viewer at the window's top left), level
+/// with them, and a long one is cut short before the buttons on the right.
+#[test]
+fn the_large_pictures_name_clears_the_window_buttons() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let long = "Photo-20261123-235225-from-the-trip-to-the-coast-with-the-team.png";
+    h.dropped = vec![egui::DroppedFile {
+        path: Some(test_picture(long, 600, 400)),
+        ..Default::default()
+    }];
+    h.frame(vec![]);
+    h.until("the picture ready in the message box", |h| {
+        h.app.pending_ready(false).0 && !h.app.pending_ready(false).1.is_empty()
+    });
+    h.settle();
+    h.click("Message composer");
+    h.key(egui::Key::Enter);
+    let m = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .last()
+        .unwrap()
+        .clone();
+    h.until("the picture decoded for the screen", |h| {
+        h.app
+            .files
+            .texture(&m.attachments[0].file, crate::app::files::THUMB)
+            .is_some()
+    });
+    h.click(&format!("Picture {}", long));
+    assert!(h.app.viewer.is_some());
+    // (its galley keeps the whole name; a cut one is just narrower)
+    let name = |h: &Ui1| {
+        h.texts_in(Rect::EVERYTHING, Seen::All)
+            .into_iter()
+            .find(|(t, _)| t == long)
+            .expect("the name over the picture")
+            .1
+    };
+    let mut widths = vec![];
+    for size in [h.size, vec2(700.0, 640.0)] {
+        h.size = size;
+        h.settle();
+        let r = name(&h);
+        // the window buttons: 13 to 67 px across, centred 20 px down
+        // (place_traffic_lights in app.rs)
+        if cfg!(target_os = "macos") {
+            assert!(r.left() > 72.0, "{:?}: {:?}", size, r);
+            assert!((r.center().y - 20.0).abs() < 3.0, "{:?}: {:?}", size, r);
+        }
+        let zout = h.rect("Zoom out");
+        assert!(r.right() < zout.left(), "{:?}: {:?} {:?}", size, r, zout);
+        widths.push(r.width());
+    }
+    assert!(
+        widths[1] < widths[0] * 0.6,
+        "cut short in the narrow window: {:?}",
+        widths
+    );
+}
+
 #[test]
 fn pictures_dropped_on_a_task_attach_and_can_be_removed() {
     let mut h = Ui1::new();

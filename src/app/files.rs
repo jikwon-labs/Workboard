@@ -2871,18 +2871,27 @@ impl App {
                 {
                     close = true;
                 }
+                // top: name and the buttons; on macOS the window buttons stay
+                // at the top left over the viewer, so the row starts after
+                // them (where the header's does) and lines up with them
+                let (left, y) = if cfg!(target_os = "macos") {
+                    (82.0, 5.0)
+                } else {
+                    (20.0, 12.0)
+                };
+                let top = Rect::from_min_max(
+                    bg.min + vec2(left, y),
+                    pos2(bg.right() - 20.0, bg.top() + y + 30.0),
+                );
                 // a zoomed picture goes under the name and the buttons: a
                 // dark band keeps them readable
                 if v.zoom > 1.0 {
                     ui.painter().rect_filled(
-                        Rect::from_min_size(bg.min, vec2(bg.width(), 54.0)),
+                        Rect::from_min_size(bg.min, vec2(bg.width(), top.bottom() + y - bg.top())),
                         0.0,
                         Color32::from_black_alpha(170),
                     );
                 }
-                // top: name and the buttons
-                let top =
-                    Rect::from_min_size(bg.min + vec2(20.0, 12.0), vec2(bg.width() - 40.0, 30.0));
                 ui.allocate_new_ui(
                     egui::UiBuilder::new()
                         .max_rect(top)
@@ -2893,11 +2902,6 @@ impl App {
                         } else {
                             String::new()
                         };
-                        ui.label(
-                            RichText::new(format!("{}{}", a.name, count))
-                                .color(Color32::WHITE)
-                                .size(14.0),
-                        );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let b = |ui: &mut Ui, s: &str| {
                                 ui.add(Tint(
@@ -2966,6 +2970,19 @@ impl App {
                                     v.zoom_to(v.zoom / 1.5, mid, mid, max_zoom);
                                 }
                             }
+                            // the name in the room the buttons leave, cut
+                            // short when long rather than run under them
+                            ui.add_space(12.0);
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!("{}{}", a.name, count))
+                                            .color(Color32::WHITE)
+                                            .size(14.0),
+                                    )
+                                    .truncate(),
+                                );
+                            });
                         });
                     },
                 );

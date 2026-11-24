@@ -321,6 +321,7 @@ final class Notifier {
             case "Sent a video": return String(localized: "Sent a video")
             case "Sent photos and videos": return String(localized: "Sent photos and videos")
             case "Sent a file": return String(localized: "Sent a file")
+            case "Sent a voice message": return String(localized: "Sent a voice message")
             default: return n.body
             }
         }

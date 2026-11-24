@@ -202,11 +202,13 @@ public enum Notify {
         return sentWhat(m["attachments"]?.array ?? [])
     }
 
-    /// What a message with only attachments says in a banner: a photo, a
-    /// video, both, or a file ("" for none). Notifications.swift translates it.
+    /// What a message with only attachments says in a banner: a voice
+    /// message, a photo, a video, both, or a file ("" for none), as the
+    /// Mac's sent_what. Notifications.swift translates it.
     public static func sentWhat(_ a: [JSON]) -> String {
         let kinds = Set(a.map { $0["kind"]?.string ?? "Image" })
         if a.isEmpty { return "" }
+        if kinds.contains("Audio") { return "Sent a voice message" }
         if kinds.contains(where: { $0 != "Image" && $0 != "Video" }) { return "Sent a file" }
         if kinds == ["Image", "Video"] { return "Sent photos and videos" }
         return kinds == ["Video"] ? "Sent a video" : "Sent a photo"

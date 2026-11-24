@@ -73,17 +73,21 @@ extension FakeServer {
                 let author = q("author").flatMap { UInt64($0) } ?? 2
                 var snap = snapshot ?? [:]
                 let id = UInt64(Date().timeIntervalSince1970 * 1000) * 1024 + 1023
-                // &file=NAME sends a file (&kind=Image: a small picture),
-                // kept here so the app can fetch it; &reply=ID sends it as
-                // a reply in that message's thread
+                // &file=NAME sends a file (&kind=Image: a small picture;
+                // &kind=Audio: a few seconds of silence as a WAV, so NAME
+                // should end in .wav), kept here so the app can fetch it;
+                // &reply=ID sends it as a reply in that message's thread
                 var attachments: [JSON] = []
                 if let name = q("file") {
                     let picture = q("kind") == "Image"
-                    let bytes = picture ? Self.tinyPNG : Data(name.utf8)
+                    let sound = q("kind") == "Audio"
+                    let secs = 4.0
+                    let bytes = picture ? Self.tinyPNG : sound ? Self.silentWAV(secs: secs) : Data(name.utf8)
                     let sha = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
-                    files[sha] = (bytes, picture ? "image/png" : "application/octet-stream")
+                    files[sha] = (bytes, picture ? "image/png" : sound ? "audio/wav" : "application/octet-stream")
                     attachments.append(picture
                         ? FileAPI.attachment(sha: sha, name: name, isVideo: false, bytes: bytes.count, w: 1, h: 1, secs: 0)
+                        : sound ? FileAPI.audioAttachment(sha: sha, name: name, bytes: bytes.count, secs: secs)
                         : FileAPI.fileAttachment(sha: sha, name: name, bytes: bytes.count))
                 }
                 let text = q("text") ?? (attachments.isEmpty ? "Hello" : "")
@@ -311,6 +315,23 @@ extension FakeServer {
         default:
             respond(p, 404, ["error": "not_found"])
         }
+    }
+
+    /// `secs` of silence as an 8 kHz, 8-bit mono WAV (a sound the app can
+    /// play, for UI tests of voice messages).
+    static func silentWAV(secs: Double) -> Data {
+        let rate: UInt32 = 8000
+        let n = UInt32(Double(rate) * secs)
+        var out = Data()
+        func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) } }
+        func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) } }
+        out.append(contentsOf: Array("RIFF".utf8)); u32(36 + n)
+        out.append(contentsOf: Array("WAVEfmt ".utf8)); u32(16)
+        u16(1); u16(1); u32(rate); u32(rate); u16(1); u16(8)
+        out.append(contentsOf: Array("data".utf8)); u32(n)
+        // 8-bit samples are unsigned: 128 is silence
+        out.append(Data(repeating: 128, count: Int(n)))
+        return out
     }
 
     /// A 1x1 PNG for pictures sent with /admin/say.

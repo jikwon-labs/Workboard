@@ -68,13 +68,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Workboard uses the microphone for huddles with your team."
+            "value" : "Workboard uses the microphone for huddles and voice messages with your team."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "needs_review",
-            "value" : "Workboard 는 팀과의 허들에 마이크를 씁니다."
+            "value" : "Workboard 는 팀과의 허들과 음성 메시지에 마이크를 씁니다."
           }
         }
       }

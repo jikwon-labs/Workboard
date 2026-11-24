@@ -176,6 +176,16 @@ public enum FileAPI {
         ]
     }
 
+    /// An Attachment object for a sound (MediaKind::Audio on the Mac): a
+    /// voice message recorded in the message box, or an audio file. Only
+    /// its length goes with it; no picture size, no still.
+    public static func audioAttachment(sha: String, name: String, bytes: Int, secs: Double) -> JSON {
+        [
+            "file": .string(sha), "name": .string(name), "kind": .string("Audio"),
+            "bytes": .int(Int64(bytes)), "secs": .double(secs.isFinite ? max(0, secs) : 0),
+        ]
+    }
+
     /// A name a file from someone else's message may be saved under here:
     /// its last part only, never empty, never hidden.
     public static func safeName(_ name: String) -> String {
@@ -282,7 +292,7 @@ public enum FileAPI {
         return up == sha
     }
 
-    static func contentType(ext: String) -> String {
+    public static func contentType(ext: String) -> String {
         switch ext.lowercased() {
         case "jpg", "jpeg": return "image/jpeg"
         case "png": return "image/png"
@@ -291,6 +301,11 @@ public enum FileAPI {
         case "webp": return "image/webp"
         case "mov": return "video/quicktime"
         case "mp4", "m4v": return "video/mp4"
+        case "m4a": return "audio/mp4"
+        case "mp3": return "audio/mpeg"
+        case "wav": return "audio/wav"
+        case "aac": return "audio/aac"
+        case "caf": return "audio/x-caf"
         default: return "application/octet-stream"
         }
     }

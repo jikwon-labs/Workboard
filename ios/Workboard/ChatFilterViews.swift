@@ -104,8 +104,9 @@ struct ConversationFilesView: View {
 
     var body: some View {
         let all = channel.files
-        let media = all.enumerated().filter { !$0.element.attachment.isFile }
-        let other = all.enumerated().filter { $0.element.attachment.isFile }
+        // sounds go with the other files (they have nothing to show in a grid)
+        let media = all.enumerated().filter { !$0.element.attachment.isFile && !$0.element.attachment.isAudio }
+        let other = all.enumerated().filter { $0.element.attachment.isFile || $0.element.attachment.isAudio }
         if all.isEmpty {
             EmptyNote(title: "No files in this conversation yet", systemImage: "paperclip")
                 .accessibilityIdentifier("noFilesNote")
@@ -139,8 +140,14 @@ struct ConversationFilesView: View {
                         } else {
                             LazyVStack(alignment: .leading, spacing: 8) {
                                 ForEach(other, id: \.element.tileId) { _, f in
-                                    FileTile(attachment: f.attachment, detail: detail(f))
-                                        .contextMenu { showButton(f) }
+                                    Group {
+                                        if f.attachment.isAudio {
+                                            VoiceCard(attachment: f.attachment, detail: detail(f))
+                                        } else {
+                                            FileTile(attachment: f.attachment, detail: detail(f))
+                                        }
+                                    }
+                                    .contextMenu { showButton(f) }
                                 }
                             }
                         }

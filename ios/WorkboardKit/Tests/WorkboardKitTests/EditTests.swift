@@ -298,7 +298,12 @@ final class EditTests: XCTestCase {
         XCTAssertFalse(kind("Image").isFile)
         XCTAssertTrue(kind("Video").isVideo)
         XCTAssertTrue(kind("File").isFile)
-        XCTAssertTrue(kind("Audio").isFile, "a kind a newer app adds opens as a file")
+        XCTAssertTrue(kind("Audio").isAudio)
+        XCTAssertFalse(kind("Audio").isFile, "a sound plays in the message")
+        XCTAssertFalse(kind("Audio").isVideo)
+        XCTAssertFalse(kind("File").isAudio)
+        XCTAssertTrue(kind("Sticker").isFile, "a kind a newer app adds opens as a file")
+        XCTAssertFalse(kind("Sticker").isAudio)
     }
 
     func testSafeFileName() {

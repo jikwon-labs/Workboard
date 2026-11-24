@@ -37,6 +37,8 @@ final class NotifyTests: XCTestCase {
         XCTAssertEqual(Notify.sentWhat([one("Video")]), "Sent a video")
         XCTAssertEqual(Notify.sentWhat([one("Image"), one("Video")]), "Sent photos and videos")
         XCTAssertEqual(Notify.sentWhat([one("Image"), one("File")]), "Sent a file")
+        XCTAssertEqual(Notify.sentWhat([one("Audio")]), "Sent a voice message")
+        XCTAssertEqual(Notify.sentWhat([one("File"), one("Audio")]), "Sent a voice message", "a sound comes first, as on the Mac")
     }
 
     func testTaskNewsFollowTheChoices() {

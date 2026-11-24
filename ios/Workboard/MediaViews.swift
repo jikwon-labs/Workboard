@@ -7,7 +7,9 @@
 // up first (PUT /files) and the message names them, the same shape the Mac
 // app writes; a video goes with a still made here. Any other file (a PDF, a
 // Markdown note) goes up as it is and shows as its name and size; a tap
-// downloads it and opens it in Quick Look, which can share or save it.
+// downloads it and opens it in Quick Look, which can share or save it. A
+// sound (a voice message, or an audio file picked in Files) plays in the
+// message (VoiceViews.swift).
 
 import AVFoundation
 import AVKit
@@ -27,7 +29,9 @@ struct AttachmentsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(attachments, id: \.file) { a in
-                if a.isFile {
+                if a.isAudio {
+                    VoiceCard(attachment: a)
+                } else if a.isFile {
                     FileTile(attachment: a)
                 } else if a.isVideo {
                     VideoTile(attachment: a)
@@ -392,6 +396,10 @@ final class PendingFile: Identifiable {
     /// A file from Files (not a picture or video), and its name.
     var isFile = false
     var name = ""
+    /// A voice message recorded in the box: the recording on this device
+    /// (played before sending) and its length.
+    var voice: URL?
+    var secs: Double = 0
 }
 
 struct PendingChip: View {
@@ -536,7 +544,8 @@ enum MediaUpload {
 /// still), except that a picture or video goes without where it was taken
 /// and the phone (MediaScrub), and a HEIC, TIFF or BMP goes as a JPEG or PNG
 /// under that name (PictureConvert); the pending file then holds its
-/// Attachment.
+/// Attachment. A sound (m4a, mp3, wav, aac, caf) goes as a sound with its
+/// length, as the Mac sends it, and plays in the message.
 @MainActor
 func uploadFile(_ url: URL, server: String, auth: String?, into f: PendingFile) async {
     f.isFile = true
@@ -572,10 +581,16 @@ func uploadFile(_ url: URL, server: String, auth: String?, into f: PendingFile) 
         } else if MediaScrub.mediaExts.contains(ext), try MediaScrub.scrubFile(at: tmp) {
             bytes = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? bytes
         }
+        let sound = Voice.isAudio(ext: ext)
         // streamed from the file, never read whole
-        let sha = try await FileAPI.upload(server: server, auth: auth, file: tmp, contentType: "application/octet-stream")
+        let sha = try await FileAPI.upload(server: server, auth: auth, file: tmp, contentType: sound ? FileAPI.contentType(ext: ext) : "application/octet-stream")
         FileAPI.keep(file: tmp, sha: sha, ext: ext)
-        f.attachment = FileAPI.fileAttachment(sha: sha, name: f.name, bytes: bytes)
+        if sound {
+            let secs = (try? await AVURLAsset(url: tmp).load(.duration)).map(CMTimeGetSeconds) ?? 0
+            f.attachment = FileAPI.audioAttachment(sha: sha, name: f.name, bytes: bytes, secs: secs.isFinite ? secs : 0)
+        } else {
+            f.attachment = FileAPI.fileAttachment(sha: sha, name: f.name, bytes: bytes)
+        }
     } catch let e as FileError {
         f.error = e.explanation
     } catch {

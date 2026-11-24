@@ -411,6 +411,9 @@ public struct AttachmentView: Hashable, Sendable {
     public let file: String
     public let name: String
     public let isVideo: Bool
+    /// A sound (kind "Audio"): a voice message or an audio file, played in
+    /// the message; `secs` is its length.
+    public let isAudio: Bool
     /// Any other file (a PDF, a Markdown note...): shown by its name and
     /// size, opened on a tap. A kind this app doesn't know is one too, as
     /// on the Mac; no kind at all is a picture (older messages).
@@ -429,7 +432,8 @@ public struct AttachmentView: Hashable, Sendable {
         name = j["name"]?.string ?? ""
         let kind = j["kind"]?.string
         isVideo = kind == "Video"
-        isFile = kind != nil && kind != "Video" && kind != "Image"
+        isAudio = kind == "Audio"
+        isFile = kind != nil && kind != "Video" && kind != "Image" && kind != "Audio"
         bytes = j["bytes"]?.uint ?? 0
         w = Int(j["w"]?.int ?? 0)
         h = Int(j["h"]?.int ?? 0)

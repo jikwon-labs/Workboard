@@ -2218,6 +2218,16 @@
         }
       }
     },
+    "Discard recording": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "녹음 지우기"
+          }
+        }
+      }
+    },
     "Disconnect": {
       "localizations": {
         "ko": {
@@ -5169,6 +5179,16 @@
         }
       }
     },
+    "Pause %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 일시 정지"
+          }
+        }
+      }
+    },
     "Pen": {
       "extractionState": "manual",
       "localizations": {
@@ -5289,6 +5309,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "고정된 메시지"
+          }
+        }
+      }
+    },
+    "Play %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 재생"
           }
         }
       }
@@ -5416,6 +5446,16 @@
         }
       }
     },
+    "Progress of %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 재생 위치"
+          }
+        }
+      }
+    },
     "Project Management": {
       "extractionState": "manual",
       "localizations": {
@@ -5518,6 +5558,16 @@
         }
       }
     },
+    "Ready to send": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보낼 준비됨"
+          }
+        }
+      }
+    },
     "Recent": {
       "localizations": {
         "ko": {
@@ -5534,6 +5584,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "다시 연결하는 중 (%lld번째)"
+          }
+        }
+      }
+    },
+    "Record a voice message": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "음성 메시지 녹음"
+          }
+        }
+      }
+    },
+    "Recording": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "녹음 중"
           }
         }
       }
@@ -6174,6 +6244,16 @@
         }
       }
     },
+    "Sent a voice message": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "음성 메시지를 보냈습니다"
+          }
+        }
+      }
+    },
     "Sent photos and videos": {
       "localizations": {
         "ko": {
@@ -6669,6 +6749,16 @@
         }
       }
     },
+    "Stop recording": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "녹음 멈추기"
+          }
+        }
+      }
+    },
     "Stop timer": {
       "localizations": {
         "ko": {
@@ -7059,6 +7149,26 @@
         }
       }
     },
+    "The microphone can't be used.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "마이크를 쓸 수 없습니다."
+          }
+        }
+      }
+    },
+    "The recording couldn't be saved.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "녹음을 저장하지 못했습니다."
+          }
+        }
+      }
+    },
     "The start and target values are the same": {
       "localizations": {
         "ko": {
@@ -7339,6 +7449,16 @@
         }
       }
     },
+    "This sound can't be played.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 음성을 재생할 수 없습니다."
+          }
+        }
+      }
+    },
     "This space is gone": {
       "localizations": {
         "ko": {
@@ -7572,6 +7692,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "틀린 코드가 너무 많습니다. 1분 뒤에 다시 해 보세요."
+          }
+        }
+      }
+    },
+    "Too short to send": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "너무 짧아서 보낼 수 없습니다"
           }
         }
       }
@@ -7982,6 +8112,26 @@
         }
       }
     },
+    "Voice message": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "음성 메시지"
+          }
+        }
+      }
+    },
+    "Voice messages can be up to 5 minutes long.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "음성 메시지는 5분까지 녹음할 수 있습니다."
+          }
+        }
+      }
+    },
     "W": {
       "localizations": {
         "ko": {
@@ -8196,6 +8346,16 @@
         }
       }
     },
+    "Workboard can't use the microphone. Turn it on in Settings > Workboard > Microphone.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workboard가 마이크를 쓸 수 없습니다. 설정 > Workboard > 마이크에서 켜 주세요."
+          }
+        }
+      }
+    },
     "Workboard isn't allowed to use the camera. Allow it in Settings, or type the six-character code instead: press Show code next to the QR code on your computer.": {
       "localizations": {
         "ko": {
@@ -8366,6 +8526,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "나"
+          }
+        }
+      }
+    },
+    "You can't record a voice message during a huddle.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "허들 중에는 음성 메시지를 녹음할 수 없습니다."
           }
         }
       }

@@ -237,7 +237,9 @@ struct ChannelRow: View {
         let who = m.author == client.me ? "You" : (client.view.member(m.author)?.name.split(separator: " ").first.map(String.init) ?? "")
         var text = m.text
         if text.isEmpty, let a = m.attachments.first {
-            if m.attachments.contains(where: \.isFile) {
+            if m.attachments.contains(where: \.isAudio) {
+                text = String(localized: "Voice message")
+            } else if m.attachments.contains(where: \.isFile) {
                 text = String(localized: "File")
             } else {
                 text = a.isVideo ? String(localized: "Video") : (m.attachments.count == 1 ? String(localized: "Photo") : String(localized: "\(m.attachments.count) photos"))
@@ -883,6 +885,7 @@ struct RepliesChip: View {
 /// the person picked (the message's `mentions`).
 struct Composer: View {
     @Environment(SyncClient.self) private var client
+    @Environment(CallManager.self) private var calls
     let placeholder: String
     let allowsAttachments: Bool
     let send: (String, [JSON], [UInt64]) -> Bool
@@ -908,6 +911,9 @@ struct Composer: View {
     @State private var formatting = false
     /// A mark a button asked to put around the selection.
     @State private var wrapMark: String?
+    /// This box, to the voice recorder (one recording in the app at a time).
+    @State private var recId = UUID()
+    private var recorder: VoiceRecorder { VoiceRecorder.shared }
 
     init(placeholder: String, send: @escaping (String, [UInt64]) -> Bool) {
         self.placeholder = placeholder
@@ -931,10 +937,19 @@ struct Composer: View {
             if !pending.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(pending) { f in PendingChip(file: f) { pending.removeAll { $0.id == f.id } } }
+                        ForEach(pending) { f in
+                            if f.voice != nil {
+                                PendingVoiceChip(file: f) { pending.removeAll { $0.id == f.id } }
+                            } else {
+                                PendingChip(file: f) { pending.removeAll { $0.id == f.id } }
+                            }
+                        }
                     }
                     .padding(.horizontal, 4)
                 }
+            }
+            if recorder.isRecording(recId) {
+                RecordingBar(id: recId)
             }
             if formatting {
                 HStack(spacing: 18) {
@@ -962,6 +977,16 @@ struct Composer: View {
                     .disabled(!can || !client.state.isConnected || pending.count >= maxFiles)
                     .accessibilityLabel("Add files")
                     .accessibilityIdentifier("attachFileButton")
+                    let recording = recorder.isRecording(recId)
+                    Button { Task { await record() } } label: {
+                        Image(systemName: recording ? "mic.fill" : "mic")
+                            .font(.system(size: 22))
+                            .foregroundStyle(recording ? Color.red : Color.accentColor)
+                            .padding(.bottom, 5)
+                    }
+                    .disabled(!can || !client.state.isConnected || (!recording && pending.count >= maxFiles))
+                    .accessibilityLabel(recording ? "Stop recording" : "Record a voice message")
+                    .accessibilityIdentifier("recordButton")
                 }
                 Button { formatting.toggle() } label: {
                     Image(systemName: "textformat").font(.system(size: 20)).padding(.bottom, 6)
@@ -994,6 +1019,7 @@ struct Composer: View {
                 Button {
                     if send(text, ready, mentioned) {
                         text = ""
+                        for f in pending { if let v = f.voice { SoundPlayer.shared.stop(v.path) } }
                         pending = []
                         mentioned = []
                         completed = nil
@@ -1019,6 +1045,8 @@ struct Composer: View {
         .onAppear {
             if let draftKey, text.isEmpty { text = ChatDrafts.load(key: draftKey, server: client.settings.server) }
         }
+        // a recording isn't left going in a box no one sees
+        .onDisappear { recorder.cancel(for: recId) }
         .sheet(isPresented: $customTime) {
             NavigationStack {
                 Form {
@@ -1082,6 +1110,38 @@ struct Composer: View {
         pending.append(f)
         let (server, auth) = (client.settings.server, client.fileAuth)
         Task { await uploadMedia(item, server: server, auth: auth, into: f) }
+    }
+
+    /// The microphone button: start recording here, or stop and put the
+    /// recording in the box.
+    func record() async {
+        if recorder.isRecording(recId) {
+            recorder.stop(keep: true)
+            return
+        }
+        if let note = await recorder.start(for: recId, inCall: calls.isActive, done: { recorded($0) }) {
+            client.showNotice(note)
+        }
+    }
+
+    /// What came of a recording in this box.
+    func recorded(_ outcome: VoiceRecorder.Outcome) {
+        switch outcome {
+        case .recorded(let url, let secs), .limit(let url, let secs):
+            if case .limit = outcome { client.showNotice(String(localized: "Voice messages can be up to 5 minutes long.")) }
+            guard pending.count < maxFiles else { return }
+            let f = PendingFile()
+            f.voice = url
+            f.secs = secs
+            f.name = url.lastPathComponent
+            pending.append(f)
+            let (server, auth) = (client.settings.server, client.fileAuth)
+            Task { await uploadVoice(url, secs: secs, server: server, auth: auth, into: f) }
+        case .tooShort:
+            client.showNotice(String(localized: "Too short to send"))
+        case .failed(let why):
+            client.showNotice(why)
+        }
     }
 
     func upload(file url: URL) {

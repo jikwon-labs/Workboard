@@ -12,6 +12,7 @@
 - 테스트 서버와 livekit-server 의 "빈 포트" 는 시스템이 알아서 나눠 주는 범위(49152 이상) 아래에서 고른다(`server/src/testing.rs` 의 `free_port`). 그 범위의 포트는 서버를 껐다 같은 포트로 다시 켜는 사이에 다른 테스트의 연결에 넘어갈 수 있었다.
 - 실제 마이크·카메라·화면은 쓰지 않는다. 테스트에서는 신호음과 색 패턴(화면 공유도 색 패턴)을 보내고, 받는 쪽에서 소리 크기와 색, 받은 영상 크기를 잰다.
 - 실제 화면 캡처는 손으로 돌리는 테스트로 따로 있다: `cargo test -p wb-voice real_ -- --ignored --nocapture`. 주 화면과 창 하나를 ScreenCaptureKit 으로 실제로 받아 본다. 터미널에 화면 기록 권한이 있어야 한다(없으면 "no Screen Recording permission" 으로 실패한다).
+- 화면 글자 겹침·잘림 전수 점검도 손으로 돌리는 테스트로 있다: `WB_AUDIT_OUT=<폴더> cargo test --release --bin workboard layout_audit -- --ignored --nocapture`. 앱의 실제 글꼴과 2배 화면으로 모든 화면(메뉴·상세·창 일부 포함 300여 개)을 창 크기 5개와 한국어·영어로 열고, 화면마다 PNG 와 겹침·잘림·창 밖·큰 대화상자 목록(`hits.tsv`)을 남긴다. 실패하지 않고 보고만 한다. 크기·언어·화면을 좁히는 환경 변수는 `src/app/ui_tests/layout_audit.rs` 맨 위에 있다.
 - cargo 가 PATH 에 없으면 `export PATH="$HOME/.cargo/bin:$PATH"`.
 
 ### iPhone 앱

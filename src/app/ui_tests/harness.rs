@@ -6,7 +6,7 @@ use egui::Pos2;
 
 /// The red pill at the bottom of the sidebar while unread chats are below.
 pub(super) const UNREAD_PILL: &str = "Unread messages \u{2193}";
-const UNREAD_PILL_KO: &str = "안 읽은 메시지 \u{2193}";
+pub(super) const UNREAD_PILL_KO: &str = "안 읽은 메시지 \u{2193}";
 
 pub(super) struct Ui1 {
     pub(super) ctx: egui::Context,
@@ -31,6 +31,11 @@ pub(super) struct Ui1 {
     pub(super) commands: Vec<egui::ViewportCommand>,
     /// the window's close button is pressed in the next frame
     pub(super) close_next: bool,
+    /// screen pixels per point, as the system reports it (2 on a Retina Mac)
+    pub(super) ppp: f32,
+    /// the textures egui has handed out so far (the font atlas, pictures),
+    /// kept only by `Ui1::real` so the layout audit can draw the window
+    pub(super) textures: Option<std::collections::HashMap<egui::TextureId, egui::ColorImage>>,
 }
 
 impl Ui1 {
@@ -54,8 +59,22 @@ impl Ui1 {
     /// A window of this size showing `data`. Tests that need an app other
     /// than the seed's start here, so it keeps the harness's clock pin.
     pub(super) fn sized_with(w: f32, h: f32, data: Data) -> Self {
+        Self::build(w, h, data, false)
+    }
+
+    /// A window as the app on a Mac draws it: the app's own fonts (Korean
+    /// glyphs included), two pixels per point, and its textures kept so it
+    /// can be drawn to a picture (layout_audit.rs).
+    pub(super) fn real(w: f32, h: f32, data: Data) -> Self {
+        Self::build(w, h, data, true)
+    }
+
+    fn build(w: f32, h: f32, data: Data, real: bool) -> Self {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
+        if real {
+            crate::app::setup_fonts(&ctx);
+        }
         let mut h = Ui1 {
             ctx,
             app: App::build(None, Some(data)),
@@ -70,6 +89,8 @@ impl Ui1 {
             focused: true,
             commands: vec![],
             close_next: false,
+            ppp: if real { 2.0 } else { 1.0 },
+            textures: real.then(Default::default),
         };
         // no notices on the wall clock: after 09:00 the seed's tasks due
         // today put a toast over the bottom of the window, so a test would
@@ -97,6 +118,13 @@ impl Ui1 {
             .entry(egui::ViewportId::ROOT)
             .or_default()
             .focused = Some(self.focused);
+        if self.ppp != 1.0 {
+            input
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .native_pixels_per_point = Some(self.ppp);
+        }
         if std::mem::take(&mut self.close_next) {
             input
                 .viewports
@@ -110,6 +138,9 @@ impl Ui1 {
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.ui_frame(ctx));
         self.shapes = out.shapes;
+        if let Some(store) = &mut self.textures {
+            keep_textures(store, &out.textures_delta);
+        }
         self.cursor = out.platform_output.cursor_icon;
         if let Some(v) = out.viewport_output.get(&egui::ViewportId::ROOT) {
             self.commands.extend(v.commands.iter().cloned());
@@ -964,6 +995,43 @@ pub(super) fn list_id(h: &Ui1, name: &str) -> u64 {
         .find(|l| l.name == name)
         .map(|l| l.id)
         .unwrap()
+}
+
+/// Applies what a frame changed in egui's textures to `store`, as a
+/// renderer would.
+fn keep_textures(
+    store: &mut std::collections::HashMap<egui::TextureId, egui::ColorImage>,
+    delta: &egui::TexturesDelta,
+) {
+    for (id, d) in &delta.set {
+        let img = match &d.image {
+            egui::ImageData::Color(c) => (**c).clone(),
+            egui::ImageData::Font(f) => egui::ColorImage {
+                size: f.size,
+                pixels: f.srgba_pixels(None).collect(),
+            },
+        };
+        match d.pos {
+            None => {
+                store.insert(*id, img);
+            }
+            Some([x, y]) => {
+                if let Some(t) = store.get_mut(id) {
+                    for row in 0..img.size[1] {
+                        for col in 0..img.size[0] {
+                            let (tx, ty) = (x + col, y + row);
+                            if tx < t.size[0] && ty < t.size[1] {
+                                t.pixels[ty * t.size[0] + tx] = img.pixels[row * img.size[0] + col];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for id in &delta.free {
+        store.remove(id);
+    }
 }
 
 /// Calls `f` with every shape painted (the ones inside shape lists too, not

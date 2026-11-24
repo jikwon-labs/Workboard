@@ -539,7 +539,7 @@ impl Files {
     fn lane(&self, kind: MediaKind) -> &Sender<Job> {
         match kind {
             MediaKind::Image => &self.small,
-            MediaKind::Video | MediaKind::File => &self.net,
+            MediaKind::Video | MediaKind::Audio | MediaKind::File => &self.net,
         }
     }
 
@@ -724,7 +724,7 @@ impl Files {
     pub fn want(&self, a: &Attachment, max: u32) {
         // the name comes from another member's synced message: only a sha256
         // may become a cache path or a request to the server
-        if !wb_server_name_ok(&a.file) || a.kind == MediaKind::File {
+        if !wb_server_name_ok(&a.file) || !a.kind.is_visual() {
             return;
         }
         self.wants
@@ -1386,7 +1386,7 @@ fn prepare(
         // its tags (src/scrub.rs): a cleaned copy is what's measured, kept
         // and sent
         let clean = match kind {
-            MediaKind::File => None,
+            MediaKind::File | MediaKind::Audio => None,
             _ => scrubbed_copy(dir, &src, name)?,
         };
         let src = clean.as_ref().map(|c| c.0.clone()).unwrap_or(src.clone());
@@ -1404,7 +1404,7 @@ fn prepare(
         }
         let thumb = match kind {
             MediaKind::Video => make_still(dir, &src, folder),
-            MediaKind::Image | MediaKind::File => None,
+            MediaKind::Image | MediaKind::Audio | MediaKind::File => None,
         };
         Ok(Attachment {
             file: sha,
@@ -2177,16 +2177,54 @@ impl App {
                         format!("Attachment {}", p.name),
                     )
                 });
-                // a click only means something on a failed upload (try again)
-                if failed.is_none() || p.error.is_some() {
+                // a voice message plays here before it's sent (voice.rs)
+                let sound = p
+                    .att
+                    .as_ref()
+                    .filter(|a| a.kind == MediaKind::Audio && crate::os::plays_audio());
+                // a click only means something on a failed upload (try
+                // again), and on a sound (play it)
+                if sound.is_none() && (failed.is_none() || p.error.is_some()) {
                     no_pointer(&resp);
                 }
                 let painter = ui.painter_at(rect.expand(6.0));
-                let plain = media::kind_of(Path::new(&p.name)) == MediaKind::File;
+                let plain = !media::kind_of(Path::new(&p.name)).is_visual();
                 match p.att.as_ref().filter(|_| !plain).and_then(|a| {
                     self.files.want(a, THUMB);
                     self.files.texture(&a.file, THUMB)
                 }) {
+                    _ if sound.is_some() => {
+                        let a = sound.unwrap();
+                        let playing = self.sound_playing(&a.file);
+                        painter.rect_filled(rect, 8.0, t.accent_bg);
+                        let c = rect.center() - vec2(0.0, 8.0);
+                        painter.circle_filled(c, 13.0, t.primary);
+                        if playing {
+                            for dx in [-3.0, 3.0] {
+                                painter.rect_filled(
+                                    Rect::from_center_size(c + vec2(dx, 0.0), vec2(3.0, 10.0)),
+                                    1.0,
+                                    t.on_primary,
+                                );
+                            }
+                        } else {
+                            super::icons::line_icon(&painter, Icon::Play, c + vec2(1.0, 0.0), t.on_primary);
+                        }
+                        painter.text(
+                            rect.center_bottom() - vec2(0.0, 12.0),
+                            Align2::CENTER_CENTER,
+                            media::clock(a.secs),
+                            FontId::proportional(11.5),
+                            t.accent_text,
+                        );
+                        if resp.clicked() && failed.is_none() {
+                            self.toggle_sound(a);
+                        }
+                        if playing {
+                            ui.ctx()
+                                .request_repaint_after(Duration::from_millis(100));
+                        }
+                    }
                     _ if plain => paint_file_tile(&painter, rect, &p.name, &t),
                     Some(tex) => {
                         let uv = cover_uv(tex.size_vec2(), size);
@@ -2247,6 +2285,17 @@ impl App {
                     if r.clicked() && p.error.is_none() {
                         retry = p.att.as_ref().map(|a| a.clone());
                     }
+                } else if let Some(a) = sound {
+                    let playing = self.sound_playing(&a.file);
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            format!("{} {}", if playing { "Pause" } else { "Play" }, a.name),
+                        )
+                    });
+                    resp.clone()
+                        .on_hover_text(tr(if playing { "Pause" } else { "Play" }));
                 } else {
                     resp.clone().on_hover_text(&p.name);
                 }
@@ -2351,7 +2400,11 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
             for (i, a) in m.attachments.iter().enumerate() {
-                if a.kind == MediaKind::File {
+                if a.kind == MediaKind::Audio && crate::os::plays_audio() && opens_as_media(a) {
+                    self.audio_card(ui, a, avail);
+                    continue;
+                }
+                if !a.kind.is_visual() {
                     if self.file_card(ui, a, avail) {
                         clicked = Some(i);
                     }
@@ -2374,7 +2427,7 @@ impl App {
                 }
             }
             for p in coming {
-                let plain = media::kind_of(Path::new(&p.name)) == MediaKind::File;
+                let plain = !media::kind_of(Path::new(&p.name)).is_visual();
                 let size = if plain {
                     vec2(260.0_f32.min(avail).max(160.0), 52.0)
                 } else if one {
@@ -2632,7 +2685,7 @@ impl App {
         // only the pictures and videos: plain files are saved, not shown;
         // from here on the index counts those
         let media: Vec<usize> = (0..m.attachments.len())
-            .filter(|&i| m.attachments[i].kind != MediaKind::File)
+            .filter(|&i| m.attachments[i].kind.is_visual())
             .collect();
         if media.is_empty() {
             return;
@@ -2735,7 +2788,7 @@ impl App {
                         .texture(&a.file, FULL)
                         .or_else(|| self.files.texture(&a.file, THUMB))
                         .cloned(),
-                    MediaKind::File => None,
+                    MediaKind::File | MediaKind::Audio => None,
                     MediaKind::Video => v.frame.clone().or_else(|| {
                         still
                             .as_ref()

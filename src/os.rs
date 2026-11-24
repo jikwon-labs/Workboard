@@ -119,6 +119,19 @@ pub fn mac_or_pc<T>(mac: T, pc: T) -> T {
     }
 }
 
+/// Whether voice messages can be recorded here (the microphone button in
+/// the message box): macOS records with AVFoundation (src/media.rs).
+/// Windows has no recorder yet, so the button isn't shown there.
+pub fn records_audio() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// Whether sounds (voice messages) play inside the app: macOS plays them
+/// with AVFoundation. Elsewhere they show as a file to save and open.
+pub fn plays_audio() -> bool {
+    cfg!(target_os = "macos")
+}
+
 /// Whether the system keeps the app's secrets: the macOS Keychain. Elsewhere
 /// the app keeps them in a file of its own (see together/tokens.rs).
 #[cfg_attr(test, allow(dead_code))]

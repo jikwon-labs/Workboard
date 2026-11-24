@@ -68,7 +68,7 @@ impl App {
             return;
         }
         let (media, other): (Vec<&SentFile>, Vec<&SentFile>) =
-            files.iter().partition(|f| f.att.kind != MediaKind::File);
+            files.iter().partition(|f| f.att.kind.is_visual());
         let tab_id = egui::Id::new(("chat_gallery_tab", cid));
         // where there are only other files, those
         let mut others = ui

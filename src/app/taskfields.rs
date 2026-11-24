@@ -1216,7 +1216,7 @@ impl App {
                     let shown = files::shown(a);
                     self.files.want(&shown, files::THUMB);
                     match self.files.texture(&shown.file, files::THUMB) {
-                        _ if a.kind == MediaKind::File => {
+                        _ if !a.kind.is_visual() => {
                             files::paint_file_tile(ui.painter(), pic, &a.name, t);
                         }
                         Some(tex) => {
@@ -1243,7 +1243,7 @@ impl App {
                         }
                     }
                     // a picture or video stays as it is under the pointer
-                    if a.kind == MediaKind::File {
+                    if !a.kind.is_visual() {
                         hover_bg(ui, &resp, pic, 8.0);
                     }
                     // shortened with an ellipsis, not cut mid-letter
@@ -1286,7 +1286,10 @@ impl App {
         if let Some(i) = remove {
             task.attachments.remove(i);
         }
-        if let Some(a) = open.as_ref().filter(|a| !files::opens_as_media(a)) {
+        if let Some(a) = open
+            .as_ref()
+            .filter(|a| !files::opens_as_media(a) || !a.kind.is_visual())
+        {
             // a plain file is saved to Downloads, never opened from here (it
             // may be a program, even one marked as a picture)
             self.save_file(a);

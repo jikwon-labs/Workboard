@@ -66,6 +66,7 @@ mod touch;
 mod typing;
 #[cfg(test)]
 mod ui_tests;
+mod voice;
 mod watch;
 mod workflows;
 use menus::{Dialog, Modal};
@@ -643,6 +644,8 @@ pub struct App {
     huddle: huddle::HuddleRt,
     /// The camera while Take a photo is open (photo.rs).
     photo: photo::PhotoRt,
+    /// A voice message being recorded, and the one playing (voice.rs).
+    voice: voice::VoiceRt,
     /// The small window that stays above other apps (mini.rs).
     mini: mini::MiniUi,
     notify_rt: notify::NotifyRt,
@@ -1293,6 +1296,7 @@ impl App {
             deleting_ws: None,
             huddle: Default::default(),
             photo: Default::default(),
+            voice: Default::default(),
             mini: Default::default(),
             notify_rt: Default::default(),
             watch_rt: Default::default(),

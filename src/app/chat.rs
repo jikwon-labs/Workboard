@@ -3125,6 +3125,7 @@ impl App {
                         ui.memory_mut(|m| m.request_focus(text_id));
                     }
                 }
+                self.recording_bar(ui, false);
                 self.pending_strip(ui, false);
                 if self.composer_mode == ComposerMode::Post {
                     // the megaphone in the box says this goes out as a post, not a message
@@ -3219,11 +3220,21 @@ impl App {
                 let mut insert: Option<String> = None;
                 ui.horizontal(|ui| {
                     let gap = ui.spacing().item_spacing.x;
-                    // room for all nine squares and, at the right, Send with
+                    // room for all nine squares (ten with the microphone) and, at the right, Send with
                     // its arrow. A narrower box leaves out B, I, S and </>:
                     // their shortcuts and typed marks still work.
                     let side = crate::widgets::CONTROL_H;
-                    let room = 9.0 * side + 8.0 * TOOL_GAP + 2.0 * gap + SEND_D + 1.0 + ARROW_W;
+                    let tools = if crate::os::records_audio() {
+                        10.0
+                    } else {
+                        9.0
+                    };
+                    let room = tools * side
+                        + (tools - 1.0) * TOOL_GAP
+                        + 2.0 * gap
+                        + SEND_D
+                        + 1.0
+                        + ARROW_W;
                     let formats = ui.available_width() >= room;
                     ui.spacing_mut().item_spacing.x = TOOL_GAP;
                     let tool = |ui: &mut Ui, g: &str, tip: &str| {
@@ -3248,6 +3259,12 @@ impl App {
                         .clicked()
                     {
                         self.open_camera(false);
+                    }
+                    // a voice message, into this box (voice.rs)
+                    if crate::os::records_audio()
+                        && super::voice::voice_tool(ui, &t, self.recording_in(false)).clicked()
+                    {
+                        self.voice_pressed(false);
                     }
                     let at = tool(ui, "@", "Mention someone");
                     let me = self.data.me;
@@ -3470,7 +3487,9 @@ impl App {
             .inner_margin(egui::Margin::same(8))
             .fill(t.card)
             .show(ui, |ui| {
+                self.recording_bar(ui, thread);
                 self.pending_strip(ui, thread);
+                let recording = self.recording_in(thread);
                 let (files_ok, files) = self.pending_ready(thread);
                 let has_files = !self.chat.composer(thread).files.is_empty();
                 let id = egui::Id::new(if thread {
@@ -3552,8 +3571,16 @@ impl App {
                     }
                 }
                 let mut pick = false;
+                let mut voice = false;
                 ui.horizontal(|ui| {
                     let gap = ui.spacing().item_spacing.x;
+                    // room for +, the microphone, @, B, I, S, </> and Send:
+                    // a narrower box leaves out the formats (their
+                    // shortcuts and typed marks still work)
+                    let side = crate::widgets::CONTROL_H;
+                    let tools = if crate::os::records_audio() { 7.0 } else { 6.0 };
+                    let formats = ui.available_width()
+                        >= tools * side + (tools - 1.0) * TOOL_GAP + 2.0 * gap + 64.0;
                     ui.spacing_mut().item_spacing.x = TOOL_GAP;
                     let b = glyph_button(
                         ui,
@@ -3562,6 +3589,9 @@ impl App {
                     );
                     crate::app::icons::paint_sign(ui, &b, false, Some(t.text2));
                     pick = b.on_hover_text(tr("Add files")).clicked();
+                    if crate::os::records_audio() {
+                        voice = super::voice::voice_tool(ui, &t, recording).clicked();
+                    }
                     let at = glyph_button(
                         ui,
                         RichText::new("@").color(t.text2),
@@ -3593,7 +3623,9 @@ impl App {
                             close_popup(ui);
                         }
                     });
-                    format_buttons(ui, &t, id, text, "reply ");
+                    if formats {
+                        format_buttons(ui, &t, id, text, "reply ");
+                    }
                     ui.spacing_mut().item_spacing.x = gap;
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let ready = files_ok && (!text.trim().is_empty() || has_files);
@@ -3633,6 +3665,9 @@ impl App {
                 }
                 if pick {
                     self.pick_media(thread);
+                }
+                if voice {
+                    self.voice_pressed(thread);
                 }
             });
         if thread {
@@ -4625,7 +4660,9 @@ impl App {
                         .filter(|x| !x.is_empty())
                         .unwrap_or_else(|| m.text.clone());
                     let body = if body.is_empty() && !m.attachments.is_empty() {
-                        if m.attachments.iter().any(|a| a.kind == MediaKind::File) {
+                        if m.attachments.iter().any(|a| a.kind == MediaKind::Audio) {
+                            tr("Voice message").to_string()
+                        } else if m.attachments.iter().any(|a| a.kind == MediaKind::File) {
                             tr("File").to_string()
                         } else {
                             tr("Picture or video").to_string()
@@ -5209,7 +5246,7 @@ impl App {
                         .and_then(|m| m.attachments.get(index))
                         .cloned();
                     // a plain file isn't opened large: it's saved to Downloads
-                    if let Some(a) = file.as_ref().filter(|a| a.kind == MediaKind::File) {
+                    if let Some(a) = file.as_ref().filter(|a| !a.kind.is_visual()) {
                         self.save_file(a);
                     } else {
                         if let Some(f) = file.map(|a| a.file).filter(|f| {

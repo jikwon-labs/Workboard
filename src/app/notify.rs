@@ -120,7 +120,9 @@ fn preview(m: &Message) -> String {
 /// video, both, or a file.
 pub(super) fn sent_what(a: &[crate::model::Attachment]) -> &'static str {
     let has = |k: MediaKind| a.iter().any(|x| x.kind == k);
-    if has(MediaKind::File) {
+    if has(MediaKind::Audio) {
+        tr("Sent a voice message")
+    } else if has(MediaKind::File) {
         tr("Sent a file")
     } else if has(MediaKind::Video) && has(MediaKind::Image) {
         tr("Sent pictures and videos")

@@ -235,4 +235,19 @@ pub const T: &[(&str, &str)] = &[
     ("reply in its thread: {}", "스레드에 답장: {}"),
     // a compact window's channel header
     ("Channel tools", "채널 도구"),
+    // voice messages (voice.rs)
+    ("Voice message", "음성 메시지"),
+    ("Record a voice message", "음성 메시지 녹음"),
+    ("Stop recording", "녹음 멈추기"),
+    ("Recording", "녹음 중"),
+    ("Discard recording", "녹음 지우기"),
+    ("Play", "재생"),
+    ("Pause", "일시 정지"),
+    ("Too short to send", "너무 짧아서 보낼 수 없습니다"),
+    ("The recording couldn't be saved.", "녹음을 저장하지 못했습니다."),
+    ("Voice messages can be up to 5 minutes long.", "음성 메시지는 5분까지 녹음할 수 있습니다."),
+    ("Allow the microphone, then press record again.", "마이크를 허용한 뒤 녹음 버튼을 다시 누르세요."),
+    ("Workboard can't use the microphone. Turn it on in System Settings > Privacy & Security > Microphone.", "Workboard가 마이크를 쓸 수 없습니다. 시스템 설정 > 개인정보 보호 및 보안 > 마이크에서 켜 주세요."),
+    ("The microphone can't be used.", "마이크를 쓸 수 없습니다."),
+    ("Recording isn't available on this computer.", "이 컴퓨터에서는 녹음할 수 없습니다."),
 ];

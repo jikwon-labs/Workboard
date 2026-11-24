@@ -44,6 +44,7 @@ mod slack;
 mod tasks;
 mod template_tests;
 mod views;
+mod voice;
 mod whiteboard;
 mod wording_tests;
 mod workspaces;

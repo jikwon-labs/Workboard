@@ -36,6 +36,7 @@ pub const T: &[(&str, &str)] = &[
     ("Sent a video", "영상을 보냈습니다"),
     ("Sent pictures and videos", "사진과 영상을 보냈습니다"),
     ("Sent a file", "파일을 보냈습니다"),
+    ("Sent a voice message", "음성 메시지를 보냈습니다"),
     ("Connected to the team server again", "팀 서버에 다시 연결되었습니다"),
     ("Your changes are being shared again.", "내 변경 사항이 다시 공유됩니다."),
     ("Lost the connection to the team server", "팀 서버 연결이 끊겼습니다"),

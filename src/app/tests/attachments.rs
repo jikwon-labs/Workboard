@@ -1365,3 +1365,64 @@ fn pictures_not_shown_for_a_while_are_let_go() {
     assert!(!f.decoded("t000", THUMB), "decoded again when wanted");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_voice_message_goes_through_the_server_and_plays_on_the_other_computer() {
+    let ServerTeam {
+        server,
+        mut a,
+        mut b,
+    } = ServerTeam::start();
+
+    // A records three seconds with the microphone button and stops
+    let ch = channel_id(&a, "general");
+    crate::media::REC_SECS.with(|s| s.set(Some(3.0)));
+    a.voice_pressed(false);
+    assert!(a.recording_in(false), "recording in the channel's box");
+    a.voice_pressed(false);
+    crate::media::REC_SECS.with(|s| s.set(None));
+    assert!(!a.recording_in(false));
+    let files = until_ready(&mut a, false);
+    let att = files[0].clone();
+    assert_eq!(att.kind, MediaKind::Audio);
+    assert!(att.name.starts_with("Voice message "), "{}", att.name);
+    assert!((att.secs - 3.0).abs() < 0.2, "its length: {}", att.secs);
+    assert!(server
+        .home
+        .join(workboard_server::FILES_DIR)
+        .join(&att.file)
+        .is_file());
+    a.apply_chat(vec![ChatAction::Send {
+        ch,
+        text: String::new(),
+        parent: None,
+        files,
+    }]);
+    a.sync_note_change();
+    a.write_shared();
+
+    net_until(&mut b, "A's voice message at B", |b| {
+        b.data.channels.iter().any(|c| {
+            c.messages
+                .iter()
+                .any(|m| m.attachments.iter().any(|x| x.kind == MediaKind::Audio))
+        })
+    });
+    // nothing is fetched until B presses play; then it comes and plays
+    assert!(b.files.local(&att.file).is_none());
+    b.toggle_sound(&att);
+    let remote = b.media_remote();
+    let sha = att.file.clone();
+    b.files.settle(&remote, |f| {
+        f.fetch(&att);
+        f.local(&sha).is_some()
+    });
+    b.toggle_sound(&att);
+    b.toggle_sound(&att);
+    if crate::os::plays_audio() {
+        assert!(
+            b.voice_player_has(&att.file),
+            "the player has B's copy of the message"
+        );
+    }
+}

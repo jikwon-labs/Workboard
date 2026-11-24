@@ -18,12 +18,25 @@ pub enum MediaKind {
     #[default]
     Image,
     Video,
+    /// A sound: a voice message recorded in the message box, or an audio
+    /// file. Plays inside the app where it can (`crate::os::plays_audio`),
+    /// else it is shown and saved like any other file. Apps from before
+    /// read it as `File`.
+    Audio,
     /// Any other file (a PDF, a Markdown note...): sent as it is, shown by
     /// its name and size, saved to Downloads when clicked. A kind a newer
     /// app adds is read as this too, so it can't make the team's data
     /// unreadable here.
     #[serde(other)]
     File,
+}
+
+impl MediaKind {
+    /// A picture or a video: shown as a tile and opened large. Sounds and
+    /// other files are shown as a card instead.
+    pub fn is_visual(self) -> bool {
+        matches!(self, MediaKind::Image | MediaKind::Video)
+    }
 }
 
 /// Premultiplied RGBA pixels.
@@ -46,6 +59,11 @@ pub const IMAGE_EXTS: [&str; 10] = [
     "jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp",
 ];
 pub const VIDEO_EXTS: [&str; 4] = ["mov", "mp4", "m4v", "3gp"];
+/// File name endings taken as sounds. A voice message is an AAC ".m4a"
+/// (what the Mac and iPhone apps record); the test recorder makes ".wav".
+pub const AUDIO_EXTS: [&str; 5] = ["m4a", "mp3", "wav", "aac", "caf"];
+/// The longest voice message the record button takes; it stops by itself then.
+pub const VOICE_MAX_SECS: f32 = 300.0;
 /// File name endings a profile photo can have: the photo picker offers only
 /// these, and both ImageIO (macOS) and the `image` crate (elsewhere) open them.
 pub const PHOTO_EXTS: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
@@ -72,6 +90,8 @@ pub fn kind_of(path: &Path) -> MediaKind {
         MediaKind::Image
     } else if VIDEO_EXTS.contains(&ext.as_str()) {
         MediaKind::Video
+    } else if AUDIO_EXTS.contains(&ext.as_str()) {
+        MediaKind::Audio
     } else {
         MediaKind::File
     }
@@ -97,6 +117,11 @@ pub fn content_type(path: &Path) -> &'static str {
         Some("mp4") => "video/mp4",
         Some("m4v") => "video/x-m4v",
         Some("3gp") => "video/3gpp",
+        Some("m4a") => "audio/mp4",
+        Some("mp3") => "audio/mpeg",
+        Some("wav") => "audio/wav",
+        Some("aac") => "audio/aac",
+        Some("caf") => "audio/x-caf",
         _ => "application/octet-stream",
     }
 }
@@ -161,6 +186,146 @@ pub fn clock(secs: f32) -> String {
         format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
     } else {
         format!("{}:{:02}", s / 60, s % 60)
+    }
+}
+
+/// How long a WAV file plays, from its header (None when it isn't one).
+pub fn wav_secs(b: &[u8]) -> Option<f32> {
+    if b.len() < 12 || &b[0..4] != b"RIFF" || &b[8..12] != b"WAVE" {
+        return None;
+    }
+    let (mut at, mut rate, mut data) = (12, 0u32, None);
+    while at + 8 <= b.len() {
+        let id = &b[at..at + 4];
+        let len = u32::from_le_bytes(b[at + 4..at + 8].try_into().ok()?) as usize;
+        if id == b"fmt " && at + 20 <= b.len() {
+            // bytes per second
+            rate = u32::from_le_bytes(b[at + 16..at + 20].try_into().ok()?);
+        } else if id == b"data" {
+            data = Some(len.min(b.len().saturating_sub(at + 8)));
+            break;
+        }
+        at += 8 + len + (len & 1);
+    }
+    (rate > 0).then(|| data.unwrap_or(0) as f32 / rate as f32)
+}
+
+/// `secs` of silence as a 16-bit mono 8 kHz WAV file (the test recorder's
+/// voice message).
+pub fn silent_wav(secs: f32) -> Vec<u8> {
+    let rate = 8000u32;
+    let n = (secs.max(0.1) * rate as f32) as u32 * 2;
+    let mut out = Vec::with_capacity(44 + n as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + n).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&n.to_le_bytes());
+    out.resize(44 + n as usize, 0);
+    out
+}
+
+/// The name a voice message recorded now goes by ("Voice message
+/// 2026-11-24 15.04.09.m4a"): what apps that can't play it show and save.
+pub fn voice_name(ext: &str) -> String {
+    format!(
+        "Voice message {}.{}",
+        chrono::Local::now().format("%Y-%m-%d %H.%M.%S"),
+        ext
+    )
+}
+
+/// Whether the microphone may be used for a voice message.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MicAccess {
+    Granted,
+    /// The system is asking the person now; press record again after.
+    Asking,
+    /// Turned off for this app in System Settings.
+    Denied,
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+pub use mac::{mic_access, Recorder};
+#[cfg(not(any(target_os = "macos", test)))]
+pub use no_mic::{mic_access, Recorder};
+#[cfg(test)]
+pub use test_mic::{mic_access, Recorder};
+
+/// No recording here: the record button isn't shown (`crate::os::records_audio`).
+#[cfg(not(any(target_os = "macos", test)))]
+mod no_mic {
+    use super::*;
+    pub fn mic_access() -> MicAccess {
+        MicAccess::Denied
+    }
+    pub struct Recorder;
+    impl Recorder {
+        pub fn start(_: &Path) -> Result<Recorder, String> {
+            Err("Recording isn't available on this computer.".into())
+        }
+        pub fn secs(&self) -> f32 {
+            0.0
+        }
+        pub fn level(&self) -> f32 {
+            0.0
+        }
+        pub fn stop(self) -> Option<PathBuf> {
+            None
+        }
+        pub fn cancel(self) {}
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How long the test recorder says it has been recording (None: as
+    /// long as it really has), and what `mic_access` answers in tests.
+    pub static REC_SECS: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+    pub static MIC: std::cell::Cell<MicAccess> = const { std::cell::Cell::new(MicAccess::Granted) };
+}
+
+/// A recorder for tests: no microphone, and on stop a silent WAV as long as
+/// it recorded.
+#[cfg(test)]
+mod test_mic {
+    use super::*;
+    pub fn mic_access() -> MicAccess {
+        MIC.with(|m| m.get())
+    }
+    pub struct Recorder {
+        dir: PathBuf,
+        started: std::time::Instant,
+    }
+    impl Recorder {
+        pub fn start(dir: &Path) -> Result<Recorder, String> {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            Ok(Recorder {
+                dir: dir.to_path_buf(),
+                started: std::time::Instant::now(),
+            })
+        }
+        pub fn secs(&self) -> f32 {
+            REC_SECS
+                .with(|s| s.get())
+                .unwrap_or_else(|| self.started.elapsed().as_secs_f32())
+        }
+        pub fn level(&self) -> f32 {
+            0.3
+        }
+        pub fn stop(self) -> Option<PathBuf> {
+            let path = self.dir.join(voice_name("wav"));
+            std::fs::write(&path, silent_wav(self.secs())).ok()?;
+            Some(path)
+        }
+        pub fn cancel(self) {}
     }
 }
 
@@ -243,6 +408,10 @@ mod other {
             MediaKind::Video => {
                 std::fs::File::open(path).map_err(|_| "That video can't be opened.")?;
                 Ok((0, 0, 0.0))
+            }
+            MediaKind::Audio => {
+                let bytes = std::fs::read(path).map_err(|_| "That sound can't be opened.")?;
+                Ok((0, 0, super::wav_secs(&bytes).unwrap_or(0.0)))
             }
             MediaKind::Image => {
                 let err = || "That picture can't be opened.".to_string();
@@ -545,6 +714,11 @@ mod mac {
     #[link(name = "AVFoundation", kind = "framework")]
     extern "C" {
         static AVMediaTypeVideo: *mut Object;
+        static AVMediaTypeAudio: *mut Object;
+        static AVFormatIDKey: *mut Object;
+        static AVSampleRateKey: *mut Object;
+        static AVNumberOfChannelsKey: *mut Object;
+        static AVEncoderBitRateKey: *mut Object;
     }
     #[link(name = "CoreMedia", kind = "framework")]
     extern "C" {}
@@ -665,6 +839,14 @@ mod mac {
         autoreleasepool(|| unsafe {
             match kind {
                 MediaKind::File => Ok((0, 0, 0.0)),
+                MediaKind::Audio => {
+                    let asset: *mut Object = msg_send![class!(AVURLAsset), URLAssetWithURL: file_url(path) options: null_mut::<Object>()];
+                    if asset.is_null() {
+                        return Err("That sound can't be opened.".into());
+                    }
+                    let dur: CMTime = msg_send![asset, duration];
+                    Ok((0, 0, dur.to_secs().unwrap_or(0.0)))
+                }
                 MediaKind::Image => {
                     let src = image_source(path).ok_or("That picture can't be opened.")?;
                     let props = CGImageSourceCopyPropertiesAtIndex(src, 0, null());
@@ -727,7 +909,7 @@ mod mac {
     pub fn thumbnail(path: &Path, kind: MediaKind, max: u32) -> Option<Rgba> {
         autoreleasepool(|| unsafe {
             match kind {
-                MediaKind::File => None,
+                MediaKind::File | MediaKind::Audio => None,
                 MediaKind::Image => {
                     let src = image_source(path)?;
                     let opts = dict(&[
@@ -860,6 +1042,104 @@ mod mac {
             return None;
         }
         Some(std::slice::from_raw_parts(bytes, len).to_vec())
+    }
+
+    /// A voice message being recorded with AVAudioRecorder, as AAC in an
+    /// ".m4a" file.
+    #[cfg_attr(test, allow(dead_code))]
+    pub struct Recorder {
+        rec: *mut Object,
+        path: PathBuf,
+    }
+
+    /// Whether the microphone may be used. The first time, the system asks
+    /// the person (the answer counts from the next press).
+    #[cfg_attr(test, allow(dead_code))]
+    pub fn mic_access() -> MicAccess {
+        unsafe {
+            let st: isize = msg_send![class!(AVCaptureDevice), authorizationStatusForMediaType: AVMediaTypeAudio];
+            match st {
+                3 => MicAccess::Granted,
+                0 => {
+                    let done = block::ConcreteBlock::new(|_: BOOL| {}).copy();
+                    let _: () = msg_send![class!(AVCaptureDevice), requestAccessForMediaType: AVMediaTypeAudio completionHandler: &*done];
+                    MicAccess::Asking
+                }
+                _ => MicAccess::Denied,
+            }
+        }
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
+    impl Recorder {
+        /// Start recording into a new file in `dir`.
+        pub fn start(dir: &Path) -> Result<Recorder, String> {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            let path = dir.join(voice_name("m4a"));
+            autoreleasepool(|| unsafe {
+                const AAC: i64 = u32::from_be_bytes(*b"aac ") as i64;
+                let settings = dict(&[
+                    (AVFormatIDKey as CFRef, number(AAC)),
+                    (AVSampleRateKey as CFRef, number(44100)),
+                    (AVNumberOfChannelsKey as CFRef, number(1)),
+                    (AVEncoderBitRateKey as CFRef, number(64000)),
+                ]);
+                let rec: *mut Object = msg_send![class!(AVAudioRecorder), alloc];
+                let mut err: *mut Object = null_mut();
+                let rec: *mut Object =
+                    msg_send![rec, initWithURL: file_url(&path) settings: settings error: &mut err];
+                if rec.is_null() {
+                    return Err("The microphone can't be used.".into());
+                }
+                let _: () = msg_send![rec, setMeteringEnabled: YES];
+                let ok: BOOL = msg_send![rec, record];
+                if ok == NO {
+                    let _: () = msg_send![rec, release];
+                    return Err("The microphone can't be used.".into());
+                }
+                Ok(Recorder { rec, path })
+            })
+        }
+
+        /// How long it has been recording.
+        pub fn secs(&self) -> f32 {
+            let t: f64 = unsafe { msg_send![self.rec, currentTime] };
+            t as f32
+        }
+
+        /// How loud it is now, 0..1.
+        pub fn level(&self) -> f32 {
+            unsafe {
+                let _: () = msg_send![self.rec, updateMeters];
+                let db: f32 = msg_send![self.rec, averagePowerForChannel: 0usize];
+                ((db + 50.0) / 50.0).clamp(0.0, 1.0)
+            }
+        }
+
+        /// Stop and give the finished file.
+        pub fn stop(self) -> Option<PathBuf> {
+            unsafe {
+                let _: () = msg_send![self.rec, stop];
+            }
+            self.path.exists().then(|| self.path.clone())
+        }
+
+        /// Stop and throw the recording away.
+        pub fn cancel(self) {
+            unsafe {
+                let _: () = msg_send![self.rec, stop];
+                let _: BOOL = msg_send![self.rec, deleteRecording];
+            }
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    impl Drop for Recorder {
+        fn drop(&mut self) {
+            unsafe {
+                let _: () = msg_send![self.rec, release];
+            }
+        }
     }
 
     #[cfg(not(test))]
@@ -1527,7 +1807,7 @@ mod tests {
         let k: MediaKind = serde_json::from_str("\"File\"").unwrap();
         assert_eq!(k, MediaKind::File);
         assert_eq!(serde_json::to_string(&k).unwrap(), "\"File\"");
-        let k: MediaKind = serde_json::from_str("\"Audio\"").unwrap();
+        let k: MediaKind = serde_json::from_str("\"Sticker\"").unwrap();
         assert_eq!(
             k,
             MediaKind::File,
@@ -1535,5 +1815,18 @@ mod tests {
         );
         let k: MediaKind = serde_json::from_str("\"Video\"").unwrap();
         assert_eq!(k, MediaKind::Video);
+        let k: MediaKind = serde_json::from_str("\"Audio\"").unwrap();
+        assert_eq!(k, MediaKind::Audio);
+    }
+
+    #[test]
+    fn sounds_are_known_by_their_ending_and_wav_lengths_are_read() {
+        assert_eq!(kind_of(Path::new("Voice message.m4a")), MediaKind::Audio);
+        assert_eq!(kind_of(Path::new("song.MP3")), MediaKind::Audio);
+        assert_eq!(content_type(Path::new("x.m4a")), "audio/mp4");
+        assert!(!MediaKind::Audio.is_visual() && MediaKind::Video.is_visual());
+        let secs = wav_secs(&silent_wav(2.5)).unwrap();
+        assert!((secs - 2.5).abs() < 0.01, "{}", secs);
+        assert_eq!(wav_secs(b"not a wav file at all"), None);
     }
 }

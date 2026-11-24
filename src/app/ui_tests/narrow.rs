@@ -417,12 +417,12 @@ fn compact_thread_is_laid_over_the_conversation() {
 }
 
 /// The message box's tools are squares as big as the emoji button. At the
-/// smallest window nine of them and Send with its arrow are too wide for
+/// smallest window ten of them (nine without the microphone) and Send with its arrow are too wide for
 /// the row, so B, I, S and </> are left out (their shortcuts still work); a
 /// little wider, they are back and still clear of Send.
 #[test]
 fn compact_message_box_tools_fit_beside_send() {
-    for (w, formats) in [(360.0, false), (440.0, true)] {
+    for (w, formats) in [(360.0, false), (480.0, true)] {
         let mut h = Ui1::sized(w, 640.0);
         go_home(&mut h);
         h.click("general");
@@ -444,6 +444,10 @@ fn compact_message_box_tools_fit_beside_send() {
         ] {
             let r = h.rect(name);
             assert_eq!(r.width(), r.height(), "{w}: {name} {r:?}");
+        }
+        if crate::os::records_audio() {
+            let r = h.rect("Record a voice message");
+            assert_eq!(r.width(), r.height(), "{w}: microphone {r:?}");
         }
         assert!(h.past_right_edge().is_empty(), "{:?}", h.past_right_edge());
         // Cmd+B still makes the word bold

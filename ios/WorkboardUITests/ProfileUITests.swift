@@ -98,6 +98,8 @@ final class ProfileUITests: WorkboardUITestCase {
         XCTAssertTrue(top.waitForExistence(timeout: 10))
         waitLabel(top, contains: "Vacationing")
         waitLabel(top, contains: "Alex Kim")
+        // and whether they are online (the test server says nobody is)
+        waitLabel(top, contains: "Offline")
         // and in People with what they do
         openPlace(a, "tools")
         let teams = a.buttons["app-teams"]

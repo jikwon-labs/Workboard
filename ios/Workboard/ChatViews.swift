@@ -342,11 +342,18 @@ struct ConversationView: View {
             .navigationTitle(v.place(of: c, me: me))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if let status = otherStatus(c, me: me) {
+                let status = otherStatus(c, me: me)
+                let online = otherOnline(c, me: me)
+                if status != nil || online != nil {
                     ToolbarItem(placement: .principal) {
                         VStack(spacing: 0) {
-                            Text(verbatim: v.place(of: c, me: me)).font(.headline).lineLimit(1)
-                            Text(verbatim: status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            HStack(spacing: 5) {
+                                Text(verbatim: v.place(of: c, me: me)).font(.headline).lineLimit(1)
+                                if let online { PresenceDot(online: online) }
+                            }
+                            if let status {
+                                Text(verbatim: status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("conversationStatus")
@@ -467,6 +474,16 @@ struct ConversationView: View {
         return s
     }
 
+    /// Whether the other person in a direct message has Workboard open:
+    /// nil when that isn't known (not connected, or not a DM). A DM with
+    /// myself is online when I am connected.
+    func otherOnline(_ c: ChannelView, me: UInt64) -> Bool? {
+        guard c.kind == .direct, client.state.isConnected else { return nil }
+        let others = c.members.filter { $0 != me }
+        guard others.count <= 1 else { return nil }
+        return others.first.map { client.online.contains($0) } ?? true
+    }
+
     func huddle(_ ch: UInt64, video: Bool) {
         Task {
             if let link = await calls.start(channel: ch, client: client, video: video) { openURL(link) }
@@ -476,6 +493,25 @@ struct ConversationView: View {
     func markRead(_ c: ChannelView) {
         guard let last = c.messages.last?.ts, last > c.lastRead else { return }
         client.editLocal { d in Edits.markRead(&d, channel: c.id, ts: max(last, nowTs())) }
+    }
+}
+
+/// A small dot after someone's name: green when they have Workboard open,
+/// a grey ring when not (the Mac draws the same).
+struct PresenceDot: View {
+    let online: Bool
+
+    var body: some View {
+        Group {
+            if online {
+                Circle().fill(Color(red: 48 / 255, green: 164 / 255, blue: 108 / 255))
+            } else {
+                Circle().strokeBorder(Color.secondary, lineWidth: 1.2)
+            }
+        }
+        .frame(width: 8, height: 8)
+        .accessibilityLabel(online ? Text("Online") : Text("Offline"))
+        .accessibilityIdentifier("presenceDot")
     }
 }
 

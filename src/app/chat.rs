@@ -1846,6 +1846,9 @@ impl App {
                         ChannelKind::Channel => format!("# {}", channel.name),
                         ChannelKind::Direct => self.channel_label(&channel),
                     };
+                    // a DM: whether the other person is online, as a dot
+                    // after their name (only when the server says)
+                    let mut presence = None;
                     if channel.kind == ChannelKind::Direct {
                         if let Some(m) = channel
                             .members
@@ -1856,6 +1859,7 @@ impl App {
                         {
                             let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
                             paint_avatar(ui.painter(), r.center(), 10.0, m, t.bg);
+                            presence = self.is_online(m.id);
                         }
                     }
                     if channel.kind == ChannelKind::Channel && channel.private {
@@ -1868,7 +1872,8 @@ impl App {
                     } else {
                         180.0
                     };
-                    let room = (ui.available_width() - buttons).max(40.0);
+                    let dot_w = if presence.is_some() { 14.0 } else { 0.0 };
+                    let room = (ui.available_width() - buttons - dot_w).max(40.0);
                     ui.scope(|ui| {
                         ui.set_max_width(room);
                         ui.add(
@@ -1876,6 +1881,19 @@ impl App {
                                 .truncate(),
                         );
                     });
+                    if let Some(on) = presence {
+                        let (r, resp) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                        name_it(&resp, "Presence");
+                        crate::widgets::paint_presence(
+                            ui.painter(),
+                            r.center(),
+                            3.5,
+                            on,
+                            t.bg,
+                            t.text3,
+                        );
+                        resp.on_hover_text(tr(if on { "Online" } else { "Offline" }));
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         // a compact window: the channel's tools (the panel
                         // beside the messages) open from here

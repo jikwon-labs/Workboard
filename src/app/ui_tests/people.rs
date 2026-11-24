@@ -244,6 +244,19 @@ fn green_dots_show_who_is_really_connected() {
     assert_eq!(dots_in(&h, "Profile menu", ONLINE), 1, "I am connected");
     assert_eq!(dots_in_rect(&h, row, ONLINE), 0, "they aren't");
     assert_eq!(rings_in_rect(&h, row), 1, "a grey ring says so");
+    // the DM open: the same ring after their name at the top
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == crate::model::ChannelKind::Direct && c.members.contains(&other.id))
+        .map(|c| c.id);
+    h.app.chat.open = dm;
+    h.settle();
+    assert!(h.has("Presence"), "a dot after the name");
+    assert_eq!(dots_in(&h, "Presence", ONLINE), 0);
+    assert_eq!(rings_in(&h, "Presence"), 1);
     h.click("Profile menu");
     assert!(h.has("Online"));
     h.key(egui::Key::Escape);
@@ -253,6 +266,8 @@ fn green_dots_show_who_is_really_connected() {
     h.settle();
     assert_eq!(dots_in_rect(&h, row, ONLINE), 1);
     assert_eq!(rings_in_rect(&h, row), 0);
+    assert_eq!(dots_in(&h, "Presence", ONLINE), 1, "green at the top too");
+    assert_eq!(rings_in(&h, "Presence"), 0);
 
     // the connection drops: who is online isn't known, and I am offline
     h.app.sync_rt.net_status = Some(wb_net::Status::Reconnecting("gone".into()));
@@ -260,6 +275,7 @@ fn green_dots_show_who_is_really_connected() {
     assert_eq!(dots_in(&h, "Profile menu", ONLINE), 0);
     assert_eq!(rings_in(&h, "Profile menu"), 1);
     assert_eq!(dots_in_rect(&h, row, ONLINE) + rings_in_rect(&h, row), 0);
+    assert!(!h.has("Presence"), "not known, so no dot at the top");
     h.click("Profile menu");
     assert!(h.has("Offline") && !h.has("Online"));
     h.key(egui::Key::Escape);

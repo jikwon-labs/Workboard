@@ -5032,6 +5032,16 @@
         }
       }
     },
+    "Offline": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오프라인"
+          }
+        }
+      }
+    },
     "On": {
       "localizations": {
         "ko": {
@@ -5068,6 +5078,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "문서를 고칠 때마다 하나씩 저장됩니다."
+          }
+        }
+      }
+    },
+    "Online": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "온라인"
           }
         }
       }

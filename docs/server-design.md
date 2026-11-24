@@ -318,6 +318,18 @@ ClickUp Brain 처럼 팀 서버가 Anthropic Claude 에게 물어 앱의 AI 도�
 - **방식.** 그 사람의 앱이 보낸 것처럼 변경분 사본(`schedule::with_message` 와 같은 모양)을 만들어 `push` 로 합친다. 그래서 다른 push 와 같은 검사를 거치고, 받는 사람에게 알림(iPhone 푸시 포함)이 간다. 메시지에는 `event: "joined"` 가 붙고 글은 영어로 저장되며, Mac 앱은 읽는 사람의 언어로 보인다(통화 메시지와 같은 방식). iPhone 앱은 아직 영어 그대로 보인다. 한 번 들어온 사람은 `invited` 가 꺼져 있어 다시 접속해도 알리지 않는다.
 - **검증:** 서버 단위 5개(`joins.rs`), 서버 통합 `someone_joining_says_so_in_the_default_channels_and_to_each_teammate`(기본 채널·DM·초대 중인 사람·다시 접속), `only_a_channels_maker_or_an_admin_deletes_it_or_changes_its_members` 에 기본 채널 되돌리기 추가, 앱 UI 클릭 `a_channels_maker_or_an_admin_makes_it_a_default_channel`, 한국어 표시 `a_join_message_from_the_server_reads_in_my_language`.
 
+### 문서 버전 기록 (2026-11-24)
+
+문서마다 이전 글(누가, 언제)을 남기고, 문서 메뉴의 "Version history" 에서 보고 되돌린다. Mac·iPhone·공유 폴더 모두 같다. 규칙: `src/model/doc_versions.rs`(Mac), `ios/WorkboardKit/Sources/WorkboardKit/DocVersions.swift`(iPhone, 같은 규칙).
+
+- **어디에.** 동기화되는 정본 안, 문서 항목의 `versions` 목록이다. 버전마다 `id`, `by`(쓴 사람, 0 은 버전 기록 전의 글), `at`(초), `title`, `body`, 되돌리기로 만든 것이면 `restored`(되돌린 버전의 시각). id 가 있는 하위 항목이라 wb-sync 가 반응·댓글처럼 하나씩 합친다. 그래서 같은 문서의 `body` 를 둘이 동시에 고쳐 한쪽이 지더라도(필드는 나중 변경이 이김) 진 쪽의 글은 버전으로 남는다. 서버만 두는 방식은 공유 폴더·오프라인에서 기능이 없어 고르지 않았다. 대신 정본과 앱을 켤 때 받는 전체 사본이 커지는데, 아래 한도로 묶는다. 다시 붙을 때와 평소에는 변경분만 오가므로 새 버전 하나만 간다.
+- **언제.** Mac: 연 문서가 이 앱에서 바뀌기 시작하면 바뀌기 전 글이 어느 버전에도 없을 때 그것을 먼저 남기고(`by` 0, 시각은 편집을 시작한 때), 5분(`DOC_VERSION_GAP`) 동안 손을 놓거나 다른 문서를 열거나 앱을 끄면 지금 글을 그 사람의 버전으로 남긴다(`App::doc_versions_tick`). 쓰는 동안 팀원의 변경이 이 문서의 글을 바꾸면 쓰던 글을 먼저 버전으로 남긴다(`doc_versions_after_merge`). iPhone: 편집 화면의 Done 한 번이 편집 하나다(`DocVersions.save`). 같은 사람이 5분 안에 다시 남기면 새로 더하지 않고 마지막 버전을 고친다. 되돌리기는 지금 글이 없으면 먼저 남기고, 고른 버전의 글로 바꾼 뒤 그것을 새 버전(`restored`)으로 남겨서 되돌린 것을 다시 되돌릴 수 있다.
+- **한도.** 문서마다 최근 50개(`DOC_VERSIONS_KEPT`), 30일(`DOC_VERSION_DAYS`)까지. 가장 최근 하나는 늘 남는다. 정리는 버전을 남길 때 그 문서에서 하고, 지운 버전은 툼스톤으로 돌아오지 않는다.
+- **권한.** 비공개 문서와 닫힌 스페이스의 문서는 `wb_sync::hidden_from` 이 문서째 빼므로 그 버전도 볼 수 있는 사람만 받는다. 스페이스 권한이 View·Comment 인 사람이 보낸 새 버전은 다른 하위 항목처럼 서버가 뺀다(`server/src/spaces.rs` `keep_item`). 그런 문서에서 Mac 은 버전을 남기지 않고 "Restore this version" 을 보이지 않는다.
+- **예전 앱·예전 서버.** 동기화 형식 번호(`META_V`, iPhone `Sync.metaV`)는 그대로 5 다. 예전 Mac 앱은 `versions` 를 모르는 필드로 읽을 때 버리지만, 합친 뒤 지문을 자기가 쓰는 모양으로 다시 계산하므로 버전을 지운 것으로 보지 않는다(툼스톤 없음). 그래서 예전 앱의 사본이 들어와도 버전은 남고, 고친 본문만 들어온다(wb-sync 테스트 `a_copy_without_versions_takes_none_away`). 예전 iPhone 앱은 JSON 을 그대로 두므로 버전을 그대로 들고 다닌다. 예전 서버도 같은 일반 규칙으로 합치므로 버전을 지우지 않는다. 메시지는 바뀌지 않았다.
+- **알려진 한계.** 버전이 없는 글을 두 사람이 동시에 고치기 시작하면 "바뀌기 전 글" 버전이 둘 생긴다(내용은 같음). 글자 단위 합치기(실시간 공동 편집)는 하지 않았다.
+- **검증:** 앱 모델 6개(`src/model/doc_versions.rs`), UI 클릭 3개(`src/app/ui_tests/doc_versions.rs`: 몇 분 간격 두 번 고치기 → 목록 두 줄 → 이전 버전 읽기 전용 → 되돌리기 → 다시 되돌리기, 버전 전에 쓴 글, View 권한 문서), 한국어 화면 검사 2개 화면, wb-sync 4개(두 사람 버전 모두 남음, 버전 없는 사본, 정리한 버전, 비공개 문서), 실제 서버 통합 `doc_versions_reach_everyone_and_keep_text_a_teammate_replaced`(Mac 두 대: 버전 전달, 덮어쓴 글 버전, 되돌리기 전달, 비공개 문서), iPhone 패키지 8개(`DocVersionTests`: 규칙, 합치기, 가짜 서버로 두 폰), 시뮬레이터 UI `DocVersionsUITests`.
+
 ### 보안 점검 (2026-11-18)
 
 서버가 Cloudflare Tunnel 로 인터넷에 열린 뒤 전수 점검을 했다(인증, 동기화 권한, HTTP·파일, 그 밖의 메시지·DoS). 고친 것마다 공격을 그대로 재현하는 테스트를 두었다(고치기 전 코드에서 실패하는 것을 확인했다).

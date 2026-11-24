@@ -149,6 +149,7 @@ struct DocDetailView: View {
     @State private var title = ""
     @State private var draft = ""
     @State private var bodyFocused = false
+    @State private var showVersions = false
 
     var body: some View {
         if let d = client.view.docs.first(where: { $0.id == docId }) {
@@ -250,6 +251,8 @@ struct DocDetailView: View {
                                 } label: { Label(d.isPrivate ? "Share with everyone" : "Make private", systemImage: d.isPrivate ? "lock.open" : "lock") }
                                     .accessibilityIdentifier("docPrivateButton")
                             }
+                            Button { showVersions = true } label: { Label("Version history", systemImage: "clock.arrow.circlepath") }
+                                .accessibilityIdentifier("docVersionsButton")
                             Button {
                                 let id = client.newId()
                                 client.edit { data, _ in Edits.saveDocAsTemplate(&data, doc: d.id, id: id) }
@@ -268,6 +271,9 @@ struct DocDetailView: View {
                         .accessibilityIdentifier("docMoreMenu")
                     }
                 }
+            }
+            .sheet(isPresented: $showVersions) {
+                DocVersionsView(docId: d.id)
             }
             .confirmationDialog("Delete this doc?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
@@ -288,11 +294,107 @@ struct DocDetailView: View {
     }
 
     func save(_ d: DocView) {
-        let ok = client.edit { data, _ in
-            if title != d.title { Edits.setDocTitle(&data, doc: d.id, to: title, ts: nowTs()) }
-            if draft != d.body { Edits.setDocBody(&data, doc: d.id, to: draft, ts: nowTs()) }
-        }
+        // the text before and after are kept in the doc's Version history
+        let ok = client.canEdit && (client.saveDoc(d.id, title: title, body: draft) || (title == d.title && draft == d.body))
         if ok { editing = false }
+    }
+}
+
+/// A doc's Version history: earlier texts, newest first, with who wrote
+/// them; one opens read-only with Restore this version (as on the Mac).
+struct DocVersionsView: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
+    let docId: UInt64
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let d = client.view.docs.first(where: { $0.id == docId }), !d.versions.isEmpty {
+                    List {
+                        Section {
+                            ForEach(d.versions) { v in
+                                NavigationLink {
+                                    DocVersionDetail(docId: docId, versionId: v.id)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(Fmt.time(v.at))
+                                        Text(versionAuthor(v, client)).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .accessibilityIdentifier("docVersion-\(v.id)")
+                            }
+                        } footer: {
+                            Text("Earlier texts of this doc, kept when someone stops editing it.")
+                        }
+                    }
+                } else {
+                    EmptyNote(title: "No versions yet", systemImage: "clock.arrow.circlepath",
+                              detail: "One is kept each time the doc is changed.")
+                }
+            }
+            .navigationTitle("Version history")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+}
+
+/// Who wrote a version, as the list shows it (the Mac's `version_author`).
+@MainActor
+func versionAuthor(_ v: DocVersionView, _ client: SyncClient) -> String {
+    if v.by == 0 { return String(localized: "Earlier edits") }
+    let name = client.view.member(v.by)?.name ?? String(localized: "Someone")
+    if let r = v.restored { return String(localized: "\(name) restored \(Fmt.time(r))") }
+    return name
+}
+
+/// One version, read-only, with Restore this version.
+struct DocVersionDetail: View {
+    @Environment(SyncClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
+    let docId: UInt64
+    let versionId: UInt64
+
+    var body: some View {
+        if let d = client.view.docs.first(where: { $0.id == docId }),
+           let v = d.versions.first(where: { $0.id == versionId }) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(v.title.isEmpty ? String(localized: "Untitled") : v.title).font(.title2.bold())
+                    Text(versionAuthor(v, client)).font(.caption).foregroundStyle(.secondary)
+                    if v.title == d.title && v.body == d.body {
+                        Text("This is the doc's text now.").font(.callout).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("versionIsCurrent")
+                    }
+                    MarkdownBody(text: v.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(v.body)
+                        .accessibilityAddTraits(.isStaticText)
+                        .accessibilityIdentifier("versionBody")
+                }
+                .padding(20)
+            }
+            .navigationTitle(Fmt.time(v.at))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if v.title != d.title || v.body != d.body {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Restore this version") {
+                            if client.restoreDocVersion(docId, version: v.id) { dismiss() }
+                        }
+                        .disabled(!client.canEdit)
+                        .accessibilityIdentifier("restoreVersion")
+                    }
+                }
+            }
+        } else {
+            EmptyNote(title: "This version is gone", systemImage: "clock.arrow.circlepath")
+        }
     }
 }
 

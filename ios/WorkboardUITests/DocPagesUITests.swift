@@ -51,3 +51,45 @@ final class DocPagesUITests: WorkboardUITestCase {
         XCTAssertTrue(body.label.contains("first \(tag)"))
     }
 }
+
+// UI tests for a doc's Version history. Needs the open fake server, as above.
+final class DocVersionsUITests: WorkboardUITestCase {
+    func testAnEditListsVersionsAndRestoreBringsTheTextBack() {
+        let a = launchFresh(["-wbOpen", "doc:402"])
+        let edit = a.buttons["docEdit"]
+        waitEnabled(edit)
+        edit.tap()
+        let editor = a.textViews["docEditor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        let tag = "\(Int.random(in: 100000...999999))"
+        editor.typeText("\nversion \(tag)")
+        a.buttons["docDone"].tap()
+        let body = a.staticTexts["docBody"]
+        XCTAssertTrue(body.waitForExistence(timeout: 5))
+        XCTAssertTrue(body.label.contains("version \(tag)"))
+
+        // the menu opens the list: the new text first, the one before it next
+        a.buttons["docMoreMenu"].tap()
+        a.buttons["docVersionsButton"].tap()
+        let rows = a.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'docVersion-'"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(rows.count, 2)
+        rows.element(boundBy: 0).tap()
+        XCTAssertTrue(a.staticTexts["versionIsCurrent"].waitForExistence(timeout: 5))
+        XCTAssertFalse(a.buttons["restoreVersion"].exists, "the doc reads this one already")
+        a.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // the older one shows read-only, and Restore brings it back
+        rows.element(boundBy: 1).tap()
+        let old = a.staticTexts["versionBody"]
+        XCTAssertTrue(old.waitForExistence(timeout: 5))
+        XCTAssertFalse(old.label.contains("version \(tag)"))
+        let restore = a.buttons["restoreVersion"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        restore.tap()
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "back on the list")
+        a.buttons["Done"].tap()
+        XCTAssertTrue(body.waitForExistence(timeout: 5))
+        XCTAssertFalse(body.label.contains("version \(tag)"), body.label)
+    }
+}

@@ -394,6 +394,11 @@ pub struct Doc {
     /// view is lost when two people read the doc at once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<DocViews>,
+    /// Earlier texts of the doc (Version history, `doc_versions.rs`). Each
+    /// has an id, so wb-sync merges them one by one: two people's versions
+    /// both stay, even when one person's body lost to the other's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<DocVersion>,
 }
 
 /// One person's recent opens of a doc (see `Doc::views`).

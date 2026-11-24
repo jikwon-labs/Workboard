@@ -13,6 +13,7 @@ mod archived;
 mod audit_sweep;
 mod chat;
 mod comments;
+mod doc_versions;
 mod docs;
 mod empty_states;
 mod forms;

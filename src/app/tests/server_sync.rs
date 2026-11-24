@@ -1960,3 +1960,157 @@ fn a_reconnect_brings_only_what_changed_while_away() {
     b.notify_scan();
     assert_eq!(b.notify_rt.sent.len(), 1, "{:?}", b.notify_rt.sent);
 }
+
+/// A doc's versions through a server: kept on one computer, they show on
+/// the other; text one person was writing when the other's change replaced
+/// it is kept as a version both see; a private doc's versions reach only
+/// its owner.
+#[test]
+fn doc_versions_reach_everyone_and_keep_text_a_teammate_replaced() {
+    let server = TestServer::start();
+    let addr = format!("127.0.0.1:{}", server.port);
+    let mut a = app();
+    a.connect_server(&addr, "").unwrap();
+    net_until(&mut a, "A shared on the server", |a| {
+        a.data.extra.shared.is_some()
+    });
+    net_until_saved(&mut a, &server.home);
+    net_until(&mut a, "A sees the people list", |a| {
+        a.sync_rt.people.iter().any(|p| p.member == 3)
+    });
+    let code = invite_code(&mut a, 3, wb_net::Role::Member);
+    let mut b = join_with(&addr, &code.to_lowercase());
+
+    let set_body = |x: &mut App, id: u64, body: &str| {
+        let d = x.data.docs.iter_mut().find(|d| d.id == id).unwrap();
+        d.body = body.into();
+        d.updated = now_ts();
+    };
+    let send = |x: &mut App| {
+        x.sync_note_change();
+        x.write_shared();
+    };
+    let bodies = |x: &App, id: u64| -> Vec<(u64, u64, String)> {
+        let d = x.data.docs.iter().find(|d| d.id == id).unwrap();
+        let mut v: Vec<(u64, u64, String)> = d
+            .versions
+            .iter()
+            .map(|v| (v.id, v.by, v.body.clone()))
+            .collect();
+        v.sort();
+        v
+    };
+
+    // A writes a doc and stops: one version, which B gets
+    a.new_doc(None);
+    let doc = a.doc_open.unwrap();
+    a.doc_versions_tick(None);
+    set_body(&mut a, doc, "A's first");
+    a.doc_versions_tick(None);
+    a.age_doc_edit(3 * DOC_VERSION_GAP);
+    a.doc_versions_tick(None);
+    send(&mut a);
+    net_until(&mut b, "A's version at B", |b| {
+        b.data
+            .docs
+            .iter()
+            .any(|d| d.id == doc && d.versions.len() == 1)
+    });
+    assert_eq!(bodies(&b, doc), bodies(&a, doc));
+    assert_eq!(bodies(&b, doc)[0].1, a.data.me, "kept as A's");
+
+    // both start writing it; B's is the later change, so B's body wins
+    b.doc_open = Some(doc);
+    b.doc_versions_tick(None);
+    set_body(&mut b, doc, "B's words");
+    b.doc_versions_tick(None);
+    assert!(b.doc_editing());
+    a.doc_versions_tick(None);
+    set_body(&mut a, doc, "A's second");
+    a.doc_versions_tick(None);
+    assert!(a.doc_editing());
+    send(&mut a);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    set_body(&mut b, doc, "B's words, later");
+    b.doc_versions_tick(None);
+    send(&mut b);
+    net_until(&mut a, "B's words at A", |a| {
+        a.data
+            .docs
+            .iter()
+            .any(|d| d.id == doc && d.body == "B's words, later")
+    });
+    // A's text was replaced while A wrote it: it is a version now
+    assert!(!a.doc_editing());
+    assert!(
+        bodies(&a, doc)
+            .iter()
+            .any(|(_, by, t)| *by == a.data.me && t == "A's second"),
+        "{:?}",
+        bodies(&a, doc)
+    );
+    a.write_shared();
+    // B stops writing: B's version
+    b.age_doc_edit(3 * DOC_VERSION_GAP);
+    b.doc_versions_tick(None);
+    send(&mut b);
+    let want = |x: &App| {
+        let v = bodies(x, doc);
+        v.len() == 3
+            && v.iter().any(|(_, _, t)| t == "A's second")
+            && v.iter().any(|(_, _, t)| t == "B's words, later")
+    };
+    net_until(&mut a, "every version at A", |a| want(a));
+    net_until(&mut b, "every version at B", |b| want(b));
+    assert_eq!(bodies(&a, doc), bodies(&b, doc), "the same list on both");
+
+    // B restores A's lost text; A gets the doc back with the restore listed
+    let lost = bodies(&b, doc)
+        .into_iter()
+        .find(|(_, _, t)| t == "A's second")
+        .unwrap()
+        .0;
+    assert!(b.restore_version(doc, lost));
+    send(&mut b);
+    net_until(&mut a, "the restore at A", |a| {
+        a.data.docs.iter().any(|d| {
+            d.id == doc
+                && d.body == "A's second"
+                && d.latest_version().is_some_and(|v| v.restored.is_some())
+        })
+    });
+
+    // a private doc of A's: its versions never reach B
+    a.new_doc(None);
+    let secret = a.doc_open.unwrap();
+    a.data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == secret)
+        .unwrap()
+        .private = true;
+    a.doc_versions_tick(None);
+    set_body(&mut a, secret, "secret plans");
+    a.doc_versions_tick(None);
+    a.age_doc_edit(3 * DOC_VERSION_GAP);
+    a.doc_versions_tick(None);
+    set_body(&mut a, secret, "secret plans v2");
+    a.doc_versions_tick(None);
+    a.age_doc_edit(DOC_VERSION_GAP + 1);
+    a.doc_versions_tick(None);
+    assert_eq!(bodies(&a, secret).len(), 2);
+    send(&mut a);
+    // a public change after it, to know B has heard everything A sent
+    set_body(&mut a, doc, "after the secret");
+    send(&mut a);
+    net_until(&mut b, "A's later change at B", |b| {
+        b.data
+            .docs
+            .iter()
+            .any(|d| d.id == doc && d.body == "after the secret")
+    });
+    assert!(b.data.docs.iter().all(|d| d.id != secret));
+    assert!(!serde_json::to_string(&b.data)
+        .unwrap()
+        .contains("secret plans"));
+}

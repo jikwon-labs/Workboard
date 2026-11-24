@@ -228,6 +228,16 @@
         }
       }
     },
+    "%@ restored %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ 버전으로 되돌림"
+          }
+        }
+      }
+    },
     "%@ said \"%@\" in %@": {
       "localizations": {
         "ko": {
@@ -2398,6 +2408,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "이전"
+          }
+        }
+      }
+    },
+    "Earlier edits": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이전 편집"
+          }
+        }
+      }
+    },
+    "Earlier texts of this doc, kept when someone stops editing it.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 문서의 이전 글입니다. 누군가 편집을 멈추면 저장됩니다."
           }
         }
       }
@@ -4587,6 +4617,16 @@
         }
       }
     },
+    "No versions yet": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "아직 버전이 없습니다"
+          }
+        }
+      }
+    },
     "No whiteboards yet": {
       "localizations": {
         "ko": {
@@ -4868,6 +4908,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "컴퓨터의 함께 작업하기 > 휴대폰에서 로그인을 여세요. 코드는 5분 동안 한 번만 쓸 수 있습니다."
+          }
+        }
+      }
+    },
+    "One is kept each time the doc is changed.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "문서를 고칠 때마다 하나씩 저장됩니다."
           }
         }
       }
@@ -5827,6 +5877,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "이 백업으로 되돌릴까요?"
+          }
+        }
+      }
+    },
+    "Restore this version": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 버전으로 되돌리기"
           }
         }
       }
@@ -7219,6 +7279,16 @@
         }
       }
     },
+    "This is the doc's text now.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지금 문서의 글과 같습니다."
+          }
+        }
+      }
+    },
     "This meeting is gone": {
       "localizations": {
         "ko": {
@@ -7285,6 +7355,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "이 작업은 없어졌습니다"
+          }
+        }
+      }
+    },
+    "This version is gone": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 버전이 없습니다"
           }
         }
       }
@@ -7847,6 +7927,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "자주 쓰는 도구"
+          }
+        }
+      }
+    },
+    "Version history": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "버전 기록"
           }
         }
       }

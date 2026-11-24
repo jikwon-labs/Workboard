@@ -22,6 +22,7 @@ mod chat_gallery;
 mod chatfmt;
 mod comments;
 mod delete_ws;
+mod doc_versions;
 mod docs;
 #[cfg(test)]
 mod due_time_tests;
@@ -593,6 +594,9 @@ pub struct App {
     /// like `dirty`, but only what's worked out from docs is made again
     /// (`docs_gen`), not the Inbox, unread counts and the rest.
     doc_dirty: bool,
+    /// The open doc as last seen, and whether it is being edited here
+    /// (doc_versions.rs).
+    doc_session: Option<doc_versions::DocSession>,
     persist: bool,
     /// Changes not saved yet: when the first and the latest of them were
     /// made (see `save_tick`).
@@ -1240,6 +1244,7 @@ impl App {
             tag_text: String::new(),
             dirty: false,
             doc_dirty: false,
+            doc_session: None,
             persist,
             save_due: std::cell::Cell::new(None),
             data_gen: std::cell::Cell::new(0),
@@ -5801,6 +5806,7 @@ impl App {
         self.apply_actions();
         self.track_history();
         self.note_recent();
+        self.doc_versions_tick(Some(ctx));
         // typing in a doc and nothing else: the rest of what's kept stays
         let docs_only = std::mem::take(&mut self.doc_dirty) && !self.dirty;
         if docs_only {
@@ -6193,6 +6199,8 @@ impl App {
     fn finish_before_quit(&mut self) {
         // a status editor still open: its edits are done like on closing it
         self.finish_status_edit();
+        // a doc being edited keeps its version
+        self.finish_doc_editing();
         self.data.stop_my_timers(now_ts());
         self.data.fix_activity_ids();
         if self.data.extra.shared.is_some() {

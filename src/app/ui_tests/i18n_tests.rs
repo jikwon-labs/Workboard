@@ -657,6 +657,34 @@ pub(super) fn screens(h: &Ui1) -> Vec<(String, Box<dyn Fn(&mut App)>)> {
             });
         }),
     ));
+    for (name, with_versions) in [("doc versions", true), ("doc versions empty", false)] {
+        v.push((
+            name.into(),
+            Box::new(move |a: &mut App| {
+                a.new_doc(None);
+                let id = a.doc_open.unwrap_or_default();
+                let me = a.data.me;
+                if with_versions {
+                    let now = now_ts();
+                    let d = a.data.docs.iter_mut().find(|d| d.id == id).unwrap();
+                    d.body = "Old".into();
+                    a.data.keep_doc_start(id, "Plan", "Old", now - 9000);
+                    a.data.keep_doc_text(id, me, now - 5000, "Plan", "New");
+                    let first = a.data.docs.iter().find(|d| d.id == id).unwrap().versions[0].id;
+                    a.data.restore_doc_version(id, first, me, now);
+                }
+                a.open_doc_versions(id);
+                if let Some(Modal::DocVersions(st)) = a.modal.as_mut() {
+                    st.pick = a
+                        .data
+                        .docs
+                        .iter()
+                        .find(|d| d.id == id)
+                        .and_then(|d| d.versions_newest().get(1).map(|v| v.id));
+                }
+            }),
+        ));
+    }
     v.push((
         "view only space".into(),
         Box::new(move |a: &mut App| {

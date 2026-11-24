@@ -250,6 +250,7 @@ impl App {
             .collect();
         let slack_before: std::collections::BTreeSet<String> =
             self.data.extra.slack_map.keys().cloned().collect();
+        let editing = self.doc_versions_before_merge();
         // the bookkeeping is merged as it is, not through JSON; what the
         // merge reads of it is kept in case the team's copy can't be read
         let mut meta = std::mem::take(&mut self.data.extra.sync);
@@ -309,6 +310,9 @@ impl App {
                     self.data.extra.sync.hashes = sync::fingerprints(&mine);
                     self.data.extra.sync.field_hashes = sync::part_hashes(&mine);
                 }
+                // the doc being written here, replaced by a teammate's text:
+                // what was written is kept as a version
+                self.doc_versions_after_merge(editing);
             }
             Err(e) => {
                 // most likely saved by a newer version of the app: our copy

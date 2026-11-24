@@ -3,7 +3,7 @@
 //
 // Here: the workspace (`Data`) and the thread that writes it to disk. In
 // model/: the shapes (types.rs, task.rs, extra.rs), a task's history lines
-// (history.rs), loading and saving
+// (history.rs), a doc's earlier texts (doc_versions.rs), loading and saving
 // (persist.rs), lookups (query.rs) and the example workspace (demo.rs). All of
 // it is reachable as `crate::model::*`.
 
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 mod demo;
+mod doc_versions;
 mod extra;
 mod history;
 mod persist;
@@ -19,6 +20,7 @@ mod query;
 mod task;
 mod types;
 
+pub use doc_versions::*;
 pub use extra::*;
 pub use query::ListPlace;
 pub use task::*;

@@ -123,6 +123,7 @@ impl App {
             meeting_note: false,
             wiki: None,
             views: vec![],
+            versions: vec![],
             parent: Some(parent),
             title: trf!("Page {}", n),
             body: String::new(),
@@ -1715,6 +1716,8 @@ impl App {
                 d.updated = now;
                 // a copy starts unread (and the view entries' ids are the original's)
                 d.views.clear();
+                // and with no history of its own (the versions' ids are the original's)
+                d.versions.clear();
                 d
             })
             .collect();
@@ -1875,6 +1878,12 @@ impl App {
         }
         if ui.button(tr("Copy link")).clicked() {
             self.copy_link(ui, nav::doc_link(id));
+            close_any(ui);
+        }
+        let vr = ui.button(tr("Version history"));
+        name_it(&vr, "Version history");
+        if vr.clicked() {
+            self.open_doc_versions(id);
             close_any(ui);
         }
         if ui.button(tr("Duplicate")).clicked() {

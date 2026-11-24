@@ -2174,3 +2174,134 @@ fn the_server_merges_and_catches_up_like_the_long_way() {
     }
     assert!(caught > 200, "{caught}");
 }
+
+fn docs_ws(docs: Value, meta: &SyncMeta) -> Value {
+    json!({"workspace": "W", "spaces": [], "tasks": [], "members": [], "me": 1, "next_id": 1, "favorites": [], "channels": [], "docs": docs, "extra": {"sync": meta}})
+}
+
+fn version(id: u64, by: u64, at: i64, body: &str) -> Value {
+    json!({"id": id, "by": by, "at": at, "title": "Plan", "body": body})
+}
+
+fn doc(body: &str, versions: Value) -> Value {
+    json!({"id": 5, "owner": 1, "title": "Plan", "body": body, "created": 1, "updated": 1, "versions": versions})
+}
+
+fn bodies(v: &Value) -> Vec<String> {
+    let mut out: Vec<String> = v["docs"][0]["versions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|x| x["body"].as_str().unwrap_or_default().to_string())
+        .collect();
+    out.sort();
+    out
+}
+
+/// Two people write the same doc at once: the newer body wins, as for any
+/// field, and each one's version stays, so the other text can be brought back.
+#[test]
+fn both_peoples_doc_versions_stay_when_one_body_wins() {
+    let mut ma = SyncMeta::default();
+    let mut a = docs_ws(json!([doc("start", json!([]))]), &ma);
+    stamp(&a.clone(), &mut ma, 100);
+    let mut mb = ma.clone();
+    a = docs_ws(
+        json!([doc("A text", json!([version(11, 1, 200, "A text")]))]),
+        &ma,
+    );
+    stamp(&a.clone(), &mut ma, 200);
+    a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
+    let mut b = docs_ws(
+        json!([doc("B text", json!([version(12, 2, 300, "B text")]))]),
+        &mb,
+    );
+    stamp(&b.clone(), &mut mb, 300);
+    b["extra"]["sync"] = serde_json::to_value(&mb).unwrap();
+    let mut a2 = a.clone();
+    assert!(merge(&mut a2, &[b.clone()]));
+    assert_eq!(a2["docs"][0]["body"], "B text", "the newer body wins");
+    assert_eq!(bodies(&a2), vec!["A text", "B text"]);
+    merge(&mut b, &[a]);
+    assert_eq!(b["docs"][0]["body"], "B text");
+    assert_eq!(
+        bodies(&b),
+        vec!["A text", "B text"],
+        "the same on both sides"
+    );
+}
+
+/// An app that doesn't know versions drops them from what it sends; a body
+/// it changed still comes in, and no version goes.
+#[test]
+fn a_copy_without_versions_takes_none_away() {
+    let mut mt = SyncMeta::default();
+    let mut team = docs_ws(
+        json!([doc("kept", json!([version(11, 1, 100, "kept")]))]),
+        &mt,
+    );
+    stamp(&team.clone(), &mut mt, 100);
+    team["extra"]["sync"] = serde_json::to_value(&mt).unwrap();
+    // the older app's own copy and bookkeeping never had them
+    let plain = |body: &str| {
+        let mut d = doc(body, json!([]));
+        d.as_object_mut().unwrap().remove("versions");
+        json!([d])
+    };
+    let mut mo = SyncMeta::default();
+    stamp(&docs_ws(plain("kept"), &mo), &mut mo, 100);
+    let mut old = docs_ws(plain("from an older app"), &mo);
+    stamp(&old.clone(), &mut mo, 500);
+    assert!(mo.tombs.is_empty());
+    old["extra"]["sync"] = serde_json::to_value(&mo).unwrap();
+    merge(&mut team, &[old]);
+    assert_eq!(team["docs"][0]["body"], "from an older app");
+    assert_eq!(bodies(&team), vec!["kept"]);
+    let m = meta_of(&team);
+    assert!(!m.tombs.contains_key(&11));
+}
+
+/// A version taken out (past the number or days kept) stays out.
+#[test]
+fn a_dropped_version_stays_dropped() {
+    let mut ma = SyncMeta::default();
+    let both = json!([version(11, 1, 100, "old"), version(12, 1, 200, "new")]);
+    let mut a = docs_ws(json!([doc("new", both)]), &ma);
+    stamp(&a.clone(), &mut ma, 100);
+    a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
+    let b = a.clone();
+    let mut a = docs_ws(
+        json!([doc("new", json!([version(12, 1, 200, "new")]))]),
+        &ma,
+    );
+    stamp(&a.clone(), &mut ma, 300);
+    a["extra"]["sync"] = serde_json::to_value(&ma).unwrap();
+    merge(&mut a, &[b]);
+    assert_eq!(bodies(&a), vec!["new"]);
+}
+
+/// Versions sit inside their doc: someone who may not see a private doc
+/// gets none of its versions either.
+#[test]
+fn a_private_docs_versions_are_hidden_with_it() {
+    let mut m = SyncMeta::default();
+    let mut d = docs_ws(
+        json!([
+            {"id": 80, "owner": 1, "private": true, "title": "Secret", "body": "secret now", "created": 1, "updated": 1,
+             "versions": [{"id": 801, "by": 1, "at": 5, "title": "Secret", "body": "secret before"}]},
+            {"id": 90, "owner": 1, "title": "Open", "body": "open", "created": 1, "updated": 1,
+             "versions": [{"id": 901, "by": 1, "at": 5, "title": "Open", "body": "open before"}]}
+        ]),
+        &m,
+    );
+    assert!(ids_within(&d["docs"][0]).contains(&801));
+    let hidden = hidden_from(&d, 2, false);
+    assert_eq!(hidden, vec![80]);
+    stamp(&d.clone(), &mut m, 10);
+    d["extra"]["sync"] = serde_json::to_value(&m).unwrap();
+    hide(&mut d, &hidden);
+    let text = d["docs"].to_string();
+    assert!(!text.contains("secret") && text.contains("open before"));
+    let m = meta_of(&d);
+    assert!(!m.stamps.contains_key(&801) && m.stamps.contains_key(&901));
+}

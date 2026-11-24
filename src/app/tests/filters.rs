@@ -725,6 +725,7 @@ fn search_leaves_out_archived_lists_and_other_peoples_private_docs() {
             meeting_note: false,
             wiki: None,
             views: vec![],
+            versions: vec![],
             parent: None,
             title: title.into(),
             body: String::new(),

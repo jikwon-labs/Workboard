@@ -382,6 +382,8 @@ public struct DocView: Identifiable, Hashable, Sendable {
     public let title: String
     public let body: String
     public let updated: Int64
+    /// Earlier texts (Version history), newest first.
+    public let versions: [DocVersionView]
 
     init(_ j: JSON) {
         id = j["id"]?.uint ?? 0
@@ -393,6 +395,7 @@ public struct DocView: Identifiable, Hashable, Sendable {
         title = j["title"]?.string ?? ""
         body = j["body"]?.string ?? ""
         updated = j["updated"]?.int ?? 0
+        versions = DocVersions.newest((j["versions"]?.array ?? []).map(DocVersionView.init))
     }
 }
 

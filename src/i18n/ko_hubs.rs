@@ -234,6 +234,15 @@ pub const T: &[(&str, &str)] = &[
     ("Unmark as Wiki", "위키 표시 해제"),
     ("{} views in the last 30 days", "최근 30일 조회 {}회"),
     ("{} (archived)", "{} (보관됨)"),
+    // a doc's Version history
+    ("Version history", "버전 기록"),
+    ("Earlier texts of this doc, kept when someone stops editing it.", "이 문서의 이전 글입니다. 누군가 편집을 멈추면 저장됩니다."),
+    ("No versions yet. One is kept a few minutes after the doc is changed.", "아직 버전이 없습니다. 문서를 고치고 몇 분 지나면 하나가 저장됩니다."),
+    ("This is the doc's text now.", "지금 문서의 글과 같습니다."),
+    ("Restore this version", "이 버전으로 되돌리기"),
+    ("Version restored", "버전을 되돌렸습니다"),
+    ("Earlier edits", "이전 편집"),
+    ("{} restored {}", "{} · {} 버전으로 되돌림"),
     // default names of new items (saved as their names, in the language
     // the screen was in when they were made)
     ("Untitled task", "제목 없는 작업"),

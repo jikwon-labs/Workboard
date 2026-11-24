@@ -544,6 +544,7 @@ impl Data {
             meeting_note: false,
             wiki: None,
             views: vec![],
+            versions: vec![],
             parent: None,
             title: "Project brief".into(),
             body: "Goals\n- Launch the new website\n- Grow the newsletter\n\nNotes\nKeep the design light and simple.".into(),

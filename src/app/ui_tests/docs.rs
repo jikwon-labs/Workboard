@@ -365,6 +365,7 @@ fn docs_delete_keeps_sub_pages_and_restore_brings_them_back() {
         meeting_note: false,
         wiki: None,
         views: vec![],
+        versions: vec![],
         parent: Some(424242),
         title: "Old".into(),
         body: String::new(),

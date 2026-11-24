@@ -73,6 +73,8 @@ pub(super) enum Modal {
     },
     /// Browse, preview and use templates; manage the team's.
     TemplateCenter(Box<super::templates::TemplateCenter>),
+    /// A doc's Version history (doc_versions.rs).
+    DocVersions(super::doc_versions::DocVersionsUi),
     Import {
         path: String,
         result: String,
@@ -1152,6 +1154,7 @@ impl App {
                 meeting_note: false,
                 wiki: None,
                 views: vec![],
+                versions: vec![],
                 parent: None,
                 title: tr("Untitled").into(),
                 body: String::new(),
@@ -1548,6 +1551,7 @@ impl App {
             Modal::Automations { .. } => tr("Automations").into(),
             Modal::TagManager { .. } => tr("Tag manager").into(),
             Modal::TemplateCenter(_) => tr("Template Center").into(),
+            Modal::DocVersions(_) => tr("Version history").into(),
             Modal::Import { .. } => tr("Import and export").into(),
             Modal::ChannelSettings(_) => tr("Channel settings").into(),
             Modal::SavedMessages => tr("Saved messages").into(),
@@ -1601,7 +1605,7 @@ impl App {
         // each kind of dialog sizes itself: a wide one doesn't leave the next wide
         let win_id = modal_window_id(&modal);
         // the Template Center has a list beside its preview
-        let wide = matches!(modal, Modal::TemplateCenter(_));
+        let wide = matches!(modal, Modal::TemplateCenter(_) | Modal::DocVersions(_));
         let (min_w, max_w) = if wide { (800.0, 820.0) } else { (460.0, 620.0) };
         let screen = ctx.screen_rect();
         let spec = Dialog {
@@ -1767,6 +1771,7 @@ impl App {
             } => close = self.automations_body(ui, t, status, action, value, scope),
             Modal::TagManager { from, to } => close = self.tag_manager_body(ui, t, from, to),
             Modal::TemplateCenter(c) => close = self.template_center_body(ui, t, c),
+            Modal::DocVersions(st) => close = self.doc_versions_body(ui, t, st),
             Modal::Import { path, result } => close = self.import_body(ui, t, path, result),
             Modal::ChannelSettings(cid) => close = self.channel_settings_body(ui, t, cid),
             Modal::Share { emails } => close = self.share_body(ui, t, emails),

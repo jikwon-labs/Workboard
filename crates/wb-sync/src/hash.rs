@@ -244,8 +244,9 @@ pub(crate) fn timer_list(obj: &Map<String, Value>) -> Vec<(u64, i64, bool)> {
 /// The parts of an item's own fields with their values (see
 /// `SyncMeta::fields`): every field except personal ones, ever-growing
 /// ones and the items inside it, with reactions (per emoji and person),
-/// time entries (per person and start), custom field values (per field)
-/// and running timers (per person) split into one part per element, so
+/// time entries (per person and start), custom field values (per field),
+/// a poll's votes (per person) and running timers (per person) split into
+/// one part per element, so
 /// each merges on its own. An empty list counts as no field. For a list of items, its
 /// entries without an id are a part named after the field.
 pub(crate) fn parts_of(obj: &Map<String, Value>) -> Vec<(String, Cow<'_, Value>)> {
@@ -283,10 +284,10 @@ pub(crate) fn parts_of(obj: &Map<String, Value>) -> Vec<(String, Cow<'_, Value>)
                 continue;
             }
         }
-        if k == "custom" {
+        if k == "custom" || k == "votes" {
             if let Some(o) = v.as_object() {
                 for (key, x) in o {
-                    out.push((format!("custom/{}", key), Cow::Borrowed(x)));
+                    out.push((format!("{}/{}", k, key), Cow::Borrowed(x)));
                 }
                 continue;
             }

@@ -95,7 +95,8 @@
             {"emoji": "🎉", "users": [3]}
           ]
         },
-        {"id": 3003, "author": 3, "text": "", "ts": 1763000100, "reactions": []}
+        {"id": 3003, "author": 3, "text": "", "ts": 1763000100, "reactions": []},
+        {"id": 3004, "author": 2, "text": "점심? \n1. 피자", "ts": 1763000200, "poll": {"question": "점심?", "options": ["피자", "국수"], "multi": true}, "votes": {"2": [0, 1], "10": [1]}}
       ]
     }
   ],

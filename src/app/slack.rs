@@ -612,6 +612,8 @@ pub(super) fn new_message(id: u64, author: u64, text: String, ts: i64) -> Messag
     Message {
         goal: None,
         event: None,
+        poll: None,
+        votes: Default::default(),
         id,
         author,
         text,

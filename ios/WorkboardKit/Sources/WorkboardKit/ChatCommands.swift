@@ -1,7 +1,7 @@
 // Slash commands, webhooks and workflows, the Mac app's way
 // (src/app/integrations.rs, src/app/workflows.rs, server/src/hooks.rs):
-// "/shrug", "/me", "/topic", "/mute", "/unmute" and "/remind" work in the
-// app; the commands an owner or admin added go to the team server, which
+// "/shrug", "/me", "/topic", "/mute", "/unmute", "/remind" and "/poll" work
+// in the app; the commands an owner or admin added go to the team server, which
 // posts their answer. Workflows (automations with `trigger` "message") run
 // in the app of whoever posts the message, right after sending.
 
@@ -65,6 +65,7 @@ public enum SlashCommands {
         ("mute", "Turn off notifications for this channel"),
         ("unmute", "Turn notifications for this channel back on"),
         ("remind", "Remind yourself: /remind call Sam in 30 minutes"),
+        ("poll", "Ask the conversation a question with choices"),
     ]
 
     /// What a "/" message is.
@@ -79,6 +80,8 @@ public enum SlashCommands {
         case remind(String, seconds: Int64)
         /// /remind without a time it understands
         case remindHelp
+        /// /poll [question]: the New poll window, with the question filled in
+        case poll(String)
         /// a server's command, or one not known (`known` false)
         case server(name: String, text: String, known: Bool)
     }
@@ -102,6 +105,7 @@ public enum SlashCommands {
         case "remind":
             guard let (what, secs) = remindParts(rest) else { return .remindHelp }
             return .remind(what, seconds: secs)
+        case "poll": return .poll(rest)
         default:
             let lower = name.lowercased()
             return .server(name: lower, text: rest, known: commands.contains { $0.name == lower })

@@ -80,8 +80,9 @@ extension Sync {
                 out += parts
                 continue
             }
-            if k == "custom", let o = v.object {
-                for key in o.keys.sorted(by: utf8Less) { out.append(("custom/\(key)", o[key]!)) }
+            // custom field values per field, a poll's votes per person
+            if k == "custom" || k == "votes", let o = v.object {
+                for key in o.keys.sorted(by: utf8Less) { out.append(("\(k)/\(key)", o[key]!)) }
                 continue
             }
             out.append((k, v))

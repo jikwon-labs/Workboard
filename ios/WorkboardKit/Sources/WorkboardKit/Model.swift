@@ -477,6 +477,11 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     /// Posted by a webhook, slash command or workflow: its name, shown in
     /// place of the person who set it up.
     public let bot: String?
+    /// A poll (Polls.swift): drawn instead of the text, which holds the
+    /// question and choices written out for apps from before polls.
+    public let poll: PollView?
+    /// Who picked what in the poll: member -> choices (Message::votes).
+    public let votes: [UInt64: [Int]]
 
     /// Still says something with its text taken away (Edits.standsWithoutText).
     public var standsWithoutText: Bool {
@@ -495,6 +500,8 @@ public struct MessageView: Identifiable, Hashable, Sendable {
         forwarded = j["forwarded"].flatMap(ForwardedView.init)
         threadOf = j["thread_of"]?.uint
         bot = j["bot"]?.string
+        poll = j["poll"].flatMap(PollView.init)
+        votes = Polls.votes(j["votes"])
         attachments = (j["attachments"]?.array ?? []).map(AttachmentView.init).filter { !$0.file.isEmpty }
         edited = j["edited"]?.int
         reactions = (j["reactions"]?.array ?? []).map { ReactionView(emoji: $0["emoji"]?.string ?? "", users: ($0["users"]?.array ?? []).compactMap(\.uint)) }
@@ -508,9 +515,9 @@ public struct MessageView: Identifiable, Hashable, Sendable {
         call = j["call"]?.string
     }
 
-    /// Only my own messages, and not huddle or call cards (the Mac app
-    /// offers no Edit for a message with `call`).
-    public func isEditable(by me: UInt64?) -> Bool { me == author && call == nil }
+    /// Only my own messages, and not huddle or call cards or polls (the
+    /// Mac app offers no Edit for a message with `call` or `poll`).
+    public func isEditable(by me: UInt64?) -> Bool { me == author && call == nil && poll == nil }
 }
 
 public struct LinkPreviewView: Hashable, Sendable {

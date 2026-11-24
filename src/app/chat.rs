@@ -335,6 +335,18 @@ const THREAD_W: f32 = 360.0;
 
 pub(super) enum ChatAction {
     JoinHuddle(u64),
+    /// Pick or unpick a choice of a poll (polls.rs).
+    Vote {
+        ch: u64,
+        msg: u64,
+        option: u32,
+    },
+    /// Its author closes a poll, or opens it again.
+    ClosePoll {
+        ch: u64,
+        msg: u64,
+        close: bool,
+    },
     /// "Open goal" on a goal's card.
     OpenGoal(u64),
     /// Open the Forward window for a message.
@@ -780,7 +792,7 @@ fn stands_without_text(m: &Message) -> bool {
         || m.post_title.as_ref().is_some_and(|t| !t.trim().is_empty())
 }
 
-fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
+pub(super) fn find_msg(msgs: &mut [Message], id: u64) -> Option<&mut Message> {
     for m in msgs.iter_mut() {
         if m.id == id {
             return Some(m);
@@ -848,6 +860,8 @@ impl App {
         let m = Message {
             goal: None,
             event: None,
+            poll: None,
+            votes: Default::default(),
             edited: None,
             imported: None,
             preview: None,
@@ -3207,7 +3221,10 @@ impl App {
                                 .iter()
                                 .rev()
                                 .find(|m| {
-                                    m.author == me && m.call.is_none() && m.post_title.is_none()
+                                    m.author == me
+                                        && m.call.is_none()
+                                        && m.post_title.is_none()
+                                        && m.poll.is_none()
                                 })
                                 .map(|m| (c.id, m.id, m.text.clone()))
                         });
@@ -3828,7 +3845,7 @@ impl App {
             }
             if m.author == me {
                 ui.separator();
-                if m.call.is_none() && row(ui, "Edit message").clicked() {
+                if m.call.is_none() && m.poll.is_none() && row(ui, "Edit message").clicked() {
                     acts.push(ChatAction::Edit { ch: cid, msg: m.id });
                     close_popup(ui);
                 }
@@ -3988,7 +4005,9 @@ impl App {
                         ui.add(egui::Label::new(job).wrap());
                     });
                 }
-                if editing {
+                if m.poll.is_some() && !editing {
+                    self.poll_card(ui, cid, m, acts);
+                } else if editing {
                     self.edit_box(ui, cid, m.id, acts);
                 } else if !m.text.is_empty() {
                     let text = shown_text(m);
@@ -4728,7 +4747,8 @@ impl App {
         let coming = std::mem::take(&mut self.chat.composer_mut(in_thread).coming);
         // "/name ...": a command (integrations.rs)
         let mut text = text;
-        if text.starts_with('/') && files.is_empty() && coming.is_empty() {
+        let poll = self.chat.poll_to_send.take();
+        if text.starts_with('/') && files.is_empty() && coming.is_empty() && poll.is_none() {
             use super::integrations::Slash;
             match self.slash(ch, parent, &text) {
                 Slash::Plain => {}
@@ -4766,6 +4786,8 @@ impl App {
         let m = Message {
             goal: None,
             event: None,
+            poll,
+            votes: Default::default(),
             edited: None,
             imported: None,
             preview: None,
@@ -4789,12 +4811,14 @@ impl App {
         };
         let sent = m.text.clone();
         // "Also send to the channel": a copy there, marked with its thread
+        // (not of a poll: its votes would be split between the two)
         let copy =
-            (parent.is_some() && std::mem::take(&mut self.chat.also_channel)).then(|| Message {
-                id: self.data.new_id(),
-                thread_of: parent,
-                ..m.clone()
-            });
+            (parent.is_some() && std::mem::take(&mut self.chat.also_channel) && m.poll.is_none())
+                .then(|| Message {
+                    id: self.data.new_id(),
+                    thread_of: parent,
+                    ..m.clone()
+                });
         let ids: Vec<u64> = std::iter::once(id)
             .chain(copy.as_ref().map(|c| c.id))
             .collect();
@@ -5160,6 +5184,8 @@ impl App {
                         note: String::new(),
                     });
                 }
+                ChatAction::Vote { ch, msg, option } => self.vote(ch, msg, option),
+                ChatAction::ClosePoll { ch, msg, close } => self.close_poll(ch, msg, close),
                 ChatAction::RemovePreview { ch, msg } => {
                     if let Some(m) = self
                         .data

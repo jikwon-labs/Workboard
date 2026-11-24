@@ -11,6 +11,8 @@ fn message_from(h: &mut Ui1, ch: u64, author: u64, text: &str) -> u64 {
     c.messages.push(Message {
         goal: None,
         event: None,
+        poll: None,
+        votes: Default::default(),
         edited: None,
         imported: None,
         preview: None,

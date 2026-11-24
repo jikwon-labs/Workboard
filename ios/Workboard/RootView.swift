@@ -99,6 +99,7 @@ struct MainScreen: View {
 
     var body: some View {
         @Bindable var nav = nav
+        @Bindable var polls = PollSheets.shared
         // the banner sits above the screens (not as a safe-area inset), so it
         // never covers the navigation bar's buttons
         VStack(spacing: 0) {
@@ -108,6 +109,8 @@ struct MainScreen: View {
         }
         .animation(.default, value: client.state.isConnected)
         .overlay(alignment: .top) { NoticeToast() }
+        // "/poll" in any message box
+        .sheet(item: $polls.request) { NewPollSheet(request: $0) }
     }
 }
 

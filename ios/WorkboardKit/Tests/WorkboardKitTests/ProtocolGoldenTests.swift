@@ -215,7 +215,7 @@ final class ProtocolGoldenTests: XCTestCase {
         let c = try XCTUnwrap(v.channels.first)
         XCTAssertEqual(c.kind, .channel)
         XCTAssertEqual(v.title(of: c, me: 2), "general")
-        XCTAssertEqual(c.messages.map(\.text), ["hi 👋", ""])
+        XCTAssertEqual(c.messages.map(\.text), ["hi 👋", "", "점심? \n1. 피자"])
         XCTAssertEqual(c.messages.first?.reactions, [ReactionView(emoji: "👍", users: [2, 3, 2]), ReactionView(emoji: "🎉", users: [3])])
         XCTAssertEqual(c.unread(me: 2), 1)
         XCTAssertEqual(c.firstUnread(me: 2), 3003)

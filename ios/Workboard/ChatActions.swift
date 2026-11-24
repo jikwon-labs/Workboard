@@ -33,6 +33,10 @@ func runSlash(_ client: SyncClient, notifier: Notifier, text: String, channel: U
     case .remindHelp:
         client.showNotice(String(localized: "Try: /remind call Sam in 30 minutes"))
         return .keep
+    case .poll(let question):
+        // the New poll window, over whatever is showing (MainScreen)
+        PollSheets.shared.request = PollRequest(channel: channel, parent: parent, question: question)
+        return .done
     case let .server(name, rest, known):
         guard known else {
             client.showNotice(String(localized: "There's no /\(name) command."))

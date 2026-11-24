@@ -674,6 +674,8 @@ fn on_a_server_what_i_may_no_longer_see_leaves_my_copy_without_deleting_it() {
         .push(Message {
             goal: None,
             event: None,
+            poll: None,
+            votes: Default::default(),
             id: 7301,
             author: me,
             text: "my last words".into(),
@@ -2113,4 +2115,94 @@ fn doc_versions_reach_everyone_and_keep_text_a_teammate_replaced() {
     assert!(!serde_json::to_string(&b.data)
         .unwrap()
         .contains("secret plans"));
+}
+
+#[test]
+fn a_poll_takes_votes_from_two_computers_at_once() {
+    let ServerTeam {
+        server: _server,
+        mut a,
+        mut b,
+    } = ServerTeam::start();
+    let ch = channel_id(&a, "general");
+    let mut d = crate::app::polls::PollDraft::new(ch, None, "Lunch?");
+    d.options = vec!["Pizza".into(), "Noodles".into(), "Salad".into()];
+    a.post_poll(d);
+    a.sync_note_change();
+    a.write_shared();
+    let poll_at = |x: &App| {
+        x.data
+            .channels
+            .iter()
+            .find(|c| c.id == ch)
+            .and_then(|c| c.messages.iter().find(|m| m.poll.is_some()))
+            .cloned()
+    };
+    net_until(&mut b, "the poll at B", |b| poll_at(b).is_some());
+    let m = poll_at(&b).unwrap();
+    assert_eq!(m.text, "Lunch?\n1. Pizza\n2. Noodles\n3. Salad");
+    let mid = m.id;
+    // both vote before either hears of the other's vote
+    a.apply_chat(vec![ChatAction::Vote {
+        ch,
+        msg: mid,
+        option: 0,
+    }]);
+    b.apply_chat(vec![ChatAction::Vote {
+        ch,
+        msg: mid,
+        option: 1,
+    }]);
+    for x in [&mut a, &mut b] {
+        x.sync_note_change();
+        x.write_shared();
+    }
+    let (ma, mb) = (a.data.me, b.data.me);
+    let both = move |x: &App| {
+        poll_at(x).is_some_and(|m| {
+            m.votes.get(&ma) == Some(&vec![0]) && m.votes.get(&mb) == Some(&vec![1])
+        })
+    };
+    net_until(&mut a, "both votes at A", both);
+    net_until(&mut b, "both votes at B", both);
+    assert_eq!(poll_at(&a).unwrap().poll_counts(), vec![1, 1, 0]);
+    // B changes their mind while A, the author, closes the poll
+    b.apply_chat(vec![ChatAction::Vote {
+        ch,
+        msg: mid,
+        option: 2,
+    }]);
+    a.apply_chat(vec![ChatAction::ClosePoll {
+        ch,
+        msg: mid,
+        close: true,
+    }]);
+    for x in [&mut a, &mut b] {
+        x.sync_note_change();
+        x.write_shared();
+    }
+    let settled = move |x: &App| {
+        poll_at(x).is_some_and(|m| {
+            m.poll.as_ref().unwrap().closed.is_some() && m.votes.get(&mb) == Some(&vec![2])
+        })
+    };
+    net_until(&mut a, "B's new vote and the close at A", settled);
+    net_until(&mut b, "B's new vote and the close at B", settled);
+    // closed: no more votes, and only the author may close it
+    b.apply_chat(vec![
+        ChatAction::Vote {
+            ch,
+            msg: mid,
+            option: 0,
+        },
+        ChatAction::ClosePoll {
+            ch,
+            msg: mid,
+            close: false,
+        },
+    ]);
+    let m = poll_at(&b).unwrap();
+    assert_eq!(m.votes.get(&mb), Some(&vec![2]));
+    assert!(m.poll.unwrap().closed.is_some());
+    assert_eq!(poll_at(&a).unwrap().poll_counts(), vec![1, 0, 1]);
 }

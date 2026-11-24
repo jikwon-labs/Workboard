@@ -526,8 +526,8 @@ public enum Edits {
         let snapshot = data
         var done = false
         func change(_ m: inout JSON) {
-            // a huddle or call card isn't edited (the Mac app offers no Edit for it)
-            guard m["author"]?.uint == me, m["text"]?.string != text, m["call"]?.string == nil else { return }
+            // a huddle or call card or a poll isn't edited (the Mac app offers no Edit for it)
+            guard m["author"]?.uint == me, m["text"]?.string != text, m["call"]?.string == nil, m["poll"] == nil || m["poll"] == .null else { return }
             guard !text.isEmpty || standsWithoutText(m) else { return }
             let picked = (m["mentions"]?.array ?? []).compactMap(\.uint)
             Mentions.put(Mentions.chatIDs(in: text, data: snapshot, channel: channel, online: Set(picked), author: me, picked: picked), on: &m)

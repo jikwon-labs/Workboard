@@ -47,6 +47,7 @@ mod notify_tests;
 mod pages;
 mod parity;
 mod photo;
+mod polls;
 mod profile;
 mod push;
 mod schedule;
@@ -899,6 +900,8 @@ struct ChatUi {
     /// Messages of nothing but files not ready yet: they go out with the
     /// first that is (never empty to the others).
     held: Vec<HeldMessage>,
+    /// The poll the message being sent carries (polls.rs `post_poll`).
+    poll_to_send: Option<crate::model::Poll>,
     /// How many messages the open conversation draws after "Show earlier
     /// messages" (by conversation; `CHAT_PAGE` for any other).
     window: Option<(u64, usize)>,

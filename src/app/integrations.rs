@@ -25,6 +25,7 @@ pub(super) const BUILT_IN: &[(&str, &str)] = &[
     ("mute", "Turn off notifications for this channel"),
     ("unmute", "Turn notifications for this channel back on"),
     ("remind", "Remind yourself: /remind call Sam in 30 minutes"),
+    ("poll", "Ask the conversation a question with choices"),
 ];
 
 /// Examples in the address and name fields (the same in every language).
@@ -128,6 +129,10 @@ impl App {
                     self.dirty = true;
                     self.toast(tr("Topic changed"));
                 }
+                return Slash::Done;
+            }
+            "poll" => {
+                self.open_new_poll(ch, parent, rest);
                 return Slash::Done;
             }
             "mute" => {

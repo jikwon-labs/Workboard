@@ -92,7 +92,7 @@
 | 서버 → 앱 | `ai_text` / `ai_done` | 답의 조각(80ms 마다 모아서)과 끝. `ai_done` 의 `error` 는 거절·실패 이유. 멈춘 요청에는 아무것도 보내지 않는다 |
 | 양쪽 | `ping` / `pong` | 30초마다 |
 
-**필드 단위 합치기.** 같은 항목을 둘이 동시에 고쳐도 서로 다른 필드면 둘 다 남는다. 항목마다 필드별 변경 시각(`SyncMeta.fields`, 저장할 때 필드별 지문으로 알아낸다)을 두고, 같은 필드는 나중 변경이 이긴다. 반응은 (이모지, 사람)마다, 실행 중인 타이머는 사람마다 합쳐서 동시에 눌러도 둘 다 남고, 지운 반응이나 멈춘 타이머는 돌아오지 않는다. 화이트보드 획과 메모는 id 를 가진다(전에 그린 것은 모양에서 모든 기기가 같은 id 를 계산한다). 필드별 시각이 없는 예전 사본은 모든 필드를 항목의 시각으로 본다. iPhone(`Sync.swift`)도 똑같이 합친다.
+**필드 단위 합치기.** 같은 항목을 둘이 동시에 고쳐도 서로 다른 필드면 둘 다 남는다. 항목마다 필드별 변경 시각(`SyncMeta.fields`, 저장할 때 필드별 지문으로 알아낸다)을 두고, 같은 필드는 나중 변경이 이긴다. 반응은 (이모지, 사람)마다, 투표의 표는 사람마다(`votes/<사람>`), 실행 중인 타이머는 사람마다 합쳐서 동시에 눌러도 둘 다 남고, 지운 반응이나 멈춘 타이머는 돌아오지 않는다. 화이트보드 획과 메모는 id 를 가진다(전에 그린 것은 모양에서 모든 기기가 같은 id 를 계산한다). 필드별 시각이 없는 예전 사본은 모든 필드를 항목의 시각으로 본다. iPhone(`Sync.swift`)도 똑같이 합친다.
 
 **변경분(delta).** 서버는 마지막으로 알린 정본의 요약(`wb_sync::Summary`: 항목별 지문과 변경 기록)을 기억하고, 정본이 바뀌면 그 뒤로 바뀐 항목만 담은 부분 사본을 만든다. 바뀐 항목은 자기가 들어 있는 항목 안에 들어가고(바깥 항목은 자기 필드만, 안쪽은 바뀐 것만), 새 툼스톤, 되살림, 바뀐 공유 설정이 붙는다. 없는 항목은 지운 것으로 보지 않으므로 이것을 합치는 것은 전체 사본을 합치는 것과 같다. 사람마다 못 보는 항목은 빼고 보내며, 다시 볼 수 있게 된 항목(비공개 채널에 초대됨 등)은 통째로 넣는다. 앱(`wb_net` 세션, iOS `SyncClient`)도 서버가 가진 것의 요약을 두고 다른 부분만 `push` 한다. welcome 의 정본이 첫 요약이고, 받은 변경분과 보낸 push 로 갱신한다. 백업 복원은 전체 `update` 로 알려서 앱이 요약을 새로 잡고, 복원 뒤에 서버에 없는 자기 항목을 다시 올리게 한다.
 
@@ -329,6 +329,24 @@ ClickUp Brain 처럼 팀 서버가 Anthropic Claude 에게 물어 앱의 AI 도�
 - **예전 앱·예전 서버.** 동기화 형식 번호(`META_V`, iPhone `Sync.metaV`)는 그대로 5 다. 예전 Mac 앱은 `versions` 를 모르는 필드로 읽을 때 버리지만, 합친 뒤 지문을 자기가 쓰는 모양으로 다시 계산하므로 버전을 지운 것으로 보지 않는다(툼스톤 없음). 그래서 예전 앱의 사본이 들어와도 버전은 남고, 고친 본문만 들어온다(wb-sync 테스트 `a_copy_without_versions_takes_none_away`). 예전 iPhone 앱은 JSON 을 그대로 두므로 버전을 그대로 들고 다닌다. 예전 서버도 같은 일반 규칙으로 합치므로 버전을 지우지 않는다. 메시지는 바뀌지 않았다.
 - **알려진 한계.** 버전이 없는 글을 두 사람이 동시에 고치기 시작하면 "바뀌기 전 글" 버전이 둘 생긴다(내용은 같음). 글자 단위 합치기(실시간 공동 편집)는 하지 않았다.
 - **검증:** 앱 모델 6개(`src/model/doc_versions.rs`), UI 클릭 3개(`src/app/ui_tests/doc_versions.rs`: 몇 분 간격 두 번 고치기 → 목록 두 줄 → 이전 버전 읽기 전용 → 되돌리기 → 다시 되돌리기, 버전 전에 쓴 글, View 권한 문서), 한국어 화면 검사 2개 화면, wb-sync 4개(두 사람 버전 모두 남음, 버전 없는 사본, 정리한 버전, 비공개 문서), 실제 서버 통합 `doc_versions_reach_everyone_and_keep_text_a_teammate_replaced`(Mac 두 대: 버전 전달, 덮어쓴 글 버전, 되돌리기 전달, 비공개 문서), iPhone 패키지 8개(`DocVersionTests`: 규칙, 합치기, 가짜 서버로 두 폰), 시뮬레이터 UI `DocVersionsUITests`.
+
+### 채팅 음성 메시지와 투표 (2026-11-24)
+
+**음성 메시지.** 메시지 칸의 마이크 버튼으로 녹음해 보내고, 메시지 안에서 재생한다. 서버가 따로 하는 일은 없다. 녹음은 사진·파일과 같은 첨부(`attachments[]`)이고 `kind: "Audio"`, 이름 `Voice message <날짜 시각>.m4a`, `secs` 에 길이가 들어간다. 파일은 다른 첨부처럼 `files/` 에 sha256 이름으로 올라가고(Content-Type `audio/mp4`), 받는 쪽은 재생을 누를 때 내려받는다.
+
+- 형식: AAC, m4a, 모노 44.1kHz 약 64kbit/s. Mac 은 AVAudioRecorder(`src/media.rs` `Recorder`), 재생은 영상용 AVPlayer(`media::Player`). 최대 5분(`VOICE_MAX_SECS`, 넘으면 저절로 멈추고 칸에 넣는다), 0.5초 미만은 버린다. 칸에 들어간 녹음은 보내기 전에 눌러 들어 보거나 X 로 뺀다.
+- 예전 앱: `MediaKind` 의 `File` 에 `#[serde(other)]` 가 있어서 `Audio` 를 일반 파일로 읽고, 누르면 내려받기 폴더에 저장한다.
+- Windows: 녹음기가 없어 버튼을 숨기고(`os::records_audio`), 앱 안에서 재생하지 않아(`os::plays_audio`) 파일 카드로 보인다.
+- m4a·mp3·wav·aac·caf 로 끝나는 파일을 끌어 넣어도 같은 종류(`Audio`)로 보내져 Mac 에서 재생된다. 작업 첨부의 소리 파일은 예전처럼 내려받기 폴더에 저장한다.
+
+**투표.** `/poll [질문]` 이 "새 투표" 창을 연다. 질문, 선택지 2~10개, "여러 개 고르기 허용", "익명 투표" 를 정해 올린다. 메시지에 두 필드가 붙는다.
+
+- `poll: {question, options, multi?, anonymous?, closed?}`: 한 필드로 합친다(바꾸는 사람은 만든 사람뿐: 마감·다시 열기).
+- `votes: {"<사람 id>": [선택지 번호, ...]}`: 사람마다 따로 합친다. wb-sync 가 `custom` 처럼 `votes/<사람>` 부분으로 나눠 필드별 시각을 두므로 두 사람이 동시에 투표해도 둘 다 남고, 바꾼 표·취소한 표(자기 항목을 뺌)도 그대로 남는다. 익명이어도 표에는 사람 id 가 있다(사람마다 합치려면 필요). 화면에서만 누가 골랐는지 숨긴다.
+- 메시지 글(`text`)은 질문과 번호 붙인 선택지다("점심?\n1. 피자\n2. 국수"). 예전 앱은 이 글을 보여 준다. 새 앱은 글 대신 투표 카드를 그린다. 투표 메시지는 고치기(Edit)가 없다.
+- **예전 앱과 섞일 때(`META_V` 그대로 5).** 예전 앱은 `poll`·`votes` 를 모르므로 읽을 때 버리고, 받은 사본의 지문을 자기가 쓰는 모양으로 다시 만들어서(`merge_in`) 두 필드를 지운 것으로 적지 않는다. 그래서 그 사본에는 두 필드가 없고 필드별 시각도 없어 다른 사본의 것이 남는다(`read_part` 가 "알 수 없음"). 예전 엔진이 합치면서 남긴 `votes/<사람>` 시각(값 없음)이 정본과 같은 시각이 되어도 서버는 정본을 먼저 두고 합치므로 동점에서 정본이 이긴다. 없는 `votes/<사람>` 을 지운 것으로 보는 것은 그 사본에 `votes` 가 있을 때뿐이다(`omits` 로 보지 않는다. 예전 앱 사본은 늘 `omits` 라서 그러면 남의 표를 지울 수 있다). 처음부터 없던 필드라 예전 지문을 바꿀 일도 없어서 형식 번호를 올리지 않았다.
+- iPhone 합치기(`Sync+Merge.swift`, `Sync+Stamps.swift`)도 똑같이 바꿨다. 골든 데이터(`crates/wb-sync/tests/golden/workspace.json`)에 투표 메시지를 넣어 `votes/<사람>` 지문이 Mac·서버·iPhone 에서 같은지 본다.
+- **검증:** wb-sync `two_people_voting_at_once_both_keep_their_votes`, `an_app_from_before_polls_cannot_take_votes_away`(iPhone 에 같은 이름의 테스트), 서버 통합 `a_poll_takes_votes_from_two_computers_at_once`(동시 투표, 표 바꾸기와 마감이 동시에, 마감 뒤 투표·남의 마감 거부), 앱 UI 클릭 `make_a_poll_vote_change_and_close_it`, `a_poll_can_take_several_choices_and_up_to_ten`, `an_anonymous_poll_does_not_say_who_voted`. 음성은 서버 통합 `a_voice_message_goes_through_the_server_and_plays_on_the_other_computer`, UI 클릭 `record_listen_and_send_a_voice_message` 외 3개(테스트에서는 마이크 대신 길이를 정한 무음 WAV 를 만드는 녹음기를 쓴다).
 
 ### 보안 점검 (2026-11-18)
 

@@ -214,6 +214,8 @@ impl App {
             c.messages.push(Message {
                 goal: None,
                 event: None,
+                poll: None,
+                votes: Default::default(),
                 edited: None,
                 imported: None,
                 preview: None,

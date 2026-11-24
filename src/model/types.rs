@@ -501,6 +501,92 @@ pub struct Message {
     /// English and shown in the reader's language (`shown_text`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<String>,
+    /// A poll: the message's text is its question and choices written out
+    /// (what apps from before polls show), this is what newer apps draw.
+    /// Only its author changes it (closing it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<Poll>,
+    /// Who voted for what in the poll: member -> the choices picked (their
+    /// places in `Poll::options`). Merged per member (wb-sync splits it
+    /// into "votes/<member>"), so people voting at once all keep theirs and
+    /// a vote changed or taken back stays that way. Taking one's vote back
+    /// takes one's entry out.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub votes: std::collections::BTreeMap<u64, Vec<u32>>,
+}
+
+/// A poll in a message (`Message::poll`): a question and 2 to 10 choices.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Poll {
+    pub question: String,
+    pub options: Vec<String>,
+    /// More than one choice may be picked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multi: bool,
+    /// Who picked what isn't shown (the votes still say whose they are, so
+    /// each person's vote merges on its own).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub anonymous: bool,
+    /// When its author closed it: no more votes after that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<i64>,
+}
+
+/// Most and fewest choices a poll has.
+pub const POLL_MAX_OPTIONS: usize = 10;
+pub const POLL_MIN_OPTIONS: usize = 2;
+
+impl Message {
+    /// Votes for each choice of the poll, in order (0s without a poll).
+    pub fn poll_counts(&self) -> Vec<usize> {
+        let n = self.poll.as_ref().map_or(0, |p| p.options.len());
+        let mut out = vec![0; n];
+        for picks in self.votes.values() {
+            for &i in picks {
+                if let Some(c) = out.get_mut(i as usize) {
+                    *c += 1;
+                }
+            }
+        }
+        out
+    }
+
+    /// Pick or unpick choice `i` of the poll for `me`: one choice at a time
+    /// unless the poll takes several, picking the one already picked takes
+    /// it back. False when there's nothing to change (no poll, closed, no
+    /// such choice).
+    pub fn toggle_vote(&mut self, me: u64, i: u32) -> bool {
+        let Some(p) = &self.poll else {
+            return false;
+        };
+        if p.closed.is_some() || i as usize >= p.options.len() {
+            return false;
+        }
+        let multi = p.multi;
+        let mut picks = self.votes.remove(&me).unwrap_or_default();
+        if let Some(at) = picks.iter().position(|&x| x == i) {
+            picks.remove(at);
+        } else if multi {
+            picks.push(i);
+            picks.sort_unstable();
+        } else {
+            picks = vec![i];
+        }
+        if !picks.is_empty() {
+            self.votes.insert(me, picks);
+        }
+        true
+    }
+}
+
+/// What a poll message says in its text: the question and its choices
+/// numbered, so apps that don't know polls still show something readable.
+pub fn poll_text(question: &str, options: &[String]) -> String {
+    let mut s = question.trim().to_string();
+    for (i, o) in options.iter().enumerate() {
+        s.push_str(&format!("\n{}. {}", i + 1, o.trim()));
+    }
+    s
 }
 
 /// The message a forwarded one carries: what it said, who wrote it, when

@@ -87,6 +87,8 @@ fn huddle_bar_shows_people_mute_and_leave() {
     h.app.data.channels[0].messages.push(Message {
         goal: None,
         event: None,
+        poll: None,
+        votes: Default::default(),
         edited: None,
         imported: None,
         preview: None,

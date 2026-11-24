@@ -149,6 +149,10 @@ extension Sync {
                 counts = sd.omits || (sd.obj["time_entries"].map { !isEmptyArr($0) } ?? false)
             } else if f == "custom" && part != f {
                 counts = sd.omits || (sd.obj["custom"]?.object.map { !$0.isEmpty } ?? false)
+            } else if f == "votes" && part != f {
+                // only a copy that has votes can have taken one away: an
+                // app from before polls leaves the field out
+                counts = sd.obj["votes"]?.object.map { !$0.isEmpty } ?? false
             } else if f == "timers" && part != f {
                 let m = UInt64(part.dropFirst("timers/".count)) ?? 0
                 // an app that doesn't know `timers` can't have stopped one there
@@ -199,6 +203,7 @@ extension Sync {
         var timers: [(UInt64, Int64)] = []
         var entries: [(String, JSON)] = []
         var custom: [String: JSON] = [:]
+        var votes: [String: JSON] = [:]
         var loose: [String: JSON] = [:]
         for p in order {
             var win: (Int64, Side, JSON?)?
@@ -221,6 +226,9 @@ extension Sync {
             } else if f == "custom" && p != f {
                 decided.insert("custom")
                 if let v = val { custom[String(p.dropFirst("custom/".count))] = v }
+            } else if f == "votes" && p != f {
+                decided.insert("votes")
+                if let v = val { votes[String(p.dropFirst("votes/".count))] = v }
             } else if f == "reactions" && p != f {
                 decided.insert("reactions")
                 let rest = p.dropFirst("reactions/".count)
@@ -278,6 +286,10 @@ extension Sync {
         }
         if decided.contains("custom") && (!custom.isEmpty || sides.contains(where: { $0.obj["custom"] != nil })) {
             obj["custom"] = .object(custom)
+        }
+        // a poll's votes, one per person (wb_sync put_votes)
+        if decided.contains("votes") && (!votes.isEmpty || sides.contains(where: { $0.obj["votes"] != nil })) {
+            obj["votes"] = .object(votes)
         }
         if anyEntry {
             if baseOut != stamp { entry[""] = baseOut }

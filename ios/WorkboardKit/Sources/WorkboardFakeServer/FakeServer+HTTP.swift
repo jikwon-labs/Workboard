@@ -73,7 +73,7 @@ extension FakeServer {
                 let author = q("author").flatMap { UInt64($0) } ?? 2
                 var snap = snapshot ?? [:]
                 let id = UInt64(Date().timeIntervalSince1970 * 1000) * 1024 + 1023
-                // &file=NAME sends a file (&kind=Image: a small picture;
+                // &poll=... sends a poll (below); &file=NAME sends a file (&kind=Image: a small picture;
                 // &kind=Audio: a few seconds of silence as a WAV, so NAME
                 // should end in .wav), kept here so the app can fetch it;
                 // &reply=ID sends it as a reply in that message's thread
@@ -91,7 +91,20 @@ extension FakeServer {
                         : FileAPI.fileAttachment(sha: sha, name: name, bytes: bytes.count))
                 }
                 let text = q("text") ?? (attachments.isEmpty ? "Hello" : "")
-                if let parent = q("reply").flatMap({ UInt64($0) }) {
+                if let spec = q("poll") {
+                    // &poll=Question|Choice|Choice (&multi=1, &anonymous=1):
+                    // a poll, with &votes=3:0;4:0,1 already in it
+                    let parts = spec.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+                    Edits.sendPoll(&snap, channel: ch, parent: q("reply").flatMap { UInt64($0) }, question: parts.first ?? "", options: Array(parts.dropFirst()),
+                                   multi: q("multi") == "1", anonymous: q("anonymous") == "1", me: author, id: id, ts: nowTs())
+                    for entry in (q("votes") ?? "").split(separator: ";") {
+                        let kv = entry.split(separator: ":")
+                        guard kv.count == 2, let who = UInt64(kv[0]) else { continue }
+                        for i in kv[1].split(separator: ",").compactMap({ Int($0) }) {
+                            Edits.vote(&snap, channel: ch, message: id, option: i, me: who)
+                        }
+                    }
+                } else if let parent = q("reply").flatMap({ UInt64($0) }) {
                     Edits.sendReply(&snap, channel: ch, to: parent, text: text, attachments: attachments, me: author, id: id, ts: nowTs())
                 } else {
                     Edits.sendMessage(&snap, channel: ch, text: text, attachments: attachments, me: author, id: id, ts: nowTs())

@@ -478,6 +478,8 @@ fn test_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
     Message {
         goal: None,
         event: None,
+        poll: None,
+        votes: Default::default(),
         mentions: vec![],
         id,
         author,
@@ -618,6 +620,8 @@ fn chat_msg(id: u64, author: u64, text: &str, ts: i64) -> Message {
     Message {
         goal: None,
         event: None,
+        poll: None,
+        votes: Default::default(),
         mentions: vec![],
         id,
         author,

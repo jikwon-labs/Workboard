@@ -1123,3 +1123,68 @@ final class FieldMergeTests: XCTestCase {
         XCTAssertEqual(ma.values["extra.slack_map/UB"], 2000)
     }
 }
+
+/// A poll's votes merge per person (wb_sync tests of the same names).
+extension FieldMergeTests {
+    func pollChat(_ votes: JSON?) -> JSON {
+        var m: [String: JSON] = ["id": 11, "author": 1, "text": "Lunch?\n1. Pizza\n2. Noodles", "ts": 5,
+                                 "poll": ["question": "Lunch?", "options": ["Pizza", "Noodles", "Salad"]]]
+        if let votes { m["votes"] = votes }
+        return [["id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [.object(m)]]]
+    }
+
+    func setMessage(_ v: inout JSON, _ k: String, _ x: JSON?) {
+        var chans = v["channels"]!.array!
+        var msgs = chans[0]["messages"]!.array!
+        msgs[0][k] = x
+        chans[0]["messages"] = .array(msgs)
+        v["channels"] = .array(chans)
+    }
+
+    func votes(_ v: JSON) -> JSON { v.at("channels")?[0]?["messages"]?[0]?["votes"] ?? [:] }
+
+    func testTwoPeopleVotingAtOnceBothKeepTheirVotes() {
+        var ma = SyncMeta()
+        var a = ws([], pollChat([:]), ma)
+        save(&a, &ma, 10)
+        var (b, mb) = (a, ma)
+        setMessage(&a, "votes", ["1": [0]])
+        save(&a, &ma, 20)
+        setMessage(&b, "votes", ["2": [1, 2]])
+        save(&b, &mb, 20)
+        swap(&a, &b)
+        for v in [a, b] { XCTAssertEqual(votes(v), ["1": [0], "2": [1, 2]]) }
+        XCTAssertEqual(Sync.fingerprints(a), Sync.fingerprints(b))
+        // A changes their vote while B, not knowing, takes theirs back
+        ma = SyncMeta(of: a)
+        mb = SyncMeta(of: b)
+        ma.fieldHashes = Sync.partHashes(a)
+        mb.fieldHashes = Sync.partHashes(b)
+        setMessage(&a, "votes", ["1": [2], "2": [1, 2]])
+        save(&a, &ma, 40)
+        setMessage(&b, "votes", ["1": [0]])
+        save(&b, &mb, 50)
+        swap(&a, &b)
+        for v in [a, b] { XCTAssertEqual(votes(v), ["1": [2]]) }
+    }
+
+    func testAnAppFromBeforePollsCannotTakeVotesAway() {
+        var ma = SyncMeta()
+        var canon = ws([], pollChat([:]), ma)
+        save(&canon, &ma, 10)
+        setMessage(&canon, "votes", ["2": [1]])
+        save(&canon, &ma, 20)
+        var old = canon
+        setMessage(&old, "poll", nil)
+        setMessage(&old, "votes", nil)
+        var mo = SyncMeta(of: canon)
+        mo.fieldHashes = Sync.partHashes(old)
+        mo.hashes = Sync.fingerprints(old)
+        setMessage(&old, "text", "Lunch? (edited)")
+        save(&old, &mo, 30)
+        Sync.merge(&canon, [old])
+        XCTAssertEqual(canon.at("channels")?[0]?["messages"]?[0]?["text"], "Lunch? (edited)")
+        XCTAssertEqual(votes(canon), ["2": [1]])
+        XCTAssertEqual(canon.at("channels")?[0]?["messages"]?[0]?["poll"]?["question"], "Lunch?")
+    }
+}

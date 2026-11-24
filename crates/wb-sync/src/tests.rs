@@ -2305,3 +2305,88 @@ fn a_private_docs_versions_are_hidden_with_it() {
     let m = meta_of(&d);
     assert!(!m.stamps.contains_key(&801) && m.stamps.contains_key(&901));
 }
+
+fn poll_chat(votes: Value) -> Value {
+    json!([{"id": 10, "name": "general", "kind": "Channel", "members": [], "messages": [{"id": 11, "author": 1, "text": "Lunch?\n1. Pizza\n2. Noodles", "ts": 5, "poll": {"question": "Lunch?", "options": ["Pizza", "Noodles", "Salad"]}, "votes": votes}]}])
+}
+
+fn votes_of(v: &Value) -> Value {
+    v["channels"][0]["messages"][0]
+        .get("votes")
+        .cloned()
+        .unwrap_or(json!({}))
+}
+
+#[test]
+fn two_people_voting_at_once_both_keep_their_votes() {
+    let mut ma = SyncMeta::default();
+    let mut a = ws(json!([]), poll_chat(json!({})), &ma);
+    save(&mut a, &mut ma, 10);
+    let (mut b, mut mb) = (a.clone(), ma.clone());
+    a["channels"][0]["messages"][0]["votes"] = json!({"1": [0]});
+    save(&mut a, &mut ma, 20);
+    b["channels"][0]["messages"][0]["votes"] = json!({"2": [1, 2]});
+    save(&mut b, &mut mb, 20);
+    swap(&mut a, &mut b);
+    for v in [&a, &b] {
+        assert_eq!(votes_of(v), json!({"1": [0], "2": [1, 2]}));
+    }
+    assert_eq!(fingerprints(&a), fingerprints(&b));
+    let e = &meta_of(&a).fields[&11];
+    assert!(
+        e.contains_key("votes/1") && e.contains_key("votes/2"),
+        "{:?}",
+        e
+    );
+    // A changes their vote while B, not knowing, takes theirs back
+    let (mut ma, mut mb) = (meta_of(&a), meta_of(&b));
+    ma.field_hashes = part_hashes(&a);
+    mb.field_hashes = part_hashes(&b);
+    a["channels"][0]["messages"][0]["votes"] = json!({"1": [2], "2": [1, 2]});
+    save(&mut a, &mut ma, 40);
+    b["channels"][0]["messages"][0]["votes"] = json!({"1": [0]});
+    save(&mut b, &mut mb, 50);
+    swap(&mut a, &mut b);
+    for v in [&a, &b] {
+        assert_eq!(votes_of(v), json!({"1": [2]}), "{}", v["channels"][0]);
+    }
+    // the poll itself (closed by its author) merges as one field
+    let mut ma = meta_of(&a);
+    ma.field_hashes = part_hashes(&a);
+    a["channels"][0]["messages"][0]["poll"]["closed"] = json!(60);
+    save(&mut a, &mut ma, 60);
+    swap(&mut a, &mut b);
+    assert_eq!(b["channels"][0]["messages"][0]["poll"]["closed"], 60);
+    assert_eq!(votes_of(&b), json!({"1": [2]}));
+}
+
+#[test]
+fn an_app_from_before_polls_cannot_take_votes_away() {
+    let mut ma = SyncMeta::default();
+    let mut canon = ws(json!([]), poll_chat(json!({})), &ma);
+    save(&mut canon, &mut ma, 10);
+    canon["channels"][0]["messages"][0]["votes"] = json!({"2": [1]});
+    save(&mut canon, &mut ma, 20);
+    // an older app's copy: it dropped `poll` and `votes` when it read the
+    // file, kept the stamp the merge gave it for B's vote, and edited the
+    // text later
+    let mut old = canon.clone();
+    let m = old["channels"][0]["messages"][0].as_object_mut().unwrap();
+    m.remove("poll");
+    m.remove("votes");
+    let mut mo = meta_of(&canon);
+    mo.field_hashes = part_hashes(&old);
+    mo.hashes = fingerprints(&old);
+    old["channels"][0]["messages"][0]["text"] = json!("Lunch? (edited)");
+    save(&mut old, &mut mo, 30);
+    // the server merges every copy into its own, which goes first
+    merge(&mut canon, &[old.clone()]);
+    let msg = &canon["channels"][0]["messages"][0];
+    assert_eq!(msg["text"], "Lunch? (edited)");
+    assert_eq!(votes_of(&canon), json!({"2": [1]}), "{}", msg);
+    assert_eq!(msg["poll"]["question"], "Lunch?");
+    // and a newer app taking that copy in keeps them too
+    let mut b = canon.clone();
+    merge(&mut b, &[old]);
+    assert_eq!(votes_of(&b), json!({"2": [1]}));
+}

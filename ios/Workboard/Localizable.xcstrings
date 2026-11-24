@@ -412,6 +412,16 @@
         }
       }
     },
+    "%lld people voted": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld명 투표"
+          }
+        }
+      }
+    },
     "%lld photos": {
       "localizations": {
         "ko": {
@@ -523,6 +533,16 @@
         }
       }
     },
+    "+ Add a choice": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+ 선택지 추가"
+          }
+        }
+      }
+    },
     "/ %@ %@": {},
     "0": {},
     "1 change": {
@@ -606,6 +626,16 @@
         }
       }
     },
+    "1 person voted": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1명 투표"
+          }
+        }
+      }
+    },
     "1 reply": {
       "localizations": {
         "ko": {
@@ -664,6 +694,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "새 스페이스"
+          }
+        }
+      }
+    },
+    "Allow more than one choice": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "여러 개 고르기 허용"
+          }
+        }
+      }
+    },
+    "Anonymous": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "익명"
+          }
+        }
+      }
+    },
+    "Anonymous votes": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "익명 투표"
           }
         }
       }
@@ -1121,6 +1181,26 @@
         }
       }
     },
+    "Ask something...": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "무엇을 물어볼까요..."
+          }
+        }
+      }
+    },
+    "Ask the conversation a question with choices": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "선택지가 있는 질문으로 투표 만들기"
+          }
+        }
+      }
+    },
     "Asking the server…": {
       "localizations": {
         "ko": {
@@ -1520,6 +1600,26 @@
         }
       }
     },
+    "Choice %lld": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "선택지 %lld"
+          }
+        }
+      }
+    },
+    "Choices": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "선택지"
+          }
+        }
+      }
+    },
     "Choose": {
       "localizations": {
         "ko": {
@@ -1627,6 +1727,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "닫기"
+          }
+        }
+      }
+    },
+    "Close poll": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "투표 마감"
           }
         }
       }
@@ -1940,6 +2050,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "채널 만들기"
+          }
+        }
+      }
+    },
+    "Create poll": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "투표 만들기"
           }
         }
       }
@@ -4272,6 +4392,16 @@
         }
       }
     },
+    "New poll": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 투표"
+          }
+        }
+      }
+    },
     "New post": {
       "localizations": {
         "ko": {
@@ -4633,6 +4763,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "아직 버전이 없습니다"
+          }
+        }
+      }
+    },
+    "No votes": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "투표 없음"
           }
         }
       }
@@ -5250,6 +5390,26 @@
         }
       }
     },
+    "Pick one": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "하나를 고르세요"
+          }
+        }
+      }
+    },
+    "Pick one or more": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "하나 이상 고르세요"
+          }
+        }
+      }
+    },
     "Picture %@": {
       "localizations": {
         "ko": {
@@ -5329,6 +5489,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "컴퓨터에 뜬 QR 코드에 카메라를 맞추세요(컴퓨터의 함께 작업하기 > 휴대폰에서 로그인)."
+          }
+        }
+      }
+    },
+    "Poll closed": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "마감됨"
           }
         }
       }
@@ -5484,6 +5654,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "넣을 곳"
+          }
+        }
+      }
+    },
+    "Question": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "질문"
           }
         }
       }
@@ -5719,6 +5899,16 @@
         }
       }
     },
+    "Remove choice": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "선택지 지우기"
+          }
+        }
+      }
+    },
     "Remove due date": {
       "localizations": {
         "ko": {
@@ -5846,6 +6036,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "다시 열기"
+          }
+        }
+      }
+    },
+    "Reopen poll": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "투표 다시 열기"
           }
         }
       }
@@ -6473,6 +6673,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "비밀번호 보기"
+          }
+        }
+      }
+    },
+    "Show votes": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "투표한 사람 보기"
           }
         }
       }
@@ -8128,6 +8338,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "음성 메시지는 5분까지 녹음할 수 있습니다."
+          }
+        }
+      }
+    },
+    "Vote %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@에 투표"
           }
         }
       }

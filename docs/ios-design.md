@@ -399,6 +399,16 @@ workboard://join?server=<host[:port]>&code=<XXXX-XXXX-XXXX>&email=<선택>
 - 로그인 없는 서버에서는 "이 iPhone 에만 저장" 안내와 섞이지 않게 두 줄을 따로 묶는다.
 - **검증:** `ProfileTests` 6개, `PictureConvertTests` 2개 추가. UI 테스트 `ProfileUITests` 4개(18789 가짜 서버)는 썼지만 이 MacBook 의 Xcode 16.4 에서는 XCUITest 실행기가 시작하지 않아 돌리지 못했다. 대신 시뮬레이터에 앱을 깔고 `orca computer` 로 눌러 사진 올리기(임시 코드로 파일을 고른 사진처럼 넣음)·저장·상태 저장/지우기가 서버에 닿는 것, 다른 사람 사진·상태가 DM·Teams 에 나오는 것, 한국어 화면을 확인했다.
 
+## 채팅 음성 메시지와 투표 (2026-11-24)
+
+맥과 같은 기능이다. 데이터 모양과 합치기는 `docs/server-design.md` "채팅 음성 메시지와 투표".
+
+- **음성 메시지** (`VoiceViews.swift`, 규칙은 WorkboardKit `Voice.swift`): 채널·스레드 입력창의 마이크 버튼으로 녹음한다(AAC m4a, 모노 44.1kHz 64kbps, 최대 5분, 0.5초 미만은 버림). 녹음 바에서 멈추면 입력창에 칩으로 들어가 보내기 전에 들어 보거나 뺀다. 첨부는 `kind: "Audio"`(`FileAPI.audioAttachment`, Content-Type `audio/mp4`). 메시지 안에서는 재생/일시정지, 진행 막대(눌러서 이동), 길이를 보이는 카드이고, 누를 때 내려받는다. 한 번에 하나만 재생한다. 허들 중에는 녹음을 막는다. 녹음 중 화면을 떠나면 그 녹음은 버린다. Files 에서 고른 m4a·mp3·wav·aac·caf 도 소리로 보낸다. 마이크 권한 문구에 음성 메시지를 더했다.
+- **투표** (`PollViews.swift`, 규칙과 편집은 WorkboardKit `Polls.swift`): `/poll [질문]` 이 새 투표 창을 연다(질문, 선택지 2~10개, 여러 개 고르기, 익명). 메시지에 `poll` 이 있으면 글 대신 카드를 그린다. 선택지를 누르면 표를 넣고, 다시 누르면 거둔다. 하나만 고르는 투표는 다른 것을 누르면 옮긴다. `Edits.vote` 는 내 키만 바꾸고 마지막 표를 거두면 `votes` 를 뺀다. 익명이 아니면 "Show votes" 시트에 선택지별 이름이 나온다. 만든 사람만 마감·다시 열기(`Edits.closePoll`). 투표 메시지는 Edit 이 없다(`editMessage` 도 거부).
+- **합치기**: `Sync+Stamps.swift` 가 `votes` 를 `votes/<사람>` 부분으로 나누고, `Sync+Merge.swift` 가 사람마다 합친다(wb_sync `put_votes` 와 같다). `votes` 가 없는 사본(투표를 모르는 앱)은 남의 표를 지운 것으로 치지 않는다.
+- **가짜 서버**: `/admin/say` 에 `&kind=Audio`(4초 무음 WAV), `&poll=질문|A|B&multi=1&anonymous=1&votes=3:0;4:0,1` 를 붙여 UI 테스트용 메시지를 올린다.
+- **검증:** `swift test` 349개(그중 `VoiceTests`, `PollTests` 8개, 합치기 `testTwoPeopleVotingAtOnceBothKeepTheirVotes`·`testAnAppFromBeforePollsCannotTakeVotesAway`, 골든 지문에 투표 메시지 3004). UI 테스트 `VoiceMessagesUITests` 3개, `PollsUITests` 2개(iPhone 17 시뮬레이터). 녹음 UI 테스트는 시뮬레이터에 마이크 권한이 미리 있어야 한다: `xcrun simctl privacy <기기> grant microphone com.seojigwon.workboard`. 실기기 녹음, 블루투스 이어폰, 홈의 빠른 "새 메시지" 시트에서 `/poll` 은 확인하지 못했다.
+
 ## 설계와 달라진 점
 
 1. **merge 도 Swift 로 옮겼다(1단계 설계 6번 변경).** 프로토콜에 "push 가 반영됐다"는 확인이 없어서, 다시 얹을 변경을 언제 지울지 알 수 없었다. 이제 iOS 는 맥 앱처럼 `merge(내 것, [정본])` 을 한다. Rust 정적 라이브러리 방식은 크로스 컴파일과 FFI 부담에 비해 이득이 적어 쓰지 않았다.

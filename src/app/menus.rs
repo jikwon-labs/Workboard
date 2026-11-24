@@ -96,6 +96,8 @@ pub(super) enum Modal {
         date: Option<NaiveDate>,
         time: String,
     },
+    /// Write a poll for a conversation ("/poll", polls.rs).
+    NewPoll(super::polls::PollDraft),
     /// Forward message `msg` of channel `ch` to another conversation.
     Forward {
         ch: u64,
@@ -1562,6 +1564,7 @@ impl App {
             Modal::ScheduleAt { .. } => tr("Schedule message").into(),
             Modal::Camera { .. } => tr("Take a photo").into(),
             Modal::Forward { .. } => tr("Forward message").into(),
+            Modal::NewPoll(_) => tr("New poll").into(),
             Modal::Share { .. } => tr("Share").into(),
             Modal::CustomizeNav => tr("Customize navigation").into(),
             Modal::CustomizeSidebar => tr("Customize your sidebar").into(),
@@ -1792,6 +1795,7 @@ impl App {
             }
             Modal::ScheduleAt { date, time } => close = self.schedule_at_body(ui, t, date, time),
             Modal::Camera { thread } => close = self.camera_body(ui, t, *thread),
+            Modal::NewPoll(d) => close = self.new_poll_body(ui, t, d),
             Modal::Forward { ch, msg, to, note } => {
                 close = self.forward_body(ui, *ch, *msg, to, note);
             }

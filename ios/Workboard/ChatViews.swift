@@ -679,7 +679,10 @@ struct MessageRow: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("viewThread-\(message.id)")
             }
-            if !message.text.isEmpty || message.edited != nil {
+            if let poll = message.poll {
+                // drawn instead of the text (the question and choices written out)
+                PollCard(message: message, poll: poll, channelId: channelId)
+            } else if !message.text.isEmpty || message.edited != nil {
                 ChatText(text: message.text, edited: message.edited != nil)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("messageText-\(message.id)")
@@ -753,7 +756,7 @@ struct MessageRow: View {
                 }
             }
             Section {
-                // huddle and call cards aren't edited, as on the Mac
+                // huddle and call cards and polls aren't edited, as on the Mac
                 if message.isEditable(by: client.me) {
                     Button { draft = message.text; editing = true } label: { Label("Edit message", systemImage: "pencil") }
                 }

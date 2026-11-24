@@ -19,7 +19,7 @@ final class ChatCommandsTests: XCTestCase {
         XCTAssertEqual(SlashCommands.parse("/usr/bin is full", commands: []), P.plain)
         XCTAssertEqual(SlashCommands.parse("hello", commands: []), P.plain)
         XCTAssertEqual(SlashCommands.choices("/de", commands: [deploy]).map(\.0), ["deploy"])
-        XCTAssertEqual(SlashCommands.choices("/", commands: [deploy]).count, 7)
+        XCTAssertEqual(SlashCommands.choices("/", commands: [deploy]).count, 8)
         XCTAssertTrue(SlashCommands.choices("/deploy v2", commands: [deploy]).isEmpty)
     }
 

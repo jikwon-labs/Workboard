@@ -184,8 +184,8 @@ impl<'a> Ctx<'a> {
                     return false;
                 }
                 let present = match k.split_once('/') {
-                    Some(("custom", key)) => obj
-                        .get("custom")
+                    Some((f @ ("custom" | "votes"), key)) => obj
+                        .get(f)
                         .and_then(|c| c.as_object())
                         .is_some_and(|c| c.contains_key(key)),
                     Some(("reactions", pair)) => pairs
@@ -404,6 +404,14 @@ pub(crate) fn read_part(
                         .and_then(|v| v.as_object())
                         .is_some_and(|o| !o.is_empty())
             }
+            // only a copy that has votes can have taken one away: an app
+            // from before polls leaves the field out (and its copy always
+            // "omits defaults"), and must not take the team's votes away
+            Some(("votes", _)) => sd
+                .obj
+                .get("votes")
+                .and_then(|v| v.as_object())
+                .is_some_and(|o| !o.is_empty()),
             Some(("timers", m)) => {
                 let m: u64 = m.parse().unwrap_or(0);
                 // an app that doesn't know `timers` can't have stopped one there
@@ -510,6 +518,7 @@ pub(crate) fn merge_fields<'a>(
     let mut timers: Vec<(u64, i64)> = vec![];
     let mut entries: Vec<(&str, Value)> = vec![];
     let mut custom = Map::new();
+    let mut votes = Map::new();
     let mut loose = HashMap::new();
     for p in order {
         let mut win: Option<(i64, &Side, Option<&Value>)> = None;
@@ -554,6 +563,12 @@ pub(crate) fn merge_fields<'a>(
                     custom.insert(key.to_string(), v.clone());
                 }
             }
+            Some(("votes", key)) => {
+                decided.insert("votes".into());
+                if let Some(v) = val {
+                    votes.insert(key.to_string(), v.clone());
+                }
+            }
             Some(("timers", _)) => {
                 for k in TIMER_KEYS {
                     decided.insert(k.to_string());
@@ -592,6 +607,9 @@ pub(crate) fn merge_fields<'a>(
     }
     if decided.contains("custom") {
         put_custom(&mut obj, custom, &sides);
+    }
+    if decided.contains("votes") {
+        put_votes(&mut obj, votes, &sides);
     }
     if any_entry {
         if base_out != stamp {
@@ -682,6 +700,15 @@ fn put_time_entries(obj: &mut Map<String, Value>, mut entries: Vec<(&str, Value)
 fn put_custom(obj: &mut Map<String, Value>, custom: Map<String, Value>, sides: &[Side]) {
     if !custom.is_empty() || sides.iter().any(|sd| sd.obj.contains_key("custom")) {
         obj.insert("custom".into(), Value::Object(custom));
+    }
+}
+
+/// The merged votes of a poll, one per person (`"votes": {"<member>":
+/// [option, ...]}` on a message), into `obj`: two people voting at once
+/// both keep theirs, and a vote changed or taken back stays that way.
+fn put_votes(obj: &mut Map<String, Value>, votes: Map<String, Value>, sides: &[Side]) {
+    if !votes.is_empty() || sides.iter().any(|sd| sd.obj.contains_key("votes")) {
+        obj.insert("votes".into(), Value::Object(votes));
     }
 }
 

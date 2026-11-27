@@ -251,8 +251,12 @@ pub fn open_path(p: impl AsRef<std::ffi::OsStr>) {
 
 /// Open the system's notification settings, where Workboard's banners are
 /// allowed or turned off: System Settings > Notifications on macOS, Settings
-/// > System > Notifications on Windows. Elsewhere nothing opens.
+/// > System > Notifications on Windows, the app's page in Settings on the
+/// iPad. Elsewhere nothing opens.
 pub fn open_notification_settings() {
+    // the iPad: Workboard Desk's page in Settings, where its notifications are
+    #[cfg(target_os = "ios")]
+    ios::open_app_settings();
     #[cfg(target_os = "macos")]
     open_path("x-apple.systempreferences:com.apple.Notifications-Settings.extension");
     #[cfg(windows)]
@@ -779,6 +783,15 @@ pub fn adopt_scenes() {
     ios::adopt_scenes();
 }
 
+/// iPad: hang up the server connections while the app is in the
+/// background (wb_net::set_away), where iOS soon stops it and it tells
+/// nothing itself, so the team server pushes its notifications instead;
+/// they come back by themselves with the app. Does nothing elsewhere.
+pub fn follow_background() {
+    #[cfg(target_os = "ios")]
+    ios::follow_background();
+}
+
 /// The app's window, for `adopt_scenes` (iPad only).
 pub fn attach_window(cc: &eframe::CreationContext<'_>) {
     #[cfg(target_os = "ios")]
@@ -856,6 +869,40 @@ mod ios {
     unsafe fn objc_string(s: &str) -> *mut Object {
         let c = std::ffi::CString::new(s).unwrap();
         msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()]
+    }
+
+    pub fn follow_background() {
+        // SAFETY: NSNotificationCenter with blocks kept for the life of the
+        // app (the center copies them; these copies are never freed)
+        unsafe {
+            let center: *mut Object = msg_send![class!(NSNotificationCenter), defaultCenter];
+            for (name, away) in [
+                ("UIApplicationDidEnterBackgroundNotification", true),
+                ("UIApplicationWillEnterForegroundNotification", false),
+            ] {
+                let block = ConcreteBlock::new(move |_note: *mut Object| {
+                    wb_net::set_away(away);
+                })
+                .copy();
+                let _: *mut Object = msg_send![center, addObserverForName: objc_string(name) object: null_mut::<Object>() queue: null_mut::<Object>() usingBlock: &*block];
+                std::mem::forget(block);
+            }
+        }
+    }
+
+    /// The app's page in Settings (its notifications are there).
+    pub fn open_app_settings() {
+        // SAFETY: UIApplication's own constant and openURL on the main thread
+        unsafe {
+            let url: *mut Object =
+                msg_send![class!(NSURL), URLWithString: objc_string("app-settings:")];
+            if url.is_null() {
+                return;
+            }
+            let app: *mut Object = msg_send![class!(UIApplication), sharedApplication];
+            let options: *mut Object = msg_send![class!(NSDictionary), dictionary];
+            let _: () = msg_send![app, openURL: url options: options completionHandler: null_mut::<Object>()];
+        }
     }
 
     pub fn adopt_scenes() {

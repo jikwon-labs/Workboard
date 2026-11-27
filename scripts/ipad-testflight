@@ -43,7 +43,7 @@ archive="$out/Desk.xcarchive"
 echo "ipad-testflight: archiving (the iPhone app's project, as $bundle $version)"
 xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard -configuration Release \
     -destination 'generic/platform=iOS' -archivePath "$archive" -derivedDataPath "$out/dd" \
-    -allowProvisioningUpdates PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGN_ENTITLEMENTS= \
+    -allowProvisioningUpdates PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGN_ENTITLEMENTS=ios/Config/Workboard.entitlements \
     MARKETING_VERSION="$version" archive >"$out/archive.log" 2>&1 ||
     { grep -E "error" "$out/archive.log" | tail -20 >&2; exit 1; }
 
@@ -73,6 +73,7 @@ PY
 plutil -lint "$plist" >/dev/null
 
 # signed again for development, so Xcode can read the app's entitlements
+# (push notifications too: the export makes "development" "production")
 cat >"$out/entitlements.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -84,6 +85,8 @@ cat >"$out/entitlements.plist" <<PLIST
 	<string>$team</string>
 	<key>get-task-allow</key>
 	<true/>
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>
 PLIST

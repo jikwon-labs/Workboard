@@ -43,7 +43,7 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 
 시뮬레이터 주의: 화면 키보드의 내리기 키를 누르거나 `type:` 으로 글자를 보내면 그 시뮬레이터는 "외부 키보드 연결" 상태가 되어, 다시 켜도 어느 앱에서도 화면 키보드가 안 뜬다(설정 앱도 같다). 키보드를 시험할 때는 새 시뮬레이터를 만들고(`xcrun simctl create`) 화면 자판을 `tap` 으로 누른다.
 
-걸음: `tap:x,y`, `drag:x1,y1,x2,y2`, `type:글자`, `portrait`, `landscape`, `wait:초`. 좌표는 가로 화면 기준 포인트(1133 x 744). 스크린샷은 `xcrun xcresulttool export attachments` 로 꺼낸다.
+걸음: `tap:x,y`, `drag:x1,y1,x2,y2`, `type:글자`, `portrait`, `landscape`, `wait:초`, `banner:글자`(그 글자가 든 알림 배너를 누른다. 배너는 SpringBoard 가 그려서 `tap` 으로는 닿지 않는다). 좌표는 가로 화면 기준 포인트(1133 x 744). 스크린샷은 `xcrun xcresulttool export attachments` 로 꺼낸다.
 
 ## 시험에서 확인한 것 (iPad mini 시뮬레이터)
 
@@ -57,10 +57,22 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 
 - 손가락(2026-11-22): egui-winit 은 첫 손가락을 마우스로 바꿔서, 사이드바를 쓸면 줄 끌기가 잡혀 스크롤이 안 됐다. `src/app/touch.rs` 가 egui 보다 먼저 입력을 고친다. 바로 움직이면 스크롤(빠르게 쓸면 관성), 움직이지 않고 떼면 클릭, 0.35초 누르고 있다가 움직이면 예전처럼 끌기. 손가락을 대고 있는 동안에는 그 줄이 hover 처럼 밝아진다.
 
+## 알림 (2026-11-27)
+
+맥 앱과 같은 알림이 온다(`src/notifier.rs` 의 `apple` 모듈을 맥과 같이 쓴다).
+
+- 앱이 켜져 있을 때: 앱 안 토스트. 앱 아이콘 숫자는 받은 편지함과 안 읽은 DM(설정 > 알림 "앱 아이콘에 안 읽은 수 표시").
+- 앱이 백그라운드이거나 꺼져 있을 때: 팀 서버가 Apple 푸시로 보낸다. 앱은 플랫폼 `ipados` 로 토큰을 보내고, 서버는 iPad 번들 ID(`com.seojigwon.workboard.desk`, apns.json 의 `topic` 에 ".desk")로 보낸다. 백그라운드로 가면 서버 연결을 끊는다(`wb_net::set_away`, `os::follow_background`). 붙어 있으면 서버는 "앱이 직접 알린다"고 보고 푸시를 안 보내는데, 백그라운드의 앱은 화면을 그리지 않아 알림도 계산하지 않기 때문이다. 앞으로 오면 다시 붙는다.
+- 마감·회의·목표·리마인더는 맥처럼 미리 iOS 에 예약한다(`plan_clock`).
+- 배너를 누르면 그 작업·대화·목표가 열린다.
+- 푸시 토큰의 환경: 실기기 개발 빌드(`scripts/ipad-device`)는 프로파일의 `aps-environment` 로 development, 시뮬레이터도 development, TestFlight 는 production(`notifier::push_env`). 서명 스크립트 셋 모두 푸시 권한을 넣는다. 시뮬레이터는 권한을 서명에 넣으면 앱을 띄우지 않아서 실행 파일 안(`__TEXT,__entitlements`)에 넣는다(`build.rs`).
+- winit 은 iPad 에서 앱 delegate 를 두지 않아, 푸시 토큰을 받는 delegate(`WBPushDelegate`)를 직접 건다.
+- 2026-11-27 iPad mini 시뮬레이터에서 확인: 알림 허용, 토큰 등록, 백그라운드에서 실제 APNs(sandbox) 배너(DM·댓글·멘션), 배너를 누르면 작업 열림, 예약한 리마인더 배너. 실기기는 아직.
+
 ## 아직 안 되는 것
 
 - **단축키:** iPad 하드웨어 키보드의 Cmd 는 egui 명령 키로 잡히지 않고 Ctrl 이 그 역할을 한다(egui-winit 이 macOS 에서만 Cmd 를 쓴다). 표기도 "Ctrl+J".
 - **마우스 올리기 전용 UI:** 올려야 보이는 버튼은 손가락으로 열 수 없다. 트랙패드에서는 된다. 버튼이 손가락에 작다.
-- **맥 전용 기능:** 사진 고르기·붙여 넣기, 알림, 카메라, 화면 공유(`crates/wb-voice/src/screen.rs` 에서 iOS 는 "아직 안 됨"), 업데이트 확인, 파일 열기.
+- **맥 전용 기능:** 사진 고르기·붙여 넣기, 카메라, 화면 공유(`crates/wb-voice/src/screen.rs` 에서 iOS 는 "아직 안 됨"), 업데이트 확인, 파일 열기.
 - **실기기:** 설치·실행까지만 확인했다. 손으로 쓰는 느낌, 음성 통화(LiveKit 빌드는 된다)는 아직 확인하지 않았다.
 - **접근성:** egui 의 AccessKit 이 iOS 를 지원하지 않아 VoiceOver 와 UI 테스트 요소가 없다.

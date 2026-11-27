@@ -42,7 +42,7 @@ if ! has_device; then
     dd="${TMPDIR:-/tmp}/wb-ipad-device"
     xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard -configuration Debug \
         -destination "id=$device" -derivedDataPath "$dd" -allowProvisioningUpdates \
-        PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGN_ENTITLEMENTS= \
+        PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGN_ENTITLEMENTS=ios/Config/Workboard.entitlements \
         build >"$out/xcode.log" 2>&1 ||
         { grep -E "error|Signing|Provision" "$out/xcode.log" | tail -20 >&2; exit 1; }
     cp "$dd/Build/Products/Debug-iphoneos/Workboard.app/embedded.mobileprovision" "$profile"
@@ -63,6 +63,13 @@ mkdir -p "$app"
 cp ios/ipad-egui/Info.plist "$app/"
 cp "$bin" "$app/workboard"
 cp "$profile" "$app/embedded.mobileprovision"
+# push notifications (src/notifier.rs), when the profile allows them
+aps=
+if security cms -D -i "$profile" 2>/dev/null | grep -q "aps-environment"; then
+    aps="
+	<key>aps-environment</key>
+	<string>development</string>"
+fi
 cat >"$out/entitlements.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -73,7 +80,7 @@ cat >"$out/entitlements.plist" <<EOF
 	<key>com.apple.developer.team-identifier</key>
 	<string>$team</string>
 	<key>get-task-allow</key>
-	<true/>
+	<true/>$aps
 </dict>
 </plist>
 EOF

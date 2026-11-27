@@ -1,6 +1,7 @@
 // The desktop (egui) app on iPad, installed by scripts/ipad-sim. It draws
 // everything itself and has no accessibility elements on iOS yet, so this
 // taps by position and keeps screenshots (xcresult attachments) to look at.
+// `banner:text` waits for the notification banner with that text and taps it.
 // Experimental (docs/ipad.md); skipped unless asked for:
 //   TEST_RUNNER_WB_DESK=1 xcodebuild ... -only-testing:WorkboardUITests/DeskUITests test
 
@@ -62,6 +63,19 @@ final class DeskUITests: XCTestCase {
                 sleep(3)
             case "wait":
                 sleep(UInt32(parts[1]) ?? 2)
+            case "banner":
+                // the notification banner with this text (SpringBoard draws
+                // it, so a tap by position in the app doesn't reach it)
+                let text = parts.count > 1 ? parts[1] : ""
+                let banner = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                    .descendants(matching: .any)
+                    .matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+                if banner.waitForExistence(timeout: 15) {
+                    banner.tap()
+                } else {
+                    XCTFail("no notification banner saying \(text)")
+                }
+                sleep(3)
             default:
                 XCTFail("unknown step \(step)")
             }

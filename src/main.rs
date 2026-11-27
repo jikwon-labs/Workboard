@@ -128,6 +128,8 @@ fn main() -> eframe::Result<()> {
     }
     links::listen();
     os::adopt_scenes();
+    // iPad: hang up while in the background, so the server pushes instead
+    os::follow_background();
     let run = eframe::run_native(
         "Workboard",
         options,

@@ -108,8 +108,9 @@ impl App {
                 },
                 |_, _| false,
             );
-            // the team server's pushes through Apple (push.rs): the Mac only
-            if cfg!(target_os = "macos") {
+            // the team server's pushes through Apple (push.rs): the Mac and
+            // the iPad
+            if cfg!(any(target_os = "macos", target_os = "ios")) {
                 setting_row(
                     ui,
                     t,
@@ -136,10 +137,14 @@ impl App {
                 RowOpts::default(),
                 |_, _| false,
             );
-            let badge = crate::os::mac_or_pc(
-                "Show the unread count on the Dock icon",
-                "Show the unread count on the taskbar icon",
-            );
+            let badge = if cfg!(target_os = "ios") {
+                "Show the unread count on the app icon"
+            } else {
+                crate::os::mac_or_pc(
+                    "Show the unread count on the Dock icon",
+                    "Show the unread count on the taskbar icon",
+                )
+            };
             ch |= setting_row(
                 ui,
                 t,
@@ -364,10 +369,14 @@ impl App {
                     sound,
                 );
             }
-            self.toast(crate::os::mac_or_pc(
-                tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications."),
-                tr("Sent a test notification. If no banner shows, turn on notifications for Workboard in Windows Settings > System > Notifications."),
-            ));
+            self.toast(if cfg!(target_os = "ios") {
+                tr("Sent a test notification. If no banner shows, allow Workboard Desk in Settings > Notifications.")
+            } else {
+                crate::os::mac_or_pc(
+                    tr("Sent a test notification. If no banner shows, allow Workboard in System Settings > Notifications."),
+                    tr("Sent a test notification. If no banner shows, turn on notifications for Workboard in Windows Settings > System > Notifications."),
+                )
+            });
         }
         if ch {
             self.dirty = true;
@@ -647,7 +656,11 @@ fn preview(ui: &mut Ui, t: &Theme, tn: &Tones, n: &NotifySettings) {
             Color32::WHITE,
         );
     }
-    let place = crate::os::mac_or_pc("Dock", "Taskbar");
+    let place = if cfg!(target_os = "ios") {
+        "Home Screen"
+    } else {
+        crate::os::mac_or_pc("Dock", "Taskbar")
+    };
     p.text(
         pos2(dock.center().x, dock.bottom() + 9.0),
         Align2::CENTER_CENTER,
@@ -736,16 +749,23 @@ fn preview(ui: &mut Ui, t: &Theme, tn: &Tones, n: &NotifySettings) {
 /// a link there under it, and the test button at the right. Returns (open
 /// the settings, send a test).
 fn delivery_footer(ui: &mut Ui, t: &Theme) -> (bool, bool) {
-    let (help, open) = crate::os::mac_or_pc(
+    let (help, open) = if cfg!(target_os = "ios") {
         (
-            "If notifications don't show, turn them on for Workboard in System Settings.",
-            "Open System Settings",
-        ),
-        (
-            "If notifications don't show, turn them on for Workboard in Windows Settings.",
-            "Open Windows Settings",
-        ),
-    );
+            "If notifications don't show, turn them on for Workboard Desk in Settings.",
+            "Open Settings",
+        )
+    } else {
+        crate::os::mac_or_pc(
+            (
+                "If notifications don't show, turn them on for Workboard in System Settings.",
+                "Open System Settings",
+            ),
+            (
+                "If notifications don't show, turn them on for Workboard in Windows Settings.",
+                "Open Windows Settings",
+            ),
+        )
+    };
     let w = ui.available_width();
     let test_label = tr("Send a test notification");
     let button_w = ui

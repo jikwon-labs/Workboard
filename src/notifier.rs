@@ -23,6 +23,10 @@
 // app is quit. While the app is in front macOS keeps those to itself and the
 // app tells them in its own toast (src/app/notify.rs `plan_clock`).
 //
+// iPad (the Mac app's code as "Workboard Desk", docs/ipad.md): the same
+// banners, planned notices and pushes through UNUserNotificationCenter, the
+// number on the app's icon; no bouncing or sound of its own.
+//
 // Windows: toast notifications, a count drawn over the taskbar button and
 // flashing the taskbar button (`win` below).
 //
@@ -49,54 +53,87 @@ pub const PLANNED_PREFIX: &str = "wb-clock-";
 /// before (`old`: those keys). `wait`: until macOS has them (when quitting).
 /// Only macOS keeps banners for later; elsewhere nothing happens.
 pub fn schedule(list: &[Planned], old: &[String], wait: bool) {
-    #[cfg(target_os = "macos")]
-    mac::schedule(list, old, wait);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    apple::schedule(list, old, wait);
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     let _ = (list, old, wait);
 }
 
 /// Banners ask for permission once, the first time one (or a Dock badge) is
 /// needed.
 pub fn post(title: &str, body: &str, target: &str, sound: bool) {
-    #[cfg(target_os = "macos")]
-    mac::post(title, body, target, sound);
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    apple::post(title, body, target, sound);
     #[cfg(windows)]
     win::post(title, body, target, sound);
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", windows)))]
     let _ = (title, body, target, sound);
 }
 
 /// Ask Apple for this Mac's push token (once; the installed app only).
 pub fn start_push() {
-    #[cfg(target_os = "macos")]
-    mac::start_push();
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    apple::start_push();
 }
 
 /// This Mac's push token (hex), once Apple gave it.
 pub fn push_token() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    return mac::push_token();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    return apple::push_token();
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     None
+}
+
+/// Which of Apple's push services this install's token is for: the iPad
+/// app signed for development (scripts/ipad-device) says "development" in
+/// its provisioning profile, and so is a simulator's; TestFlight builds and
+/// the Mac app (Developer ID) are "production".
+pub fn push_env() -> &'static str {
+    // a simulator's token is a development one
+    if cfg!(target_abi = "sim") {
+        return "development";
+    }
+    #[cfg(target_os = "ios")]
+    {
+        let profile = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|d| d.join("embedded.mobileprovision")))
+            .and_then(|p| std::fs::read(p).ok());
+        if let Some(bytes) = profile {
+            if aps_environment(&String::from_utf8_lossy(&bytes)) == Some("development") {
+                return "development";
+            }
+        }
+    }
+    "production"
+}
+
+/// The `aps-environment` a provisioning profile's entitlements name (its
+/// plist is plain text inside the signature).
+#[cfg_attr(not(any(target_os = "ios", test)), allow(dead_code))]
+fn aps_environment(profile: &str) -> Option<&str> {
+    let after = profile.split_once("<key>aps-environment</key>")?.1;
+    let value = after.split_once("<string>")?.1;
+    Some(value.split_once("</string>")?.0.trim())
 }
 
 /// What banners the person clicked since the last call (their targets).
 pub fn take_clicked() -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    return mac::take_clicked();
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    return apple::take_clicked();
     #[cfg(windows)]
     return win::take_clicked();
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", windows)))]
     vec![]
 }
 
 /// The red number on the Dock icon, or over the taskbar button ("" for none).
 pub fn set_badge(label: &str) {
-    #[cfg(target_os = "macos")]
-    mac::set_badge(label);
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    apple::set_badge(label);
     #[cfg(windows)]
     win::set_badge(label);
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios", windows)))]
     let _ = label;
 }
 
@@ -104,7 +141,7 @@ pub fn set_badge(label: &str) {
 /// is brought forward.
 pub fn bounce(until_seen: bool) {
     #[cfg(target_os = "macos")]
-    mac::bounce(until_seen);
+    apple::bounce(until_seen);
     #[cfg(windows)]
     win::bounce(until_seen);
     #[cfg(not(any(target_os = "macos", windows)))]
@@ -114,7 +151,7 @@ pub fn bounce(until_seen: bool) {
 /// A short sound (for news that arrives while the app is in front).
 pub fn play_sound() {
     #[cfg(target_os = "macos")]
-    mac::play_sound();
+    apple::play_sound();
     #[cfg(windows)]
     win::play_sound();
 }
@@ -136,8 +173,12 @@ pub fn bring_forward() {
     win::bring_forward();
 }
 
-#[cfg(target_os = "macos")]
-mod mac {
+// macOS and the iPad's desktop app (docs/ipad.md): the same
+// UNUserNotificationCenter, with NSApplication or UIApplication around it.
+// objc 0.2's macros check a cfg this crate doesn't declare.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[allow(unexpected_cfgs)]
+mod apple {
     use block::{Block, ConcreteBlock};
     use objc::declare::ClassDecl;
     use objc::runtime::{Class, Object, Sel, BOOL, YES};
@@ -160,6 +201,30 @@ mod mac {
         static ASKED: Cell<bool> = const { Cell::new(false) };
         static PUSH_STARTED: Cell<bool> = const { Cell::new(false) };
         static BADGE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    }
+
+    /// NSApplication (macOS) or UIApplication (iPad).
+    unsafe fn shared_app() -> *mut Object {
+        #[cfg(target_os = "macos")]
+        return msg_send![class!(NSApplication), sharedApplication];
+        #[cfg(target_os = "ios")]
+        return msg_send![class!(UIApplication), sharedApplication];
+    }
+
+    /// The app is the one in front (macOS) or on screen (iPad).
+    unsafe fn app_active() -> bool {
+        let app = shared_app();
+        #[cfg(target_os = "macos")]
+        {
+            let active: BOOL = msg_send![app, isActive];
+            active == YES
+        }
+        #[cfg(target_os = "ios")]
+        {
+            // UIApplicationStateActive
+            let state: isize = msg_send![app, applicationState];
+            state == 0
+        }
     }
 
     fn on_main_thread() -> bool {
@@ -214,6 +279,7 @@ mod mac {
             return;
         }
         if !center_ok() {
+            #[cfg(target_os = "macos")]
             fallback(title, body, sound);
             return;
         }
@@ -316,6 +382,7 @@ mod mac {
     }
 
     /// Not the installed app: a banner through AppleScript.
+    #[cfg(target_os = "macos")]
     fn fallback(title: &str, body: &str, sound: bool) {
         let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
         let mut script = format!(
@@ -379,12 +446,25 @@ mod mac {
             // the delegate first: a click on a banner that launched the app
             // comes to it
             center();
-            let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-            let d: *mut Object = msg_send![app, delegate];
+            let app = shared_app();
+            let mut d: *mut Object = msg_send![app, delegate];
             if d.is_null() {
-                return;
+                // winit has none on the iPad (it listens to UIKit's
+                // notifications instead): one of our own, only for the
+                // answers below, kept for the life of the app (the
+                // application holds its delegate weakly)
+                let cls = match Class::get("WBPushDelegate") {
+                    Some(c) => c,
+                    None => match ClassDecl::new("WBPushDelegate", class!(NSObject)) {
+                        Some(decl) => decl.register(),
+                        None => return,
+                    },
+                };
+                d = msg_send![cls, new];
+                let _: () = msg_send![app, setDelegate: d];
             }
-            // the answers go to the app's delegate (winit's): add them to its class
+            // the answers go to the app's delegate (winit's on the Mac): add
+            // them to its class
             let cls = (*d).class() as *const Class as *mut Class;
             let types = c"v@:@@".as_ptr();
             let imp: objc::runtime::Imp = std::mem::transmute(
@@ -488,8 +568,12 @@ mod mac {
                 if let Some(t) = pushed_target(info).or_else(|| from_ns(t)) {
                     CLICKED.lock().unwrap_or_else(|e| e.into_inner()).push(t);
                 }
-                let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-                let _: () = msg_send![app, activateIgnoringOtherApps: YES];
+                // (an iPad app comes forward by itself)
+                #[cfg(target_os = "macos")]
+                {
+                    let app = shared_app();
+                    let _: () = msg_send![app, activateIgnoringOtherApps: YES];
+                }
                 if !done.is_null() {
                     let b = &*(done as *const Block<(), ()>);
                     b.call(());
@@ -509,11 +593,10 @@ mod mac {
                 let req: *mut Object = msg_send![note, request];
                 let id: *mut Object = msg_send![req, identifier];
                 let planned = from_ns(id).is_some_and(|i| i.starts_with(super::PLANNED_PREFIX));
-                let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-                let active: BOOL = msg_send![app, isActive];
+                let active = app_active();
                 if !done.is_null() {
                     let b = &*(done as *const Block<(usize,), ()>);
-                    if planned && active == YES {
+                    if planned && active {
                         b.call((0,));
                     } else {
                         // list | banner | sound
@@ -551,32 +634,43 @@ mod mac {
             if !label.is_empty() && center_ok() {
                 center();
             }
-            let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-            let tile: *mut Object = msg_send![app, dockTile];
-            if tile.is_null() {
-                return;
+            #[cfg(target_os = "macos")]
+            {
+                let app = shared_app();
+                let tile: *mut Object = msg_send![app, dockTile];
+                if tile.is_null() {
+                    return;
+                }
+                let s = if label.is_empty() {
+                    null_mut()
+                } else {
+                    ns(label)
+                };
+                let _: () = msg_send![tile, setBadgeLabel: s];
             }
-            let s = if label.is_empty() {
-                null_mut()
-            } else {
-                ns(label)
-            };
-            let _: () = msg_send![tile, setBadgeLabel: s];
+            // the number on the app's icon ("99+" shows as 99)
+            #[cfg(target_os = "ios")]
+            if center_ok() {
+                let n: isize = label.trim_end_matches('+').parse().unwrap_or(0);
+                let _: () = msg_send![center(), setBadgeCount: n withCompletionHandler: null_mut::<Object>()];
+            }
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub fn bounce(until_seen: bool) {
         if !on_main_thread() {
             return;
         }
         unsafe {
-            let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+            let app = shared_app();
             // NSCriticalRequest 0, NSInformationalRequest 10
             let _: isize =
                 msg_send![app, requestUserAttention: if until_seen { 0usize } else { 10usize }];
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub fn play_sound() {
         if !on_main_thread() {
             return;
@@ -915,6 +1009,17 @@ mod win {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_push_service_comes_from_the_provisioning_profile() {
+        let dev = "junk<plist><dict><key>Entitlements</key><dict>\n\t\t<key>aps-environment</key>\n\t\t<string>development</string>";
+        assert_eq!(aps_environment(dev), Some("development"));
+        assert_eq!(
+            aps_environment("<key>aps-environment</key><string>production</string>"),
+            Some("production")
+        );
+        assert_eq!(aps_environment("<key>get-task-allow</key><true/>"), None);
+    }
 
     #[test]
     fn toast_text_is_plain_text_in_the_xml() {

@@ -1,4 +1,5 @@
-// Notifications while the app is quit (macOS).
+// Notifications while the app is quit (macOS, and the iPad's desktop app,
+// which sends platform "ipados" so the server uses its bundle id).
 //
 // The team server notifies a Mac whose app isn't running through Apple's
 // push service, as it does iPhones (server/src/push.rs). For that the app
@@ -121,9 +122,16 @@ pub(super) fn push_prefs(settings: &NotifySettings, muted_until: i64) -> wb_net:
 pub(super) fn token_msg(token: &str, file: &str, prefs: Option<wb_net::PushPrefs>) -> wb_net::Msg {
     wb_net::Msg::PushToken {
         token: token.to_string(),
-        platform: "macos".into(),
-        // a Developer ID app's token is always a production one
-        env: "production".into(),
+        // the iPad's desktop app has a bundle id (and APNs topic) of its own
+        platform: if cfg!(target_os = "ios") {
+            "ipados"
+        } else {
+            "macos"
+        }
+        .into(),
+        // a Developer ID app's token is always a production one; an iPad
+        // app signed for development has a development one
+        env: crate::notifier::push_env().into(),
         workspace: ws_key(file),
         prefs,
     }
@@ -132,7 +140,7 @@ pub(super) fn token_msg(token: &str, file: &str, prefs: Option<wb_net::PushPrefs
 impl App {
     /// Once a frame: ask Apple for the token, then keep the servers told.
     pub(super) fn push_tick(&mut self, ctx: Option<&egui::Context>) {
-        if !cfg!(target_os = "macos") {
+        if !cfg!(any(target_os = "macos", target_os = "ios")) {
             return;
         }
         if self.push_rt.started.is_none() {

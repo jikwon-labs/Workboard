@@ -9052,12 +9052,12 @@
         }
       }
     },
-    "No notifications during these hours, as with Mute notifications": {
+    "No notifications during these hours; unread counts still show": {
       "localizations": {
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이 시간에는 알림 끄기처럼 알림이 오지 않습니다"
+            "value": "이 시간에는 알림이 뜨지 않습니다. 안 읽은 숫자는 그대로 보입니다"
           }
         }
       }

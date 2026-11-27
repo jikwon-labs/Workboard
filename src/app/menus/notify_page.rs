@@ -1099,7 +1099,7 @@ fn quiet_schedule(ui: &mut Ui, t: &Theme, tn: &Tones, n: &mut NotifySettings) ->
         &mut n.quiet,
         false,
         RowOpts {
-            desc: Some("No notifications during these hours, as with Mute notifications"),
+            desc: Some("No notifications during these hours; unread counts still show"),
             ..Default::default()
         },
         |_, _| false,

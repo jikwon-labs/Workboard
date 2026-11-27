@@ -299,7 +299,7 @@ fn paused_notifications_announce_nothing() {
 }
 
 #[test]
-fn the_quiet_hours_announce_nothing_and_hide_the_counts() {
+fn the_quiet_hours_announce_nothing_but_keep_the_counts() {
     let mut a = app();
     // all day, every day: it is always the quiet hours
     let n = &mut a.data.extra.notify;
@@ -310,7 +310,9 @@ fn the_quiet_hours_announce_nothing_and_hide_the_counts() {
     a.notify_scan();
     assert!(a.notify_rt.sent.is_empty());
     assert!(a.notify_paused());
-    assert_eq!(a.dock_count(), 0);
+    assert!(a.dock_count() > 0, "the Dock count stays");
+    let (inbox, chat) = a.rail_unread(true);
+    assert!(inbox + chat > 0, "the rail's counts stay");
     // no day picked: never
     a.data.extra.notify.quiet_days = 0;
     assert!(!a.notify_paused());

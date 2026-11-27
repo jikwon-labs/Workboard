@@ -107,7 +107,7 @@ pub const T: &[(&str, &str)] = &[
     ("Notified like a mention when a channel message has one of these words", "채널 메시지에 이 단어가 있으면 멘션처럼 알림"),
     ("Notification schedule", "알림 일정"),
     ("Pause notifications on a schedule", "정해진 시간에 알림 끄기"),
-    ("No notifications during these hours, as with Mute notifications", "이 시간에는 알림 끄기처럼 알림이 오지 않습니다"),
+    ("No notifications during these hours; unread counts still show", "이 시간에는 알림이 뜨지 않습니다. 안 읽은 숫자는 그대로 보입니다"),
     ("Hours", "시간"),
     ("Days", "요일"),
     ("next day", "다음 날"),

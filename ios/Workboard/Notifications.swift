@@ -375,7 +375,8 @@ final class Notifier {
 
     func updateBadge(_ data: JSON, view: WorkspaceView, me: UInt64, inbox: [InboxItem]) {
         // none while muted, like the Mac's Dock (dock_count)
-        let n = prefs.badge && !prefs.muted(now: nowTs()) ? Notify.badge(data, view: view, me: me, inbox: inbox) : 0
+        // paused by hand only: the quiet hours keep the count
+        let n = prefs.badge && prefs.mutedUntil <= nowTs() ? Notify.badge(data, view: view, me: me, inbox: inbox) : 0
         UNUserNotificationCenter.current().setBadgeCount(n)
     }
 

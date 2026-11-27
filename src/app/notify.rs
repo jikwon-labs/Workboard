@@ -11,7 +11,9 @@
 // Notification Center (src/notifier.rs), and a Dock bounce for direct
 // messages, mentions and huddles. The Dock badge counts the Inbox and unread
 // direct messages. "Pause notifications" (`muted_until`) and the quiet hours
-// of "Pause notifications on a schedule" silence all of it (`paused_at`).
+// of "Pause notifications on a schedule" silence the banners, sounds and
+// bounces (`paused_at`). Muting by hand also hides the counts; the quiet
+// hours keep them.
 //
 // What each person wants is `Data.extra.notify` (NotifySettings), which stays
 // on their own computer.
@@ -1125,9 +1127,10 @@ impl App {
         }
     }
 
-    /// The number on the Dock icon: the Inbox badge plus unread direct messages.
+    /// The number on the Dock icon: the Inbox badge plus unread direct
+    /// messages. None while paused by hand; the quiet hours keep it.
     pub(super) fn dock_count(&self) -> usize {
-        if !self.data.extra.notify.dock_badge || self.notify_paused() {
+        if !self.data.extra.notify.dock_badge || self.data.extra.muted_until > now_ts() {
             return 0;
         }
         let me = self.data.me;

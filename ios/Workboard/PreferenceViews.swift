@@ -92,7 +92,7 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Notification schedule")
             } footer: {
-                Text("No notifications during these hours, as with Mute notifications")
+                Text("No notifications during these hours; unread counts still show")
             }
 
             Section("Chat") {

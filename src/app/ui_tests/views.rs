@@ -479,10 +479,16 @@ fn personal_list_looks_like_the_original_and_my_tasks_stays_open() {
                 .all(|(_, r)| r.left() < 320.0),
         "no Add Channel button on the page"
     );
-    // empty: an inline Add Task row
+    // empty: an inline Add Task row, with the group right under the header
+    let empty_top = h.rect("Group options ALL TASKS").top();
     h.click("Add Task in ALL TASKS");
     h.type_text("Buy milk");
     h.key(egui::Key::Enter);
+    let top = h.rect("Group options ALL TASKS").top();
+    assert!(
+        (empty_top - top).abs() < 1.0,
+        "no gap above the empty group ({empty_top} vs {top})"
+    );
     assert!(h
         .app
         .data

@@ -900,97 +900,101 @@ impl App {
                     } else {
                         self.archived_here()
                     };
-                    ui.add_space(30.0);
-                    ui.vertical_centered(|ui| {
-                        if hidden > 0 {
-                            ui.label(
-                                RichText::new(if hidden == 1 {
-                                    tr("All tasks here are done").to_string()
-                                } else {
-                                    trf!("All {} tasks here are done", hidden)
-                                })
-                                .size(16.0)
-                                .color(t.text2),
-                            );
-                            ui.add_space(6.0);
-                            ui.horizontal(|ui| {
-                                ui.add_space((ui.available_width() - 230.0).max(0.0) / 2.0);
-                                let label = if hidden == 1 {
-                                    tr("Show 1 closed task").to_string()
-                                } else {
-                                    trf!("Show {} closed tasks", hidden)
-                                };
-                                if ui
-                                    .add(
-                                        egui::Button::new(label)
-                                            .stroke(Stroke::new(1.0_f32, t.border))
-                                            .corner_radius(6),
-                                    )
-                                    .clicked()
-                                {
-                                    self.prefs.show_closed = true;
-                                }
+                    // the Personal List's empty state is the inline "+ Add task"
+                    // row below: no message, and no gap above the group
+                    let quiet =
+                        self.on_personal_list() && hidden == 0 && arch_tasks + arch_in_lists == 0;
+                    if !quiet {
+                        ui.add_space(30.0);
+                        ui.vertical_centered(|ui| {
+                            if hidden > 0 {
+                                ui.label(
+                                    RichText::new(if hidden == 1 {
+                                        tr("All tasks here are done").to_string()
+                                    } else {
+                                        trf!("All {} tasks here are done", hidden)
+                                    })
+                                    .size(16.0)
+                                    .color(t.text2),
+                                );
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_space((ui.available_width() - 230.0).max(0.0) / 2.0);
+                                    let label = if hidden == 1 {
+                                        tr("Show 1 closed task").to_string()
+                                    } else {
+                                        trf!("Show {} closed tasks", hidden)
+                                    };
+                                    if ui
+                                        .add(
+                                            egui::Button::new(label)
+                                                .stroke(Stroke::new(1.0_f32, t.border))
+                                                .corner_radius(6),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.prefs.show_closed = true;
+                                    }
+                                    if primary_button(ui, &t, tr("Add Task")).clicked() {
+                                        self.open_quick_add(None);
+                                    }
+                                });
+                            } else if arch_tasks + arch_in_lists > 0 {
+                                let n = arch_tasks + arch_in_lists;
+                                ui.label(
+                                    RichText::new(if n == 1 {
+                                        tr("The 1 task here is archived").to_string()
+                                    } else {
+                                        trf!("All {} tasks here are archived", n)
+                                    })
+                                    .size(16.0)
+                                    .color(t.text2),
+                                );
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_space((ui.available_width() - 330.0).max(0.0) / 2.0);
+                                    let ghost_btn = |ui: &mut Ui, label: &str| {
+                                        ui.add(
+                                            egui::Button::new(label)
+                                                .stroke(Stroke::new(1.0_f32, t.border))
+                                                .corner_radius(6),
+                                        )
+                                    };
+                                    // archived tasks in Lists that are not: the Archived filter
+                                    if arch_tasks > 0 {
+                                        let b = ghost_btn(ui, tr("Show archived tasks"));
+                                        name_it(&b, "Show archived tasks");
+                                        if b.clicked() {
+                                            self.prefs.filter.archived = true;
+                                        }
+                                    }
+                                    // tasks in archived Lists come back with their List
+                                    if arch_in_lists > 0 {
+                                        let b = ghost_btn(ui, tr("See archived Lists"));
+                                        name_it(&b, "See archived Lists");
+                                        if b.clicked() {
+                                            self.open_settings("Spaces");
+                                        }
+                                    }
+                                    if !self.on_personal_list()
+                                        && primary_button(ui, &t, tr("Add Task")).clicked()
+                                    {
+                                        self.open_quick_add(None);
+                                    }
+                                });
+                            } else {
+                                ui.label(
+                                    RichText::new(tr("No tasks here yet"))
+                                        .size(16.0)
+                                        .color(t.text2),
+                                );
+                                ui.add_space(6.0);
                                 if primary_button(ui, &t, tr("Add Task")).clicked() {
                                     self.open_quick_add(None);
                                 }
-                            });
-                        } else if arch_tasks + arch_in_lists > 0 {
-                            let n = arch_tasks + arch_in_lists;
-                            ui.label(
-                                RichText::new(if n == 1 {
-                                    tr("The 1 task here is archived").to_string()
-                                } else {
-                                    trf!("All {} tasks here are archived", n)
-                                })
-                                .size(16.0)
-                                .color(t.text2),
-                            );
-                            ui.add_space(6.0);
-                            ui.horizontal(|ui| {
-                                ui.add_space((ui.available_width() - 330.0).max(0.0) / 2.0);
-                                let ghost_btn = |ui: &mut Ui, label: &str| {
-                                    ui.add(
-                                        egui::Button::new(label)
-                                            .stroke(Stroke::new(1.0_f32, t.border))
-                                            .corner_radius(6),
-                                    )
-                                };
-                                // archived tasks in Lists that are not: the Archived filter
-                                if arch_tasks > 0 {
-                                    let b = ghost_btn(ui, tr("Show archived tasks"));
-                                    name_it(&b, "Show archived tasks");
-                                    if b.clicked() {
-                                        self.prefs.filter.archived = true;
-                                    }
-                                }
-                                // tasks in archived Lists come back with their List
-                                if arch_in_lists > 0 {
-                                    let b = ghost_btn(ui, tr("See archived Lists"));
-                                    name_it(&b, "See archived Lists");
-                                    if b.clicked() {
-                                        self.open_settings("Spaces");
-                                    }
-                                }
-                                if !self.on_personal_list()
-                                    && primary_button(ui, &t, tr("Add Task")).clicked()
-                                {
-                                    self.open_quick_add(None);
-                                }
-                            });
-                        } else if self.on_personal_list() {
-                            // the inline "+ Add task" row below is the empty state
-                        } else {
-                            ui.label(
-                                RichText::new(tr("No tasks here yet"))
-                                    .size(16.0)
-                                    .color(t.text2),
-                            );
-                            ui.add_space(6.0);
-                            if primary_button(ui, &t, tr("Add Task")).clicked() {
-                                self.open_quick_add(None);
                             }
-                        }
-                    });
+                        });
+                    }
                 }
                 for g in &groups {
                     self.list_group(ui, g, &shown);

@@ -9,7 +9,8 @@
 // (watch.rs), without choices, so those notify the quit app too. While the
 // app is connected the server sends nothing (it shows its notices itself),
 // and what came while it was quit is a catch-up that isn't announced again
-// (notify.rs).
+// (notify.rs). The choices carry every kind the app tells and its language,
+// so the server's banners are the app's own notices in its words.
 //
 // `workspace` in the token is the workspace file's name in hex, so a click
 // on the banner opens that workspace: the notifier hands back
@@ -91,6 +92,24 @@ pub(super) fn push_prefs(settings: &NotifySettings, muted_until: i64) -> wb_net:
             vec![]
         },
         muted_until,
+        // the rest of what the app tells while it runs (notify.rs), so a
+        // quit app is told the same
+        huddles: Some(on && settings.huddles),
+        reactions: Some(on && settings.reactions),
+        assigned: Some(on && settings.assigned),
+        comments: Some(on && settings.comments),
+        task_changes: Some(on && settings.task_changes),
+        forms: Some(on && settings.forms),
+        team: Some(on && settings.team),
+        goal_milestones: Some(on && settings.goal_milestones),
+        // in the words the app would use
+        lang: Some(
+            match crate::i18n::lang() {
+                crate::i18n::Lang::Ko => "ko",
+                crate::i18n::Lang::En => "en",
+            }
+            .into(),
+        ),
     }
 }
 
@@ -164,14 +183,16 @@ impl App {
         }
     }
 
-    /// A clicked pushed banner ("push:WS:CHANNEL[:THREAD]"): the target it
-    /// opens.
+    /// A clicked pushed banner ("push:WS:TARGET", or from a server from
+    /// before targets "push:WS:CHANNEL[:THREAD]"): the target it opens.
     pub(super) fn open_pushed(&self, rest: &str) -> String {
-        let (ws, chat) = rest.split_once(':').unwrap_or((rest, ""));
-        let inner = if chat.is_empty() {
+        let (ws, inner) = rest.split_once(':').unwrap_or((rest, ""));
+        let inner = if inner.is_empty() {
             "inbox".to_string()
+        } else if inner.starts_with(|c: char| c.is_ascii_digit()) {
+            format!("chat:{}", inner)
         } else {
-            format!("chat:{}", chat)
+            inner.to_string()
         };
         match ws_file(ws) {
             Some(file) if file != self.ws_file => format!("ws:{}:{}", file, inner),
@@ -206,10 +227,44 @@ mod tests {
         assert_eq!(p.keywords, vec!["deploy".to_string(), "배포".to_string()]);
         assert_eq!(p.channel_modes.len(), 1);
         assert_eq!(p.muted_until, 5);
+        // the rest of what the app tells, so a quit app is told the same,
+        // in the app's language
+        assert_eq!(p.huddles, Some(true));
+        assert_eq!(p.reactions, Some(false), "off unless turned on");
+        assert_eq!(p.assigned, Some(true));
+        assert_eq!(p.comments, Some(true));
+        assert_eq!(p.task_changes, Some(true));
+        assert_eq!(p.forms, Some(true));
+        assert_eq!(p.team, Some(true));
+        assert_eq!(p.goal_milestones, Some(true));
+        crate::i18n::set_lang(crate::i18n::Lang::Ko);
+        assert_eq!(push_prefs(&s, 0).lang.as_deref(), Some("ko"));
+        crate::i18n::set_lang(crate::i18n::Lang::En);
+        assert_eq!(push_prefs(&s, 0).lang.as_deref(), Some("en"));
         s.desktop = false;
         let p = push_prefs(&s, 0);
         assert!(!p.direct && !p.mentions && !p.replies);
         assert_eq!(p.channel_default, "nothing");
         assert!(p.channel_modes.is_empty() && p.keywords.is_empty());
+        assert_eq!(p.assigned, Some(false));
+        assert_eq!(p.huddles, Some(false));
+    }
+
+    #[test]
+    fn pushed_banners_open_what_they_are_about() {
+        let a = crate::app::tests::app();
+        let ws = ws_key(&a.ws_file).unwrap();
+        assert_eq!(a.open_pushed(&format!("{}:task:5", ws)), "task:5");
+        assert_eq!(a.open_pushed(&format!("{}:people", ws)), "people");
+        assert_eq!(a.open_pushed(&format!("{}:chat:10:11", ws)), "chat:10:11");
+        // a server from before targets
+        assert_eq!(a.open_pushed(&format!("{}:10:11", ws)), "chat:10:11");
+        assert_eq!(a.open_pushed(&format!("{}:", ws)), "inbox");
+        // another workspace's opens there
+        let other = ws_key("other.json").unwrap();
+        assert_eq!(
+            a.open_pushed(&format!("{}:goal:7", other)),
+            "ws:other.json:goal:7"
+        );
     }
 }

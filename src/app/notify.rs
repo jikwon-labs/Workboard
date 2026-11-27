@@ -14,6 +14,13 @@
 //
 // What each person wants is `Data.extra.notify` (NotifySettings), which stays
 // on their own computer.
+//
+// While the app is quit the same notices still come: the team server tells
+// what others do (messages, calls, reactions, tasks, forms, goals, people:
+// server/src/push.rs and news.rs, in this app's words and language, from
+// the choices push.rs sends it), and the notices on the clock are handed to
+// macOS ahead of time (`plan_clock`), which shows them at their time. What
+// macOS showed meanwhile isn't told again (`settle_planned`, `os_showed`).
 
 use super::nav::InboxSrc;
 use super::*;
@@ -87,6 +94,10 @@ pub struct NotifyRt {
     pub(super) toast_target: Option<(String, String)>,
     lost_since: Option<i64>,
     told_lost: bool,
+    /// What macOS showed while the app was quit was taken as told (`settle_planned`).
+    pub(super) settled: bool,
+    /// The notices on the clock last handed to macOS (`plan_clock`).
+    pub(super) planned: Option<Vec<crate::notifier::Planned>>,
 }
 
 fn add(out: &mut Vec<(i64, Note)>, keys: &mut HashSet<String>, ts: i64, note: Note) {
@@ -145,6 +156,51 @@ fn goal_key(k: &str) -> Option<u64> {
         .find_map(|p| k.strip_prefix(p))
         .and_then(|rest| rest.split(':').next())
         .and_then(|id| id.parse().ok())
+}
+
+/// How far ahead the clock notices are handed to macOS (`plan_clock`).
+const PLAN_DAYS: i64 = 7;
+/// The most handed over at once (macOS keeps 64 for an app).
+const PLAN_MAX: usize = 60;
+/// How long a handed-over notice whose time came is remembered as shown by
+/// macOS, for the clock's next look (`os_showed`).
+const PLAN_KEEP_SECS: i64 = 3600;
+
+/// "Review starts in 10 minutes" and its agenda (or its time).
+fn meeting_words(m: &Meeting, mins: i64) -> (String, String) {
+    let title = if mins == 1 {
+        trf!("{} starts in 1 minute", m.title)
+    } else {
+        trf!("{} starts in {} minutes", m.title, mins)
+    };
+    let body = if m.agenda.trim().is_empty() {
+        m.time.clone()
+    } else {
+        cut(m.agenda.trim(), 140)
+    };
+    (title, body)
+}
+
+/// "Goal due today: Q4" (`days` 0) or tomorrow (1), with how far it is.
+fn goal_due_words(g: &Goal, days: i64, progress: f32) -> (String, String) {
+    let title = if days == 0 {
+        trf!("Goal due today: {}", g.name)
+    } else {
+        trf!("Goal due tomorrow: {}", g.name)
+    };
+    (title, trf!("{}% done", super::more::pct_of(progress)))
+}
+
+/// "Goal at risk: Q4", with how far it is and the days left.
+fn goal_risk_words(g: &Goal, progress: f32, left: i64) -> (String, String) {
+    (
+        trf!("Goal at risk: {}", g.name),
+        trf!(
+            "{}% done, {} days left",
+            super::more::pct_of(progress),
+            left.max(0)
+        ),
+    )
 }
 
 impl App {
@@ -825,45 +881,17 @@ impl App {
         let key = format!("due:{}", day);
         if n.due && after_due_time && !self.fired(&key) {
             self.mark_fired(key.clone());
-            let mine: Vec<&Task> = self
-                .data
-                .tasks
-                .iter()
-                .filter(|t| {
-                    t.assignees.contains(&me)
-                        && !t.archived
-                        && !self.data.is_closed(t)
-                        && t.due.is_some_and(|d| d <= day)
-                })
-                .collect();
-            if !mine.is_empty() {
-                // due today with a time that has passed counts as overdue
-                let now_dt = local.naive_local();
-                let today_n = mine
-                    .iter()
-                    .filter(|t| t.due == Some(day) && !t.is_overdue_at(now_dt))
-                    .count();
-                let late = mine.len() - today_n;
-                let title = match (today_n, late) {
-                    (1, 0) => tr("1 task is due today").to_string(),
-                    (d, 0) => trf!("{} tasks are due today", d),
-                    (0, 1) => tr("1 overdue task").to_string(),
-                    (0, l) => trf!("{} overdue tasks", l),
-                    (d, l) => trf!("{} due today, {} overdue", d, l),
-                };
-                let body = mine
-                    .iter()
-                    .take(3)
-                    .map(|t| t.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                self.deliver(Note {
-                    key,
-                    kind: Kind::Due,
-                    title,
-                    body,
-                    target: "today".into(),
-                });
+            if let Some((title, body)) = self.due_summary(day, local.naive_local()) {
+                self.clock_deliver(
+                    Note {
+                        key,
+                        kind: Kind::Due,
+                        title,
+                        body,
+                        target: "today".into(),
+                    },
+                    now,
+                );
             }
         }
         // ---- my tasks with a due time, when that time comes (one missed
@@ -895,13 +923,16 @@ impl App {
                     continue;
                 }
                 self.mark_fired(key.clone());
-                self.deliver(Note {
-                    key,
-                    kind: Kind::Due,
-                    title: trf!("{} is due now", name),
-                    body: trf!("Due {}", when),
-                    target: format!("task:{}", id),
-                });
+                self.clock_deliver(
+                    Note {
+                        key,
+                        kind: Kind::Due,
+                        title: trf!("{} is due now", name),
+                        body: trf!("Due {}", when),
+                        target: format!("task:{}", id),
+                    },
+                    now,
+                );
             }
         }
         // ---- meetings about to start
@@ -924,23 +955,17 @@ impl App {
                 if now >= start - lead && now < start && !self.fired(&key) {
                     self.mark_fired(key.clone());
                     let mins = ((start - now + 59) / 60).max(1);
-                    let title = if mins == 1 {
-                        trf!("{} starts in 1 minute", m.title)
-                    } else {
-                        trf!("{} starts in {} minutes", m.title, mins)
-                    };
-                    let body = if m.agenda.trim().is_empty() {
-                        m.time.clone()
-                    } else {
-                        cut(m.agenda.trim(), 140)
-                    };
-                    self.deliver(Note {
-                        key,
-                        kind: Kind::Meeting,
-                        title,
-                        body,
-                        target: format!("meeting:{}", m.id),
-                    });
+                    let (title, body) = meeting_words(&m, mins);
+                    self.clock_deliver(
+                        Note {
+                            key,
+                            kind: Kind::Meeting,
+                            title,
+                            body,
+                            target: format!("meeting:{}", m.id),
+                        },
+                        now,
+                    );
                 }
             }
         }
@@ -965,19 +990,17 @@ impl App {
                     continue;
                 }
                 self.mark_fired(key.clone());
-                let title = if days == 0 {
-                    trf!("Goal due today: {}", g.name)
-                } else {
-                    trf!("Goal due tomorrow: {}", g.name)
-                };
-                let body = trf!("{}% done", super::more::pct_of(self.goal_progress(&g)));
-                self.deliver(Note {
-                    key,
-                    kind: Kind::Goal,
-                    title,
-                    body,
-                    target: format!("goal:{}", g.id),
-                });
+                let (title, body) = goal_due_words(&g, days, self.goal_progress(&g));
+                self.clock_deliver(
+                    Note {
+                        key,
+                        kind: Kind::Goal,
+                        title,
+                        body,
+                        target: format!("goal:{}", g.id),
+                    },
+                    now,
+                );
             }
         }
         // ---- my goals passing a milestone (one I didn't record myself:
@@ -1034,14 +1057,17 @@ impl App {
                         continue;
                     }
                     self.mark_fired(key.clone());
-                    let left = (due - day).num_days().max(0);
-                    self.deliver(Note {
-                        key,
-                        kind: Kind::Goal,
-                        title: trf!("Goal at risk: {}", g.name),
-                        body: trf!("{}% done, {} days left", pct, left),
-                        target: format!("goal:{}", g.id),
-                    });
+                    let (title, body) = goal_risk_words(&g, p, (due - day).num_days());
+                    self.clock_deliver(
+                        Note {
+                            key,
+                            kind: Kind::Goal,
+                            title,
+                            body,
+                            target: format!("goal:{}", g.id),
+                        },
+                        now,
+                    );
                 }
             }
         }
@@ -1124,10 +1150,12 @@ impl App {
             self.notify_scan();
         }
         let now = now_ts();
+        self.settle_planned(now);
         self.notify_connection(now);
         if now - self.notify_rt.last_clock >= CLOCK_SECS {
             self.notify_rt.last_clock = now;
             self.notify_clock(now);
+            self.plan_clock(now, false);
         }
         if self.persist {
             let c = self.dock_count();
@@ -1142,6 +1170,309 @@ impl App {
         if let Some(ctx) = ctx {
             ctx.request_repaint_after(std::time::Duration::from_secs(CLOCK_SECS as u64));
         }
+    }
+}
+
+impl App {
+    /// The once-a-day notice of my tasks due on `day` and overdue by then,
+    /// at the moment `at`: (title, the first names), None when there are none.
+    pub(super) fn due_summary(
+        &self,
+        day: chrono::NaiveDate,
+        at: chrono::NaiveDateTime,
+    ) -> Option<(String, String)> {
+        let me = self.data.me;
+        let mine: Vec<&Task> = self
+            .data
+            .tasks
+            .iter()
+            .filter(|t| {
+                t.assignees.contains(&me)
+                    && !t.archived
+                    && !self.data.is_closed(t)
+                    && t.due.is_some_and(|d| d <= day)
+            })
+            .collect();
+        if mine.is_empty() {
+            return None;
+        }
+        // due today with a time that has passed counts as overdue
+        let today_n = mine
+            .iter()
+            .filter(|t| t.due == Some(day) && !t.is_overdue_at(at))
+            .count();
+        let late = mine.len() - today_n;
+        let title = match (today_n, late) {
+            (1, 0) => tr("1 task is due today").to_string(),
+            (d, 0) => trf!("{} tasks are due today", d),
+            (0, 1) => tr("1 overdue task").to_string(),
+            (0, l) => trf!("{} overdue tasks", l),
+            (d, l) => trf!("{} due today, {} overdue", d, l),
+        };
+        let body = mine
+            .iter()
+            .take(3)
+            .map(|t| t.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some((title, body))
+    }
+
+    /// Announces a notice on the clock, unless macOS has just shown it
+    /// (handed over ahead of time, `plan_clock`) while the app wasn't in
+    /// front. In front, macOS keeps it to itself and the toast tells it.
+    pub(super) fn clock_deliver(&mut self, note: Note, now: i64) {
+        if self.notify_rt.away && self.os_showed(&note.key, now) {
+            return;
+        }
+        self.deliver(note);
+    }
+
+    /// Whether the notice `key` was handed to macOS and its time has come.
+    pub(super) fn os_showed(&self, key: &str, now: i64) -> bool {
+        self.data
+            .extra
+            .notify
+            .scheduled
+            .iter()
+            .any(|(k, at)| k == key && *at <= now)
+    }
+
+    /// Once, when the app starts: what macOS showed while it was quit (handed
+    /// over and its time came) isn't told again.
+    pub(super) fn settle_planned(&mut self, now: i64) {
+        if std::mem::replace(&mut self.notify_rt.settled, true) {
+            return;
+        }
+        let shown: Vec<String> = self
+            .data
+            .extra
+            .notify
+            .scheduled
+            .iter()
+            .filter(|(_, at)| *at <= now)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in shown {
+            match key
+                .strip_prefix("reminder:")
+                .and_then(|id| id.parse::<u64>().ok())
+            {
+                Some(id) => {
+                    if let Some(r) = self.data.extra.reminders.iter_mut().find(|r| r.id == id) {
+                        r.alerted = true;
+                        self.dirty = true;
+                    }
+                }
+                None if !self.fired(&key) => self.mark_fired(key),
+                None => {}
+            }
+        }
+    }
+
+    /// The notices on the clock still to come in the next PLAN_DAYS, as
+    /// `notify_clock` and `reminder_tick` will word them, soonest first:
+    /// what macOS shows at their time, also while the app is quit. None
+    /// when banners are off.
+    pub(super) fn clock_plan(&self, now: i64) -> Vec<crate::notifier::Planned> {
+        let n = &self.data.extra.notify;
+        if !n.desktop {
+            return vec![];
+        }
+        let me = self.data.me;
+        let end = now + PLAN_DAYS * 86_400;
+        let Some(local) = local(now) else {
+            return vec![];
+        };
+        let today = local.date_naive();
+        let due_time = parse_time_of_day(&n.due_time);
+        let mut out: Vec<crate::notifier::Planned> = vec![];
+        let mut add = |key: String, at: i64, title: String, body: String, target: String| {
+            if at <= now || at > end || at < self.data.extra.muted_until || self.fired(&key) {
+                return;
+            }
+            out.push(crate::notifier::Planned {
+                key,
+                title,
+                body,
+                target,
+                at,
+                sound: n.sound,
+            });
+        };
+        let days = |from: chrono::NaiveDate| {
+            (0..=PLAN_DAYS).map(move |i| from + chrono::Duration::days(i))
+        };
+        // my tasks due each day, at the chosen time
+        if let (true, Some(at_time)) = (n.due, due_time) {
+            for day in days(today) {
+                let Some(at) = local_ts(day, at_time) else {
+                    continue;
+                };
+                if let Some((title, body)) = self.due_summary(day, day.and_time(at_time)) {
+                    add(format!("due:{}", day), at, title, body, "today".into());
+                }
+            }
+        }
+        // my tasks with a due time, at that time
+        if n.due {
+            for t in self
+                .data
+                .tasks
+                .iter()
+                .filter(|t| t.assignees.contains(&me) && !t.archived && !self.data.is_closed(t))
+            {
+                let (Some(d), Some(at_time)) = (t.due, t.due_at()) else {
+                    continue;
+                };
+                let Some(at) = local_ts(d, at_time) else {
+                    continue;
+                };
+                let stamp = d.and_time(at_time).format("%Y-%m-%dT%H:%M").to_string();
+                // shown on the day itself: "Today 2:30 PM"
+                let when = format!("{} {}", tr("Today"), fmt_time(at_time));
+                add(
+                    format!("due-at:{}:{}", t.id, stamp),
+                    at,
+                    trf!("{} is due now", t.name),
+                    trf!("Due {}", when),
+                    format!("task:{}", t.id),
+                );
+            }
+        }
+        // meetings I attend, the chosen minutes before
+        if n.meetings {
+            let lead = n.meeting_minutes.max(1) as i64 * 60;
+            for m in self
+                .data
+                .extra
+                .meetings
+                .iter()
+                .filter(|m| m.attendees.contains(&me))
+            {
+                let Some(start) = parse_time_of_day(&m.time).and_then(|at| local_ts(m.date, at))
+                else {
+                    continue;
+                };
+                let (title, body) = meeting_words(m, (lead + 59) / 60);
+                add(
+                    format!("meeting:{}:{}T{}", m.id, m.date, m.time),
+                    start - lead,
+                    title,
+                    body,
+                    format!("meeting:{}", m.id),
+                );
+            }
+        }
+        // my goals the day before and the day they are due, and the first
+        // day one falls far behind at the pace it has now
+        if let Some(at_time) = due_time {
+            for g in self
+                .data
+                .extra
+                .goals
+                .iter()
+                .filter(|g| g.owner == me && g.due.is_some())
+            {
+                let Some(due) = g.due else { continue };
+                let p = self.goal_progress(g);
+                if n.goals && p < 1.0 {
+                    for before in [1, 0] {
+                        let day = due - chrono::Duration::days(before);
+                        if let Some(at) = local_ts(day, at_time) {
+                            let (title, body) = goal_due_words(g, before, p);
+                            add(
+                                format!("goal:{}:{}:{}", g.id, due, before),
+                                at,
+                                title,
+                                body,
+                                format!("goal:{}", g.id),
+                            );
+                        }
+                    }
+                }
+                if n.goal_risk {
+                    let first = days(today).find(|day| {
+                        local_ts(*day, at_time).is_some_and(|at| at > now)
+                            && g.pace(p, *day) == Some(Pace::AtRisk)
+                    });
+                    if let Some(day) = first {
+                        if let Some(at) = local_ts(day, at_time) {
+                            let (title, body) = goal_risk_words(g, p, (due - day).num_days());
+                            add(
+                                format!("goalrisk:{}:{}", g.id, due),
+                                at,
+                                title,
+                                body,
+                                format!("goal:{}", g.id),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // my reminders
+        if n.reminders {
+            for r in self
+                .data
+                .extra
+                .reminders
+                .iter()
+                .filter(|r| r.owner == me && !r.done && !r.alerted)
+            {
+                add(
+                    format!("reminder:{}", r.id),
+                    r.due_ts,
+                    tr("Reminder").into(),
+                    r.text.clone(),
+                    format!("reminder:{}", r.id),
+                );
+            }
+        }
+        out.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.key.cmp(&b.key)));
+        out.truncate(PLAN_MAX);
+        out
+    }
+
+    /// Hand the notices on the clock to macOS again when they changed: on
+    /// each look at the clock, and when quitting (`wait`: until macOS has
+    /// them).
+    pub(super) fn plan_clock(&mut self, now: i64, wait: bool) {
+        if !self.persist {
+            return;
+        }
+        let plan = self.clock_plan(now);
+        if self.notify_rt.planned.as_ref() == Some(&plan) {
+            return;
+        }
+        let old: Vec<String> = self
+            .data
+            .extra
+            .notify
+            .scheduled
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect();
+        crate::notifier::schedule(&plan, &old, wait);
+        // the ones whose time just came stay known as shown by macOS for a
+        // while (`os_showed`)
+        let mut kept: Vec<(String, i64)> = self
+            .data
+            .extra
+            .notify
+            .scheduled
+            .iter()
+            .filter(|(k, at)| {
+                *at <= now && now - *at < PLAN_KEEP_SECS && !plan.iter().any(|p| &p.key == k)
+            })
+            .cloned()
+            .collect();
+        kept.extend(plan.iter().map(|p| (p.key.clone(), p.at)));
+        if kept != self.data.extra.notify.scheduled {
+            self.data.extra.notify.scheduled = kept;
+            self.dirty = true;
+        }
+        self.notify_rt.planned = Some(plan);
     }
 }
 

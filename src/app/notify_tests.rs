@@ -1311,3 +1311,249 @@ fn a_pushed_banner_opens_its_conversation() {
     // no conversation: the Inbox
     assert_eq!(a.open_pushed(&format!("{}:", here)), "inbox");
 }
+
+/// Only the tasks made in the test are mine, and no meetings, goals or
+/// reminders: what `clock_plan` hands to macOS is easy to read.
+fn clock_app() -> App {
+    let mut a = app();
+    a.data
+        .tasks
+        .iter_mut()
+        .for_each(|t| t.assignees.retain(|m| *m != 1));
+    a.data.extra.meetings.clear();
+    a.data.extra.goals.clear();
+    a.data.extra.reminders.clear();
+    a
+}
+
+#[test]
+fn clock_notices_to_come_are_handed_to_macos_in_the_words_they_will_have() {
+    let mut a = clock_app();
+    let day = today() + Duration::days(1);
+    let id = my_task(&mut a, "File taxes");
+    {
+        let t = a.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+        t.due = Some(day);
+        t.set_due_time(chrono::NaiveTime::from_hms_opt(14, 30, 0));
+    }
+    let mid = a.data.new_id();
+    a.data.extra.meetings.push(Meeting {
+        id: mid,
+        title: "Standup".into(),
+        date: day,
+        time: "11:00".into(),
+        attendees: vec![1, 2],
+        agenda: String::new(),
+        notes: String::new(),
+    });
+    let rid = a.data.new_id();
+    a.data.extra.reminders.push(Reminder {
+        id: rid,
+        text: "Call the bank".into(),
+        due_ts: at(day, 16, 0),
+        owner: 1,
+        ..Default::default()
+    });
+    let now = at(day, 8, 0);
+    let plan: Vec<(String, i64, String, String, String)> = a
+        .clock_plan(now)
+        .into_iter()
+        .map(|p| (p.key, p.at, p.title, p.body, p.target))
+        .collect();
+    assert_eq!(
+        plan[..4],
+        [
+            (
+                format!("due:{}", day),
+                at(day, 9, 0),
+                "1 task is due today".to_string(),
+                "File taxes".to_string(),
+                "today".to_string()
+            ),
+            (
+                format!("meeting:{}:{}T11:00", mid, day),
+                at(day, 10, 50),
+                "Standup starts in 10 minutes".to_string(),
+                "11:00".to_string(),
+                format!("meeting:{}", mid)
+            ),
+            (
+                format!("due-at:{}:{}T14:30", id, day),
+                at(day, 14, 30),
+                "File taxes is due now".to_string(),
+                "Due Today 2:30 PM".to_string(),
+                format!("task:{}", id)
+            ),
+            (
+                format!("reminder:{}", rid),
+                at(day, 16, 0),
+                "Reminder".to_string(),
+                "Call the bank".to_string(),
+                format!("reminder:{}", rid)
+            ),
+        ]
+    );
+    // the next mornings it is overdue
+    assert_eq!(plan[4].0, format!("due:{}", day + Duration::days(1)));
+    assert_eq!(plan[4].2, "1 overdue task");
+    // the clock tells them with the same words when their time comes
+    a.notify_clock(at(day, 9, 1));
+    a.notify_clock(at(day, 10, 50));
+    a.notify_clock(at(day, 14, 30));
+    let told: Vec<(String, String)> = a
+        .notify_rt
+        .sent
+        .iter()
+        .map(|n| (n.title.clone(), n.body.clone()))
+        .collect();
+    let planned: Vec<(String, String)> = plan[..3]
+        .iter()
+        .map(|p| (p.2.clone(), p.3.clone()))
+        .collect();
+    // (the due time's day reads from the real today in the live notice:
+    // "Today" once that day comes, as the planned one says)
+    assert_eq!(told[..2], planned[..2]);
+    assert_eq!(told[2].0, planned[2].0);
+    // told already: no longer planned
+    assert!(a
+        .clock_plan(now)
+        .iter()
+        .all(|p| !p.key.starts_with("due-at:") && !p.key.starts_with("meeting:")));
+    // banners off: nothing for macOS
+    a.data.extra.notify.desktop = false;
+    assert!(a.clock_plan(now).is_empty());
+    // paused until 5 pm: only what comes after
+    a.data.extra.notify.desktop = true;
+    a.data.extra.muted_until = at(day, 17, 0);
+    assert!(a.clock_plan(now).iter().all(|p| p.at >= at(day, 17, 0)));
+}
+
+#[test]
+fn goals_are_planned_for_the_day_before_and_the_day_they_are_due() {
+    let mut a = clock_app();
+    let day = today() + Duration::days(1);
+    let gid = a.data.new_id();
+    a.data.extra.goals.push(Goal {
+        id: gid,
+        name: "Q4".into(),
+        color: [0, 0, 0],
+        due: Some(day + Duration::days(2)),
+        owner: 1,
+        targets: vec![],
+        start: None,
+        done_on: None,
+        reached: 0,
+        log: vec![],
+        days: vec![],
+    });
+    let plan = a.clock_plan(at(day, 8, 0));
+    let goals: Vec<(String, i64, String)> = plan
+        .iter()
+        .filter(|p| p.key.starts_with("goal:"))
+        .map(|p| (p.key.clone(), p.at, p.title.clone()))
+        .collect();
+    let due = day + Duration::days(2);
+    assert_eq!(
+        goals,
+        vec![
+            (
+                format!("goal:{}:{}:1", gid, due),
+                at(day + Duration::days(1), 9, 0),
+                "Goal due tomorrow: Q4".to_string()
+            ),
+            (
+                format!("goal:{}:{}:0", gid, due),
+                at(due, 9, 0),
+                "Goal due today: Q4".to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn what_macos_showed_while_the_app_was_quit_is_not_told_again() {
+    let n = now_ts();
+    let setup = || {
+        let mut a = clock_app();
+        a.data.extra.notify.due_time = "00:00".into();
+        let id = my_task(&mut a, "File taxes");
+        a.data.tasks.iter_mut().find(|t| t.id == id).unwrap().due = Some(today());
+        let rid = a.data.new_id();
+        a.data.extra.reminders.push(Reminder {
+            id: rid,
+            text: "Call the bank".into(),
+            due_ts: n - 30,
+            owner: 1,
+            ..Default::default()
+        });
+        a.data.extra.notify.scheduled = vec![
+            (format!("due:{}", today()), n - 60),
+            (format!("reminder:{}", rid), n - 30),
+        ];
+        a
+    };
+    // macOS showed both while the app was quit: starting, it tells neither
+    let mut a = setup();
+    a.settle_planned(n);
+    a.reminder_tick(None);
+    a.notify_clock(n);
+    assert!(a.notify_rt.sent.is_empty(), "{:?}", kinds(&a));
+    // an app that never handed them over tells both
+    let mut b = setup();
+    b.data.extra.notify.scheduled.clear();
+    b.settle_planned(n);
+    b.reminder_tick(None);
+    b.notify_clock(n);
+    assert_eq!(kinds(&b), vec![Kind::Reminder, Kind::Due]);
+    // running behind other windows: macOS showed it at its time, the app doesn't again
+    let mut c = setup();
+    c.notify_rt.settled = true;
+    c.notify_rt.away = true;
+    c.reminder_tick(None);
+    c.notify_clock(n);
+    assert!(c.notify_rt.sent.is_empty(), "{:?}", kinds(&c));
+    assert!(c
+        .data
+        .extra
+        .notify
+        .fired
+        .contains(&format!("due:{}", today())));
+    // in front: macOS keeps it to itself, so the app's toast tells it
+    let mut d = setup();
+    d.notify_rt.settled = true;
+    d.notify_rt.away = false;
+    d.reminder_tick(None);
+    d.notify_clock(n);
+    assert_eq!(kinds(&d), vec![Kind::Reminder, Kind::Due]);
+}
+
+#[test]
+fn handing_over_keeps_what_just_showed_and_skips_when_nothing_changed() {
+    let mut a = clock_app();
+    a.persist = true;
+    let day = today() + Duration::days(1);
+    let rid = a.data.new_id();
+    a.data.extra.reminders.push(Reminder {
+        id: rid,
+        text: "Call the bank".into(),
+        due_ts: at(day, 16, 0),
+        owner: 1,
+        ..Default::default()
+    });
+    a.data.extra.notify.scheduled = vec![("due:earlier".into(), at(day, 7, 59))];
+    a.plan_clock(at(day, 8, 0), false);
+    let keys: Vec<&str> = a
+        .data
+        .extra
+        .notify
+        .scheduled
+        .iter()
+        .map(|(k, _)| k.as_str())
+        .collect();
+    assert_eq!(keys[0], "due:earlier", "just shown: still known");
+    assert!(keys.contains(&format!("reminder:{}", rid).as_str()));
+    a.dirty = false;
+    a.plan_clock(at(day, 8, 0), false);
+    assert!(!a.dirty, "the same plan isn't handed over again");
+    a.persist = false;
+}

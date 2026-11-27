@@ -6019,6 +6019,9 @@ impl App {
     fn exit(&mut self) {
         if self.persist {
             self.finish_before_quit();
+            // the notices on the clock as they are now, for macOS to show
+            // while the app is quit
+            self.plan_clock(now_ts(), true);
             self.save_now();
             self.remember_ws_spot();
         }

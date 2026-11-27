@@ -693,6 +693,11 @@ pub struct NotifySettings {
     /// Notices on the clock (due tasks, meetings, goals) already given, so a
     /// restart doesn't repeat them. Newest last, kept short.
     pub fired: Vec<String>,
+    /// Notices on the clock handed to macOS to show at their time (key,
+    /// when), so they show while the app is quit too; one whose time has
+    /// come was shown by macOS and isn't told again (src/app/notify.rs).
+    /// Stays on this computer.
+    pub scheduled: Vec<(String, i64)>,
 }
 
 impl Default for NotifySettings {
@@ -725,6 +730,7 @@ impl Default for NotifySettings {
             channel_modes: vec![],
             keywords: String::new(),
             fired: vec![],
+            scheduled: vec![],
         }
     }
 }

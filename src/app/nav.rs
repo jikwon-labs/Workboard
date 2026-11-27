@@ -768,6 +768,8 @@ impl App {
     pub(super) fn reminder_tick(&mut self, ctx: Option<&egui::Context>) {
         let me = self.data.me;
         let now = now_ts();
+        // what macOS showed while the app was quit isn't told again
+        self.settle_planned(now);
         let mut fired: Vec<Reminder> = vec![];
         for r in self
             .data
@@ -779,9 +781,15 @@ impl App {
             r.alerted = true;
             fired.push(r.clone());
         }
+        // shown by macOS at their time already, the app not being in front
+        // (handed over ahead of time, notify.rs `plan_clock`)
+        let os_showed = self.notify_rt.away
+            && fired
+                .iter()
+                .all(|r| self.os_showed(&format!("reminder:{}", r.id), now));
         if !fired.is_empty() {
             self.dirty = true;
-            if self.data.extra.notify.reminders {
+            if self.data.extra.notify.reminders && !os_showed {
                 let key = format!("reminder:{}:{}", fired[0].id, now);
                 // came due a while ago (the app was closed): not "due now"
                 let late = fired.iter().any(|r| now - r.due_ts > 10 * 60);

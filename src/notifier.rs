@@ -14,13 +14,46 @@
 // token, which works only in the installed app signed with its provisioning
 // profile (scripts/bundle.sh); `push_token` has it once it came. Clicking
 // such a banner launches the app, and `take_clicked` gives
-// "push:WS:CHANNEL[:THREAD]" (WS: the workspace key the app sent with the
-// token, src/app/push.rs).
+// "push:WS:TARGET" (WS: the workspace key the app sent with the token,
+// src/app/push.rs; TARGET what the banner opens, or for a server from
+// before targets "CHANNEL[:THREAD]").
+//
+// Notices on the clock (tasks due, meetings, goals, reminders) are handed to
+// macOS ahead of time (`schedule`), so they show at their time even while the
+// app is quit. While the app is in front macOS keeps those to itself and the
+// app tells them in its own toast (src/app/notify.rs `plan_clock`).
 //
 // Windows: toast notifications, a count drawn over the taskbar button and
 // flashing the taskbar button (`win` below).
 //
 // Everything here must be called from the main thread (the egui frame).
+
+/// A banner handed to macOS ahead of time (`schedule`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Planned {
+    /// the notice's key (src/app/notify.rs), unique among the planned
+    pub key: String,
+    pub title: String,
+    pub body: String,
+    /// what a click opens
+    pub target: String,
+    /// when it shows (seconds)
+    pub at: i64,
+    pub sound: bool,
+}
+
+/// The identifier macOS keeps a planned banner under.
+pub const PLANNED_PREFIX: &str = "wb-clock-";
+
+/// Hand `list` to macOS to show at their times, in place of what was handed
+/// before (`old`: those keys). `wait`: until macOS has them (when quitting).
+/// Only macOS keeps banners for later; elsewhere nothing happens.
+pub fn schedule(list: &[Planned], old: &[String], wait: bool) {
+    #[cfg(target_os = "macos")]
+    mac::schedule(list, old, wait);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (list, old, wait);
+}
 
 /// Banners ask for permission once, the first time one (or a Dock badge) is
 /// needed.
@@ -203,6 +236,85 @@ mod mac {
         }
     }
 
+    pub fn schedule(list: &[super::Planned], old: &[String], wait: bool) {
+        if !on_main_thread() || !center_ok() {
+            return;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        // how many macOS hasn't confirmed yet
+        let pending = std::sync::Arc::new((Mutex::new(0usize), std::sync::Condvar::new()));
+        unsafe {
+            let c = center();
+            // the ones no longer planned go; a planned one with the same
+            // key replaces its old self
+            let gone: Vec<&String> = old
+                .iter()
+                .filter(|k| !list.iter().any(|p| &p.key == *k))
+                .collect();
+            if !gone.is_empty() {
+                let ids: *mut Object = msg_send![class!(NSMutableArray), array];
+                for k in gone {
+                    let _: () =
+                        msg_send![ids, addObject: ns(&format!("{}{}", super::PLANNED_PREFIX, k))];
+                }
+                let _: () = msg_send![c, removePendingNotificationRequestsWithIdentifiers: ids];
+            }
+            for p in list {
+                let secs = (p.at - now) as f64;
+                if secs < 1.0 {
+                    continue;
+                }
+                let content: *mut Object = msg_send![class!(UNMutableNotificationContent), new];
+                let _: () = msg_send![content, setTitle: ns(&p.title)];
+                let _: () = msg_send![content, setBody: ns(&p.body)];
+                let info: *mut Object = msg_send![class!(NSDictionary), dictionaryWithObject: ns(&p.target) forKey: ns("target")];
+                let _: () = msg_send![content, setUserInfo: info];
+                if p.sound {
+                    let s: *mut Object = msg_send![class!(UNNotificationSound), defaultSound];
+                    let _: () = msg_send![content, setSound: s];
+                }
+                let trigger: *mut Object = msg_send![class!(UNTimeIntervalNotificationTrigger), triggerWithTimeInterval: secs repeats: objc::runtime::NO];
+                let id = ns(&format!("{}{}", super::PLANNED_PREFIX, p.key));
+                let req: *mut Object = msg_send![class!(UNNotificationRequest), requestWithIdentifier: id content: content trigger: trigger];
+                if wait {
+                    *pending.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+                    let left = pending.clone();
+                    let done = ConcreteBlock::new(move |_err: *mut Object| {
+                        let mut n = left.0.lock().unwrap_or_else(|e| e.into_inner());
+                        *n = n.saturating_sub(1);
+                        left.1.notify_all();
+                    })
+                    .copy();
+                    let _: () =
+                        msg_send![c, addNotificationRequest: req withCompletionHandler: &*done];
+                } else {
+                    let _: () = msg_send![c, addNotificationRequest: req withCompletionHandler: null_mut::<Object>()];
+                }
+                let _: () = msg_send![content, release];
+            }
+        }
+        if wait {
+            // macOS answers on its own queue; quitting before it has them
+            // would lose them
+            let (lock, cv) = &*pending;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+            let mut n = lock.lock().unwrap_or_else(|e| e.into_inner());
+            while *n > 0 {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                n = cv
+                    .wait_timeout(n, left)
+                    .unwrap_or_else(|e| e.into_inner())
+                    .0;
+            }
+        }
+    }
+
     /// Not the installed app: a banner through AppleScript.
     fn fallback(title: &str, body: &str, sound: bool) {
         let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
@@ -301,8 +413,10 @@ mod mac {
         TOKEN.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// What a pushed banner opens: "push:WS:CHANNEL[:THREAD]" from its
-    /// "ws", "channel" and "parent" (server/src/push.rs `payload`).
+    /// What a pushed banner opens: "push:WS:TARGET" from its "ws" and
+    /// "target", or from a server from before targets
+    /// "push:WS:CHANNEL[:THREAD]" from its "channel" and "parent"
+    /// (server/src/push.rs).
     unsafe fn pushed_target(info: *mut Object) -> Option<String> {
         let aps: *mut Object = msg_send![info, objectForKey: ns("aps")];
         if aps.is_null() {
@@ -328,6 +442,18 @@ mod mac {
         };
         let ws = if ok == YES { from_ns(ws) } else { None };
         let mut t = format!("push:{}:", ws.unwrap_or_default());
+        let target: *mut Object = msg_send![info, objectForKey: ns("target")];
+        let is_text: BOOL = if target.is_null() {
+            objc::runtime::NO
+        } else {
+            msg_send![target, isKindOfClass: class!(NSString)]
+        };
+        if is_text == YES {
+            if let Some(target) = from_ns(target).filter(|t| !t.is_empty()) {
+                t.push_str(&target);
+                return Some(t);
+            }
+        }
         if let Some(ch) = number("channel") {
             t.push_str(&ch.to_string());
             if let Some(p) = number("parent") {
@@ -356,8 +482,10 @@ mod mac {
                 let req: *mut Object = msg_send![note, request];
                 let content: *mut Object = msg_send![req, content];
                 let info: *mut Object = msg_send![content, userInfo];
+                // a push (it has "aps") names its workspace; the app's own
+                // banners carry only their target
                 let t: *mut Object = msg_send![info, objectForKey: ns("target")];
-                if let Some(t) = from_ns(t).or_else(|| pushed_target(info)) {
+                if let Some(t) = pushed_target(info).or_else(|| from_ns(t)) {
                     CLICKED.lock().unwrap_or_else(|e| e.into_inner()).push(t);
                 }
                 let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
@@ -372,14 +500,25 @@ mod mac {
             _this: &Object,
             _cmd: Sel,
             _center: *mut Object,
-            _note: *mut Object,
+            note: *mut Object,
             done: *mut Object,
         ) {
             unsafe {
+                // a notice on the clock handed over ahead of time: with the
+                // app in front it shows in the app's own toast instead
+                let req: *mut Object = msg_send![note, request];
+                let id: *mut Object = msg_send![req, identifier];
+                let planned = from_ns(id).is_some_and(|i| i.starts_with(super::PLANNED_PREFIX));
+                let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+                let active: BOOL = msg_send![app, isActive];
                 if !done.is_null() {
-                    // list | banner | sound
                     let b = &*(done as *const Block<(usize,), ()>);
-                    b.call(((1 << 3) | (1 << 4) | (1 << 1),));
+                    if planned && active == YES {
+                        b.call((0,));
+                    } else {
+                        // list | banner | sound
+                        b.call(((1 << 3) | (1 << 4) | (1 << 1),));
+                    }
                 }
             }
         }

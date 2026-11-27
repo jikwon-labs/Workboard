@@ -10,6 +10,7 @@
 
 ## 끝난 일
 
+- [x] **0.1.32 배포 (Mac, iPhone, iPad Desk)** (2026-11-27, `ac5ce0e`, 빌드 1196): 알림 일정, 앱을 꺼도 오는 알림, 남는 AI 대화(공유·문서로 저장), 워크스페이스 위치 기억, iPad 데스크 앱 알림이 들어 있다. Mac 은 공증해 업데이트 서버에 올렸다(appcast 확인). iPhone 은 `ios/scripts/testflight.sh` 로 0.1.32 (1) 을 Team 에 넣어 베타 심사에 냈다. iPad "Workboard Desk" 는 `scripts/ipad-testflight` 로 0.1.32 를 올렸다(첫 시도는 entitlements 경로가 `ios/ios/Config` 로 풀려 실패, 절대 경로로 고쳐 다시 올림). GitHub Release v0.1.32 에 Mac zip 을 붙였다(Windows 는 이번에 하지 않음). 업데이트 창 안내 글은 `build/updates/Workboard-0.1.32-arm64.html`, 심볼 원본은 `build/symbols/Workboard-0.1.32-1196`.
 - [x] **0.1.31 배포 (Mac, Windows, iPhone, iPad Desk)** (2026-11-24, `8d227bc`, 빌드 1177): 1:1 대화 상단에 상대 접속 상태 점이 들어 있다. Mac 은 공증해 업데이트 서버에 올렸다(appcast 확인). iPhone 은 `ios/scripts/testflight.sh` 로 0.1.31 (1) 을 Team 에 넣어 베타 심사에 냈다. iPad "Workboard Desk" 는 `scripts/ipad-testflight` 로 0.1.31 (1) 을 올렸고 처리가 끝났다(VALID). Windows 는 Actions 실행 45358839803(빌드·테스트 모두 성공)의 zip 을 `appcast-windows.xml` 로 올렸다. GitHub Release v0.1.31 에 Mac·Windows zip 을 붙였다. 업데이트 창 안내 글은 `build/updates/Workboard-0.1.31-arm64.html`, 심볼 원본은 `build/symbols/Workboard-0.1.31-1177`.
 
 - [x] **iPad "Workboard Desk" 0.1.30 TestFlight** (2026-11-24, `797eed0`): `scripts/ipad-testflight` 로 0.1.30 (1) 을 올렸고 App Store Connect 처리가 끝났다(VALID). 내부 그룹 "Internal" 은 자동 배포라 바로 받는다. 직전 빌드는 0.1.25 였다. 좁은 창 정리 묶음, 채팅 투표, 문서 버전 기록, 예약 전송이 들어 있다. 음성 메시지 녹음은 iPad 판에 녹음기가 없어 마이크 버튼이 숨겨진다(`src/media.rs`).

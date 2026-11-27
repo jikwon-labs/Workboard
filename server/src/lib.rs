@@ -1015,9 +1015,10 @@ fn apns_sender(home: &Path) -> Option<Arc<dyn push::Sender>> {
     match push::load_apns(home).and_then(push::Apns::new) {
         Ok(a) => {
             println!(
-                "iPhone and Mac notifications on (APNs, topics {} and {})",
+                "iPhone, Mac and iPad notifications on (APNs, topics {}, {} and {})",
                 a.topic("ios"),
-                a.topic("macos")
+                a.topic("macos"),
+                a.topic("ipados")
             );
             Some(Arc::new(a))
         }

@@ -27,6 +27,7 @@
 // password is reset with a code the server emails (POST /auth/forgot).
 
 mod addr;
+mod away;
 mod bell;
 mod client;
 mod conn;
@@ -35,6 +36,7 @@ pub mod notice;
 mod protocol;
 mod watch;
 pub use addr::*;
+pub use away::{is_away, set_away};
 pub use client::*;
 pub use conn::{trust_certificate, Conn};
 pub use http::{

@@ -255,6 +255,10 @@ impl Client {
         let (etx, rx) = mpsc::channel();
         let addr = addr.to_string();
         let ring = tx.clone();
+        let away_ring = tx.clone();
+        crate::away::ring_me(Box::new(move || {
+            away_ring.send(Cmd::Readable(u64::MAX)).is_ok()
+        }));
         std::thread::Builder::new()
             .name("workboard-net".into())
             .spawn(move || run(addr, sign_in, crx, ring, etx, wake))
@@ -401,6 +405,16 @@ fn wait(
     wait_until(crx, pending, queued, Instant::now() + pause)
 }
 
+/// While the app is away (away.rs): false when the app asked to stop.
+fn wait_back(crx: &Receiver<Cmd>, pending: &mut Option<Value>, queued: &mut Vec<Msg>) -> bool {
+    while crate::away::is_away() {
+        if !wait(crx, pending, queued, Duration::from_secs(1)) {
+            return false;
+        }
+    }
+    true
+}
+
 fn wait_until(
     crx: &Receiver<Cmd>,
     pending: &mut Option<Value>,
@@ -425,6 +439,8 @@ fn wait_until(
 
 pub(crate) enum End {
     Stop,
+    /// the app went away (away.rs): hang up until it is back
+    Away,
     Lost(String),
     Refused(String),
     Gone(String),
@@ -447,6 +463,10 @@ fn run(
     let mut known: Option<Known> = None;
     line.emit(Event::Status(Status::Connecting));
     loop {
+        // away: no connection until the app is back
+        if crate::away::is_away() && !wait_back(&crx, &mut pending, &mut queued) {
+            return;
+        }
         let end = match connect(&addr) {
             Ok(mut ws) => {
                 let end = session(
@@ -468,6 +488,11 @@ fn run(
         };
         let gave_up = match end {
             End::Stop => return,
+            End::Away => {
+                // straight back once the app is (wait_back at the top)
+                tries = 0;
+                continue;
+            }
             End::Refused(why) => Some(Status::Refused(why)),
             End::Gone(why) => Some(Status::Gone(why)),
             End::Lost(why) => {
@@ -627,6 +652,10 @@ fn session_on(
         }
         if stopping {
             return End::Stop;
+        }
+        // (after sending what was waiting: the last changes go up first)
+        if crate::away::is_away() {
+            return End::Away;
         }
         if last_ping.elapsed() >= Duration::from_secs(PING_SECS) {
             last_ping = Instant::now();

@@ -45,12 +45,15 @@
 //     "key_id": "ABC123DEFG",              the key's id
 //     "team_id": "ABCDE12345",             the Apple developer team id
 //     "topic": "com.example.workboard",    the iPhone app's bundle id
-//     "mac_topic": "local.workboard.app"   the Mac app's (optional: this is
+//     "mac_topic": "local.workboard.app",  the Mac app's (optional: this is
 //                                           the default)
+//     "ipad_topic": "com.example.workboard.desk"  the iPad's desktop app
+//                                           (optional: `topic` + ".desk")
 //   }
 //
 // or the environment variables WB_APNS_KEY, WB_APNS_KEY_ID, WB_APNS_TEAM_ID,
-// WB_APNS_TOPIC and WB_APNS_MAC_TOPIC (each wins over the file). The key must
+// WB_APNS_TOPIC, WB_APNS_MAC_TOPIC and WB_APNS_IPAD_TOPIC (each wins over
+// the file). The key must
 // be one for the whole team (not one Apple ties to the iPhone app alone) for
 // Macs to get notifications. Without all four nothing is
 // sent and the server says so once when it starts. It reads the setup when it
@@ -125,13 +128,17 @@ pub fn token_ok(token: &str) -> bool {
 /// unless apns.json says `mac_topic`.
 pub const MAC_TOPIC: &str = "local.workboard.app";
 
-/// The platforms tokens are kept for: "ios" or "macos" (None: neither).
+/// The platforms tokens are kept for: "ios" (the iPhone app), "macos" (the
+/// Mac app) or "ipados" (the Mac app's code on an iPad, "Workboard Desk",
+/// docs/ipad.md); None: none of them.
 pub fn norm_platform(platform: &str) -> Option<&'static str> {
     let p = platform.trim();
     if p.eq_ignore_ascii_case("ios") {
         Some("ios")
     } else if p.eq_ignore_ascii_case("macos") {
         Some("macos")
+    } else if p.eq_ignore_ascii_case("ipados") {
+        Some("ipados")
     } else {
         None
     }
@@ -159,6 +166,9 @@ pub struct ApnsCfg {
     /// the Mac app's bundle id (MAC_TOPIC when empty)
     #[serde(skip_serializing_if = "String::is_empty")]
     pub mac_topic: String,
+    /// the iPad desktop app's bundle id (`topic` + ".desk" when empty)
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub ipad_topic: String,
 }
 
 /// The APNs setup from apns.json and WB_APNS_* (these win). Err says why
@@ -196,9 +206,13 @@ pub fn load_apns(home: &Path) -> Result<ApnsCfg, String> {
         team_id: pick("WB_APNS_TEAM_ID", &f.team_id),
         topic: pick("WB_APNS_TOPIC", &f.topic),
         mac_topic: pick("WB_APNS_MAC_TOPIC", &f.mac_topic),
+        ipad_topic: pick("WB_APNS_IPAD_TOPIC", &f.ipad_topic),
     };
     if cfg.mac_topic.is_empty() {
         cfg.mac_topic = MAC_TOPIC.into();
+    }
+    if cfg.ipad_topic.is_empty() && !cfg.topic.is_empty() {
+        cfg.ipad_topic = format!("{}.desk", cfg.topic);
     }
     let missing: Vec<&str> = [
         ("key", &cfg.key),
@@ -325,10 +339,10 @@ impl Apns {
 
     /// The bundle id notifications to `platform` go to.
     pub fn topic(&self, platform: &str) -> &str {
-        if platform == "macos" {
-            &self.cfg.mac_topic
-        } else {
-            &self.cfg.topic
+        match platform {
+            "macos" => &self.cfg.mac_topic,
+            "ipados" => &self.cfg.ipad_topic,
+            _ => &self.cfg.topic,
         }
     }
 
@@ -1608,6 +1622,7 @@ mod tests {
         assert!(token_ok(&"ab".repeat(32)) && !token_ok("xyz") && !token_ok(""));
         assert_eq!(norm_platform(" iOS"), Some("ios"));
         assert_eq!(norm_platform("macos"), Some("macos"));
+        assert_eq!(norm_platform("iPadOS"), Some("ipados"));
         assert_eq!(norm_platform("android"), None);
         assert_eq!(norm_platform(""), None);
     }
@@ -1648,6 +1663,8 @@ mod tests {
         // Mac tokens go to the Mac app's bundle id unless apns.json names another
         assert_eq!(apns.topic("ios"), "com.example.wb");
         assert_eq!(apns.topic("macos"), MAC_TOPIC);
+        // the iPad's desktop app: the iPhone app's id with ".desk"
+        assert_eq!(apns.topic("ipados"), "com.example.wb.desk");
         std::fs::write(home.join(APNS_FILE), r#"{"key": "AuthKey_TEST.p8", "key_id": "KEY123", "team_id": "TEAM45", "topic": "com.example.wb", "mac_topic": "com.example.mac"}"#).unwrap();
         assert_eq!(load_apns(&home).unwrap().mac_topic, "com.example.mac");
         let t = apns.jwt(1_000_000).unwrap();

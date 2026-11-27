@@ -83,6 +83,10 @@ impl Watcher {
             ..Default::default()
         };
         let ring = stop.clone();
+        let away_ring = stop.clone();
+        crate::away::ring_me(Box::new(move || {
+            away_ring.send(Ctl::Readable(u64::MAX)).is_ok()
+        }));
         std::thread::Builder::new()
             .name("workboard-watch".into())
             .spawn(move || watch_run(addr, sign_in, srx, ring, Heard { tx: etx, wake }))
@@ -149,6 +153,12 @@ fn watch_run(addr: String, sign_in: SignIn, srx: Receiver<Ctl>, ring: Sender<Ctl
     let mut tries: u32 = 0;
     let mut push = None;
     loop {
+        // away (away.rs): no connection until the app is back
+        while crate::away::is_away() {
+            if !pause(&srx, 1, &mut push) {
+                return;
+            }
+        }
         let ended = match connect(&addr) {
             Ok(mut ws) => {
                 let e = watch_session(&mut ws, &sign_in, &srx, &ring, &line, &mut tries, &mut push);
@@ -238,6 +248,11 @@ fn watch_session(
                     *push = Some(m);
                 }
             }
+        }
+        if crate::away::is_away() {
+            // straight back once the app is (watch_run)
+            *tries = 0;
+            return Ended::Again(Some(0));
         }
         if watching && last_ping.elapsed() >= Duration::from_secs(PING_SECS) {
             last_ping = Instant::now();

@@ -822,7 +822,8 @@ impl App {
     /// Not on an iPad (the keyboard would cover the screen), not under a
     /// dialog or the task window, and not while another text field has the
     /// cursor (it waits a couple of frames for one that is closing, such as
-    /// the quick switcher's).
+    /// the quick switcher's). "/" typed while no text field has the cursor
+    /// also puts it back in the box.
     pub(super) fn focus_on_open(
         &mut self,
         ctx: &egui::Context,
@@ -850,6 +851,25 @@ impl App {
             }
         }
         ctx.data_mut(|d| d.insert_temp(key, (what, pass, due)));
+        // "/" while no text field has the cursor: back to the box, and the
+        // "/" typed there opens the command list, as in Slack (the box
+        // drawn after this takes this frame's "/" itself)
+        if self.modal.is_none()
+            && self.open_task.is_none()
+            && self.palette.is_none()
+            && self.quick_add.is_none()
+            && self.rename.is_none()
+            && !ctx
+                .memory(|m| m.focused())
+                .is_some_and(|f| egui::TextEdit::load_state(ctx, f).is_some())
+            && ctx.input(|i| {
+                i.events
+                    .iter()
+                    .any(|e| matches!(e, egui::Event::Text(s) if s == "/"))
+            })
+        {
+            ctx.memory_mut(|m| m.request_focus(id));
+        }
     }
 
     /// A post of mine in conversation `ch`, from the channel's box (Post) or

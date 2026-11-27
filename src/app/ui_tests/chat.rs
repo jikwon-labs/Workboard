@@ -4549,3 +4549,43 @@ fn a_long_name_in_the_mention_list_stays_inside_it() {
         }
     }
 }
+
+/// "/" while no text field has the cursor puts it back in the message box
+/// (a thread's reply box while one is open) with the "/" typed there, so the
+/// command list opens, as in Slack. A "/" typed in another field stays there.
+#[test]
+fn slash_puts_the_cursor_back_in_the_box() {
+    let chat_box = egui::Id::new(super::super::files::CHAT_BOX);
+    let thread_box = egui::Id::new(super::super::files::THREAD_BOX);
+    let focused = |h: &Ui1| h.ctx.memory(|m| m.focused());
+    let mut h = Ui1::new();
+    h.click("general");
+    // a click on the messages takes the cursor out
+    let messages = h.find("Message composer").unwrap() - vec2(0.0, 300.0);
+    h.click_at(messages);
+    h.settle();
+    assert_eq!(focused(&h), None);
+
+    h.type_text("/");
+    h.settle();
+    assert_eq!(focused(&h), Some(chat_box), "back in the box");
+    assert_eq!(h.app.chat.channel.text, "/");
+    assert!(
+        h.app.slash_choices(&h.app.chat.channel.text).len() > 0,
+        "the command list has something to show"
+    );
+    h.type_text("remind");
+    assert_eq!(h.app.chat.channel.text, "/remind", "typing goes on there");
+
+    // a thread open: its reply box
+    h.app.chat.channel.text.clear();
+    h.click("1 reply");
+    let messages = h.find("Message composer").unwrap() - vec2(0.0, 300.0);
+    h.click_at(messages);
+    h.settle();
+    assert_eq!(focused(&h), None);
+    h.type_text("/");
+    h.settle();
+    assert_eq!(focused(&h), Some(thread_box), "the thread's reply box");
+    assert_eq!(h.app.chat.channel.text, "", "not the channel's box");
+}

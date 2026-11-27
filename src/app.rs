@@ -656,6 +656,9 @@ pub struct App {
     push_rt: push::PushRt,
     /// Where each workspace file lives (team server, shared folder, this computer), read once.
     ws_places: HashMap<String, &'static str>,
+    /// The page each workspace left this run showed, and its open task:
+    /// switching back to a workspace opens it there again.
+    ws_spots: HashMap<String, (nav::NavSpot, Option<u64>)>,
     create_text: String,
     new_message_open: bool,
     dash_open: Option<u64>,
@@ -1305,6 +1308,7 @@ impl App {
             watch_rt: Default::default(),
             push_rt: Default::default(),
             ws_places: HashMap::new(),
+            ws_spots: HashMap::new(),
             create_text: String::new(),
             new_message_open: false,
             dash_open: None,

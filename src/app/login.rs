@@ -712,6 +712,7 @@ impl App {
             self.save_now();
         }
         self.ws_places.clear();
+        self.ws_spots.clear();
         self.loc = self
             .data
             .first_list()

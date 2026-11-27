@@ -481,3 +481,76 @@ fn an_open_task_keeps_cmd_numbers_for_its_priority() {
         assert_eq!(h.app.task(id).unwrap().priority, 2, "its priority instead");
     }
 }
+
+#[test]
+fn going_back_to_a_workspace_opens_where_it_was_left() {
+    let _home = own_home("ws-spot");
+    let mut h = Ui1::new();
+    // the sample lists stay when this workspace is read back from its file
+    h.app.data.extra.demo_removed = true;
+    let (side, third) = three_workspaces(&mut h);
+    let first = h.app.loc;
+    // a list other than the one a workspace opens on, and a task on it
+    h.click("Personal");
+    let personal = h.app.loc;
+    assert_ne!(personal, first);
+    // to Side Biz and on to Third, then back to this one
+    h.click("Workspace menu");
+    h.click("Side Biz");
+    h.settle();
+    assert_eq!(h.app.ws_file, side);
+    h.key_with(egui::Key::Num3, workspace_mods());
+    assert_eq!(h.app.ws_file, third);
+    h.key_with(egui::Key::Num1, workspace_mods());
+    assert_eq!(h.app.ws_file, "data.json");
+    assert_eq!(h.app.loc, personal, "the list it was on");
+    assert!(h.has("Task Renew passport"));
+    // a task open when a notification takes me to another workspace is
+    // open again on coming back
+    h.click_left("Task Renew passport", 120.0);
+    let task = h.app.open_task.expect("the task opened");
+    h.app.open_in_workspace(&side, "x");
+    h.settle();
+    assert_eq!(h.app.ws_file, side);
+    assert_eq!(h.app.open_task, None, "the task stays with its workspace");
+    h.key_with(egui::Key::Num1, workspace_mods());
+    assert_eq!(h.app.loc, personal);
+    assert_eq!(h.app.open_task, Some(task));
+    // Side Biz too comes back where it was left: its Home
+    h.app.open_task = None;
+    h.settle();
+    h.app.actions.push(Action::Go(Location::Inbox));
+    h.settle();
+    h.key_with(egui::Key::Num2, workspace_mods());
+    h.app.actions.push(Action::Go(Location::Home));
+    h.settle();
+    h.key_with(egui::Key::Num1, workspace_mods());
+    assert_eq!(h.app.loc, Location::Inbox);
+    h.key_with(egui::Key::Num2, workspace_mods());
+    assert_eq!(h.app.ws_file, side);
+    assert_eq!(h.app.loc, Location::Home);
+    // Back doesn't step into the other workspace's pages
+    h.app.go_back();
+    h.settle();
+    assert_eq!(h.app.ws_file, side);
+    // a list deleted while away: the workspace opens on its first list
+    h.key_with(egui::Key::Num1, workspace_mods());
+    h.app.actions.push(Action::Go(personal));
+    h.settle();
+    h.key_with(egui::Key::Num2, workspace_mods());
+    let mut d = Data::load();
+    let Location::List(pid) = personal else {
+        unreachable!()
+    };
+    for s in &mut d.spaces {
+        s.lists.retain(|l| l.id != pid);
+        for f in &mut s.folders {
+            f.lists.retain(|l| l.id != pid);
+        }
+    }
+    d.save();
+    h.key_with(egui::Key::Num1, workspace_mods());
+    assert_eq!(h.app.ws_file, "data.json");
+    assert_ne!(h.app.loc, personal);
+    assert!(h.app.data.location_exists(h.app.loc));
+}

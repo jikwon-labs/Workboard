@@ -796,7 +796,29 @@ impl App {
         if self.persist {
             self.save_now();
         }
+        let left = self.ws_file.clone();
+        self.ws_spots
+            .insert(left, (self.nav_spot(), self.open_task));
         self.open_workspace(file);
+        if self.ws_file == file {
+            self.back_to_ws_spot();
+        }
+    }
+
+    /// The workspace just opened was open earlier this run: back to the page
+    /// it showed then, and its open task, when they are still there.
+    fn back_to_ws_spot(&mut self) {
+        let Some((spot, task)) = self.ws_spots.get(&self.ws_file).copied() else {
+            return;
+        };
+        // gone or archived there since (a team workspace changes while closed)
+        if !self.nav_spot_exists(&spot) || !self.location_shown(spot.loc) {
+            return;
+        }
+        self.show_nav_spot(spot);
+        self.open_task = task.filter(|&id| self.task(id).is_some());
+        // the history starts over at this page
+        self.nav.last = Some(spot);
     }
 
     /// Open workspace `file` in place of the one open, which isn't saved

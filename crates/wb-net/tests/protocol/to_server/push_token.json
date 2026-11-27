@@ -19,6 +19,15 @@
       "launch",
       "deploy"
     ],
-    "muted_until": 1763009999
+    "muted_until": 1763009999,
+    "huddles": true,
+    "reactions": false,
+    "assigned": true,
+    "comments": false,
+    "task_changes": true,
+    "forms": true,
+    "team": false,
+    "goal_milestones": true,
+    "lang": "ko"
   }
 }

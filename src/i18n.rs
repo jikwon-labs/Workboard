@@ -180,88 +180,10 @@ fn history_ko(text: &str) -> Option<String> {
     None
 }
 
-/// Picks the particle after a value by its last sound: "(으)로" becomes
-/// "로" or "으로", "을(를)" becomes "을" or "를". After a Latin letter only
-/// the endings whose sound is plain are settled ("me@team.io로", "Kim으로");
-/// the rest are left as written.
-pub fn particles(s: &str) -> String {
-    // Some(true): ends in a consonant other than ㄹ, Some(false): a vowel or ㄹ
-    fn coda(c: char, for_ro: bool) -> Option<bool> {
-        let code = c as u32;
-        if (0xac00..=0xd7a3).contains(&code) {
-            let f = (code - 0xac00) % 28;
-            return Some(if for_ro { f != 0 && f != 8 } else { f != 0 });
-        }
-        match c.to_ascii_lowercase() {
-            'a' | 'i' | 'o' | 'u' | 'y' => return Some(false),
-            'm' | 'n' => return Some(true),
-            'l' => return Some(!for_ro),
-            _ => {}
-        }
-        // digits read in Korean: 0 영 1 일 3 삼 6 육 7 칠 8 팔 have a final consonant
-        let d = c.to_digit(10)?;
-        Some(match d {
-            0 | 3 | 6 => true,
-            1 | 7 | 8 => !for_ro,
-            _ => false,
-        })
-    }
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    loop {
-        let ro = rest.find("(\u{c73c})\u{b85c}");
-        let eul = rest.find("\u{c744}(\u{b97c})");
-        let (at, is_ro) = match (ro, eul) {
-            (Some(a), Some(b)) if b < a => (b, false),
-            (Some(a), _) => (a, true),
-            (None, Some(b)) => (b, false),
-            (None, None) => break,
-        };
-        let before = &rest[..at];
-        out.push_str(before);
-        let last = before.chars().last().or_else(|| out.chars().last());
-        let token = if is_ro {
-            "(\u{c73c})\u{b85c}"
-        } else {
-            "\u{c744}(\u{b97c})"
-        };
-        match last.and_then(|c| coda(c, is_ro)) {
-            Some(true) => out.push_str(if is_ro {
-                "\u{c73c}\u{b85c}"
-            } else {
-                "\u{c744}"
-            }),
-            Some(false) => out.push_str(if is_ro { "\u{b85c}" } else { "\u{b97c}" }),
-            None => out.push_str(token),
-        }
-        rest = &rest[at + token.len()..];
-    }
-    out.push_str(rest);
-    out
-}
+/// Picks the particle after a value by its last sound ("(으)로", "을(를)").
+pub use wb_net::notice::particles;
 
-/// The {} values of `text` when it has the shape of `pattern`.
-fn match_pattern<'a>(pattern: &str, text: &'a str) -> Option<Vec<&'a str>> {
-    let parts: Vec<&str> = pattern.split("{}").collect();
-    let mut rest = text.strip_prefix(parts[0])?;
-    let mut vals = vec![];
-    for (i, sep) in parts.iter().enumerate().skip(1) {
-        if i == parts.len() - 1 {
-            let v = if sep.is_empty() {
-                rest
-            } else {
-                rest.strip_suffix(sep)?
-            };
-            vals.push(v);
-            rest = "";
-        } else {
-            let at = rest.find(sep)?;
-            vals.push(&rest[..at]);
-            rest = &rest[at + sep.len()..];
-        }
-    }
-    rest.is_empty().then_some(vals)
-}
+use wb_net::notice::match_pattern;
 
 /// A value inside a history line: default statuses, priorities, repeats and
 /// the dates `fmt_date` wrote ("Today", "Nov 16", "11/16/25") in Korean.
@@ -310,45 +232,8 @@ pub fn has_ko(s: &str) -> bool {
 }
 
 /// Puts `args` into a translated template: `{}` takes the next value, `{0}`,
-/// `{1}`... a numbered one (Korean often needs the values in another order),
-/// and `{{` / `}}` are literal braces.
-pub fn fill(template: &str, args: &[String]) -> String {
-    let mut out = String::with_capacity(template.len() + 16);
-    let mut next = 0;
-    let mut it = template.chars().peekable();
-    while let Some(c) = it.next() {
-        match c {
-            '{' if it.peek() == Some(&'{') => {
-                it.next();
-                out.push('{');
-            }
-            '}' if it.peek() == Some(&'}') => {
-                it.next();
-                out.push('}');
-            }
-            '{' => {
-                let mut num = String::new();
-                for d in it.by_ref() {
-                    if d == '}' {
-                        break;
-                    }
-                    num.push(d);
-                }
-                let i = if num.is_empty() {
-                    next += 1;
-                    next - 1
-                } else {
-                    num.parse().unwrap_or(usize::MAX)
-                };
-                if let Some(a) = args.get(i) {
-                    out.push_str(a);
-                }
-            }
-            _ => out.push(c),
-        }
-    }
-    out
-}
+/// `{1}`... a numbered one, and `{{` / `}}` are literal braces.
+pub use wb_net::notice::fill;
 
 /// `format!` for interface text: the template is translated first. Only plain
 /// `{}` (and `{0}`...) placeholders: format numbers into strings beforehand.
@@ -464,6 +349,37 @@ pub fn choice_from_key(s: &str) -> Choice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The server writes banners for a quit app in the app's words
+    /// (wb_net::notice): its Korean must be what these tables say.
+    #[test]
+    fn the_servers_notification_words_are_the_apps() {
+        set_lang(Lang::Ko);
+        for (en, ko) in wb_net::notice::KO {
+            assert_eq!(tr(en), *ko, "the Korean of {:?}", en);
+        }
+        for line in [
+            "changed status from to do to complete",
+            "changed status from in progress to Review",
+            "set priority to Urgent",
+            "set priority to None",
+            "changed due date to Nov 16",
+            "changed due date to Today",
+            "changed due date to Nov 16 at 2:30 PM",
+            "changed due date to 11/16/25",
+            "changed due date to none",
+            "removed assignee Kim",
+            "removed assignee Alex",
+        ] {
+            assert_eq!(
+                wb_net::notice::history_line(wb_net::notice::Lang::Ko, "Bo", line),
+                history_line("Bo", line),
+                "{:?}",
+                line
+            );
+        }
+        set_lang(Lang::En);
+    }
 
     #[test]
     fn fill_takes_values_in_order_or_by_number() {

@@ -153,6 +153,37 @@ pub struct PushPrefs {
     /// "Pause notifications" until this time (seconds)
     #[serde(default)]
     pub muted_until: i64,
+    // What else the device wants while its app isn't running, as the apps
+    // tell it themselves (NotifySettings). None: an app from before these
+    // were pushed, which gets none of them (and a call as a message).
+    /// huddles and calls
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub huddles: Option<bool>,
+    /// reactions to my messages
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reactions: Option<bool>,
+    /// tasks assigned to me
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assigned: Option<bool>,
+    /// comments on tasks I watch
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments: Option<bool>,
+    /// status, due date and priority changes on tasks I watch, and being
+    /// taken off one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_changes: Option<bool>,
+    /// answers to my forms
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forms: Option<bool>,
+    /// people joining (owners and admins)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<bool>,
+    /// someone else's progress takes my goal past 25, 50, 75 or 100%
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_milestones: Option<bool>,
+    /// The language the banners are written in: "ko" or "en" (None: English).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
 }
 
 /// A webhook an owner or admin set up (server/src/hooks.rs): "in" posts
@@ -228,6 +259,15 @@ impl Default for PushPrefs {
             channel_modes: vec![],
             keywords: vec![],
             muted_until: 0,
+            huddles: None,
+            reactions: None,
+            assigned: None,
+            comments: None,
+            task_changes: None,
+            forms: None,
+            team: None,
+            goal_milestones: None,
+            lang: None,
         }
     }
 }

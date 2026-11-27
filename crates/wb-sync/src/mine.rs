@@ -35,8 +35,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const MINE_SETTINGS: &[&str] = &["notify", "muted_until"];
 
 /// Fields of `notify` that stay on each device: the clock notices it has
-/// already shown (each device shows its own).
-pub const NOTIFY_LOCAL: &[&str] = &["fired"];
+/// already shown (each device shows its own) and those it handed to the
+/// system to show later.
+pub const NOTIFY_LOCAL: &[&str] = &["fired", "scheduled"];
 
 /// What one device has, in the shape both apps build.
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -31,6 +31,7 @@ mod bell;
 mod client;
 mod conn;
 mod http;
+pub mod notice;
 mod protocol;
 mod watch;
 pub use addr::*;

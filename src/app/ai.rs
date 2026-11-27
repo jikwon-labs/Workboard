@@ -342,6 +342,93 @@ pub(super) fn linked(answer: &str, name: &dyn Fn(&str, u64, u64) -> Option<Strin
     out
 }
 
+/// An answer as a doc keeps it: its Markdown as written (headings and
+/// checklists stay), cited tasks and docs as links that open them, and
+/// cited messages as the name of their conversation, since a doc's link
+/// can't open a message.
+pub(super) fn doc_linked(answer: &str, name: &dyn Fn(&str, u64, u64) -> Option<String>) -> String {
+    answer
+        .split('\n')
+        .map(|line| {
+            let t = line.trim_start();
+            let indent = &line[..line.len() - t.len()];
+            let hashes = t.len() - t.trim_start_matches('#').len();
+            let pre_len = if hashes > 0 && t[hashes..].starts_with(' ') {
+                hashes + 1
+            } else {
+                ["- [ ] ", "- [x] ", "- [X] "]
+                    .iter()
+                    .find(|p| t.starts_with(*p))
+                    .map_or(0, |p| p.len())
+            };
+            let (pre, rest) = t.split_at(pre_len);
+            format!("{}{}{}", indent, pre, unlink_messages(&linked(rest, name)))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `[#general](workboard://ai-msg/..)` links (made by `linked`) as their
+/// label alone.
+fn unlink_messages(s: &str) -> String {
+    const MARK: &str = "](workboard://ai-msg/";
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find(MARK) {
+        let close = rest[at..].find(')').map(|c| at + c);
+        let open = rest[..at].rfind('[');
+        match (open, close) {
+            (Some(open), Some(close)) => {
+                out.push_str(&rest[..open]);
+                out.push_str(&rest[open + 1..at]);
+                rest = &rest[close + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..at + MARK.len()]);
+                rest = &rest[at + MARK.len()..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The name a citation marker of an answer shows for what it points to
+/// (`kind` task, doc or msg; `b` the message of conversation `a`), or None
+/// when it isn't here (deleted, archived, or never was).
+fn cited_name(data: &Data, kind: &str, a: u64, b: u64) -> Option<String> {
+    match kind {
+        "task" => data
+            .tasks
+            .iter()
+            .find(|t| t.id == a && !t.archived)
+            .map(|t| t.name.clone()),
+        "doc" => data
+            .docs
+            .iter()
+            .find(|d| d.id == a && !d.archived)
+            .map(|d| {
+                if d.title.trim().is_empty() {
+                    tr("Untitled").to_string()
+                } else {
+                    d.title.clone()
+                }
+            }),
+        "msg" => {
+            let c = data.channels.iter().find(|c| c.id == a)?;
+            let here = c
+                .messages
+                .iter()
+                .any(|m| m.id == b || m.replies.iter().any(|r| r.id == b));
+            here.then(|| match c.kind {
+                ChannelKind::Channel => format!("#{}", c.name),
+                ChannelKind::Direct => tr("Direct message").to_string(),
+            })
+        }
+        _ => None,
+    }
+}
+
 impl App {
     // ------------------------------------------------------------ jobs
 
@@ -689,6 +776,60 @@ impl App {
             }
             self.dirty = true;
         }
+    }
+
+    /// Makes a doc of chat `id` (mine or one a teammate shared): its title,
+    /// and each question as a heading over its answer. The doc is private,
+    /// since the answers used what only the asker may see; its owner can
+    /// share it from the doc like any other. Opens it; gives its id.
+    pub(super) fn ai_chat_to_doc(&mut self, id: u64) -> Option<u64> {
+        let c = self.ai_chat(id)?.clone();
+        let body = {
+            let data = &self.data;
+            let name = |kind: &str, a: u64, b: u64| cited_name(data, kind, a, b);
+            c.turns
+                .iter()
+                .map(|t| {
+                    let q = t.question.split_whitespace().collect::<Vec<_>>().join(" ");
+                    format!("## {}\n\n{}", q, doc_linked(t.answer.trim(), &name))
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
+        let doc = self.data.new_id();
+        let now = crate::model::now_ts();
+        self.data.docs.insert(
+            0,
+            Doc {
+                id: doc,
+                space: None,
+                owner: self.data.me,
+                private: true,
+                archived: false,
+                meeting_note: false,
+                wiki: None,
+                views: vec![],
+                versions: vec![],
+                parent: None,
+                title: if c.title.trim().is_empty() {
+                    tr("Untitled").into()
+                } else {
+                    c.title.clone()
+                },
+                body,
+                created: now,
+                updated: now,
+                tags: vec![],
+            },
+        );
+        self.open_task = None;
+        self.section = Section::Docs;
+        self.doc_open = Some(doc);
+        // shown as read, its links ready to click
+        self.doc_preview = true;
+        self.dirty = true;
+        self.toast(tr("Saved as a private doc"));
+        Some(doc)
     }
 
     // ------------------------------------------------------ opening them
@@ -1154,38 +1295,7 @@ impl App {
     /// one opens what it points to.
     pub(super) fn ai_rich(&mut self, ui: &mut Ui, answer: &str) {
         let data = &self.data;
-        let name = |kind: &str, a: u64, b: u64| -> Option<String> {
-            match kind {
-                "task" => data
-                    .tasks
-                    .iter()
-                    .find(|t| t.id == a && !t.archived)
-                    .map(|t| t.name.clone()),
-                "doc" => data
-                    .docs
-                    .iter()
-                    .find(|d| d.id == a && !d.archived)
-                    .map(|d| {
-                        if d.title.trim().is_empty() {
-                            tr("Untitled").to_string()
-                        } else {
-                            d.title.clone()
-                        }
-                    }),
-                "msg" => {
-                    let c = data.channels.iter().find(|c| c.id == a)?;
-                    let here = c
-                        .messages
-                        .iter()
-                        .any(|m| m.id == b || m.replies.iter().any(|r| r.id == b));
-                    here.then(|| match c.kind {
-                        ChannelKind::Channel => format!("#{}", c.name),
-                        ChannelKind::Direct => tr("Direct message").to_string(),
-                    })
-                }
-                _ => None,
-            }
-        };
+        let name = |kind: &str, a: u64, b: u64| cited_name(data, kind, a, b);
         let src = linked(answer, &name);
         if let Some(url) = self.message_text(ui, &src, 14.5) {
             self.ai_open_link(&url);
@@ -1334,7 +1444,7 @@ impl App {
                     ui.label(RichText::new(tr("AI")).size(17.0).strong().color(t.text));
                     if let Some((_, title, _, personal)) = &open {
                         ui.add_space(6.0);
-                        let room = (ui.available_width() - 420.0).max(60.0);
+                        let room = (ui.available_width() - 540.0).max(60.0);
                         ui.allocate_ui(vec2(room, 30.0), |ui| {
                             ui.horizontal_centered(|ui| {
                                 let l = ui.add(
@@ -1389,6 +1499,21 @@ impl App {
                                 .clicked()
                         {
                             self.ai_open_chat(None);
+                        }
+                        if let Some((id, ..)) = open {
+                            if icon_button(
+                                ui,
+                                &t,
+                                Icon::Docs,
+                                tr("Save as doc"),
+                                "Save chat as doc",
+                                true,
+                            )
+                            .on_hover_text(tr("Make a private doc of this chat"))
+                            .clicked()
+                            {
+                                self.ai_chat_to_doc(id);
+                            }
                         }
                         // only who asked shares, takes back or deletes a chat
                         if let Some((id, title, by, personal)) = open.clone() {
@@ -2154,6 +2279,30 @@ mod tests {
                 .unwrap()
                 .len(),
             20
+        );
+    }
+
+    #[test]
+    fn a_doc_keeps_the_markdown_and_names_cited_messages() {
+        let name = |kind: &str, a: u64, b: u64| -> Option<String> {
+            match (kind, a, b) {
+                ("task", 1, _) => Some("Design".into()),
+                ("doc", 2, _) => Some("Plan".into()),
+                ("msg", 3, 4) => Some("#general".into()),
+                _ => None,
+            }
+        };
+        assert_eq!(
+            doc_linked(
+                "## Status\n- [ ] Bora does [task:1]\n  - [x] see [doc:2]\nSaid in [msg:3:4]. Gone [task:9].",
+                &name
+            ),
+            "## Status\n- [ ] Bora does [Design](workboard://task/1)\n  - [x] see [Plan](workboard://doc/2)\nSaid in #general. Gone."
+        );
+        // the answer's own links stay
+        assert_eq!(
+            doc_linked("[site](https://a.io) and #tag", &name),
+            "[site](https://a.io) and #tag"
         );
     }
 

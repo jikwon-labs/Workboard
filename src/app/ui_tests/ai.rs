@@ -732,3 +732,94 @@ fn the_sidebar_lists_the_newest_ai_chats() {
     assert_eq!(h.app.section, Section::Ai);
     assert_eq!(h.app.ai.open, Some(9004));
 }
+
+/// "Save as doc" makes a private doc of the chat shown and opens it: the
+/// chat's title, each question as a heading over its answer, cited tasks
+/// as links and cited messages as their channel's name. It is listed under
+/// Docs, and only its maker sees it until they share it. A teammate's
+/// shared chat makes a doc of mine too.
+#[test]
+fn a_chat_is_saved_as_a_private_doc() {
+    let (mut h, _server, fake) = on_ai_server("");
+    let (tid, tname) = h
+        .app
+        .data
+        .tasks
+        .iter()
+        .find(|t| t.parent.is_none() && !t.archived)
+        .map(|t| (t.id, t.name.clone()))
+        .unwrap();
+    let (cid, mid) = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .map(|c| (c.id, c.messages[0].id))
+        .unwrap();
+    *fake.answer.lock().unwrap() = format!(
+        "## Owner\n- [ ] Bora has [task:{}]\nAgreed in [msg:{}:{}].",
+        tid, cid, mid
+    );
+    h.click("Rail AI");
+    assert!(!h.has("Save chat as doc"), "nothing to save yet");
+    h.click("Ask AI");
+    h.type_text("Who owns the launch?");
+    h.key(egui::Key::Enter);
+    h.net_until("the answer", |h| answered(h, 1));
+    let docs_before = h.app.data.docs.len();
+    h.click("Save chat as doc");
+    assert_eq!(h.app.data.docs.len(), docs_before + 1);
+    let d = h.app.data.docs[0].clone();
+    assert_eq!(h.app.section, Section::Docs);
+    assert_eq!(h.app.doc_open, Some(d.id));
+    assert_eq!(d.title, "Who owns the launch?");
+    assert!(d.private && d.owner == h.app.data.me && d.space.is_none());
+    assert_eq!(
+        d.body,
+        format!(
+            "## Who owns the launch?\n\n## Owner\n- [ ] Bora has [{}](workboard://task/{})\nAgreed in #general.",
+            tname, tid
+        )
+    );
+    // shown as read: the answer's words, the task as a link
+    assert!(h.texts().iter().any(|t| t.contains("Agreed in #general.")));
+    // in the Docs list
+    h.open_docs_list();
+    assert!(h.has("Doc Who owns the launch?"));
+    // hidden from teammates until shared
+    let v = serde_json::to_value(&h.app.data).unwrap();
+    let hidden = crate::sync::hidden_from(&v, 999, false);
+    assert!(hidden.contains(&d.id));
+
+    // a teammate's shared chat
+    let other = h
+        .app
+        .data
+        .members
+        .iter()
+        .find(|m| m.id != h.app.data.me)
+        .unwrap()
+        .id;
+    h.app.data.extra.ai_chats.push(crate::model::AiChat {
+        id: 77_001,
+        title: "Plan for March".into(),
+        by: other,
+        created: 1,
+        turns: vec![crate::model::AiChatTurn {
+            id: 77_002,
+            question: "What is planned\nfor March?".into(),
+            answer: "The beta.".into(),
+            ts: 2,
+        }],
+        personal: false,
+    });
+    h.click("Rail AI");
+    h.click("AI chat Plan for March");
+    h.click("Save chat as doc");
+    let d2 = h.app.data.docs[0].clone();
+    assert_ne!(d2.id, d.id);
+    assert_eq!(d2.owner, h.app.data.me);
+    assert!(d2.private);
+    assert_eq!(d2.body, "## What is planned for March?\n\nThe beta.");
+}

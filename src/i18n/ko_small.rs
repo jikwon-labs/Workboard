@@ -101,6 +101,7 @@ pub const T: &[(&str, &str)] = &[
     ("{} (main)", "{} (주 화면)"),
     ("No windows to share.", "공유할 창이 없습니다."),
     ("{}'s screen", "{}님의 화면"),
+    ("Your screen", "내 화면"),
     ("The screen or window you shared is gone, so sharing stopped.", "공유하던 화면이나 창이 사라져 공유를 멈췄습니다."),
     ("Screen sharing stopped: {}", "화면 공유가 멈췄습니다: {}"),
     // together: connection status and toasts

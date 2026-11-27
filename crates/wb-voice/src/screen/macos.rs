@@ -280,7 +280,7 @@ pub fn sources() -> Result<Vec<Source>, ScreenTrouble> {
 
 pub fn capture(
     share: Share,
-    source: &NativeVideoSource,
+    out: &Out,
     limits: &Limits,
     stop: &AtomicBool,
 ) -> Result<(), ScreenTrouble> {
@@ -288,9 +288,9 @@ pub fn capture(
         return Err(ScreenTrouble::NotAllowed);
     }
     if sck() {
-        unsafe { run_sck(share, source, limits, stop) }
+        unsafe { run_sck(share, out, limits, stop) }
     } else {
-        run_webrtc(share, source, limits, stop)
+        run_webrtc(share, out, limits, stop)
     }
 }
 
@@ -412,7 +412,7 @@ unsafe fn wait_done(
 
 unsafe fn run_sck(
     share: Share,
-    source: &NativeVideoSource,
+    out: &Out,
     limits: &Limits,
     stop: &AtomicBool,
 ) -> Result<(), ScreenTrouble> {
@@ -503,7 +503,7 @@ unsafe fn run_sck(
     };
     let r = match started {
         Ok(()) => {
-            let r = pump(source, limits, stop, &shared, || {});
+            let r = pump(out, limits, stop, &shared, || {});
             let _ = wait_done(|done| {
                 let _: () = msg_send![stream, stopCaptureWithCompletionHandler: done];
             });

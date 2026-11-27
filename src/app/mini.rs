@@ -438,16 +438,17 @@ impl App {
             let aspect = size.y / size.x.max(1.0);
             let w = full.min(220.0 / aspect.max(0.01));
             let r = ui.add(egui::Image::new((tex.id(), vec2(w, w * aspect))).corner_radius(6));
+            let access = if wb_voice::screen_owner(id) == Some(wb_voice::ME) {
+                "Your screen".to_string()
+            } else {
+                format!("Screen of {}", name)
+            };
             r.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Image,
-                    true,
-                    format!("Screen of {}", name),
-                )
+                egui::WidgetInfo::labeled(egui::WidgetType::Image, true, access.clone())
             });
             drawn.insert(id.clone(), w * ppp);
             ui.label(
-                RichText::new(trf!("{}'s screen", name))
+                RichText::new(Self::screen_label(id, name))
                     .small()
                     .color(t.text2),
             );
@@ -480,6 +481,7 @@ impl App {
         // a big picture picked in the main window means nothing here
         self.huddle.focus = None;
         drawn.remove(wb_voice::ME);
+        drawn.remove(&wb_voice::screen_key(wb_voice::ME));
         self.tell_view_sizes(drawn);
     }
 

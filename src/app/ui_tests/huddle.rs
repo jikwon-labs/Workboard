@@ -252,7 +252,27 @@ fn huddle_shares_a_screen_and_shows_others_screens_large() {
     h.click("Share screen");
     h.click("Share Test display");
     assert_eq!(h.app.huddle.screen, Some(wb_voice::Share::Display(1)));
+    // you see your own screen as it is sent, under "Your screen"
+    let mine = wb_voice::screen_key(wb_voice::ME);
+    let own = wb_voice::Picture {
+        width: 192,
+        height: 108,
+        rgba: vec![90u8; 192 * 108 * 4],
+    };
+    h.app
+        .huddle
+        .pictures
+        .insert(mine.clone(), (std::sync::Arc::new(own), true));
+    h.settle();
+    assert!(h.has("Your screen"));
+    assert!(
+        !h.app.huddle.views.contains_key(&mine),
+        "your own screen asks the server for nothing"
+    );
     h.click("Stop sharing screen");
+    h.app.huddle.drop_picture(&mine);
+    h.settle();
+    assert!(!h.has("Your screen"));
 
     // without the Screen Recording permission: how to turn it on
     h.app.huddle.screen_env = crate::app::huddle::ScreenEnv::Fake {

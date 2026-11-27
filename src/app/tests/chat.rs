@@ -381,15 +381,25 @@ fn a_huddle_on_the_server_connects_two_computers() {
     let display = a.huddle.screen_sources[0].share();
     a.set_huddle_screen(Some(display));
     let a_screen = wb_voice::screen_key(&a_identity);
-    huddle_until(&mut a, &mut b, "B sees A's screen", |a, b| {
-        b.huddle.pictures.contains_key(&a_screen)
-            && b.huddle.people.iter().any(|p| !p.me && p.screen)
-            && a.huddle.people.iter().any(|p| p.me && p.screen)
-    });
+    let mine = wb_voice::screen_key(wb_voice::ME);
+    huddle_until(
+        &mut a,
+        &mut b,
+        "B sees A's screen, and A sees it too",
+        |a, b| {
+            b.huddle.pictures.contains_key(&a_screen)
+                && b.huddle.people.iter().any(|p| !p.me && p.screen)
+                && a.huddle.people.iter().any(|p| p.me && p.screen)
+                && a.huddle.pictures.contains_key(&mine)
+        },
+    );
     a.set_huddle_screen(None);
-    huddle_until(&mut a, &mut b, "A's screen is gone at B", |_, b| {
-        !b.huddle.pictures.contains_key(&a_screen)
-    });
+    huddle_until(
+        &mut a,
+        &mut b,
+        "A's screen is gone at B and at A",
+        |a, b| !b.huddle.pictures.contains_key(&a_screen) && !a.huddle.pictures.contains_key(&mine),
+    );
 
     // B mutes, then leaves
     b.set_huddle_muted(true);

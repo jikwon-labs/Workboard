@@ -345,16 +345,20 @@ fn two_people_hear_each_other_in_a_huddle() {
                 .is_some_and(|p| greenish(p) && p.width == 1920 && p.height == 1080)
             && t.their_picture().is_some_and(|p| reddish(p))
     });
-    a.until("Ann sees she is sharing", |t| {
+    // and she sees her own screen too, a smaller copy of what is sent
+    let own_screen = screen_key(ME);
+    a.until("Ann sees she is sharing, and what", |t| {
         t.people.iter().any(|p| p.me && p.screen)
+            && t.pictures.get(&own_screen).is_some_and(|p| {
+                greenish(p) && p.width == wb_voice::screen::PREVIEW_WIDTH && p.height == 540
+            })
     });
-    assert!(
-        !a.pictures.keys().any(|k| k.ends_with("#screen")),
-        "no picture of your own screen"
-    );
     a.call.share_screen(None);
     b.until("Ann's screen is gone", |t| {
         t.other().is_some_and(|p| !p.screen) && !t.pictures.contains_key(&ann_screen)
+    });
+    a.until("and her own copy too", |t| {
+        !t.pictures.contains_key(&own_screen)
     });
     assert!(b.their_picture().is_some(), "her camera stays");
 

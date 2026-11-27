@@ -12,7 +12,7 @@
 // camera (or a test pattern) and everyone's pictures arrive as RGBA through
 // `new_pictures` (see video.rs). `share_screen` publishes a display or a
 // window as a screen-share track (screen.rs); it arrives under
-// `screen_key(identity)`.
+// `screen_key(identity)`, and a copy of your own under `screen_key(ME)`.
 //
 // Quality adapts (quality.rs): video goes out in simulcast layers, the app
 // tells `set_view_sizes` how large each picture is drawn and the call asks the
@@ -103,7 +103,8 @@ enum Cmd {
     Leave,
 }
 
-/// Whose picture: a participant identity, or ME for your own camera.
+/// Whose picture: a participant identity, or ME for your own camera (and
+/// `screen_key(ME)` for your own shared screen).
 pub const ME: &str = "";
 
 const SCREEN_SUFFIX: &str = "#screen";
@@ -594,8 +595,19 @@ async fn run(
                         let track = LocalVideoTrack::create_video_track("screen", RtcVideoSource::Native(source.clone()));
                         match room.local_participant().publish_track(LocalTrack::Video(track), quality::screen_options()).await {
                             Ok(p) => {
-                                let (etx2, wake2) = (etx.clone(), wake.clone());
-                                let feed = screen::start_screen(share, source, screen_limits.clone(), move |why| {
+                                let pics = pictures.clone();
+                                let (etx2, wake2, wake3) = (etx.clone(), wake.clone(), wake.clone());
+                                // your own screen, as the others see it
+                                let mine = screen_key(ME);
+                                let feed = screen::start_screen(share, source, screen_limits.clone(), move |pic| {
+                                    match pic {
+                                        Some(pic) => put_picture(&pics, &mine, pic),
+                                        None => {
+                                            pics.lock().unwrap().remove(&mine);
+                                        }
+                                    }
+                                    wake3();
+                                }, move |why| {
                                     let _ = etx2.send(Event::ScreenEnded(why));
                                     wake2();
                                 });

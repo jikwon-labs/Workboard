@@ -23,7 +23,7 @@
 // `open_settings` does nothing.
 
 use crate::quality;
-use crate::video::{self, Feed, Limits};
+use crate::video::{self, Feed, Limits, Picture};
 use livekit::webrtc::native::yuv_helper;
 use livekit::webrtc::prelude::I420Buffer;
 use livekit::webrtc::video_source::native::NativeVideoSource;
@@ -202,19 +202,43 @@ pub(crate) struct Shared {
     ended: Mutex<Option<Option<ScreenTrouble>>>,
 }
 
-/// Start sharing. `ended` is called when sharing stops without being asked
-/// to (with why, or None when it was stopped from macOS's own controls); it
-/// isn't called when the returned Feed is dropped.
+/// Your own shared screen is shown at most this wide (a copy of what is sent).
+pub const PREVIEW_WIDTH: u32 = 960;
+
+/// Where each shared picture goes: the encoder, and a smaller copy to the
+/// window so the sharer sees what the others see.
+pub(crate) struct Out {
+    source: NativeVideoSource,
+    preview: Box<dyn Fn(Option<Picture>) + Send>,
+}
+
+impl Out {
+    fn send(&self, mut buf: I420Buffer, started: Instant) {
+        (self.preview)(Some(video::small_picture(&mut buf, PREVIEW_WIDTH)));
+        video::push(&self.source, buf, started);
+    }
+}
+
+/// Start sharing. `preview` gets a copy of each picture sent (at most
+/// PREVIEW_WIDTH wide, to show the sharer), and None when sharing ends.
+/// `ended` is called when sharing stops without being asked to (with why,
+/// or None when it was stopped from macOS's own controls); it isn't called
+/// when the returned Feed is dropped.
 pub fn start_screen(
     share: Share,
     source: NativeVideoSource,
     limits: Arc<Limits>,
+    preview: impl Fn(Option<Picture>) + Send + 'static,
     ended: impl Fn(Option<ScreenTrouble>) + Send + 'static,
 ) -> Feed {
     let (feed, stop, finished) = Feed::new();
     std::thread::Builder::new()
         .name("workboard-screen".into())
         .spawn(move || {
+            let out = Out {
+                source,
+                preview: Box::new(preview),
+            };
             let r = match share {
                 Share::Pattern(rgb) => {
                     video::run_pattern(
@@ -222,18 +246,20 @@ pub fn start_screen(
                         quality::SCREEN_WIDTH,
                         &limits,
                         &stop,
-                        |buf, started| video::push(&source, buf, started),
+                        |buf, started| out.send(buf, started),
                     );
                     Ok(())
                 }
                 _ => {
                     eprintln!("workboard screen: starting");
-                    imp::capture(share, &source, &limits, &stop)
+                    imp::capture(share, &out, &limits, &stop)
                 }
             };
             if let Err(e) = &r {
                 eprintln!("workboard screen: {:?}", e);
             }
+            // last, so no picture sent just before stopping stays on screen
+            (out.preview)(None);
             finished.store(true, Ordering::Relaxed);
             if !stop.load(Ordering::Relaxed) {
                 ended(r.err());
@@ -256,7 +282,7 @@ pub(crate) fn send_now(new: bool, last_sent: Option<Instant>, now: Instant) -> b
 /// while the screen is still) until stopped or capture ends; `each` runs
 /// once a round (to ask for a frame).
 fn pump(
-    source: &NativeVideoSource,
+    out: &Out,
     limits: &Limits,
     stop: &AtomicBool,
     shared: &Shared,
@@ -279,7 +305,7 @@ fn pump(
         }
         let now = Instant::now();
         if let Some(p) = last.as_ref().filter(|_| send_now(new, last_sent, now)) {
-            video::push(source, p.to_buffer(limits.width()), started);
+            out.send(p.to_buffer(limits.width()), started);
             last_sent = Some(now);
         }
         std::thread::sleep(limits.gap());
@@ -346,12 +372,12 @@ fn open_webrtc(
 #[cfg(not(target_os = "ios"))]
 fn run_webrtc(
     share: Share,
-    source: &NativeVideoSource,
+    out: &Out,
     limits: &Limits,
     stop: &AtomicBool,
 ) -> Result<(), ScreenTrouble> {
     let (mut cap, shared) = open_webrtc(share)?;
-    pump(source, limits, stop, &shared, || cap.capture_frame())
+    pump(out, limits, stop, &shared, || cap.capture_frame())
 }
 
 /// iPad: libwebrtc has no screen capturer there (iOS shares the screen
@@ -542,9 +568,13 @@ mod tests {
             livekit::webrtc::video_stream::native::NativeVideoStream::new(track.rtc_track());
         let ended = Arc::new(Mutex::new(None));
         let e = ended.clone();
-        let feed = start_screen(share, source, Limits::new(Kind::Screen), move |why| {
-            *e.lock().unwrap() = Some(why)
-        });
+        let feed = start_screen(
+            share,
+            source,
+            Limits::new(Kind::Screen),
+            |_| {},
+            move |why| *e.lock().unwrap() = Some(why),
+        );
         // the first frames can be the source's black keep-alive pictures:
         // wait for one with something on it
         let got = rt.block_on(async {

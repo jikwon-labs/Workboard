@@ -12,8 +12,8 @@
 use super::*;
 use std::collections::HashMap;
 use wb_voice::{
-    screen_owner, Audio, Call, Event as VoiceEvent, Join, Person, Picture, ScreenTrouble, Share,
-    Source, SourceKind, Video, ME,
+    screen_key, screen_owner, Audio, Call, Event as VoiceEvent, Join, Person, Picture,
+    ScreenTrouble, Share, Source, SourceKind, Video, ME,
 };
 
 /// Where screens to share come from: macOS, or a made-up list in tests.
@@ -514,13 +514,17 @@ impl App {
             .huddle
             .textures
             .keys()
-            .filter(|id| *id == ME || in_call(screen_owner(id).unwrap_or(id)))
+            .filter(|id| {
+                let who = screen_owner(id).unwrap_or(id);
+                who == ME || in_call(who)
+            })
             .cloned()
             .collect();
         if ids.is_empty() {
             return None;
         }
-        ids.sort_by_key(|id| (id == ME, id.clone()));
+        // yours last: your camera after the others', your screen after theirs
+        ids.sort_by_key(|id| (screen_owner(id).unwrap_or(id) == ME, id.clone()));
         let name_of = |id: &str| -> String {
             if id == ME {
                 return "You".to_string();
@@ -537,6 +541,15 @@ impl App {
             .map(|id| (id.clone(), name_of(screen_owner(id).unwrap_or(id))))
             .partition(|(id, _)| screen_owner(id).is_some());
         Some((screens, cameras))
+    }
+
+    /// The words under a shared screen (and its accessibility name).
+    pub(super) fn screen_label(id: &str, name: &str) -> String {
+        if screen_owner(id) == Some(ME) {
+            tr("Your screen").to_string()
+        } else {
+            trf!("{}'s screen", name)
+        }
     }
 
     /// The pictures over the main window, above the bar.
@@ -572,6 +585,7 @@ impl App {
         let room = ctx.screen_rect();
         let screen_w = (room.width() - 80.0).clamp(240.0, 960.0);
         let screen_max_h = (room.height() - 210.0 - 200.0 - 60.0).max(140.0);
+        let own_w = screen_w.min(480.0);
         let ppp = ctx.pixels_per_point();
         let mut drawn: HashMap<String, f32> = HashMap::new();
         let mut clicked: Option<String> = None;
@@ -591,25 +605,31 @@ impl App {
                                 };
                                 let size = tex.size_vec2();
                                 let aspect = size.y / size.x.max(1.0);
-                                let w = screen_w.min(screen_max_h / aspect.max(0.01));
+                                let mine = screen_owner(id) == Some(ME);
+                                // your own screen smaller: it is only a check of
+                                // what the others see (and a shared screen that
+                                // shows this window repeats inside itself)
+                                let most = if mine { own_w } else { screen_w };
+                                let w = most.min(screen_max_h / aspect.max(0.01));
                                 let r = ui.add(
                                     egui::Image::new((tex.id(), vec2(w, w * aspect)))
                                         .corner_radius(8),
                                 );
+                                let label = Self::screen_label(id, name);
+                                let access = if mine {
+                                    "Your screen".to_string()
+                                } else {
+                                    format!("Screen of {}", name)
+                                };
                                 r.widget_info(|| {
                                     egui::WidgetInfo::labeled(
                                         egui::WidgetType::Image,
                                         true,
-                                        format!("Screen of {}", name),
+                                        access.clone(),
                                     )
                                 });
                                 drawn.insert(id.clone(), w * ppp);
-                                ui.label(
-                                    RichText::new(trf!("{}'s screen", name))
-                                        .small()
-                                        .strong()
-                                        .color(t.text2),
-                                );
+                                ui.label(RichText::new(label).small().strong().color(t.text2));
                                 ui.add_space(6.0);
                             }
                             ui.horizontal(|ui| {
@@ -672,6 +692,7 @@ impl App {
             };
         }
         drawn.remove(ME);
+        drawn.remove(&screen_key(ME));
         self.tell_view_sizes(drawn);
     }
 

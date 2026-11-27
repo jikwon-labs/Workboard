@@ -13,7 +13,7 @@ pub fn sources() -> Result<Vec<Source>, ScreenTrouble> {
 }
 pub fn capture(
     _share: Share,
-    _source: &NativeVideoSource,
+    _out: &Out,
     _limits: &Limits,
     _stop: &AtomicBool,
 ) -> Result<(), ScreenTrouble> {

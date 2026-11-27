@@ -71,10 +71,10 @@ pub fn sources() -> Result<Vec<Source>, ScreenTrouble> {
 
 pub fn capture(
     share: Share,
-    source: &NativeVideoSource,
+    out: &Out,
     limits: &Limits,
     stop: &AtomicBool,
 ) -> Result<(), ScreenTrouble> {
     let _com = os::Com::init();
-    run_webrtc(share, source, limits, stop)
+    run_webrtc(share, out, limits, stop)
 }

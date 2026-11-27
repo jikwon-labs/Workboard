@@ -381,108 +381,27 @@ impl App {
         });
     }
 
-    /// The huddle in the small window: who is there, their pictures (a
-    /// shared screen as wide as the window) and the buttons.
-    fn mini_huddle(&mut self, ui: &mut Ui, t: &Theme, press: &mut HuddlePress) {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(self.huddle_status()).small().color(t.text2));
-            if self.huddle.screen.is_some() {
-                ui.label(
-                    RichText::new(tr("Sharing your screen"))
-                        .small()
-                        .color(super::huddle::HUDDLE_GREEN),
-                );
-            }
-        });
-        // the pictures and people scroll in at most about half the window,
-        // so the buttons under them, the messages and the box always show
-        // (a shared screen is tall)
-        let room = (ui.available_height() * 0.45).max(60.0);
-        egui::ScrollArea::vertical()
-            .id_salt("mini_huddle")
-            .max_height(room)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                self.mini_videos(ui, t);
-                ui.horizontal_wrapped(|ui| {
-                    for p in &self.huddle.people {
-                        self.huddle_person(ui, t, p);
-                    }
-                });
-            });
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            self.huddle_buttons(ui, t, press);
-        });
-        ui.add_space(4.0);
-    }
-
-    /// The huddle's pictures, small: shared screens the window's width, the
-    /// cameras in tiles under them. How large each is drawn goes to the
-    /// call, as in the main window.
-    fn mini_videos(&mut self, ui: &mut Ui, t: &Theme) {
-        let Some((screens, cameras)) = self.huddle_shown_videos() else {
-            self.huddle.focus = None;
-            self.tell_view_sizes(std::collections::HashMap::new());
-            return;
-        };
-        let ppp = ui.ctx().pixels_per_point();
-        let full = ui.available_width().max(120.0);
-        let mut drawn = std::collections::HashMap::new();
-        for (id, name) in &screens {
-            let Some(tex) = self.huddle.textures.get(id) else {
-                continue;
-            };
-            let size = tex.size_vec2();
-            let aspect = size.y / size.x.max(1.0);
-            let w = full.min(220.0 / aspect.max(0.01));
-            let r = ui.add(egui::Image::new((tex.id(), vec2(w, w * aspect))).corner_radius(6));
-            let access = if wb_voice::screen_owner(id) == Some(wb_voice::ME) {
-                "Your screen".to_string()
-            } else {
-                format!("Screen of {}", name)
-            };
-            r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Image, true, access.clone())
-            });
-            drawn.insert(id.clone(), w * ppp);
+    /// The huddle in the small window, as in the main window but smaller
+    /// (panel.rs): how many are in it, the stage with everyone's tiles and
+    /// the buttons. The stage takes at most about half the window, so the
+    /// messages and the box always show.
+    fn mini_huddle(&mut self, ui: &mut Ui, _t: &Theme, press: &mut HuddlePress) {
+        let s = super::huddle::Sizes::SMALL;
+        let room = (ui.available_height() * 0.45).max(s.strip + 2.0 * 8.0);
+        ui.add_space(2.0);
+        super::huddle::panel_frame(10, 8).show(ui, |ui| {
+            let w = ui.available_width();
+            ui.set_width(w);
+            ui.spacing_mut().item_spacing.y = 6.0;
             ui.label(
-                RichText::new(Self::screen_label(id, name))
+                RichText::new(self.huddle_status())
                     .small()
-                    .color(t.text2),
+                    .color(Color32::from_rgb(0xab, 0xad, 0xb0)),
             );
-        }
-        let tile = ((full - 12.0) / 3.0).max(80.0);
-        ui.horizontal_wrapped(|ui| {
-            for (id, name) in &cameras {
-                let Some(tex) = self.huddle.textures.get(id) else {
-                    continue;
-                };
-                let size = tex.size_vec2();
-                let h = tile * size.y / size.x.max(1.0);
-                let r = ui.add(egui::Image::new((tex.id(), vec2(tile, h))).corner_radius(6));
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Image,
-                        true,
-                        format!("Video of {}", name),
-                    )
-                });
-                let shown = if id == wb_voice::ME {
-                    tr("You").to_string()
-                } else {
-                    name.clone()
-                };
-                r.on_hover_text(shown);
-                drawn.insert(id.clone(), tile * ppp);
-            }
+            self.huddle_stage(ui, w, room, s);
+            self.huddle_toolbar(ui, w, s, false, press);
         });
-        // a big picture picked in the main window means nothing here
-        self.huddle.focus = None;
-        drawn.remove(wb_voice::ME);
-        drawn.remove(&wb_voice::screen_key(wb_voice::ME));
-        self.tell_view_sizes(drawn);
+        ui.add_space(4.0);
     }
 
     /// The box at the bottom of the small window: Enter sends, Shift+Enter

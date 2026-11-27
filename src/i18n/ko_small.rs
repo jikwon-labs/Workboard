@@ -90,6 +90,7 @@ pub const T: &[(&str, &str)] = &[
     ("Share screen", "화면 공유"),
     ("Stop sharing screen", "화면 공유 중지"),
     ("Sharing your screen", "내 화면 공유 중"),
+    ("Open the conversation", "대화 열기"),
     ("Share your screen", "화면 공유하기"),
     ("Workboard needs the Screen Recording permission to share your screen.", "화면을 공유하려면 Workboard에 화면 기록 권한이 필요합니다."),
     ("Turn on Workboard in System Settings > Privacy & Security > Screen & System Audio Recording, then quit and reopen Workboard.", "시스템 설정 > 개인정보 보호 및 보안 > 화면 및 시스템 오디오 녹음에서 Workboard를 켠 다음, Workboard를 종료하고 다시 여세요."),

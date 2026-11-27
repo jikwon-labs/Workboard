@@ -353,7 +353,9 @@ fn a_huddle_elsewhere_stays_in_the_main_window() {
     assert!(h.has("Huddle in a small window"), "the bar stays");
     assert!(h.has("No messages yet"), "the small window shows #random");
     // the bar's button moves the small window to the huddle's conversation
-    h.click("Huddle in a small window");
+    // (here the small window is drawn over the main window and covers the
+    // card's top right corner; in the app it is a window of its own)
+    h.accessibility_click("Huddle in a small window");
     assert_eq!(h.app.mini.channel, Some(general));
     assert!(!h.has("Huddle in a small window"));
 }

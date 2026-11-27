@@ -569,6 +569,31 @@ pub(super) fn extra_screens(_h: &Ui1) -> Vec<(String, Go)> {
         }),
     );
     x(
+        "huddle video",
+        app(|a| {
+            huddle(a);
+            a.section = Section::Chat;
+            a.chat.open = Some(general(a));
+            // the speaking person sends video: a picture in their tile
+            let who = a.huddle.people[1].identity.clone();
+            let (w, h) = (64u32, 36u32);
+            let rgba = (0..w * h)
+                .flat_map(|i| {
+                    let (x, y) = (i % w, i / w);
+                    [(60 + x * 2) as u8, (90 + y * 3) as u8, 140, 255]
+                })
+                .collect();
+            let pic = wb_voice::Picture {
+                width: w,
+                height: h,
+                rgba,
+            };
+            a.huddle
+                .pictures
+                .insert(who, (std::sync::Arc::new(pic), true));
+        }),
+    );
+    x(
         "mini window",
         app(|a| {
             let g = general(a);

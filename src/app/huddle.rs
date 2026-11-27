@@ -1,7 +1,7 @@
 // Voice huddles inside the app (stage 3). When the workspace is on a server,
 // the Huddle button joins the conversation's LiveKit room: the server hands
-// out a token for it, wb_voice runs the call, and a bar shows who is in it,
-// who is speaking, mute and leave. Without a server the Huddle button opens
+// out a token for it, wb_voice runs the call, and a card like a call window
+// (huddle/panel.rs) shows everyone's tiles, who is speaking, mute and leave. Without a server the Huddle button opens
 // a browser call as before (see together.rs). Video (stage 4): the Video
 // button sends the camera, and everyone's pictures show above the bar.
 // Share screen offers the displays and windows to share (after the Screen
@@ -11,6 +11,9 @@
 
 use super::*;
 use std::collections::HashMap;
+
+mod panel;
+pub(super) use panel::{panel_frame, Sizes};
 use wb_voice::{
     screen_key, screen_owner, Audio, Call, Event as VoiceEvent, Join, Person, Picture,
     ScreenTrouble, Share, Source, SourceKind, Video, ME,
@@ -459,22 +462,6 @@ impl App {
         }
     }
 
-    /// Everyone's video above the bar: shared screens large on top, then
-    /// cameras, others first, then you.
-    fn huddle_videos(&mut self, ctx: &egui::Context, t: &Theme, bottom: egui::Pos2) {
-        if self.huddle.pictures.is_empty() {
-            self.tell_view_sizes(HashMap::new());
-            return;
-        }
-        self.huddle_textures(ctx);
-        let Some((screens, cameras)) = self.huddle_shown_videos() else {
-            self.huddle.focus = None;
-            self.tell_view_sizes(HashMap::new());
-            return;
-        };
-        self.huddle_videos_large(ctx, t, screens, cameras, bottom);
-    }
-
     /// Puts the pictures that came in since the last frame on the screen's
     /// textures (the main window's and the small window's share them).
     pub(super) fn huddle_textures(&mut self, ctx: &egui::Context) {
@@ -550,150 +537,6 @@ impl App {
         } else {
             trf!("{}'s screen", name)
         }
-    }
-
-    /// The pictures over the main window, above the bar.
-    fn huddle_videos_large(
-        &mut self,
-        ctx: &egui::Context,
-        t: &Theme,
-        screens: Vec<(String, String)>,
-        cameras: Vec<(String, String)>,
-        bottom: egui::Pos2,
-    ) {
-        // a clicked video shows large and the rest small; otherwise tiles get
-        // smaller when many people send video (and when a screen is shared)
-        if self
-            .huddle
-            .focus
-            .as_ref()
-            .is_some_and(|f| !cameras.iter().any(|(id, _)| id == f))
-        {
-            self.huddle.focus = None;
-        }
-        let focus = self.huddle.focus.clone();
-        let normal = if !screens.is_empty() {
-            140.0
-        } else if cameras.len() <= 2 {
-            320.0
-        } else if cameras.len() <= 4 {
-            240.0
-        } else {
-            180.0
-        };
-        // a shared screen as large as fits above the bar
-        let room = ctx.screen_rect();
-        let screen_w = (room.width() - 80.0).clamp(240.0, 960.0);
-        let screen_max_h = (room.height() - 210.0 - 200.0 - 60.0).max(140.0);
-        let own_w = screen_w.min(480.0);
-        let ppp = ctx.pixels_per_point();
-        let mut drawn: HashMap<String, f32> = HashMap::new();
-        let mut clicked: Option<String> = None;
-        egui::Area::new(egui::Id::new("huddle_videos"))
-            .order(egui::Order::Middle)
-            .pivot(Align2::CENTER_BOTTOM)
-            .fixed_pos(bottom)
-            .show(ctx, |ui| {
-                card_frame(&t)
-                    .fill(t.card)
-                    .inner_margin(egui::Margin::same(8))
-                    .show(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            for (id, name) in &screens {
-                                let Some(tex) = self.huddle.textures.get(id) else {
-                                    continue;
-                                };
-                                let size = tex.size_vec2();
-                                let aspect = size.y / size.x.max(1.0);
-                                let mine = screen_owner(id) == Some(ME);
-                                // your own screen smaller: it is only a check of
-                                // what the others see (and a shared screen that
-                                // shows this window repeats inside itself)
-                                let most = if mine { own_w } else { screen_w };
-                                let w = most.min(screen_max_h / aspect.max(0.01));
-                                let r = ui.add(
-                                    egui::Image::new((tex.id(), vec2(w, w * aspect)))
-                                        .corner_radius(8),
-                                );
-                                let label = Self::screen_label(id, name);
-                                let access = if mine {
-                                    "Your screen".to_string()
-                                } else {
-                                    format!("Screen of {}", name)
-                                };
-                                r.widget_info(|| {
-                                    egui::WidgetInfo::labeled(
-                                        egui::WidgetType::Image,
-                                        true,
-                                        access.clone(),
-                                    )
-                                });
-                                drawn.insert(id.clone(), w * ppp);
-                                ui.label(RichText::new(label).small().strong().color(t.text2));
-                                ui.add_space(6.0);
-                            }
-                            ui.horizontal(|ui| {
-                                for (id, name) in &cameras {
-                                    let Some(tex) = self.huddle.textures.get(id) else {
-                                        continue;
-                                    };
-                                    let big = focus.as_ref() == Some(id);
-                                    let w = match &focus {
-                                        Some(_) if big => 560.0,
-                                        Some(_) => 140.0,
-                                        None => normal,
-                                    };
-                                    let size = tex.size_vec2();
-                                    let h = w * size.y / size.x.max(1.0);
-                                    drawn.insert(id.clone(), w * ppp);
-                                    ui.vertical(|ui| {
-                                        let r = ui.add(
-                                            egui::Image::new((tex.id(), vec2(w, h)))
-                                                .corner_radius(8)
-                                                .sense(Sense::click()),
-                                        );
-                                        hover_bg(ui, &r, r.rect, 8.0);
-                                        r.widget_info(|| {
-                                            egui::WidgetInfo::labeled(
-                                                egui::WidgetType::Image,
-                                                true,
-                                                format!("Video of {}", name),
-                                            )
-                                        });
-                                        if r.on_hover_text(if big {
-                                            tr("Click to make smaller")
-                                        } else {
-                                            tr("Click to make larger")
-                                        })
-                                        .clicked()
-                                        {
-                                            clicked = Some(id.clone());
-                                        }
-                                        ui.label(
-                                            RichText::new(if id == ME {
-                                                tr("You")
-                                            } else {
-                                                name.as_str()
-                                            })
-                                            .small()
-                                            .color(t.text2),
-                                        );
-                                    });
-                                }
-                            });
-                        });
-                    });
-            });
-        if let Some(id) = clicked {
-            self.huddle.focus = if self.huddle.focus.as_ref() == Some(&id) {
-                None
-            } else {
-                Some(id)
-            };
-        }
-        drawn.remove(ME);
-        drawn.remove(&screen_key(ME));
-        self.tell_view_sizes(drawn);
     }
 
     /// Tell the call how large each received picture is drawn (when that
@@ -913,119 +756,6 @@ impl App {
         }
     }
 
-    /// One person in the huddle: a round initial, ringed while speaking,
-    /// with a red mark while muted. Its name says who and how they are.
-    pub(super) fn huddle_person(&self, ui: &mut Ui, t: &Theme, p: &Person) {
-        let green = HUDDLE_GREEN;
-        let name = self.huddle_name(p);
-        let (r, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-        let color = p
-            .member()
-            .and_then(|m| self.data.member(m))
-            .map(|m| rgb(m.color))
-            .unwrap_or(t.text3);
-        if p.speaking && !p.muted {
-            ui.painter()
-                .circle_stroke(r.center(), 15.0, Stroke::new(2.5_f32, green));
-        }
-        ui.painter().circle_filled(r.center(), 12.0, color);
-        let initial = name
-            .chars()
-            .next()
-            .map(|c| c.to_uppercase().to_string())
-            .unwrap_or_default();
-        ui.painter().text(
-            r.center(),
-            Align2::CENTER_CENTER,
-            initial,
-            FontId::proportional(12.0),
-            Color32::WHITE,
-        );
-        if p.muted {
-            ui.painter()
-                .circle_filled(r.right_bottom() - vec2(5.0, 5.0), 5.5, t.danger);
-            ui.painter().line_segment(
-                [
-                    r.right_bottom() - vec2(8.0, 8.0),
-                    r.right_bottom() - vec2(2.0, 2.0),
-                ],
-                Stroke::new(1.5_f32, Color32::WHITE),
-            );
-        }
-        let state = if p.muted {
-            "muted"
-        } else if p.speaking {
-            "speaking"
-        } else {
-            "listening"
-        };
-        let label = if p.me {
-            format!("{} (you), {}", name, state)
-        } else {
-            format!("{}, {}", name, state)
-        };
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
-        let shown = if p.me {
-            trf!("{} (you), {}", name, tr(state))
-        } else {
-            format!("{}, {}", name, tr(state))
-        };
-        resp.on_hover_text(shown);
-    }
-
-    /// The huddle's buttons: Mute, Video, Share screen and Leave, in the bar
-    /// and in the small window. What was pressed goes in `press`.
-    pub(super) fn huddle_buttons(&self, ui: &mut Ui, t: &Theme, press: &mut HuddlePress) {
-        let muted = self.huddle.muted;
-        if ui
-            .add(
-                egui::Button::new(if muted { tr("Unmute") } else { tr("Mute") })
-                    .min_size(vec2(72.0, 30.0))
-                    .corner_radius(7),
-            )
-            .clicked()
-        {
-            press.mute = Some(!muted);
-        }
-        let cam = self.huddle.camera;
-        if ui
-            .add(
-                egui::Button::new(if cam { tr("Stop video") } else { tr("Video") })
-                    .min_size(vec2(72.0, 30.0))
-                    .corner_radius(7),
-            )
-            .clicked()
-        {
-            press.camera = Some(!cam);
-        }
-        let sharing = self.huddle.screen.is_some();
-        if ui
-            .add(
-                egui::Button::new(if sharing {
-                    tr("Stop sharing screen")
-                } else {
-                    tr("Share screen")
-                })
-                .min_size(vec2(72.0, 30.0))
-                .corner_radius(7),
-            )
-            .clicked()
-        {
-            press.share = true;
-        }
-        if ui
-            .add(Tint(
-                egui::Button::new(RichText::new(tr("Leave")).color(Color32::WHITE))
-                    .fill(t.danger)
-                    .min_size(vec2(64.0, 30.0))
-                    .corner_radius(7),
-            ))
-            .clicked()
-        {
-            press.leave = true;
-        }
-    }
-
     /// Does what was pressed among the huddle's buttons.
     pub(super) fn huddle_pressed(&mut self, press: HuddlePress) {
         if let Some(m) = press.mute {
@@ -1043,13 +773,23 @@ impl App {
                 self.open_share_menu();
             }
         }
+        if press.open_chat {
+            if let Some(ch) = self.huddle.channel {
+                self.section = Section::Chat;
+                self.chat.open = Some(ch);
+            }
+        }
         if press.leave {
             self.leave_huddle();
         }
     }
 
-    /// The bar at the bottom while in a huddle (above the message box, so it
-    /// never covers it). Not while the huddle shows in the small window.
+    /// The huddle over the page while in one, as a call window shows it:
+    /// its name, the stage with everyone's tiles and the row of buttons
+    /// (panel.rs). Over Chat's message box and as wide as it at most (it
+    /// covered the top of the box's tabs, and the sidebar beside a narrow
+    /// page); elsewhere near the window's bottom, inside the window. Not
+    /// while the huddle shows in the small window.
     pub(super) fn huddle_bar(&mut self, ctx: &egui::Context) {
         let Some(ch) = self.huddle.channel else {
             return;
@@ -1058,13 +798,8 @@ impl App {
             return;
         }
         let t = self.t();
-        let where_ = self.huddle_place(ch);
-        let green = HUDDLE_GREEN;
         let mut press = HuddlePress::default();
         let mut small = false;
-        // over Chat's message box, as wide as it at most (it covered the
-        // top of the box's tabs, and the sidebar beside a narrow page);
-        // elsewhere near the window's bottom, inside the window
         let screen = ctx.screen_rect();
         let (at, max_w) = match self.huddle.dock {
             Some((pass, r)) if pass == ctx.cumulative_pass_nr() => {
@@ -1075,75 +810,63 @@ impl App {
                 screen.width() - 16.0,
             ),
         };
+        // wider while a screen or a picture shows large
+        let large = self.huddle.focus.is_some()
+            || self
+                .huddle_shown_videos()
+                .is_some_and(|(screens, _)| !screens.is_empty());
+        let margin = 10.0;
+        let width = (if large { 960.0 } else { 600.0_f32 }).min(max_w);
+        let inner_w = width - 2.0 * margin;
+        // the conversation's button only where there is room for it, and
+        // smaller buttons in a very narrow window
+        let mut s = Sizes::MAIN;
+        if inner_w < Self::toolbar_width(s, false) {
+            s = Sizes::SMALL;
+        }
+        let chat = inner_w >= Self::toolbar_width(s, true);
+        // the screen chooser goes above the card: the stage gives it room
+        let menu_id = egui::Id::new("huddle_share_menu");
+        let menu_h = if self.huddle.share_menu {
+            ctx.memory(|m| m.area_rect(menu_id))
+                .map(|r| r.height())
+                .unwrap_or(300.0)
+                + 8.0
+        } else {
+            0.0
+        };
+        let room = at.y - screen.top() - 8.0 - menu_h;
+        // a short window with the chooser open: no stage, only the title
+        // and the buttons (the chooser covered them)
+        let stage_max = (room - 2.0 * margin - 26.0 - s.buttons_h() - 2.0 * s.gap).min(620.0);
+        let stage = stage_max >= s.strip + 2.0 * s.pad;
+        self.huddle_textures(ctx);
         let bar = egui::Area::new(egui::Id::new("huddle_bar"))
             .order(egui::Order::Middle)
             .pivot(Align2::CENTER_BOTTOM)
             .fixed_pos(at)
             .show(ctx, |ui| {
-                card_frame(&t)
-                    .fill(t.card)
-                    .inner_margin(egui::Margin::symmetric(14, 10))
+                panel_frame(14, margin as i8)
                     .shadow(egui::epaint::Shadow {
-                        offset: [0, 4],
-                        blur: 16,
+                        offset: [0, 6],
+                        blur: 24,
                         spread: 0,
-                        color: Color32::from_black_alpha(40),
+                        color: Color32::from_black_alpha(70),
                     })
                     .show(ui, |ui| {
-                        // what doesn't fit in a narrow window goes on
-                        // another row (it ran past both edges)
-                        ui.set_max_width(max_w - 28.0);
-                        ui.horizontal_wrapped(|ui| {
-                            let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
-                            ui.painter().circle_filled(r.center(), 13.0, green);
-                            super::shell::line_icon(
-                                ui.painter(),
-                                Icon::Phone,
-                                r.center(),
-                                Color32::WHITE,
-                            );
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new(trf!("Huddle in {}", where_))
-                                        .strong()
-                                        .color(t.text),
-                                );
-                                ui.label(
-                                    RichText::new(self.huddle_status()).small().color(t.text2),
-                                );
-                                if self.huddle.screen.is_some() {
-                                    ui.label(
-                                        RichText::new(tr("Sharing your screen"))
-                                            .small()
-                                            .color(green),
-                                    );
-                                }
-                            });
-                            ui.add_space(10.0);
-                            for p in &self.huddle.people {
-                                self.huddle_person(ui, &t, p);
-                            }
-                            ui.add_space(10.0);
-                            self.huddle_buttons(ui, &t, &mut press);
-                            // the huddle and its conversation in a small
-                            // window that stays above other apps (mini.rs)
-                            let b = super::icons::icon_button(
-                                ui,
-                                &t,
-                                Icon::PopOut,
-                                "",
-                                "Huddle in a small window",
-                                false,
-                            );
-                            if b.on_hover_text(tr("Open in a small window")).clicked() {
-                                small = true;
-                            }
-                        });
+                        ui.set_width(inner_w);
+                        ui.spacing_mut().item_spacing.y = s.gap;
+                        self.huddle_header(ui, ch, &mut small);
+                        if stage {
+                            self.huddle_stage(ui, inner_w, stage_max, s);
+                        } else {
+                            self.tell_view_sizes(HashMap::new());
+                        }
+                        self.huddle_toolbar(ui, inner_w, s, chat, &mut press);
                     });
             });
-        // the videos and the screen chooser above the bar
+        // the screen chooser above the card
         let top = pos2(at.x, bar.response.rect.top() - 8.0);
-        self.huddle_videos(ctx, &t, top);
         self.share_menu(ctx, &t, 380.0, Some(top));
         // the huddle floats over the page but under dialogs: put an open
         // dialog (and its dimmed background) back on top
@@ -1166,9 +889,6 @@ impl App {
     }
 }
 
-/// The huddle's green (the call icon, the ring around whoever speaks).
-pub(super) const HUDDLE_GREEN: Color32 = Color32::from_rgb(0x00, 0x88, 0x44);
-
 /// What was pressed among a huddle's buttons this frame.
 #[derive(Default)]
 pub(super) struct HuddlePress {
@@ -1176,4 +896,5 @@ pub(super) struct HuddlePress {
     camera: Option<bool>,
     share: bool,
     leave: bool,
+    open_chat: bool,
 }

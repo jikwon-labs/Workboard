@@ -311,6 +311,9 @@ fn the_quiet_hours_announce_nothing_but_keep_the_counts() {
     assert!(a.notify_rt.sent.is_empty());
     assert!(a.notify_paused());
     assert!(a.dock_count() > 0, "the Dock count stays");
+    a.data.extra.muted_until = now_ts() + 3600;
+    assert!(a.dock_count() > 0, "also when muted by hand");
+    a.data.extra.muted_until = 0;
     let (inbox, chat) = a.rail_unread(true);
     assert!(inbox + chat > 0, "the rail's counts stay");
     // no day picked: never

@@ -256,9 +256,9 @@ impl App {
     }
 
     /// The red number for workspace `file`: what was heard from it since it
-    /// was last open. Nothing while notifications are paused, as on the rail.
+    /// was last open (pausing notifications leaves it, as on the rail).
     pub(super) fn ws_unread(&self, file: &str) -> usize {
-        if file == self.ws_file || self.data.extra.muted_until > now_ts() {
+        if file == self.ws_file {
             return 0;
         }
         self.watch_rt.unread.get(file).copied().unwrap_or(0)

@@ -726,8 +726,8 @@ pub struct NotifySettings {
     pub keywords: String,
     /// "Pause notifications on a schedule": every week on `quiet_days`, no
     /// banners, sounds or pushes from `quiet_from` to `quiet_to` ("HH:MM";
-    /// a span that ends before it starts runs past midnight). Unlike "Mute
-    /// notifications" the unread counts still show.
+    /// a span that ends before it starts runs past midnight), as "Mute
+    /// notifications" does by hand; the unread counts still show.
     pub quiet: bool,
     pub quiet_from: String,
     pub quiet_to: String,

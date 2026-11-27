@@ -373,12 +373,16 @@ fn unseen_notifications_show_a_red_count_on_the_rail_and_sidebar() {
     assert_eq!(red_badge_in(&h, &name), None, "read now");
     assert_eq!(h.app.chat_unread_total(), chat - 2);
 
-    // paused notifications: no red counts anywhere
+    // paused notifications: the red counts stay
     two_unread_dms(&mut h);
+    h.settle();
+    let names = ["Rail Home", "Rail Chat", "Inbox", name.as_str()];
+    let before: Vec<_> = names.iter().map(|n| red_badge_in(&h, n)).collect();
+    assert!(before.iter().any(Option::is_some), "{:?}", before);
     h.app.data.extra.muted_until = now_ts() + 3600;
     h.settle();
-    for n in ["Rail Home", "Rail Chat", "Inbox", name.as_str()] {
-        assert_eq!(red_badge_in(&h, n), None, "{} while muted", n);
+    for (n, b) in names.iter().zip(before) {
+        assert_eq!(red_badge_in(&h, n), b, "{} while muted", n);
     }
 }
 

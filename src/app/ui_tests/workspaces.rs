@@ -412,11 +412,12 @@ fn the_workspace_button_counts_what_came_in_for_me_in_the_others() {
         h.texts()
     );
     assert!(h.texts().iter().any(|t| t.ends_with(&key(3))));
-    // paused notifications: no red numbers, as on the rail
+    // paused notifications: the red numbers stay, as on the rail
     h.key(egui::Key::Escape);
+    let before = red_badge_in(&h, "Workspace menu");
     h.app.data.extra.muted_until = now_ts() + 3600;
     h.settle();
-    assert_eq!(red_badge_in(&h, "Workspace menu"), None, "while muted");
+    assert_eq!(red_badge_in(&h, "Workspace menu"), before, "while muted");
     h.app.data.extra.muted_until = 0;
     // opening Side Biz: it has nothing waiting any more, Third still does
     h.click("Workspace menu");

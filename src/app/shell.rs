@@ -693,12 +693,9 @@ impl App {
 
     /// The red counts on the rail's Home and Chat: the Inbox badge, and the
     /// unread messages the sidebar shows. While Chat isn't pinned to the rail
-    /// it lives under Home, so Home carries both. Nothing while notifications
-    /// are paused by hand, as in the sidebar (the quiet hours keep them).
+    /// it lives under Home, so Home carries both. Pausing notifications
+    /// leaves them, as in the sidebar.
     pub(super) fn rail_unread(&self, chat_pinned: bool) -> (usize, usize) {
-        if self.data.extra.muted_until > now_ts() {
-            return (0, 0);
-        }
         let (inbox, chat) = (self.inbox_badge(), self.chat_unread_total());
         if chat_pinned {
             (inbox, chat)

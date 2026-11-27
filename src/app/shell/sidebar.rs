@@ -99,14 +99,12 @@ impl App {
                 }
                 let out = area.show(ui, |ui| {
                     let tc = t.text2;
-                    // paused by hand: no counts (the quiet hours keep them)
-                    let muted = self.data.extra.muted_until > now_ts();
                     if filter.is_empty() {
                         if self.tier == Tier::Compact {
                             // the rail's apps, which a compact window hides
                             self.compact_apps(ui, tc);
                         }
-                        self.sidebar_nav(ui, t, tc, muted);
+                        self.sidebar_nav(ui, t, tc);
                         ui.add_space(6.0);
                         let r = ui.available_rect_before_wrap();
                         ui.painter().hline(
@@ -126,10 +124,10 @@ impl App {
                     self.sidebar_spaces(ui, tc, filter, &ws);
 
                     // Channels
-                    self.sidebar_channels(ui, t, tc, filter, muted, &ws);
+                    self.sidebar_channels(ui, t, tc, filter, &ws);
 
                     // Direct Messages
-                    self.sidebar_dms(ui, t, filter, muted);
+                    self.sidebar_dms(ui, t, filter);
                     // room under the last row once the list is taller than
                     // the sidebar, so its end scrolls clear of the edge and
                     // the unread pill; a list that fits gets none, or the
@@ -341,9 +339,9 @@ impl App {
 
     /// The fixed rows at the top of the sidebar: Inbox, Replies, Assigned
     /// Comments, Posts and the rest, with My Tasks and its three items.
-    fn sidebar_nav(&mut self, ui: &mut Ui, t: Theme, tc: Color32, muted: bool) {
-        let inbox_n = if muted { 0 } else { self.inbox_badge() };
-        let replies_n = if muted || self.hidden("Replies") {
+    fn sidebar_nav(&mut self, ui: &mut Ui, t: Theme, tc: Color32) {
+        let inbox_n = self.inbox_badge();
+        let replies_n = if self.hidden("Replies") {
             0
         } else {
             self.unread_replies()
@@ -779,17 +777,9 @@ impl App {
     /// Channels: each channel I can see, with its unread count and settings
     /// button, and the field for a new channel. The heading's "+" is the only
     /// add button here (no "Add Channel" row under the list too).
-    fn sidebar_channels(
-        &mut self,
-        ui: &mut Ui,
-        t: Theme,
-        tc: Color32,
-        filter: &str,
-        muted: bool,
-        ws: &str,
-    ) {
+    fn sidebar_channels(&mut self, ui: &mut Ui, t: Theme, tc: Color32, filter: &str, ws: &str) {
         if (filter.is_empty() || filter == "unread") && !self.hidden("Channels") {
-            // the Unread filter uses the real count; muting only hides the badge
+            // the Unread filter uses the real count; a quiet channel only hides the badge
             let chans: Vec<(u64, String, usize)> = self
                 .data
                 .channels
@@ -797,16 +787,12 @@ impl App {
                 .filter(|c| c.kind == ChannelKind::Channel && self.listed(c))
                 .map(|c| (c.id, c.name.clone(), self.unread_count(c)))
                 .collect();
-            // folded, the heading counts what the rows would: not muted, not quiet
-            let total = if muted {
-                0
-            } else {
-                chans
-                    .iter()
-                    .filter(|c| self.data.extra.notify.channel_mode(c.0) != "nothing")
-                    .map(|c| c.2)
-                    .sum()
-            };
+            // folded, the heading counts what the rows would: not quiet
+            let total = chans
+                .iter()
+                .filter(|c| self.data.extra.notify.channel_mode(c.0) != "nothing")
+                .map(|c| c.2)
+                .sum();
             let (mut folded, hs) = self.side_header(
                 ui,
                 "Channels",
@@ -851,7 +837,7 @@ impl App {
                 }
                 // a channel set to notify about nothing is quiet: dimmed, no count
                 let quiet = self.data.extra.notify.channel_mode(id) == "nothing";
-                let unread = if muted || quiet { 0 } else { real_unread };
+                let unread = if quiet { 0 } else { real_unread };
                 let sel = self.section == Section::Chat && self.chat.open == Some(id);
                 let sub = if name == "general" {
                     Some(format!("- {}", ws))
@@ -970,7 +956,7 @@ impl App {
 
     /// Direct Messages: a row per conversation with the other person's
     /// avatar and presence, and New message.
-    fn sidebar_dms(&mut self, ui: &mut Ui, t: Theme, filter: &str, muted: bool) {
+    fn sidebar_dms(&mut self, ui: &mut Ui, t: Theme, filter: &str) {
         if (filter.is_empty() || filter == "dms" || filter == "unread")
             && !self.hidden("Direct Messages")
         {
@@ -996,11 +982,7 @@ impl App {
             // the conversation with the newest message (from either side)
             // first; ones without any keep their order at the end
             dms.sort_by_key(|d| std::cmp::Reverse(d.3));
-            let total = if muted {
-                0
-            } else {
-                dms.iter().map(|d| d.2).sum()
-            };
+            let total = dms.iter().map(|d| d.2).sum();
             // the heading's "+" starts one (no "New message" row at the end
             // too: two buttons for the same thing)
             let (folded, hs) =
@@ -1012,7 +994,7 @@ impl App {
                 return;
             }
             for (id, other, real_unread, _) in dms {
-                let unread = if muted { 0 } else { real_unread };
+                let unread = real_unread;
                 let (name, sub) = match &other {
                     Some(m) => (m.shown().to_string(), None),
                     None => (

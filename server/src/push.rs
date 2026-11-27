@@ -688,7 +688,7 @@ pub fn wanted(n: &Note, prefs: Option<&wb_net::PushPrefs>, now_secs: i64) -> boo
     let Some(p) = prefs else {
         return n.why != Why::Channel;
     };
-    if p.muted_until > now_secs {
+    if p.paused(now_secs) {
         return false;
     }
     if n.why == Why::Direct {
@@ -1151,7 +1151,7 @@ fn kind_wanted(kind: Kind, p: &wb_net::PushPrefs) -> bool {
 /// (`p.lang`), in the Mac app's words, or None when its choices leave it
 /// out: (its kind, the payload).
 pub fn device_payload(n: &Note, p: &wb_net::PushPrefs, now_secs: i64) -> Option<(Kind, Value)> {
-    if p.muted_until > now_secs {
+    if p.paused(now_secs) {
         return None;
     }
     let lang = Lang::of(p.lang.as_deref());
@@ -1360,6 +1360,19 @@ mod tests {
             ..Default::default()
         };
         assert!(got(3, Some(&paused)).is_empty());
+        // in the quiet hours the phone set (all day, every day) and out of
+        // them (none at all on any day)
+        let quiet = |days: u8| wb_net::PushPrefs {
+            quiet: Some(wb_net::QuietHours {
+                from: 0,
+                to: 24 * 60,
+                days,
+                utc_offset: 9 * 3600,
+            }),
+            ..Default::default()
+        };
+        assert!(got(3, Some(&quiet(0x7f))).is_empty());
+        assert_eq!(got(3, Some(&quiet(0))), vec![8, 9]);
         // the author never, the strongest reason once
         let loud = wb_net::PushPrefs {
             channel_default: "all".into(),

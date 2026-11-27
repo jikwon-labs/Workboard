@@ -9031,6 +9031,46 @@
           }
         }
       }
+    },
+    "Pause notifications on a schedule": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "정해진 시간에 알림 끄기"
+          }
+        }
+      }
+    },
+    "Notification schedule": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "알림 일정"
+          }
+        }
+      }
+    },
+    "No notifications during these hours, as with Mute notifications": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 시간에는 알림 끄기처럼 알림이 오지 않습니다"
+          }
+        }
+      }
+    },
+    "End": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "끝"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

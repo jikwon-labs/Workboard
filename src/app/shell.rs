@@ -486,7 +486,7 @@ impl App {
                     // orange: notifications muted; green / grey ring:
                     // connected to the team server or not; alone or in a
                     // shared folder there is no "online", so no dot
-                    let muted = self.data.extra.muted_until > now_ts();
+                    let muted = self.notify_paused();
                     let dot = c + vec2(9.0, 9.0);
                     if muted {
                         ui.painter().circle_filled(dot, 4.0, t.app_bg);
@@ -696,7 +696,7 @@ impl App {
     /// it lives under Home, so Home carries both. Nothing while notifications
     /// are paused, as in the sidebar.
     pub(super) fn rail_unread(&self, chat_pinned: bool) -> (usize, usize) {
-        if self.data.extra.muted_until > now_ts() {
+        if self.notify_paused() {
             return (0, 0);
         }
         let (inbox, chat) = (self.inbox_badge(), self.chat_unread_total());

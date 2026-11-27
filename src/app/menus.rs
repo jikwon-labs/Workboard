@@ -892,7 +892,7 @@ impl App {
                     if !m.title.trim().is_empty() {
                         ui.label(RichText::new(m.title.trim()).small().color(t.text2));
                     }
-                    let muted = self.data.extra.muted_until > now_ts();
+                    let muted = self.notify_paused();
                     let st: String = if !m.status_text.is_empty() {
                         m.status_text.clone()
                     } else if muted {

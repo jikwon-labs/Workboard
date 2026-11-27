@@ -10,7 +10,8 @@
 // toast and a short sound when the app is in front; otherwise a banner in
 // Notification Center (src/notifier.rs), and a Dock bounce for direct
 // messages, mentions and huddles. The Dock badge counts the Inbox and unread
-// direct messages. "Pause notifications" (`muted_until`) silences all of it.
+// direct messages. "Pause notifications" (`muted_until`) and the quiet hours
+// of "Pause notifications on a schedule" silence all of it (`paused_at`).
 //
 // What each person wants is `Data.extra.notify` (NotifySettings), which stays
 // on their own computer.
@@ -743,11 +744,22 @@ impl App {
                 .is_some_and(|c| self.conversation(c).iter().any(|d| d.id == ch))
     }
 
+    /// No notifications at `ts`: paused by hand ("Mute notifications") or
+    /// in the scheduled quiet hours.
+    pub(crate) fn paused_at(&self, ts: i64) -> bool {
+        self.data.extra.muted_until > ts || self.data.extra.notify.quiet_at(ts)
+    }
+
+    /// No notifications now (`paused_at`).
+    pub(crate) fn notify_paused(&self) -> bool {
+        self.paused_at(now_ts())
+    }
+
     /// Announces one thing.
     pub(super) fn deliver(&mut self, note: Note) {
         let now = now_ts();
         let n = self.data.extra.notify.clone();
-        if self.data.extra.muted_until > now {
+        if self.paused_at(now) {
             return;
         }
         self.notify_rt.sent.push(note.clone());
@@ -1115,7 +1127,7 @@ impl App {
 
     /// The number on the Dock icon: the Inbox badge plus unread direct messages.
     pub(super) fn dock_count(&self) -> usize {
-        if !self.data.extra.notify.dock_badge || self.data.extra.muted_until > now_ts() {
+        if !self.data.extra.notify.dock_badge || self.notify_paused() {
             return 0;
         }
         let me = self.data.me;
@@ -1288,7 +1300,7 @@ impl App {
         let due_time = parse_time_of_day(&n.due_time);
         let mut out: Vec<crate::notifier::Planned> = vec![];
         let mut add = |key: String, at: i64, title: String, body: String, target: String| {
-            if at <= now || at > end || at < self.data.extra.muted_until || self.fired(&key) {
+            if at <= now || at > end || self.paused_at(at) || self.fired(&key) {
                 return;
             }
             out.push(crate::notifier::Planned {

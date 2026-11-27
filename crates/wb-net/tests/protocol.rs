@@ -218,6 +218,7 @@ fn to_server() -> Vec<(&'static str, Msg)> {
                     }],
                     keywords: vec!["launch".into(), "deploy".into()],
                     muted_until: 1763009999,
+                    quiet: None,
                     huddles: Some(true),
                     reactions: Some(false),
                     assigned: Some(true),

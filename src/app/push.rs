@@ -61,7 +61,8 @@ pub(super) fn ws_file(key: &str) -> Option<String> {
     String::from_utf8(bytes?).ok()
 }
 
-/// What `settings` (and "Pause notifications" until `muted_until`) ask of
+/// What `settings` (with its quiet hours, and "Pause notifications" until
+/// `muted_until`) ask of
 /// the server's pushes. Banners off: nothing.
 pub(super) fn push_prefs(settings: &NotifySettings, muted_until: i64) -> wb_net::PushPrefs {
     let on = settings.desktop;
@@ -92,6 +93,9 @@ pub(super) fn push_prefs(settings: &NotifySettings, muted_until: i64) -> wb_net:
             vec![]
         },
         muted_until,
+        // the schedule on this computer's clock as it is now: a change of
+        // clock (summer time, travel) sends the choices again
+        quiet: settings.quiet_hours(chrono::Local::now().offset().local_minus_utc()),
         // the rest of what the app tells while it runs (notify.rs), so a
         // quit app is told the same
         huddles: Some(on && settings.huddles),
@@ -248,6 +252,20 @@ mod tests {
         assert!(p.channel_modes.is_empty() && p.keywords.is_empty());
         assert_eq!(p.assigned, Some(false));
         assert_eq!(p.huddles, Some(false));
+    }
+
+    #[test]
+    fn the_quiet_hours_go_to_the_server_in_minutes() {
+        let mut s = NotifySettings::default();
+        assert_eq!(push_prefs(&s, 0).quiet, None, "off until turned on");
+        s.quiet = true;
+        s.quiet_from = "22:30".into();
+        s.quiet_to = "07:00".into();
+        s.quiet_days = 0b100_0001;
+        let q = push_prefs(&s, 0).quiet.expect("sent");
+        assert_eq!((q.from, q.to, q.days), (22 * 60 + 30, 7 * 60, 0b100_0001));
+        s.quiet_to = "soon".into();
+        assert_eq!(push_prefs(&s, 0).quiet, None, "a time that can't be read");
     }
 
     #[test]

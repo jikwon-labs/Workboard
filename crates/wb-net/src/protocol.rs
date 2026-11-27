@@ -153,6 +153,10 @@ pub struct PushPrefs {
     /// "Pause notifications" until this time (seconds)
     #[serde(default)]
     pub muted_until: i64,
+    /// "Pause notifications on a schedule": the hours each week with none
+    /// (None: no schedule, or an app from before there was one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet: Option<QuietHours>,
     // What else the device wants while its app isn't running, as the apps
     // tell it themselves (NotifySettings). None: an app from before these
     // were pushed, which gets none of them (and a call as a message).
@@ -184,6 +188,50 @@ pub struct PushPrefs {
     /// The language the banners are written in: "ko" or "en" (None: English).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
+}
+
+/// The hours each week with no notifications ("Pause notifications on a
+/// schedule"): on each of `days`, from `from` to `to`, in minutes after
+/// midnight on the device's clock. A span that ends before it starts runs
+/// past midnight and ends the next morning; one that ends where it starts
+/// is no span at all.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct QuietHours {
+    pub from: u32,
+    pub to: u32,
+    /// The days a span starts on: bit 0 Monday ... bit 6 Sunday.
+    pub days: u8,
+    /// How far the device's clock was ahead of UTC (seconds) when it said
+    /// this, so the server can tell the device's time of day.
+    #[serde(default)]
+    pub utc_offset: i32,
+}
+
+impl QuietHours {
+    /// Whether the time of day `minute` (after midnight) on `weekday`
+    /// (0 Monday ... 6 Sunday) is in a span.
+    pub fn covers_local(&self, weekday: u32, minute: u32) -> bool {
+        let on = |d: u32| self.days & (1 << (d % 7)) != 0;
+        if self.from == self.to {
+            false
+        } else if self.from < self.to {
+            on(weekday) && (self.from..self.to).contains(&minute)
+        } else {
+            // past midnight: the evening of a day picked, or the morning
+            // after one
+            (on(weekday) && minute >= self.from) || (on(weekday + 6) && minute < self.to)
+        }
+    }
+
+    /// Whether `ts` (seconds since 1970) is in a span on the device's clock
+    /// (`utc_offset`).
+    pub fn covers(&self, ts: i64) -> bool {
+        let local = ts + self.utc_offset as i64;
+        let minute = (local.rem_euclid(86_400) / 60) as u32;
+        // 1 January 1970 was a Thursday
+        let weekday = (local.div_euclid(86_400) + 3).rem_euclid(7) as u32;
+        self.covers_local(weekday, minute)
+    }
 }
 
 /// A webhook an owner or admin set up (server/src/hooks.rs): "in" posts
@@ -259,6 +307,7 @@ impl Default for PushPrefs {
             channel_modes: vec![],
             keywords: vec![],
             muted_until: 0,
+            quiet: None,
             huddles: None,
             reactions: None,
             assigned: None,
@@ -273,6 +322,12 @@ impl Default for PushPrefs {
 }
 
 impl PushPrefs {
+    /// No notifications at `now` (seconds): paused by hand, or in the
+    /// scheduled quiet hours.
+    pub fn paused(&self, now: i64) -> bool {
+        self.muted_until > now || self.quiet.as_ref().is_some_and(|q| q.covers(now))
+    }
+
     /// "all", "mentions" or "nothing" for a channel.
     pub fn channel_mode(&self, channel: u64) -> &str {
         self.channel_modes
@@ -821,5 +876,70 @@ impl Msg {
                 self,
                 Msg::CreateInvite { .. } | Msg::SetPassword { .. } | Msg::Restore { .. }
             )
+    }
+}
+
+#[cfg(test)]
+mod quiet_tests {
+    use super::QuietHours;
+
+    const MON: u8 = 1;
+    const SUN: u8 = 1 << 6;
+
+    #[test]
+    fn a_daytime_span_covers_only_its_hours_on_its_days() {
+        // 9:00 to 18:00, Monday to Friday
+        let q = QuietHours {
+            from: 9 * 60,
+            to: 18 * 60,
+            days: 0b001_1111,
+            utc_offset: 0,
+        };
+        assert!(q.covers_local(0, 9 * 60));
+        assert!(q.covers_local(4, 17 * 60 + 59));
+        assert!(!q.covers_local(0, 18 * 60), "ends at 18:00");
+        assert!(!q.covers_local(0, 8 * 60 + 59));
+        assert!(!q.covers_local(5, 12 * 60), "not on Saturday");
+    }
+
+    #[test]
+    fn an_overnight_span_ends_the_next_morning() {
+        // Sunday 22:00 to Monday 7:00
+        let q = QuietHours {
+            from: 22 * 60,
+            to: 7 * 60,
+            days: SUN,
+            utc_offset: 0,
+        };
+        assert!(q.covers_local(6, 23 * 60));
+        assert!(q.covers_local(0, 6 * 60), "Monday morning, after Sunday");
+        assert!(
+            !q.covers_local(6, 6 * 60),
+            "Sunday morning follows Saturday"
+        );
+        assert!(!q.covers_local(0, 23 * 60), "Monday isn't picked");
+        assert!(!QuietHours {
+            from: 60,
+            to: 60,
+            days: 0x7f,
+            utc_offset: 0
+        }
+        .covers_local(0, 60));
+    }
+
+    #[test]
+    fn the_device_clock_decides_the_day_and_hour() {
+        // Monday 9:00 to 10:00 in Seoul (UTC+9) is Monday 0:00 to 1:00 UTC
+        let q = QuietHours {
+            from: 9 * 60,
+            to: 10 * 60,
+            days: MON,
+            utc_offset: 9 * 3600,
+        };
+        // Monday 5 January 1970, 0:30 UTC
+        let monday = 4 * 86_400 + 30 * 60;
+        assert!(q.covers(monday));
+        assert!(!q.covers(monday + 3600));
+        assert!(!q.covers(monday + 7 * 86_400 - 86_400), "Sunday");
     }
 }

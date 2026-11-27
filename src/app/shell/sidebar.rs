@@ -99,7 +99,7 @@ impl App {
                 }
                 let out = area.show(ui, |ui| {
                     let tc = t.text2;
-                    let muted = self.data.extra.muted_until > now_ts();
+                    let muted = self.notify_paused();
                     if filter.is_empty() {
                         if self.tier == Tier::Compact {
                             // the rail's apps, which a compact window hides

@@ -45,6 +45,14 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
     public var channelModes: [UInt64: String] = [:]
     /// No notifications until then (seconds since 1970).
     public var mutedUntil: Int64 = 0
+    /// "Pause notifications on a schedule": every week on `quietDays`, none
+    /// from `quietFrom` to `quietTo` ("HH:MM"; a span that ends before it
+    /// starts runs past midnight). The same on all my devices.
+    public var quiet = false
+    public var quietFrom = "09:00"
+    public var quietTo = "18:00"
+    /// The days a span starts on: bit 0 Monday ... bit 6 Sunday.
+    public var quietDays = 0b001_1111
     /// Words to be told about like a mention, separated by commas
     /// (NotifySettings::keywords on the Mac).
     public var keywords = ""
@@ -66,7 +74,37 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         channelModes[id] = mode == channelDefault ? nil : mode
     }
 
-    public func muted(now: Int64) -> Bool { mutedUntil > now }
+    /// No notifications at `now`: paused by hand, or in the quiet hours on
+    /// this phone's clock.
+    public func muted(now: Int64, calendar: Calendar = .current) -> Bool {
+        mutedUntil > now || quietAt(now, calendar: calendar)
+    }
+
+    /// "HH:MM" as minutes after midnight, or nil.
+    public static func minutes(_ hhmm: String) -> Int? {
+        let p = hhmm.split(separator: ":")
+        guard p.count == 2, let h = Int(p[0]), let m = Int(p[1]), (0..<24).contains(h), (0..<60).contains(m) else { return nil }
+        return h * 60 + m
+    }
+
+    /// Whether `minute` (after midnight) on `weekday` (0 Monday ... 6
+    /// Sunday) is in the quiet hours (wb_net::QuietHours::covers_local).
+    public func quietCovers(weekday: Int, minute: Int) -> Bool {
+        guard quiet, let from = Self.minutes(quietFrom), let to = Self.minutes(quietTo), from != to else { return false }
+        func on(_ d: Int) -> Bool { quietDays & (1 << (d % 7)) != 0 }
+        if from < to { return on(weekday) && minute >= from && minute < to }
+        // past midnight: the evening of a day picked, or the morning after one
+        return (on(weekday) && minute >= from) || (on(weekday + 6) && minute < to)
+    }
+
+    /// Whether `ts` (seconds) is in the quiet hours on `calendar`'s clock.
+    public func quietAt(_ ts: Int64, calendar: Calendar = .current) -> Bool {
+        guard quiet else { return false }
+        let c = calendar.dateComponents([.weekday, .hour, .minute], from: Date(timeIntervalSince1970: TimeInterval(ts)))
+        // Calendar's weekday is 1 Sunday ... 7 Saturday
+        let weekday = ((c.weekday ?? 1) + 5) % 7
+        return quietCovers(weekday: weekday, minute: (c.hour ?? 0) * 60 + (c.minute ?? 0))
+    }
 
     /// The choices kept with the workspace in the Mac's shape
     /// (NotifySettings in src/model/extra.rs, `extra.notify`) and
@@ -91,6 +129,10 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
             }
         }
         keywords = n["keywords"]?.string ?? keywords
+        quiet = b("quiet", quiet)
+        quietFrom = n["quiet_from"]?.string ?? quietFrom
+        quietTo = n["quiet_to"]?.string ?? quietTo
+        quietDays = n["quiet_days"]?.int.map { Int($0) } ?? quietDays
         mutedUntil = m ?? mutedUntil
     }
 
@@ -109,6 +151,8 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         o["channel_default"] = .string(channelDefault)
         o["channel_modes"] = .array(channelModes.keys.sorted().map { id in [.id(id), .string(channelModes[id] ?? "")] })
         o["keywords"] = .string(keywords)
+        o["quiet"] = .bool(quiet); o["quiet_from"] = .string(quietFrom); o["quiet_to"] = .string(quietTo)
+        o["quiet_days"] = .int(Int64(quietDays))
         return .object(o)
     }
 
@@ -140,7 +184,7 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
     /// tell the server this app takes huddles, reactions, task news, form
     /// answers, people joining and goal milestones as pushes too (an app
     /// that sends none of them gets only messages).
-    public func forServer(lang: String) -> JSON {
+    public func forServer(lang: String, utcOffset: Int = TimeZone.current.secondsFromGMT()) -> JSON {
         let modes: [JSON] = channelModes.keys.sorted().map { id in
             let mode: String = channelModes[id] ?? ""
             return JSON.object(["channel": JSON.id(id), "mode": JSON.string(mode)])
@@ -154,6 +198,14 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         o["channel_modes"] = .array(modes)
         o["keywords"] = .array(words)
         o["muted_until"] = .int(mutedUntil)
+        if quiet, let from = Self.minutes(quietFrom), let to = Self.minutes(quietTo) {
+            // on this phone's clock as it is now; the phone sends its
+            // choices again when they change
+            o["quiet"] = .object([
+                "from": .int(Int64(from)), "to": .int(Int64(to)), "days": .int(Int64(quietDays)),
+                "utc_offset": .int(Int64(utcOffset)),
+            ])
+        }
         o["huddles"] = .bool(huddles)
         o["reactions"] = .bool(reactions)
         o["assigned"] = .bool(assigned)
@@ -180,6 +232,8 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         badge = v(.badge, badge); channelDefault = v(.channelDefault, channelDefault)
         channelModes = v(.channelModes, channelModes); mutedUntil = v(.mutedUntil, mutedUntil)
         keywords = v(.keywords, keywords)
+        quiet = v(.quiet, quiet); quietFrom = v(.quietFrom, quietFrom); quietTo = v(.quietTo, quietTo)
+        quietDays = v(.quietDays, quietDays)
     }
 }
 

@@ -11,6 +11,22 @@ struct NotificationSettingsView: View {
     @Environment(\.openURL) private var openURL
 
     static let modes: [(String, String)] = [("all", "All messages"), ("mentions", "Only @mentions"), ("nothing", "Nothing")]
+    /// In the order of `NotifyPrefs.quietDays`' bits.
+    static let days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    /// A time of day kept as "HH:MM", for a DatePicker (today at that time).
+    static func time(_ hhmm: Binding<String>) -> Binding<Date> {
+        Binding(
+            get: {
+                let m = NotifyPrefs.minutes(hhmm.wrappedValue) ?? 0
+                return Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: { d in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+                hhmm.wrappedValue = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+            }
+        )
+    }
 
     var body: some View {
         @Bindable var n = notifier
@@ -46,6 +62,37 @@ struct NotificationSettingsView: View {
                 Toggle("Number on the app icon", isOn: $n.prefs.badge).accessibilityIdentifier("badgeToggle")
             } header: {
                 Text("Notifications")
+            }
+
+            Section {
+                Toggle("Pause notifications on a schedule", isOn: $n.prefs.quiet)
+                    .accessibilityIdentifier("quietToggle")
+                if n.prefs.quiet {
+                    DatePicker("Start", selection: Self.time($n.prefs.quietFrom), displayedComponents: .hourAndMinute)
+                        .accessibilityIdentifier("quietFrom")
+                    DatePicker("End", selection: Self.time($n.prefs.quietTo), displayedComponents: .hourAndMinute)
+                        .accessibilityIdentifier("quietTo")
+                    HStack(spacing: 6) {
+                        ForEach(Array(Self.days.enumerated()), id: \.offset) { i, day in
+                            let bit = 1 << i
+                            let on = n.prefs.quietDays & bit != 0
+                            Button { n.prefs.quietDays ^= bit } label: {
+                                Text(L(day))
+                                    .font(.subheadline)
+                                    .frame(maxWidth: .infinity, minHeight: 32)
+                                    .foregroundStyle(on ? Color.white : Color.primary)
+                                    .background(on ? Color.accentColor : Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("quietDay\(day)")
+                            .accessibilityAddTraits(on ? .isSelected : [])
+                        }
+                    }
+                }
+            } header: {
+                Text("Notification schedule")
+            } footer: {
+                Text("No notifications during these hours, as with Mute notifications")
             }
 
             Section("Chat") {

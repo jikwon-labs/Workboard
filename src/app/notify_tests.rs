@@ -299,6 +299,27 @@ fn paused_notifications_announce_nothing() {
 }
 
 #[test]
+fn the_quiet_hours_announce_nothing_and_hide_the_counts() {
+    let mut a = app();
+    // all day, every day: it is always the quiet hours
+    let n = &mut a.data.extra.notify;
+    (n.quiet, n.quiet_from, n.quiet_to, n.quiet_days) =
+        (true, "00:00".into(), "23:59".into(), 0x7f);
+    let dm = dm_with_alex(&a);
+    post(&mut a, dm, 2, "hello?");
+    a.notify_scan();
+    assert!(a.notify_rt.sent.is_empty());
+    assert!(a.notify_paused());
+    assert_eq!(a.dock_count(), 0);
+    // no day picked: never
+    a.data.extra.notify.quiet_days = 0;
+    assert!(!a.notify_paused());
+    post(&mut a, dm, 2, "still there?");
+    a.notify_scan();
+    assert_eq!(a.notify_rt.sent.len(), 1);
+}
+
+#[test]
 fn what_i_am_looking_at_is_not_announced() {
     let mut a = app();
     let dm = dm_with_alex(&a);
@@ -1426,6 +1447,17 @@ fn clock_notices_to_come_are_handed_to_macos_in_the_words_they_will_have() {
     a.data.extra.notify.desktop = true;
     a.data.extra.muted_until = at(day, 17, 0);
     assert!(a.clock_plan(now).iter().all(|p| p.at >= at(day, 17, 0)));
+    // in the quiet hours every day from 0:00 to 17:00: the same
+    a.data.extra.muted_until = 0;
+    let n = &mut a.data.extra.notify;
+    (n.quiet, n.quiet_from, n.quiet_to, n.quiet_days) =
+        (true, "00:00".into(), "17:00".into(), 0x7f);
+    use chrono::{TimeZone, Timelike};
+    let plan = a.clock_plan(now);
+    assert!(plan.iter().all(|p| {
+        let h = chrono::Local.timestamp_opt(p.at, 0).unwrap().hour();
+        h >= 17
+    }));
 }
 
 #[test]

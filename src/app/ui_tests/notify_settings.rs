@@ -1,6 +1,7 @@
 // The Notifications settings, clicked through: rows that turn a setting on
 // and off as a whole, the preview that follows the delivery switches, the
-// due-notice time, the minutes before a meeting and keywords as chips.
+// due-notice time, the minutes before a meeting, keywords as chips and the
+// quiet hours of "Pause notifications on a schedule".
 
 use super::*;
 
@@ -179,4 +180,44 @@ fn the_settings_page_has_the_same_rows_and_a_link_to_the_system_settings() {
     // a test app has nothing to save, so nothing opens
     h.click(link);
     assert!(matches!(h.app.section, Section::Settings));
+}
+
+#[test]
+fn the_schedule_pauses_on_the_hours_and_days_picked() {
+    let mut h = open_dialog();
+    let n = |h: &Ui1| h.app.data.extra.notify.clone();
+    assert!(!n(&h).quiet, "off at first");
+    // off: the hours and days aren't shown
+    assert!(!h.has("Quiet hours start") && !h.has("Quiet hours on Sat"));
+    assert_eq!(n(&h).quiet_days, 0b001_1111, "Monday to Friday");
+    h.click("Pause notifications on a schedule");
+    assert!(n(&h).quiet);
+    assert!(h.has("Quiet hours on Sat"));
+    // picked from the menus of half hours
+    h.click("Quiet hours start");
+    h.click("10:00 AM");
+    h.settle();
+    h.click("Quiet hours end");
+    h.click("7:30 PM");
+    h.settle();
+    assert_eq!(
+        (n(&h).quiet_from.as_str(), n(&h).quiet_to.as_str()),
+        ("10:00", "19:30")
+    );
+    assert!(!h.has("next day"));
+    // 10 pm to 7 am ends the next day
+    h.app.data.extra.notify.quiet_from = "22:00".into();
+    h.app.data.extra.notify.quiet_to = "07:00".into();
+    h.settle();
+    assert!(h.has("next day"));
+    // the weekend on, Monday off
+    h.click("Quiet hours on Sat");
+    h.click("Quiet hours on Sun");
+    h.click("Quiet hours on Mon");
+    assert_eq!(n(&h).quiet_days, 0b111_1110);
+    // what the server is told for pushes while the app is quit
+    let q = super::super::push::push_prefs(&n(&h), 0)
+        .quiet
+        .expect("sent");
+    assert_eq!((q.from, q.to, q.days), (22 * 60, 7 * 60, 0b111_1110));
 }

@@ -156,6 +156,10 @@ impl App {
         });
 
         section_gap(ui);
+        section_title(ui, t, "Notification schedule");
+        card(ui, t, |ui| ch |= quiet_schedule(ui, t, &tn, n));
+
+        section_gap(ui);
         section_title(ui, t, "Inbox");
         caption(ui, t, "Notified and kept in your Inbox");
         card(ui, t, |ui| {
@@ -1061,19 +1065,148 @@ fn keyword_chip(ui: &mut Ui, t: &Theme, tn: &Tones, word: &str) -> bool {
     resp.clicked()
 }
 
+// ------------------------------------------------------------- schedule
+
+/// "Pause notifications on a schedule": the switch, then (while it is on)
+/// the hours and the days it pauses on.
+fn quiet_schedule(ui: &mut Ui, t: &Theme, tn: &Tones, n: &mut NotifySettings) -> bool {
+    let mut changed = setting_row(
+        ui,
+        t,
+        tn,
+        Icon::BellOff,
+        "Pause notifications on a schedule",
+        &mut n.quiet,
+        false,
+        RowOpts {
+            desc: Some("No notifications during these hours, as with Mute notifications"),
+            ..Default::default()
+        },
+        |_, _| false,
+    );
+    if !n.quiet {
+        return changed;
+    }
+    let overnight = match (
+        parse_time_of_day(&n.quiet_from),
+        parse_time_of_day(&n.quiet_to),
+    ) {
+        (Some(a), Some(b)) => b < a,
+        _ => false,
+    };
+    let (from, to) = (&mut n.quiet_from, &mut n.quiet_to);
+    changed |= sub_row(ui, t, "Hours", |ui| {
+        let mut c = false;
+        // right to left: the end first
+        if overnight {
+            ui.label(RichText::new(tr("next day")).size(12.5).color(t.text2));
+        }
+        c |= time_pick(ui, t, to, "Quiet hours end", |s| s);
+        ui.label(RichText::new("–").color(t.text2));
+        c |= time_pick(ui, t, from, "Quiet hours start", |s| s);
+        c
+    });
+    let days = &mut n.quiet_days;
+    changed |= sub_row(ui, t, "Days", |ui| {
+        let mut c = false;
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for (i, day) in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            .into_iter()
+            .enumerate()
+            .rev()
+        {
+            let bit = 1u8 << i;
+            if day_chip(ui, t, tn, day, *days & bit != 0) {
+                *days ^= bit;
+                c = true;
+            }
+        }
+        c
+    });
+    changed
+}
+
+/// A row with a rule above and `title` where the rows' text starts, with
+/// controls added right to left at its end.
+fn sub_row(ui: &mut Ui, t: &Theme, title: &str, add: impl FnOnce(&mut Ui) -> bool) -> bool {
+    let w = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(vec2(w, 48.0), Sense::hover());
+    row_rule(ui, t, rect);
+    ui.painter().text(
+        pos2(rect.left() + TEXT_X, rect.center().y),
+        Align2::LEFT_CENTER,
+        tr(title),
+        FontId::proportional(14.0),
+        t.text,
+    );
+    let room = Rect::from_min_max(
+        pos2(rect.left() + TEXT_X + 60.0, rect.top()),
+        pos2(rect.right() - ROW_RIGHT, rect.bottom()),
+    );
+    let mut sub = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(room)
+            .layout(Layout::right_to_left(Align::Center)),
+    );
+    add(&mut sub)
+}
+
+/// A day of the week that can be picked or not. Returns true when clicked.
+fn day_chip(ui: &mut Ui, t: &Theme, tn: &Tones, day: &str, picked: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(32.0, CONTROL_H), Sense::click());
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            true,
+            picked,
+            format!("Quiet hours on {}", day),
+        )
+    });
+    if picked {
+        ui.painter().rect_filled(rect, 7.0, t.primary);
+    } else {
+        ui.painter().rect_filled(rect, 7.0, tn.tile);
+        hover_bg(ui, &resp, rect, 7.0);
+    }
+    let color = if picked { t.on_primary } else { t.text2 };
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        tr(day),
+        FontId::proportional(12.5),
+        color,
+    );
+    resp.clicked()
+}
+
 // --------------------------------------------------------- task controls
 
 /// The time of day the due notice comes, picked from a menu of half hours
 /// (a time set another way stays in the menu).
 fn due_time_pick(ui: &mut Ui, t: &Theme, due_time: &mut String) -> bool {
-    let current = parse_time_of_day(due_time);
-    let shown = current.map_or_else(|| due_time.clone(), fmt_time);
-    let text = crate::trf!("Every day at {}", shown);
+    time_pick(ui, t, due_time, "Due notice time", |shown| {
+        crate::trf!("Every day at {}", shown)
+    })
+}
+
+/// A button showing the time of day in `value` ("HH:MM") as `words` put it,
+/// that opens a menu of half hours (a time set another way stays in it).
+/// `name` is its name for screen readers and tests.
+fn time_pick(
+    ui: &mut Ui,
+    t: &Theme,
+    value: &mut String,
+    name: &str,
+    words: impl FnOnce(String) -> String,
+) -> bool {
+    let current = parse_time_of_day(value);
+    let shown = current.map_or_else(|| value.clone(), fmt_time);
+    let text = words(shown);
     let g = ui
         .painter()
         .layout_no_wrap(text, FontId::proportional(13.0), t.text);
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 36.0, CONTROL_H), Sense::click());
-    name_it(&resp, "Due notice time");
+    name_it(&resp, name);
     let fade = if resp.enabled() { 1.0 } else { 0.45 };
     ui.painter().rect_stroke(
         rect,
@@ -1121,7 +1254,7 @@ fn due_time_pick(ui: &mut Ui, t: &Theme, due_time: &mut String) -> bool {
                         row.scroll_to_me(Some(Align::Center));
                     }
                     if row.clicked() {
-                        *due_time = at.format("%H:%M").to_string();
+                        *value = at.format("%H:%M").to_string();
                         changed = true;
                         ui.close_menu();
                     }

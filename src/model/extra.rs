@@ -690,6 +690,15 @@ pub struct NotifySettings {
     /// Words to be told about in channels set to "Only @mentions" (and in
     /// threads), separated by commas, like a mention ("deploy, 배포").
     pub keywords: String,
+    /// "Pause notifications on a schedule": every week on `quiet_days`, no
+    /// notifications from `quiet_from` to `quiet_to` ("HH:MM"; a span that
+    /// ends before it starts runs past midnight), as "Mute notifications"
+    /// does by hand.
+    pub quiet: bool,
+    pub quiet_from: String,
+    pub quiet_to: String,
+    /// The days a span starts on: bit 0 Monday ... bit 6 Sunday.
+    pub quiet_days: u8,
     /// Notices on the clock (due tasks, meetings, goals) already given, so a
     /// restart doesn't repeat them. Newest last, kept short.
     pub fired: Vec<String>,
@@ -729,6 +738,10 @@ impl Default for NotifySettings {
             channel_default: "mentions".into(),
             channel_modes: vec![],
             keywords: String::new(),
+            quiet: false,
+            quiet_from: "09:00".into(),
+            quiet_to: "18:00".into(),
+            quiet_days: 0b001_1111,
             fired: vec![],
             scheduled: vec![],
         }
@@ -754,6 +767,38 @@ impl NotifySettings {
             channel_default: "all".into(),
             ..Self::default()
         }
+    }
+
+    /// The quiet hours as the server takes them, on a clock `utc_offset`
+    /// seconds ahead of UTC. None when the schedule is off or its times
+    /// can't be read.
+    pub fn quiet_hours(&self, utc_offset: i32) -> Option<wb_net::QuietHours> {
+        use chrono::Timelike;
+        if !self.quiet {
+            return None;
+        }
+        let minutes = |s: &str| parse_time_of_day(s).map(|t| t.hour() * 60 + t.minute());
+        Some(wb_net::QuietHours {
+            from: minutes(&self.quiet_from)?,
+            to: minutes(&self.quiet_to)?,
+            days: self.quiet_days,
+            utc_offset,
+        })
+    }
+
+    /// Whether `ts` (seconds) falls in the quiet hours on this computer's clock.
+    pub fn quiet_at(&self, ts: i64) -> bool {
+        use chrono::{Datelike, Offset, TimeZone, Timelike};
+        let Some(local) = chrono::Local.timestamp_opt(ts, 0).single() else {
+            return false;
+        };
+        let offset = local.offset().fix().local_minus_utc();
+        self.quiet_hours(offset).is_some_and(|q| {
+            q.covers_local(
+                local.weekday().num_days_from_monday(),
+                local.hour() * 60 + local.minute(),
+            )
+        })
     }
 
     /// "all", "mentions" or "nothing" for a channel.

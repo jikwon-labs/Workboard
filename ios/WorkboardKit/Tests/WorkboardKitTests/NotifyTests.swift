@@ -201,6 +201,40 @@ final class NotifyTests: XCTestCase {
         XCTAssertEqual(p.forServer["lang"]?.string, NotifyPrefs.pushLanguage())
     }
 
+    /// "Pause notifications on a schedule": the hours and days the Mac set
+    /// come with the synced choices, mute the phone in those hours on its
+    /// clock, and go to the server in minutes (wb_net::QuietHours).
+    func testTheQuietHoursComeFromTheMacAndGoToTheServer() throws {
+        XCTAssertNil(NotifyPrefs().forServer(lang: "en")["quiet"], "off at first")
+        let mac: JSON = ["quiet": true, "quiet_from": "22:00", "quiet_to": "07:30", "quiet_days": 0b100_0000]
+        var p = NotifyPrefs(mac: mac, mutedUntil: nil)
+        XCTAssertTrue(p.quiet)
+        XCTAssertEqual([p.quietFrom, p.quietTo], ["22:00", "07:30"])
+        XCTAssertEqual(p.quietDays, 0b100_0000, "Sunday")
+        // Sunday night and the Monday morning after it, nothing else
+        XCTAssertTrue(p.quietCovers(weekday: 6, minute: 23 * 60))
+        XCTAssertTrue(p.quietCovers(weekday: 0, minute: 7 * 60))
+        XCTAssertFalse(p.quietCovers(weekday: 0, minute: 7 * 60 + 30))
+        XCTAssertFalse(p.quietCovers(weekday: 0, minute: 23 * 60))
+        XCTAssertFalse(p.quietCovers(weekday: 6, minute: 6 * 60))
+        // on the phone's clock: Sunday 4 January 1970 23:00 in Seoul
+        var seoul = Calendar(identifier: .gregorian)
+        seoul.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Seoul"))
+        let sundayNight: Int64 = 3 * 86_400 + 23 * 3600 - 9 * 3600
+        XCTAssertTrue(p.muted(now: sundayNight, calendar: seoul))
+        XCTAssertFalse(p.muted(now: sundayNight + 12 * 3600, calendar: seoul))
+        let q = p.forServer(lang: "en", utcOffset: 9 * 3600)["quiet"]
+        XCTAssertEqual(q, ["from": 1320, "to": 450, "days": 64, "utc_offset": 32400])
+        // written back in the Mac's shape
+        p.quietDays = 0b001_1111
+        let back = p.mac(base: mac)
+        XCTAssertEqual(back["quiet_days"], 31)
+        XCTAssertEqual(back["quiet_from"], "22:00")
+        p.quiet = false
+        XCTAssertFalse(p.muted(now: sundayNight, calendar: seoul))
+        XCTAssertNil(p.forServer(lang: "en")["quiet"])
+    }
+
     /// Banners from the server come in Korean when the phone's first
     /// language is Korean, else in English.
     func testThePushLanguageFollowsThePhone() {

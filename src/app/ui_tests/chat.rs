@@ -4012,9 +4012,13 @@ fn files_and_links_channel(h: &mut Ui1) -> (u64, u64) {
 }
 
 /// A row of the panel on the right, by the words on it.
+/// Picks one of a conversation's tools: its own button in the header, or
+/// else the row in the header's menu.
 fn panel_row(h: &mut Ui1, label: &str) {
-    let r = h.painted_text(label).first().expect(label).0;
-    h.click_at(r.center());
+    if !h.has(label) {
+        h.click("Channel tools");
+    }
+    h.click(label);
 }
 
 fn shown(h: &Ui1, text: &str) -> bool {
@@ -4219,11 +4223,11 @@ fn find_bar_goes_through_the_matches_like_a_browser() {
         (close.center().y - row.center().y).abs() < 6.0,
         "in the chips' row: {close:?} {row:?}"
     );
-    // (the panel's words start past its margins and the row's icon)
-    let panel = h.painted_text("Followers").first().expect("the panel").0;
+    // (no panel beside the messages any more: the tools are in the header)
+    let header = h.rect("Followers");
     assert!(
-        close.right() < panel.left() && close.right() > panel.left() - 80.0,
-        "at the row's right, beside the panel: {close:?} {panel:?}"
+        close.right() <= h.size.x && close.right() > header.left() - 40.0,
+        "at the row's right, under the header's tools: {close:?} {header:?}"
     );
 
     h.type_text("quokka");
@@ -4588,4 +4592,85 @@ fn slash_puts_the_cursor_back_in_the_box() {
     h.settle();
     assert_eq!(focused(&h), Some(thread_box), "the thread's reply box");
     assert_eq!(h.app.chat.channel.text, "", "not the channel's box");
+}
+
+/// A conversation's tools are in its header, not a panel beside the
+/// messages: Followers, Find, the kinds of messages I picked as buttons
+/// (Pinned and Files at first), the menu with every kind and Settings. The
+/// menu's checkboxes choose which kinds have a button, kept for every
+/// channel and direct message alike.
+#[test]
+fn the_header_has_the_conversation_tools_i_pick() {
+    use crate::app::chat::ChannelPanel;
+    let mut h = Ui1::new();
+    h.click("general");
+    for name in [
+        "Followers",
+        "Find in channel",
+        "Pinned messages",
+        "Files",
+        "Channel tools",
+        "Channel settings",
+    ] {
+        assert!(h.has(name), "{name} in the header");
+    }
+    let header = h.rect("Channel tools");
+    assert!(
+        h.rect("Files").center().y == header.center().y,
+        "in one row"
+    );
+    assert!(!h.has("Links"), "a kind not picked is only in the menu");
+    // the menu shows a kind that has no button of its own
+    h.click("Channel tools");
+    h.click("Links");
+    assert_eq!(h.app.channel_panel, ChannelPanel::Links);
+    assert!(
+        h.has("Messages with links  \u{00D7}"),
+        "the chip over the messages says so"
+    );
+    // a header button shows its kind, and clicked again shows everything
+    h.click("Pinned messages");
+    assert_eq!(h.app.channel_panel, ChannelPanel::Pinned);
+    h.click("Pinned messages");
+    assert_eq!(h.app.channel_panel, ChannelPanel::All);
+
+    // Links gets a button, Files loses its own
+    h.click("Channel tools");
+    h.click("Show links in the header");
+    h.click("Show files in the header");
+    h.key(egui::Key::Escape);
+    h.settle();
+    assert!(h.has("Links") && !h.has("Files"));
+    assert!(h.rect("Links").center().y == header.center().y);
+    let mut views = h.app.data.extra.chat_header_views.clone();
+    views.sort();
+    assert_eq!(views, ["links", "pinned"]);
+
+    // a direct message has the same header, with my choice
+    let dm = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.kind == ChannelKind::Direct && c.members == vec![1, 2])
+        .unwrap()
+        .id;
+    h.app.chat.open = Some(dm);
+    h.settle();
+    for name in [
+        "Followers",
+        "Find in channel",
+        "Pinned messages",
+        "Links",
+        "Channel tools",
+        "Channel settings",
+    ] {
+        assert!(h.has(name), "{name} in the direct message's header");
+    }
+    assert!(!h.has("Files"));
+    // Find and Settings from the header
+    h.click("Find in channel");
+    assert_eq!(h.app.channel_find.as_deref(), Some(""));
+    h.click("Channel settings");
+    assert!(matches!(h.app.modal, Some(Modal::ChannelSettings(c)) if c == dm));
 }

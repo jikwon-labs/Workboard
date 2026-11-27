@@ -36,6 +36,56 @@ pub(super) enum ChannelPanel {
     Links,
 }
 
+impl ChannelPanel {
+    /// The kinds a conversation can be narrowed to, in its menu's order.
+    pub(super) const KINDS: [ChannelPanel; 6] = [
+        ChannelPanel::Replies,
+        ChannelPanel::Pinned,
+        ChannelPanel::Saved,
+        ChannelPanel::Files,
+        ChannelPanel::Links,
+        ChannelPanel::Tasks,
+    ];
+
+    /// The name kept in `Extra::chat_header_views`.
+    pub(super) fn key(self) -> &'static str {
+        match self {
+            ChannelPanel::All => "all",
+            ChannelPanel::Pinned => "pinned",
+            ChannelPanel::Replies => "replies",
+            ChannelPanel::Tasks => "tasks",
+            ChannelPanel::Saved => "saved",
+            ChannelPanel::Files => "files",
+            ChannelPanel::Links => "links",
+        }
+    }
+
+    /// Its name in the menu and on its header button.
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            ChannelPanel::All => "All messages",
+            ChannelPanel::Pinned => "Pinned messages",
+            ChannelPanel::Replies => "Replies",
+            ChannelPanel::Tasks => "Turned into tasks",
+            ChannelPanel::Saved => "Saved",
+            ChannelPanel::Files => "Files",
+            ChannelPanel::Links => "Links",
+        }
+    }
+
+    fn icon(self) -> Icon {
+        match self {
+            ChannelPanel::All => Icon::Chat,
+            ChannelPanel::Pinned => Icon::Pin,
+            ChannelPanel::Replies => Icon::Reply,
+            ChannelPanel::Tasks => Icon::Task,
+            ChannelPanel::Saved => Icon::Bookmark,
+            ChannelPanel::Files => Icon::Attach,
+            ChannelPanel::Links => Icon::Link,
+        }
+    }
+}
+
 /// The open conversation's messages as listed, and what its find box finds
 /// in them, worked out again only when one of those changes.
 pub(super) struct Found {
@@ -254,15 +304,6 @@ fn find_bar(
         close = true;
     }
     (step, close)
-}
-
-/// A row of the panel beside a channel's messages.
-#[derive(Clone, Copy, PartialEq)]
-enum PanelRow {
-    Followers,
-    Find,
-    Show(ChannelPanel),
-    Settings,
 }
 
 /// The emoji grid behind "Add reaction" and the message box's emoji button.
@@ -495,8 +536,6 @@ impl Default for Previews {
     }
 }
 
-/// The temp flag that shows a channel's tools in a compact window.
-const CHAN_TOOLS: &str = "chan_tools_open";
 impl App {
     /// Fetch the preview of the first web address of message `msg` (in
     /// channel `ch`), just sent.
@@ -1499,183 +1538,188 @@ impl App {
         None
     }
 
-    /// The panel at the right of a channel's messages: Followers, Find,
-    /// the kinds of messages to show, Settings.
-    fn channel_side_panel(&mut self, ui: &mut Ui, cid: u64, channel: &Channel) {
+    /// The tools at the right of a conversation's header, drawn right to
+    /// left: Settings, the menu of the kinds of messages to show (and which
+    /// of them have their own button), those buttons, Find and the
+    /// followers. `compact`: only the menu, with Followers, Find and
+    /// Settings at its top.
+    fn channel_tools(
+        &mut self,
+        ui: &mut Ui,
+        cid: u64,
+        channel: &Channel,
+        compact: bool,
+        pinned: &[ChannelPanel],
+    ) {
         let t = self.t();
-        // a compact window: only while its header's tools button has it open
-        if self.tier == super::shell::Tier::Compact
-            && !ui
-                .data(|d| d.get_temp::<bool>(egui::Id::new(CHAN_TOOLS)))
-                .unwrap_or(false)
+        let mut find = false;
+        let mut settings = false;
+        if !compact
+            && icon_button(ui, &t, Icon::Settings, "", "Channel settings", false)
+                .on_hover_text(tr("Settings"))
+                .clicked()
         {
-            return;
+            settings = true;
         }
-        // right panel: narrower in a small window so the messages keep room;
-        // where even that leaves them too little (a thread open beside a
-        // small window) only its icons, named on hover: it was drawn
-        // over the messages
-        let icons_only = ui.available_width() < 560.0;
-        let panel_w = if icons_only {
-            46.0
-        } else {
-            (ui.available_width() * 0.3).clamp(170.0, 230.0)
-        };
-        // slides in from the right as it opens
-        let panel_in = egui::Id::new("chan_panel_in");
-        crate::motion::enter(ui, panel_in, cid, vec2(24.0, 0.0), |ui| {
-            egui::SidePanel::right(egui::Id::new(("chan_panel", cid)))
-                .exact_width(panel_w)
-                .resizable(false)
-                .show_separator_line(false)
-                .frame(egui::Frame::new().inner_margin(egui::Margin {
-                    left: 8,
-                    right: 12,
-                    top: 12,
-                    bottom: 8,
-                }))
-                .show_inside(ui, |ui| {
-                    // it scrolls when the window is short (an iPad's keyboard up),
-                    // instead of making the messages beside it as tall as it is
-                    egui::ScrollArea::vertical()
-                        .id_salt(("chan_panel_scroll", cid))
-                        .auto_shrink([false, true])
-                        .show(ui, |ui| {
-                            egui::Frame::new()
-                                .stroke(Stroke::new(1.0_f32, t.border))
-                                .corner_radius(10)
-                                .inner_margin(egui::Margin::same(6))
-                                .show(ui, |ui| {
-                                    ui.set_width(ui.available_width());
-                                    let rows: [(Icon, &str, PanelRow); 9] = [
-                                        (Icon::Person, "Followers", PanelRow::Followers),
-                                        (Icon::Search, "Find in channel", PanelRow::Find),
-                                        (
-                                            Icon::Reply,
-                                            "Replies",
-                                            PanelRow::Show(ChannelPanel::Replies),
-                                        ),
-                                        (
-                                            Icon::Pin,
-                                            "Pinned messages",
-                                            PanelRow::Show(ChannelPanel::Pinned),
-                                        ),
-                                        (
-                                            Icon::Bookmark,
-                                            "Saved",
-                                            PanelRow::Show(ChannelPanel::Saved),
-                                        ),
-                                        (
-                                            Icon::Attach,
-                                            "Files",
-                                            PanelRow::Show(ChannelPanel::Files),
-                                        ),
-                                        (Icon::Link, "Links", PanelRow::Show(ChannelPanel::Links)),
-                                        (
-                                            Icon::Task,
-                                            "Turned into tasks",
-                                            PanelRow::Show(ChannelPanel::Tasks),
-                                        ),
-                                        (Icon::Settings, "Settings", PanelRow::Settings),
-                                    ];
-                                    for (icon, label, code) in rows {
-                                        let w = ui.available_width();
-                                        let (r, resp) =
-                                            ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                                        let sel = code == PanelRow::Show(self.channel_panel);
-                                        if sel {
-                                            ui.painter().rect_filled(r, 6.0, t.row_selected);
-                                        } else if resp.hovered() {
-                                            ui.painter().rect_filled(r, 6.0, t.hover);
-                                        }
-                                        let at = if icons_only {
-                                            r.center() - vec2(12.0, 0.0)
-                                        } else {
-                                            r.left_center()
-                                        };
-                                        if code == PanelRow::Followers {
-                                            paint_avatars(
-                                                ui.painter(),
-                                                at + vec2(4.0, 0.0),
-                                                8.0,
-                                                &channel
-                                                    .members
-                                                    .iter()
-                                                    .take(1)
-                                                    .copied()
-                                                    .collect::<Vec<_>>(),
-                                                &self.data,
-                                                t.bg,
-                                            );
-                                        } else {
-                                            line_icon(
-                                                ui.painter(),
-                                                icon,
-                                                at + vec2(12.0, 0.0),
-                                                t.text2,
-                                            );
-                                        }
-                                        let resp = if icons_only {
-                                            name_it(&resp, label);
-                                            resp.on_hover_text(tr(label))
-                                        } else {
-                                            let count_w = if code == PanelRow::Followers {
-                                                24.0
-                                            } else {
-                                                0.0
-                                            };
-                                            paint_fit(
-                                                ui,
-                                                r.left_center() + vec2(28.0, 0.0),
-                                                Align2::LEFT_CENTER,
-                                                tr(label),
-                                                FontId::proportional(14.0),
-                                                t.text,
-                                                w - 32.0 - count_w,
-                                            );
-                                            if code == PanelRow::Followers {
-                                                ui.painter().text(
-                                                    r.right_center() - vec2(8.0, 0.0),
-                                                    Align2::RIGHT_CENTER,
-                                                    channel.members.len().to_string(),
-                                                    FontId::proportional(12.0),
-                                                    t.text3,
-                                                );
-                                            }
-                                            resp
-                                        };
-                                        if resp.clicked() {
-                                            match code {
-                                                PanelRow::Followers | PanelRow::Settings => {
-                                                    self.modal = Some(Modal::ChannelSettings(cid))
-                                                }
-                                                PanelRow::Find => {
-                                                    // opened with the cursor in it, as Cmd+F
-                                                    self.channel_find =
-                                                        if self.channel_find.is_some() {
-                                                            None
-                                                        } else {
-                                                            let id =
-                                                                egui::Id::new(("chan_find", cid));
-                                                            ui.memory_mut(|m| m.request_focus(id));
-                                                            Some(String::new())
-                                                        }
-                                                }
-                                                PanelRow::Show(c) => {
-                                                    self.channel_panel = if self.channel_panel == c
-                                                    {
-                                                        ChannelPanel::All
-                                                    } else {
-                                                        c
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                });
-                        });
-                });
+        // the menu: its button stands out while a kind only it has is shown
+        let picked = self.channel_panel;
+        let hidden_pick = picked != ChannelPanel::All && !pinned.contains(&picked);
+        let menu = icon_button_ex(
+            ui,
+            &t,
+            Icon::Dots,
+            "",
+            "Channel tools",
+            hidden_pick,
+            0.0,
+            t.text,
+            if hidden_pick { t.primary } else { t.text2 },
+        )
+        .on_hover_text(tr("Channel tools"));
+        popup(ui, &menu, ui.id().with(("chan_tools", cid)), 250.0, |ui| {
+            if compact {
+                let n = channel.members.len();
+                let label = format!("{} ({})", tr("Followers"), n);
+                if menu_row_named(ui, &t, "Followers", &label, false, |p, c| {
+                    line_icon(p, Icon::Person, c, t.text2)
+                })
+                .clicked()
+                {
+                    settings = true;
+                    close_popup(ui);
+                }
+                if menu_row_named(
+                    ui,
+                    &t,
+                    "Find in channel",
+                    tr("Find in channel"),
+                    false,
+                    |p, c| line_icon(p, Icon::Search, c, t.text2),
+                )
+                .clicked()
+                {
+                    find = true;
+                    close_popup(ui);
+                }
+                ui.separator();
+            }
+            ui.label(RichText::new(tr("Show")).small().color(t.text2));
+            for k in ChannelPanel::KINDS {
+                if menu_row_named(ui, &t, k.label(), tr(k.label()), picked == k, |p, c| {
+                    line_icon(p, k.icon(), c, t.text2)
+                })
+                .clicked()
+                {
+                    self.channel_panel = if picked == k { ChannelPanel::All } else { k };
+                    close_popup(ui);
+                }
+            }
+            if !compact {
+                ui.separator();
+                ui.label(
+                    RichText::new(tr("Buttons in the header"))
+                        .small()
+                        .color(t.text2),
+                );
+                for k in ChannelPanel::KINDS {
+                    let views = &mut self.data.extra.chat_header_views;
+                    let mut on = views.iter().any(|v| v == k.key());
+                    let r = check(ui, &mut on, tr(k.label()));
+                    name_it(&r, &format!("Show {} in the header", k.key()));
+                    if r.changed() {
+                        views.retain(|v| v != k.key());
+                        if on {
+                            views.push(k.key().to_string());
+                        }
+                        self.dirty = true;
+                    }
+                }
+            } else {
+                ui.separator();
+                if menu_row_named(ui, &t, "Channel settings", tr("Settings"), false, |p, c| {
+                    line_icon(p, Icon::Settings, c, t.text2)
+                })
+                .clicked()
+                {
+                    settings = true;
+                    close_popup(ui);
+                }
+            }
         });
+        if !compact {
+            // the kinds picked to have a button, in the menu's order (drawn
+            // right to left)
+            for &k in pinned.iter().rev() {
+                let on = picked == k;
+                if icon_button_ex(
+                    ui,
+                    &t,
+                    k.icon(),
+                    "",
+                    k.label(),
+                    on,
+                    0.0,
+                    t.text,
+                    if on { t.primary } else { t.text2 },
+                )
+                .on_hover_text(tr(k.label()))
+                .clicked()
+                {
+                    self.channel_panel = if on { ChannelPanel::All } else { k };
+                }
+            }
+            if icon_button(
+                ui,
+                &t,
+                Icon::Search,
+                "",
+                "Find in channel",
+                self.channel_find.is_some(),
+            )
+            .on_hover_text(tr("Find in channel"))
+            .clicked()
+            {
+                find = true;
+            }
+            // the followers: the first one's picture and how many
+            let (r, resp) = ui.allocate_exact_size(vec2(44.0, CONTROL_H), Sense::click());
+            name_it(&resp, "Followers");
+            if resp.hovered() {
+                ui.painter()
+                    .rect_filled(r, 6.0, crate::widgets::hover_fill(ui));
+            }
+            let first: Vec<u64> = channel.members.iter().take(1).copied().collect();
+            paint_avatars(
+                ui.painter(),
+                r.left_center() + vec2(5.0, 0.0),
+                8.0,
+                &first,
+                &self.data,
+                t.bg,
+            );
+            ui.painter().text(
+                r.right_center() - vec2(7.0, 0.0),
+                Align2::RIGHT_CENTER,
+                channel.members.len().to_string(),
+                FontId::proportional(12.5),
+                t.text2,
+            );
+            if resp.on_hover_text(tr("Followers")).clicked() {
+                settings = true;
+            }
+        }
+        if settings {
+            self.modal = Some(Modal::ChannelSettings(cid));
+        }
+        if find {
+            // opened with the cursor in it, as Cmd+F; closed when it was open
+            self.channel_find = if self.channel_find.is_some() {
+                None
+            } else {
+                ui.memory_mut(|m| m.request_focus(egui::Id::new(("chan_find", cid))));
+                Some(String::new())
+            };
+        }
     }
 
     /// The row over a channel's messages: bookmarks, the kind of messages
@@ -1719,13 +1763,15 @@ impl App {
                     });
                 }
                 self.panel_chip(ui);
-                // the find bar is at least 200 wide (and its margin): under
-                // the chips when they leave less room
+                // the find bar is at least 236 wide (and its margin): under
+                // the chips when they leave less room (at 200 its box was
+                // narrower than a word typed in it, with the arrows and
+                // "1/3" beside it)
                 // (a wrapping row's available width is the whole row's)
                 let room =
                     ui.max_rect().right() - ui.min_rect().right() - ui.spacing().item_spacing.x;
                 let finding = self.channel_find.is_some();
-                below = finding && room < 214.0;
+                below = finding && room < 250.0;
                 if finding && !below {
                     // in the room left, so it ends at the row's right
                     let h = ui.spacing().interact_size.y;
@@ -1912,11 +1958,38 @@ impl App {
                         line_icon(ui.painter(), Icon::Lock, r.center(), t.text2);
                     }
                     // shortened before the buttons on the right (it ran under them)
-                    let buttons = if self.ai_offered() && !no_messages {
+                    let others = if self.ai_offered() && !no_messages {
                         300.0
                     } else {
                         180.0
                     };
+                    // the conversation's tools as there is room for them, the
+                    // name keeping at least 120: all of them, without the
+                    // kinds of messages picked as buttons, or only the menu
+                    // (which has them all). Followers, Find, the menu and
+                    // Settings, each with a gap, then each picked kind
+                    let picked: Vec<ChannelPanel> = ChannelPanel::KINDS
+                        .into_iter()
+                        .filter(|k| {
+                            self.data
+                                .extra
+                                .chat_header_views
+                                .iter()
+                                .any(|v| v == k.key())
+                        })
+                        .collect();
+                    let bare = 44.0 + 3.0 * 36.0 + 12.0;
+                    let full = bare + picked.len() as f32 * 36.0;
+                    let left = ui.available_width() - others - 120.0;
+                    let small_window = self.tier == super::shell::Tier::Compact;
+                    let (compact, pinned, tools) = if !small_window && left >= full {
+                        (false, picked, full)
+                    } else if !small_window && left >= bare {
+                        (false, vec![], bare)
+                    } else {
+                        (true, vec![], 42.0)
+                    };
+                    let buttons = others + tools;
                     let dot_w = if presence.is_some() { 14.0 } else { 0.0 };
                     let room = (ui.available_width() - buttons - dot_w).max(40.0);
                     ui.scope(|ui| {
@@ -1940,18 +2013,13 @@ impl App {
                         resp.on_hover_text(tr(if on { "Online" } else { "Offline" }));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        // a compact window: the channel's tools (the panel
-                        // beside the messages) open from here
-                        if self.tier == super::shell::Tier::Compact {
-                            let id = egui::Id::new(CHAN_TOOLS);
-                            let open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
-                            if icon_button(ui, &t, Icon::Dots, "", "Channel tools", open)
-                                .on_hover_text(tr("Channel tools"))
-                                .clicked()
-                            {
-                                ui.data_mut(|d| d.insert_temp(id, !open));
-                            }
-                        }
+                        // the conversation's tools (they were a panel beside
+                        // the messages): settings, the menu of kinds of
+                        // messages, the kinds picked to have their own
+                        // button, find and followers; a compact window has
+                        // only the menu, with the rest in it
+                        self.channel_tools(ui, cid, channel, compact, &pinned);
+                        ui.add_space(6.0);
                         if channel.kind == ChannelKind::Channel {
                             // how this channel notifies me (notify.rs)
                             let mode = self.data.extra.notify.channel_mode(cid).to_string();
@@ -2393,7 +2461,6 @@ impl App {
             self.channel_header(ui, cid, &channel, no_messages);
             let r = ui.available_rect_before_wrap();
             ui.painter().hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
-            self.channel_side_panel(ui, cid, &channel);
             // the find box finds without hiding anything, as a web browser's
             // does: every message shows, the words found lit up, and it goes
             // from one to the next. "has:file", "has:link" and "from:name"

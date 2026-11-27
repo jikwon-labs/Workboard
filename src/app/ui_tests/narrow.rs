@@ -669,7 +669,7 @@ fn compact_channel_intro_fits_and_its_tools_open_from_the_header() {
         // the tools beside the messages: closed, then opened from the header
         assert!(!h.has("Followers"));
         h.click("Channel tools");
-        assert!(h.has("Settings"));
+        assert!(h.has("Channel settings"));
         assert!(h.past_right_edge().is_empty(), "{:?}", h.past_right_edge());
     }
 }

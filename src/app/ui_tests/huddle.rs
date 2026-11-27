@@ -414,9 +414,11 @@ fn huddle_bar_and_screen_chooser_fit_the_window() {
                     .ctx
                     .memory(|m| m.area_rect(egui::Id::new("huddle_bar")))
                     .unwrap_or_else(|| panic!("{}: the bar", what));
+                // (the message box's tabs, not the header's Ask button)
                 let tabs: Vec<Rect> = ["Message", "Post", "Ask"]
                     .iter()
                     .map(|n| h.rect(n))
+                    .filter(|r| r.center().y > h.size.y / 2.0)
                     .collect();
                 let today = h
                     .has(tr("Today & Overdue"))

@@ -934,13 +934,11 @@ fn small_window_chat_chip_stays_above_the_messages() {
         h.settle();
         chip_clear(&h);
     }
-    // the right panel gives the messages room in a small window
-    let followers = h.painted_text(tr("Followers"))[0].0;
-    assert!(
-        h.size.x - followers.left() < 220.0,
-        "the panel is narrower: {:?}",
-        followers
-    );
+    // no panel beside the messages: its tools are in the header, inside
+    // the window
+    assert!(h.painted_text(tr("Turned into tasks")).is_empty());
+    let followers = h.rect("Followers");
+    assert!(followers.right() <= h.size.x, "{:?}", followers);
 }
 
 #[test]
@@ -1516,6 +1514,8 @@ fn small_window_thread_beside_a_channel_does_not_overlap() {
     h.settle();
     let thumbs = h.rect("\u{1F44D}");
     assert!(thumbs.left() >= 320.0, "the first reaction at {:?}", thumbs);
+    // (beside a thread the header has room only for the tools' menu)
+    h.click("Channel tools");
     h.click("Pinned messages");
     assert_eq!(h.app.channel_panel, crate::app::chat::ChannelPanel::Pinned);
 }

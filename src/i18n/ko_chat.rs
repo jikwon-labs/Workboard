@@ -37,6 +37,8 @@ pub const T: &[(&str, &str)] = &[
     // side panel
     ("Followers", "팔로워"),
     ("Find in channel", "채널에서 찾기"),
+    ("Show", "보기"),
+    ("Buttons in the header", "헤더에 버튼으로 두기"),
     ("Previous match", "이전 결과"),
     ("Next match", "다음 결과"),
     ("Pinned messages", "고정된 메시지"),

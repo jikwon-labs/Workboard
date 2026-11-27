@@ -904,6 +904,10 @@ pub struct Extra {
     /// view names ("List"). A channel not here has the usual row. Only mine.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub channel_tabs: std::collections::BTreeMap<u64, Vec<String>>,
+    /// The kinds of messages with their own button in a conversation's
+    /// header ("pinned", "files", ...); the others are in its menu. Only
+    /// mine, the same for every channel and direct message.
+    pub chat_header_views: Vec<String>,
     /// How the Goals page lists goals: "" cards, "list" rows.
     pub goals_view: String,
     /// Theme colour: black, purple, blue, pink, violet, indigo, orange, teal, bronze, mint.
@@ -1033,6 +1037,7 @@ impl Default for Extra {
             folded_nav: vec![],
             hidden_views: vec![],
             channel_tabs: Default::default(),
+            chat_header_views: vec!["pinned".into(), "files".into()],
             goals_view: String::new(),
             accent: "black".into(),
             auto_theme: false,

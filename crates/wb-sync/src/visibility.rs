@@ -26,6 +26,7 @@ pub(crate) const PERSONAL_EXTRA: &[&str] = &[
     "hidden_nav",
     "hidden_views",
     "channel_tabs",
+    "chat_header_views",
     "hidden_cards",
     "accent",
     "auto_theme",

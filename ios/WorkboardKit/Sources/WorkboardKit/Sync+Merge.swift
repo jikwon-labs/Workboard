@@ -540,7 +540,7 @@ extension Sync {
     public static let personalExtra = [
         "chat_seen", "chat_drafts", "scheduled", "closed_dm_seen", "closed_dms", "replies_seen", "replies_read",
         "starred", "recent", "notify", "muted_until", "pinned_tools", "rail_items", "hidden_nav", "hidden_views",
-        "hidden_cards", "accent", "auto_theme", "hide_tray", "labs", "shared", "sheet_rows", "sheet_week_rows",
+        "chat_header_views", "hidden_cards", "accent", "auto_theme", "hide_tray", "labs", "shared", "sheet_rows", "sheet_week_rows",
         "slack_under_me", "slack_not_under_me", "slack_carried", "mine_sync",
     ]
 

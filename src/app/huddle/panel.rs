@@ -22,6 +22,21 @@ const TEXT2: Color32 = Color32::from_rgb(0xab, 0xad, 0xb0);
 const BUTTON_OFF: Color32 = Color32::from_rgb(0x3c, 0x3e, 0x43);
 const BUTTON_ON: Color32 = Color32::from_rgb(0xe9, 0xe9, 0xea);
 const LEAVE_RED: Color32 = Color32::from_rgb(0xc9, 0x3d, 0x62);
+/// The raised hand.
+pub(in crate::app) const HAND: &str = "\u{270B}";
+/// How long a reaction shows over its sender's tile.
+pub(in crate::app) const REACTION_SECS: f32 = 3.5;
+/// The reactions to pick from.
+pub(in crate::app) const REACTIONS: [&str; 8] = [
+    "\u{1F44D}",
+    "\u{1F44F}",
+    "\u{1F602}",
+    "\u{2764}\u{FE0F}",
+    "\u{1F389}",
+    "\u{1F62E}",
+    "\u{1F64C}",
+    "\u{1F44B}",
+];
 /// The ring around whoever speaks.
 const SPEAKING: Color32 = Color32::from_rgb(0x2b, 0xc4, 0x7d);
 
@@ -57,11 +72,6 @@ impl Sizes {
         strip: 56.0,
         radius: 8.0,
     };
-
-    /// How tall the row of buttons is.
-    pub(in crate::app) fn buttons_h(&self) -> f32 {
-        self.button.y
-    }
 }
 
 /// One person's tile on the stage.
@@ -458,7 +468,47 @@ impl App {
                 );
             }
         }
-        let _ = s;
+        // a raised hand in the top left corner
+        let hand = tile.person.as_ref().is_some_and(|p| p.hand) || (me && self.huddle.hand);
+        if hand {
+            let side = if small { 22.0 } else { 30.0 };
+            let at = r.min + vec2(s.gap.min(6.0), s.gap.min(6.0));
+            let b = Rect::from_min_size(at, vec2(side, side));
+            p.rect_filled(b, 7.0, Color32::WHITE);
+            p.text(
+                b.center(),
+                Align2::CENTER_CENTER,
+                HAND,
+                FontId::proportional(side * 0.6),
+                Color32::WHITE,
+            );
+        }
+        // reactions rise from the bottom of the tile and fade
+        let now = std::time::Instant::now();
+        for (n, (_, emoji, at)) in self
+            .huddle
+            .reactions
+            .iter()
+            .filter(|(who, _, _)| who == &tile.key)
+            .enumerate()
+        {
+            let t = now.duration_since(*at).as_secs_f32() / REACTION_SECS;
+            if t >= 1.0 {
+                continue;
+            }
+            let size = (r.width() * 0.28).clamp(18.0, 40.0);
+            // the first in the middle, more beside it
+            let x = r.center().x + [0.0, -0.7, 0.7][n % 3] * size;
+            let y = r.bottom() - size * 0.6 - t * r.height() * 0.6;
+            let fade = if t > 0.7 { 1.0 - (t - 0.7) / 0.3 } else { 1.0 };
+            p.text(
+                pos2(x, y),
+                Align2::CENTER_CENTER,
+                emoji,
+                FontId::proportional(size),
+                Color32::WHITE.gamma_multiply(fade),
+            );
+        }
         let state = if muted {
             "muted"
         } else if speaking {
@@ -466,18 +516,28 @@ impl App {
         } else {
             "listening"
         };
+        let raised = if hand { ", hand raised" } else { "" };
         let access = if tex.is_some() {
-            format!("Video of {}", if me { "You" } else { tile.name.as_str() })
+            format!(
+                "Video of {}{}",
+                if me { "You" } else { tile.name.as_str() },
+                raised
+            )
         } else if me {
-            format!("{} (you), {}", tile.name, state)
+            format!("{} (you), {}{}", tile.name, state, raised)
         } else {
-            format!("{}, {}", tile.name, state)
+            format!("{}, {}{}", tile.name, state, raised)
         };
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, &access));
         let tip = if me {
             trf!("{} (you), {}", tile.name, tr(state))
         } else {
             format!("{}, {}", tile.name, tr(state))
+        };
+        let tip = if hand {
+            format!("{}, {}", tip, tr("hand raised"))
+        } else {
+            tip
         };
         let tip = match tex {
             Some(_) if self.huddle.focus.as_ref() == Some(&tile.key) => {
@@ -511,9 +571,11 @@ impl App {
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
     }
 
-    /// The row of buttons under the stage: microphone, camera, screen, the
+    /// The buttons under the stage: microphone and camera (each with an
+    /// arrow that picks the device), screen, hand, reactions, the
     /// conversation (`chat`: not in the small window, which shows it) and
-    /// Leave, in the middle of `width`. What was pressed goes in `press`.
+    /// Leave, in the middle of `width`, on more rows when they don't fit.
+    /// What was pressed goes in `press`.
     pub(in crate::app) fn huddle_toolbar(
         &self,
         ui: &mut Ui,
@@ -522,105 +584,326 @@ impl App {
         chat: bool,
         press: &mut HuddlePress,
     ) {
-        let count = if chat { 4.0 } else { 3.0 };
-        let row_w = count * s.button.x + s.leave_w + count * s.gap;
-        let (row, _) = ui.allocate_exact_size(vec2(width, s.button.y), Sense::hover());
-        let mut x = row.center().x - row_w.min(width) / 2.0;
-        let mut next = |w: f32| {
-            let r = Rect::from_min_size(pos2(x, row.top()), vec2(w, s.button.y));
-            x += w + s.gap;
-            r
-        };
-        let muted = self.huddle.muted;
-        if tool_button(
-            ui,
-            next(s.button.x),
-            !muted,
-            |p, c, col, bg| {
-                if muted {
-                    paint_slashed(p, Icon::Mic, c, col, bg, 1.15)
-                } else {
-                    line_icon_scaled(p, Icon::Mic, c, col, 1.15)
+        let menu = self.huddle.menu;
+        let mut anchor: Option<Rect> = None;
+        for row in toolbar_rows(&items(chat), width, s) {
+            let row_w: f32 =
+                row.iter().map(|i| s.item_w(*i)).sum::<f32>() + (row.len() - 1) as f32 * s.gap;
+            let (line, _) = ui.allocate_exact_size(vec2(width, s.button.y), Sense::hover());
+            let mut x = line.center().x - row_w / 2.0;
+            for item in row {
+                let r = Rect::from_min_size(pos2(x, line.top()), vec2(s.item_w(item), s.button.y));
+                x += r.width() + s.gap;
+                self.toolbar_item(ui, item, r, s, press);
+                let opens = match item {
+                    Item::Mic => Some(HuddleMenu::Devices),
+                    Item::Camera => Some(HuddleMenu::Cameras),
+                    Item::React => Some(HuddleMenu::Reactions),
+                    _ => None,
+                };
+                if opens.is_some() && opens == menu {
+                    anchor = Some(r);
                 }
-            },
-            if muted { "Unmute" } else { "Mute" },
-            if muted { tr("Unmute") } else { tr("Mute") },
-        ) {
-            press.mute = Some(!muted);
+            }
         }
-        let cam = self.huddle.camera;
-        if tool_button(
-            ui,
-            next(s.button.x),
-            cam,
-            |p, c, col, bg| {
-                if cam {
-                    line_icon_scaled(p, Icon::Video, c, col, 1.15)
-                } else {
-                    paint_slashed(p, Icon::Video, c, col, bg, 1.15)
-                }
-            },
-            if cam { "Stop video" } else { "Video" },
-            if cam { tr("Stop video") } else { tr("Video") },
-        ) {
-            press.camera = Some(!cam);
-        }
-        let sharing = self.huddle.screen.is_some();
-        if tool_button(
-            ui,
-            next(s.button.x),
-            sharing,
-            |p, c, col, _| paint_screen(p, c, col),
-            if sharing {
-                "Stop sharing screen"
-            } else {
-                "Share screen"
-            },
-            if sharing {
-                tr("Stop sharing screen")
-            } else {
-                tr("Share screen")
-            },
-        ) {
-            press.share = true;
-        }
-        if chat
-            && tool_button(
-                ui,
-                next(s.button.x),
-                false,
-                |p, c, col, _| line_icon_scaled(p, Icon::Chat, c, col, 1.1),
-                "Open the huddle's conversation",
-                tr("Open the conversation"),
-            )
-        {
-            press.open_chat = true;
-        }
-        let leave = next(s.leave_w);
-        let r = ui.interact(leave, ui.id().with("huddle_leave"), Sense::click());
-        let fill = if r.hovered() {
-            Color32::from_rgb(0xd8, 0x4b, 0x70)
-        } else {
-            LEAVE_RED
-        };
-        ui.painter().rect_filled(leave, 9.0, fill);
-        ui.painter().text(
-            leave.center(),
-            Align2::CENTER_CENTER,
-            tr("Leave"),
-            FontId::new(14.0, egui::FontFamily::Proportional),
-            Color32::WHITE,
-        );
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Leave"));
-        if r.clicked() {
-            press.leave = true;
+        if let (Some(m), Some(r)) = (menu, anchor) {
+            self.huddle_menu(ui.ctx(), m, r, press);
         }
     }
 
-    /// The width the row of buttons needs.
-    pub(in crate::app) fn toolbar_width(s: Sizes, chat: bool) -> f32 {
-        let count = if chat { 4.0 } else { 3.0 };
-        count * s.button.x + s.leave_w + count * s.gap
+    /// How tall the buttons are for `width` (more rows when narrow).
+    pub(in crate::app) fn toolbar_height(width: f32, s: Sizes, chat: bool) -> f32 {
+        let rows = toolbar_rows(&items(chat), width, s).len().max(1) as f32;
+        rows * s.button.y + (rows - 1.0) * s.gap
+    }
+
+    fn toolbar_item(&self, ui: &mut Ui, item: Item, r: Rect, s: Sizes, press: &mut HuddlePress) {
+        let toggle = |m: HuddleMenu| {
+            Some(if self.huddle.menu == Some(m) {
+                None
+            } else {
+                Some(m)
+            })
+        };
+        match item {
+            Item::Mic => {
+                let muted = self.huddle.muted;
+                let (main, arrow) = split_button(
+                    ui,
+                    r,
+                    s,
+                    !muted,
+                    self.huddle.menu == Some(HuddleMenu::Devices),
+                    |p, c, col, bg| {
+                        if muted {
+                            paint_slashed(p, Icon::Mic, c, col, bg, 1.15)
+                        } else {
+                            line_icon_scaled(p, Icon::Mic, c, col, 1.15)
+                        }
+                    },
+                    if muted { "Unmute" } else { "Mute" },
+                    if muted { tr("Unmute") } else { tr("Mute") },
+                    "Microphone and speaker",
+                    tr("Microphone and speaker"),
+                );
+                if main {
+                    press.mute = Some(!muted);
+                }
+                if arrow {
+                    press.menu = toggle(HuddleMenu::Devices);
+                }
+            }
+            Item::Camera => {
+                let cam = self.huddle.camera;
+                let (main, arrow) = split_button(
+                    ui,
+                    r,
+                    s,
+                    cam,
+                    self.huddle.menu == Some(HuddleMenu::Cameras),
+                    |p, c, col, bg| {
+                        if cam {
+                            line_icon_scaled(p, Icon::Video, c, col, 1.15)
+                        } else {
+                            paint_slashed(p, Icon::Video, c, col, bg, 1.15)
+                        }
+                    },
+                    if cam { "Stop video" } else { "Video" },
+                    if cam { tr("Stop video") } else { tr("Video") },
+                    "Choose a camera",
+                    tr("Choose a camera"),
+                );
+                if main {
+                    press.camera = Some(!cam);
+                }
+                if arrow {
+                    press.menu = toggle(HuddleMenu::Cameras);
+                }
+            }
+            Item::Screen => {
+                let sharing = self.huddle.screen.is_some();
+                if tool_button(
+                    ui,
+                    r,
+                    sharing,
+                    |p, c, col, _| paint_screen(p, c, col),
+                    if sharing {
+                        "Stop sharing screen"
+                    } else {
+                        "Share screen"
+                    },
+                    if sharing {
+                        tr("Stop sharing screen")
+                    } else {
+                        tr("Share screen")
+                    },
+                ) {
+                    press.share = true;
+                }
+            }
+            Item::Hand => {
+                let up = self.huddle.hand;
+                let size = s.button.y * 0.48;
+                if tool_button(
+                    ui,
+                    r,
+                    up,
+                    |p, c, _, _| {
+                        p.text(
+                            c,
+                            Align2::CENTER_CENTER,
+                            HAND,
+                            FontId::proportional(size),
+                            Color32::WHITE,
+                        );
+                    },
+                    if up { "Lower hand" } else { "Raise hand" },
+                    if up {
+                        tr("Lower hand")
+                    } else {
+                        tr("Raise hand")
+                    },
+                ) {
+                    press.hand = Some(!up);
+                }
+            }
+            Item::React => {
+                let open = self.huddle.menu == Some(HuddleMenu::Reactions);
+                if tool_button(
+                    ui,
+                    r,
+                    open,
+                    |p, c, col, _| line_icon_scaled(p, Icon::Smile, c, col, 1.15),
+                    "Reactions",
+                    tr("Reactions"),
+                ) {
+                    press.menu = toggle(HuddleMenu::Reactions);
+                }
+            }
+            Item::Chat => {
+                if tool_button(
+                    ui,
+                    r,
+                    false,
+                    |p, c, col, _| line_icon_scaled(p, Icon::Chat, c, col, 1.1),
+                    "Open the huddle's conversation",
+                    tr("Open the conversation"),
+                ) {
+                    press.open_chat = true;
+                }
+            }
+            Item::Leave => {
+                let resp = ui.interact(r, ui.id().with("huddle_leave"), Sense::click());
+                let fill = if resp.hovered() {
+                    Color32::from_rgb(0xd8, 0x4b, 0x70)
+                } else {
+                    LEAVE_RED
+                };
+                ui.painter().rect_filled(r, 9.0, fill);
+                ui.painter().text(
+                    r.center(),
+                    Align2::CENTER_CENTER,
+                    tr("Leave"),
+                    FontId::proportional(if s.button.y < 38.0 { 13.0 } else { 14.0 }),
+                    Color32::WHITE,
+                );
+                resp.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Leave")
+                });
+                if resp.clicked() {
+                    press.leave = true;
+                }
+            }
+        }
+    }
+
+    /// The menu over the button at `at`: the microphones and speakers, the
+    /// cameras, or the reactions. A click outside it (or Esc) closes it.
+    fn huddle_menu(&self, ctx: &egui::Context, m: HuddleMenu, at: Rect, press: &mut HuddlePress) {
+        let screen = ctx.screen_rect();
+        // the reactions in one row; the device lists a little narrower
+        let want = if m == HuddleMenu::Reactions {
+            REACTIONS.len() as f32 * 38.0
+        } else {
+            260.0
+        };
+        let width = want.min(screen.width() - 32.0);
+        let x = (at.center().x - width / 2.0)
+            .min(screen.right() - width - 8.0)
+            .max(screen.left() + 8.0);
+        let shown = egui::Area::new(egui::Id::new("huddle_menu"))
+            .order(egui::Order::Foreground)
+            .pivot(Align2::LEFT_BOTTOM)
+            .fixed_pos(pos2(x, at.top() - 6.0))
+            .constrain(true)
+            .show(ctx, |ui| {
+                panel_frame(10, 8)
+                    .shadow(egui::epaint::Shadow {
+                        offset: [0, 4],
+                        blur: 16,
+                        spread: 0,
+                        color: Color32::from_black_alpha(80),
+                    })
+                    .show(ui, |ui| match m {
+                        HuddleMenu::Reactions => {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+                                ui.set_max_width(width);
+                                for e in REACTIONS {
+                                    let (r, resp) =
+                                        ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+                                    if resp.hovered() {
+                                        ui.painter().rect_filled(
+                                            r,
+                                            8.0,
+                                            Color32::from_white_alpha(28),
+                                        );
+                                    }
+                                    ui.painter().text(
+                                        r.center(),
+                                        Align2::CENTER_CENTER,
+                                        e,
+                                        FontId::proportional(22.0),
+                                        Color32::WHITE,
+                                    );
+                                    resp.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Button,
+                                            true,
+                                            format!("React {}", e),
+                                        )
+                                    });
+                                    if resp.clicked() {
+                                        press.react = Some(e.to_string());
+                                        press.menu = Some(None);
+                                    }
+                                }
+                            });
+                        }
+                        HuddleMenu::Devices => {
+                            ui.set_width(width - 16.0);
+                            menu_heading(ui, tr("Microphone"));
+                            let chosen = self.huddle.mic.clone().or(self
+                                .huddle
+                                .mics
+                                .first()
+                                .map(|d| d.id.clone()));
+                            if self.huddle.mics.is_empty() {
+                                menu_note(ui, tr("No microphones found"));
+                            }
+                            for d in &self.huddle.mics {
+                                if menu_row(ui, &d.name, chosen.as_ref() == Some(&d.id)) {
+                                    press.mic = Some(d.id.clone());
+                                    press.menu = Some(None);
+                                }
+                            }
+                            ui.add_space(4.0);
+                            menu_heading(ui, tr("Speaker"));
+                            let chosen = self.huddle.speaker.clone().or(self
+                                .huddle
+                                .speakers
+                                .first()
+                                .map(|d| d.id.clone()));
+                            if self.huddle.speakers.is_empty() {
+                                menu_note(ui, tr("No speakers found"));
+                            }
+                            for d in &self.huddle.speakers {
+                                if menu_row(ui, &d.name, chosen.as_ref() == Some(&d.id)) {
+                                    press.speaker = Some(d.id.clone());
+                                    press.menu = Some(None);
+                                }
+                            }
+                        }
+                        HuddleMenu::Cameras => {
+                            ui.set_width(width - 16.0);
+                            menu_heading(ui, tr("Camera"));
+                            let chosen = self.huddle.camera_pick.clone().or(self
+                                .huddle
+                                .cameras
+                                .first()
+                                .cloned());
+                            if self.huddle.cameras.is_empty() {
+                                menu_note(ui, tr("No cameras found"));
+                            }
+                            for c in &self.huddle.cameras {
+                                if menu_row(ui, c, chosen.as_ref() == Some(c)) {
+                                    press.camera_pick = Some(c.clone());
+                                    press.menu = Some(None);
+                                }
+                            }
+                        }
+                    });
+            });
+        let area = shown.response.rect;
+        let outside = ctx.input(|i| {
+            i.pointer.any_pressed()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| !area.contains(p) && !at.contains(p))
+        });
+        if outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            press.menu.get_or_insert(None);
+        }
     }
 }
 
@@ -666,6 +949,194 @@ fn initial(name: &str) -> String {
         .unwrap_or_default()
 }
 
+/// One of the buttons under the stage.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Item {
+    Mic,
+    Camera,
+    Screen,
+    Hand,
+    React,
+    Chat,
+    Leave,
+}
+
+fn items(chat: bool) -> Vec<Item> {
+    let mut v = vec![
+        Item::Mic,
+        Item::Camera,
+        Item::Screen,
+        Item::Hand,
+        Item::React,
+    ];
+    if chat {
+        v.push(Item::Chat);
+    }
+    v.push(Item::Leave);
+    v
+}
+
+impl Sizes {
+    /// The arrow beside the microphone and the camera.
+    fn arrow_w(&self) -> f32 {
+        (self.button.x * 0.55).round()
+    }
+
+    fn item_w(&self, i: Item) -> f32 {
+        match i {
+            Item::Mic | Item::Camera => self.button.x + self.arrow_w(),
+            Item::Leave => self.leave_w,
+            _ => self.button.x,
+        }
+    }
+}
+
+/// The buttons in rows that fit `width`: one row when they all fit, else
+/// split as evenly as can be.
+fn toolbar_rows(items: &[Item], width: f32, s: Sizes) -> Vec<Vec<Item>> {
+    let total = |v: &[Item]| -> f32 {
+        v.iter().map(|i| s.item_w(*i)).sum::<f32>() + v.len().saturating_sub(1) as f32 * s.gap
+    };
+    for rows in 1..=items.len() {
+        let per = items.len().div_ceil(rows);
+        let split: Vec<Vec<Item>> = items.chunks(per).map(|c| c.to_vec()).collect();
+        if split.iter().all(|r| total(r) <= width) {
+            return split;
+        }
+    }
+    items.iter().map(|i| vec![*i]).collect()
+}
+
+/// The microphone's or camera's button: the main part toggles it, the arrow
+/// beside it opens its menu (`open`: shown open). (main clicked, arrow clicked)
+#[allow(clippy::too_many_arguments)]
+fn split_button(
+    ui: &mut Ui,
+    r: Rect,
+    s: Sizes,
+    on: bool,
+    open: bool,
+    paint: impl Fn(&egui::Painter, Pos2, Color32, Color32),
+    access: &str,
+    tip: &str,
+    arrow_access: &str,
+    arrow_tip: &str,
+) -> (bool, bool) {
+    let split = r.right() - s.arrow_w();
+    let main_r = Rect::from_min_max(r.min, pos2(split, r.bottom()));
+    let arrow_r = Rect::from_min_max(pos2(split, r.top()), r.max);
+    let main = ui.interact(
+        main_r,
+        ui.id().with(("huddle_button", access)),
+        Sense::click(),
+    );
+    let arrow = ui.interact(
+        arrow_r,
+        ui.id().with(("huddle_arrow", arrow_access)),
+        Sense::click(),
+    );
+    let (fill, icon) = colors(on, false);
+    ui.painter().rect_filled(r, 9.0, fill);
+    // each half lights up on its own
+    for (half, resp, corners) in [
+        (
+            main_r,
+            &main,
+            egui::CornerRadius {
+                nw: 9,
+                sw: 9,
+                ne: 0,
+                se: 0,
+            },
+        ),
+        (
+            arrow_r,
+            &arrow,
+            egui::CornerRadius {
+                nw: 0,
+                sw: 0,
+                ne: 9,
+                se: 9,
+            },
+        ),
+    ] {
+        if resp.hovered() || (open && half == arrow_r) {
+            ui.painter().rect_filled(half, corners, colors(on, true).0);
+        }
+    }
+    paint(ui.painter(), main_r.center() + vec2(2.0, 0.0), icon, fill);
+    let line = icon.gamma_multiply(0.35);
+    ui.painter().line_segment(
+        [pos2(split, r.top() + 10.0), pos2(split, r.bottom() - 10.0)],
+        Stroke::new(1.0_f32, line),
+    );
+    // the arrow points up: the menu opens above
+    let c = arrow_r.center() - vec2(1.0, 0.0);
+    let st = Stroke::new(1.6_f32, icon);
+    ui.painter()
+        .line_segment([c + vec2(-4.0, 2.0), c + vec2(0.0, -2.0)], st);
+    ui.painter()
+        .line_segment([c + vec2(0.0, -2.0), c + vec2(4.0, 2.0)], st);
+    main.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, access));
+    arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, arrow_access));
+    let m = main.on_hover_text(tip).clicked();
+    let a = arrow.on_hover_text(arrow_tip).clicked();
+    (m, a)
+}
+
+/// A button's fill and icon colors: light while on, dark while off, a
+/// little lighter under the pointer.
+fn colors(on: bool, hover: bool) -> (Color32, Color32) {
+    match (on, hover) {
+        (true, false) => (BUTTON_ON, Color32::from_rgb(0x1d, 0x1c, 0x1d)),
+        (true, true) => (Color32::WHITE, Color32::from_rgb(0x1d, 0x1c, 0x1d)),
+        (false, false) => (BUTTON_OFF, Color32::WHITE),
+        (false, true) => (Color32::from_rgb(0x4c, 0x4e, 0x54), Color32::WHITE),
+    }
+}
+
+fn menu_heading(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).small().strong().color(TEXT2));
+}
+
+fn menu_note(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).small().color(TEXT2));
+}
+
+/// A choice in a huddle menu, checked when it is the one in use. True when
+/// clicked.
+fn menu_row(ui: &mut Ui, name: &str, chosen: bool) -> bool {
+    let w = ui.available_width();
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+    if resp.hovered() {
+        ui.painter()
+            .rect_filled(r, 6.0, Color32::from_white_alpha(24));
+    }
+    if chosen {
+        super::super::icons::line_icon(
+            ui.painter(),
+            Icon::Check,
+            pos2(r.left() + 13.0, r.center().y),
+            TEXT,
+        );
+    }
+    let text = r.with_min_x(r.left() + 28.0).shrink2(vec2(0.0, 2.0));
+    // a long name ends in "…" (all of it on hover)
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        name.to_string(),
+        FontId::proportional(13.0),
+        TEXT,
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(r.right() - 6.0 - text.left());
+    let g = ui.fonts(|f| f.layout_job(job));
+    ui.painter()
+        .galley(pos2(text.left(), r.center().y - g.size().y / 2.0), g, TEXT);
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, chosen, name)
+    });
+    resp.on_hover_text(name).clicked()
+}
+
 /// A square button of the row: light while `on`, dark while off. True when
 /// clicked. `paint` draws its icon at a centre in a color, given the fill.
 fn tool_button(
@@ -677,18 +1148,7 @@ fn tool_button(
     tip: &str,
 ) -> bool {
     let resp = ui.interact(r, ui.id().with(("huddle_button", access)), Sense::click());
-    let (mut fill, icon) = if on {
-        (BUTTON_ON, Color32::from_rgb(0x1d, 0x1c, 0x1d))
-    } else {
-        (BUTTON_OFF, Color32::WHITE)
-    };
-    if resp.hovered() {
-        fill = if on {
-            Color32::WHITE
-        } else {
-            Color32::from_rgb(0x4c, 0x4e, 0x54)
-        };
-    }
+    let (fill, icon) = colors(on, resp.hovered());
     ui.painter().rect_filled(r, 9.0, fill);
     paint(ui.painter(), r.center(), icon, fill);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, access));

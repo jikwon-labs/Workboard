@@ -13,7 +13,7 @@ use super::*;
 use std::collections::HashMap;
 
 mod panel;
-pub(super) use panel::{panel_frame, Sizes};
+pub(super) use panel::{panel_frame, Sizes, REACTION_SECS};
 use wb_voice::{
     screen_key, screen_owner, Audio, Call, Event as VoiceEvent, Join, Person, Picture,
     ScreenTrouble, Share, Source, SourceKind, Video, ME,
@@ -126,6 +126,32 @@ pub struct HuddleRt {
     /// when it draws one: the pass it was drawn in, and the box's left and
     /// right and the top of its Message / Post / Ask tabs.
     pub(super) dock: Option<(u64, Rect)>,
+    /// Your hand is raised.
+    pub(super) hand: bool,
+    /// Reactions showing over their sender's tile: (tile key, emoji, when).
+    pub(super) reactions: Vec<(String, String, std::time::Instant)>,
+    /// The menu open over the buttons, if any.
+    pub(super) menu: Option<HuddleMenu>,
+    /// The microphones and speakers the call listed, and the ones picked
+    /// (None: the first, the system's).
+    pub(super) mics: Vec<wb_voice::Device>,
+    pub(super) speakers: Vec<wb_voice::Device>,
+    pub(super) mic: Option<String>,
+    pub(super) speaker: Option<String>,
+    /// The cameras there are (listed when their menu opens) and the one
+    /// picked (None: the first).
+    pub(super) cameras: Vec<String>,
+    pub(super) camera_pick: Option<String>,
+}
+
+/// The menus over the huddle's buttons.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum HuddleMenu {
+    /// Microphones and speakers (the microphone's arrow).
+    Devices,
+    /// Cameras (the camera's arrow).
+    Cameras,
+    Reactions,
 }
 
 impl Default for HuddleRt {
@@ -168,6 +194,15 @@ impl Default for HuddleRt {
             opened_settings: false,
             views: HashMap::new(),
             dock: None,
+            hand: false,
+            reactions: vec![],
+            menu: None,
+            mics: vec![],
+            speakers: vec![],
+            mic: None,
+            speaker: None,
+            cameras: vec![],
+            camera_pick: None,
         }
     }
 }
@@ -262,6 +297,7 @@ impl App {
         }
         let (audio, video) = (self.huddle.audio, self.huddle.video);
         let screen_env = self.huddle.screen_env.clone();
+        let (mic, speaker, camera_pick) = self.huddle_devices();
         self.huddle = HuddleRt {
             channel: Some(ch),
             waiting: true,
@@ -269,6 +305,9 @@ impl App {
             audio,
             video,
             screen_env,
+            mic,
+            speaker,
+            camera_pick,
             ..Default::default()
         };
         self.access_request(wb_net::Msg::CallJoin { channel: ch });
@@ -277,12 +316,75 @@ impl App {
     pub(super) fn leave_huddle(&mut self) {
         let (audio, video) = (self.huddle.audio, self.huddle.video);
         let screen_env = self.huddle.screen_env.clone();
+        let (mic, speaker, camera_pick) = self.huddle_devices();
         self.huddle = HuddleRt {
             audio,
             video,
             screen_env,
+            mic,
+            speaker,
+            camera_pick,
             ..Default::default()
         };
+    }
+
+    /// The microphone, speaker and camera picked (kept for the next huddle).
+    fn huddle_devices(&self) -> (Option<String>, Option<String>, Option<String>) {
+        (
+            self.huddle.mic.clone(),
+            self.huddle.speaker.clone(),
+            self.huddle.camera_pick.clone(),
+        )
+    }
+
+    pub(super) fn set_huddle_hand(&mut self, up: bool) {
+        self.huddle.hand = up;
+        if let Some(c) = &self.huddle.call {
+            c.raise_hand(up);
+        }
+    }
+
+    /// Send a reaction; it shows over your own tile at once.
+    pub(super) fn huddle_react(&mut self, emoji: String) {
+        if let Some(c) = &self.huddle.call {
+            c.react(&emoji);
+        }
+        self.add_reaction(ME.to_string(), emoji);
+    }
+
+    fn add_reaction(&mut self, key: String, emoji: String) {
+        let now = std::time::Instant::now();
+        self.huddle
+            .reactions
+            .retain(|(_, _, at)| now.duration_since(*at).as_secs_f32() < REACTION_SECS);
+        // a burst of clicks shows a few, not a column
+        if self
+            .huddle
+            .reactions
+            .iter()
+            .filter(|(k, _, _)| *k == key)
+            .count()
+            < 6
+        {
+            self.huddle.reactions.push((key, emoji, now));
+        }
+    }
+
+    /// Opens (or closes, with None) a menu over the huddle's buttons; the
+    /// devices' menus list what is there now.
+    fn set_huddle_menu(&mut self, m: Option<HuddleMenu>) {
+        match m {
+            Some(HuddleMenu::Devices) => {
+                if let Some(c) = &self.huddle.call {
+                    c.list_devices();
+                }
+            }
+            Some(HuddleMenu::Cameras) => {
+                self.huddle.cameras = wb_voice::cameras(self.huddle.video);
+            }
+            _ => {}
+        }
+        self.huddle.menu = m;
     }
 
     /// Open the "Share your screen" chooser: ask for the Screen Recording
@@ -397,6 +499,15 @@ impl App {
             if self.huddle.screen.is_some() {
                 call.share_screen(self.huddle.screen);
             }
+            if let Some(id) = &self.huddle.mic {
+                call.use_mic(id);
+            }
+            if let Some(id) = &self.huddle.speaker {
+                call.use_speaker(id);
+            }
+            if self.huddle.camera_pick.is_some() {
+                call.use_camera(self.huddle.camera_pick.clone());
+            }
             self.huddle.views.clear();
             self.huddle.call = Some(call);
         }
@@ -434,6 +545,17 @@ impl App {
                         }
                     }
                 }
+                // yours showed when it was sent
+                VoiceEvent::Reaction { identity, emoji } => {
+                    if identity != ME {
+                        self.add_reaction(identity, emoji);
+                    }
+                }
+                VoiceEvent::Devices { mics, speakers } => {
+                    self.huddle.mics = mics;
+                    self.huddle.speakers = speakers;
+                }
+                VoiceEvent::DeviceTrouble(why) => self.toast(why),
                 VoiceEvent::Left(why) => {
                     if let Some(why) = why {
                         self.toast(why);
@@ -454,6 +576,16 @@ impl App {
                     self.huddle.pictures.insert(id, (p, true));
                 }
                 None => self.huddle.drop_picture(&id),
+            }
+        }
+        // reactions move until they are gone
+        if !self.huddle.reactions.is_empty() {
+            let now = std::time::Instant::now();
+            self.huddle
+                .reactions
+                .retain(|(_, _, at)| now.duration_since(*at).as_secs_f32() < REACTION_SECS);
+            if let Some(c) = ctx {
+                c.request_repaint();
             }
         }
         // the server connection went away or the workspace changed
@@ -773,6 +905,33 @@ impl App {
                 self.open_share_menu();
             }
         }
+        if let Some(up) = press.hand {
+            self.set_huddle_hand(up);
+        }
+        if let Some(e) = press.react {
+            self.huddle_react(e);
+        }
+        if let Some(m) = press.menu {
+            self.set_huddle_menu(m);
+        }
+        if let Some(id) = press.mic {
+            if let Some(c) = &self.huddle.call {
+                c.use_mic(&id);
+            }
+            self.huddle.mic = Some(id);
+        }
+        if let Some(id) = press.speaker {
+            if let Some(c) = &self.huddle.call {
+                c.use_speaker(&id);
+            }
+            self.huddle.speaker = Some(id);
+        }
+        if let Some(name) = press.camera_pick {
+            if let Some(c) = &self.huddle.call {
+                c.use_camera(Some(name.clone()));
+            }
+            self.huddle.camera_pick = Some(name);
+        }
         if press.open_chat {
             if let Some(ch) = self.huddle.channel {
                 self.section = Section::Chat;
@@ -820,11 +979,13 @@ impl App {
         let inner_w = width - 2.0 * margin;
         // the conversation's button only where there is room for it, and
         // smaller buttons in a very narrow window
-        let mut s = Sizes::MAIN;
-        if inner_w < Self::toolbar_width(s, false) {
-            s = Sizes::SMALL;
-        }
-        let chat = inner_w >= Self::toolbar_width(s, true);
+        let s = if inner_w >= 400.0 {
+            Sizes::MAIN
+        } else {
+            Sizes::SMALL
+        };
+        let chat = true;
+        let buttons_h = Self::toolbar_height(inner_w, s, chat);
         // the screen chooser goes above the card: the stage gives it room
         let menu_id = egui::Id::new("huddle_share_menu");
         let menu_h = if self.huddle.share_menu {
@@ -838,7 +999,7 @@ impl App {
         let room = at.y - screen.top() - 8.0 - menu_h;
         // a short window with the chooser open: no stage, only the title
         // and the buttons (the chooser covered them)
-        let stage_max = (room - 2.0 * margin - 26.0 - s.buttons_h() - 2.0 * s.gap).min(620.0);
+        let stage_max = (room - 2.0 * margin - 26.0 - buttons_h - 2.0 * s.gap).min(620.0);
         let stage = stage_max >= s.strip + 2.0 * s.pad;
         self.huddle_textures(ctx);
         let bar = egui::Area::new(egui::Id::new("huddle_bar"))
@@ -897,4 +1058,11 @@ pub(super) struct HuddlePress {
     share: bool,
     leave: bool,
     open_chat: bool,
+    hand: Option<bool>,
+    react: Option<String>,
+    /// A menu opened, or closed (Some(None)).
+    menu: Option<Option<HuddleMenu>>,
+    mic: Option<String>,
+    speaker: Option<String>,
+    camera_pick: Option<String>,
 }

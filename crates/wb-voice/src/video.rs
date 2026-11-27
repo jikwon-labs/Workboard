@@ -300,6 +300,7 @@ impl Drop for Feed {
 /// the camera can't be used.
 pub fn start_feed(
     video: Video,
+    camera: Option<String>,
     source: NativeVideoSource,
     limits: Arc<Limits>,
     preview: impl Fn(Option<Picture>) + Send + 'static,
@@ -321,7 +322,7 @@ pub fn start_feed(
                     eprintln!("workboard camera: starting");
                     let started = Instant::now();
                     let out = |buf| send(&source, buf, started, &show);
-                    match read_camera(quality::CAMERA_WIDTH, &limits, &s, out) {
+                    match read_camera(camera.as_deref(), quality::CAMERA_WIDTH, &limits, &s, out) {
                         Ok(()) => eprintln!("workboard camera: stopped"),
                         Err(e) => {
                             eprintln!("workboard camera: {}", e);
@@ -418,7 +419,7 @@ pub fn start_preview(
             match video {
                 Video::Pattern(rgb) => run_pattern(rgb, width, &limits, &s, |buf, _| out(buf)),
                 Video::Camera => {
-                    if let Err(e) = read_camera(width, &limits, &s, out) {
+                    if let Err(e) = read_camera(None, width, &limits, &s, out) {
                         eprintln!("workboard camera: {}", e);
                         if !s.load(Ordering::Relaxed) {
                             trouble(e);
@@ -433,10 +434,19 @@ pub fn start_preview(
     feed
 }
 
+/// The cameras' names (none when they can't be listed).
+pub(crate) fn camera_names() -> Vec<String> {
+    let _com = crate::screen::os::Com::init_sta();
+    nokhwa::query(nokhwa::utils::ApiBackend::Auto)
+        .map(|cams| cams.iter().map(|c| c.human_name()).collect())
+        .unwrap_or_default()
+}
+
 /// Read the camera until stopped: each picture goes to `out`, at most
 /// `limits.width()` wide and no more often than `limits.gap()`. The
 /// camera is set to the smallest picture at least `width` wide.
 fn read_camera(
+    name: Option<&str>,
     width: u32,
     limits: &Limits,
     stop: &AtomicBool,
@@ -450,7 +460,12 @@ fn read_camera(
     camera_allowed()?;
     let cams =
         nokhwa::query(ApiBackend::Auto).map_err(|e| format!("Couldn't look for cameras: {}", e))?;
-    let first = cams.first().ok_or("No camera found on this computer.")?;
+    // the camera asked for by name, else the first
+    let first = cams
+        .iter()
+        .find(|c| Some(c.human_name().as_str()) == name)
+        .or(cams.first())
+        .ok_or("No camera found on this computer.")?;
     // frame_raw, not frame: frame() reconfigures the camera on every call.
     // (The camera lock nokhwa leaked is fixed in third_party/nokhwa-bindings-macos.)
     let want = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);

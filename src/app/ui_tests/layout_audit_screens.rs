@@ -146,6 +146,7 @@ fn huddle(a: &mut App) {
             heard: 0.0,
             camera: false,
             screen: false,
+            hand: false,
         },
         wb_voice::Person {
             identity: format!("{}-dev2", other),
@@ -156,6 +157,7 @@ fn huddle(a: &mut App) {
             heard: 0.3,
             camera: true,
             screen: false,
+            hand: false,
         },
         wb_voice::Person {
             identity: "9001-dev3".into(),
@@ -166,6 +168,7 @@ fn huddle(a: &mut App) {
             heard: 0.0,
             camera: false,
             screen: false,
+            hand: false,
         },
     ];
 }
@@ -591,6 +594,55 @@ pub(super) fn extra_screens(_h: &Ui1) -> Vec<(String, Go)> {
             a.huddle
                 .pictures
                 .insert(who, (std::sync::Arc::new(pic), true));
+        }),
+    );
+    x(
+        "huddle hand and reaction",
+        app(|a| {
+            huddle(a);
+            a.section = Section::Chat;
+            a.chat.open = Some(general(a));
+            a.huddle.hand = true;
+            a.huddle.people[2].hand = true;
+            let who = a.huddle.people[1].identity.clone();
+            let at = std::time::Instant::now() - std::time::Duration::from_millis(900);
+            a.huddle.reactions.push((who, "\u{1F389}".into(), at));
+            a.huddle
+                .reactions
+                .push((wb_voice::ME.into(), "\u{1F44D}".into(), at));
+        }),
+    );
+    x(
+        "huddle reactions menu",
+        app(|a| {
+            huddle(a);
+            a.section = Section::Chat;
+            a.chat.open = Some(general(a));
+            a.huddle.menu = Some(crate::app::huddle::HuddleMenu::Reactions);
+        }),
+    );
+    x(
+        "huddle device menu",
+        app(|a| {
+            huddle(a);
+            a.section = Section::Chat;
+            a.chat.open = Some(general(a));
+            a.huddle.mics = vec![
+                wb_voice::Device {
+                    id: "m1".into(),
+                    name: "MacBook Pro 마이크".into(),
+                },
+                wb_voice::Device {
+                    id: "m2".into(),
+                    name: "USB Audio Device with a very long name for the list".into(),
+                },
+            ];
+            a.huddle.speakers = vec![wb_voice::Device {
+                id: "s1".into(),
+                name: "MacBook Pro 스피커".into(),
+            }];
+            a.huddle.mic = Some("m2".into());
+            a.huddle.menu = Some(crate::app::huddle::HuddleMenu::Devices);
         }),
     );
     x(

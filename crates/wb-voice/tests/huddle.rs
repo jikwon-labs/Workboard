@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wb_net::{Client, Event, Msg, Role, SignIn, Status};
 use wb_voice::{
-    screen_key, Audio, Call, Event as VoiceEvent, Join, Person, Picture, Share, Video, ME,
+    screen_key, Audio, Call, Device, Event as VoiceEvent, Join, Person, Picture, Share, Video, ME,
 };
 use workboard_server::testing::{
     free_port, livekit_bin, start_livekit, start_livekit_on, wait_until, TestServer,
@@ -101,6 +101,10 @@ struct Talker {
     joined: bool,
     left: Option<Option<String>>,
     pictures: std::collections::HashMap<String, std::sync::Arc<Picture>>,
+    /// Reactions that came: (whose, emoji).
+    reactions: Vec<(String, String)>,
+    /// The microphones and speakers the call listed.
+    devices: Option<(Vec<Device>, Vec<Device>)>,
 }
 
 impl Talker {
@@ -120,6 +124,8 @@ impl Talker {
             joined: false,
             left: None,
             pictures: Default::default(),
+            reactions: vec![],
+            devices: None,
         }
     }
 
@@ -139,6 +145,11 @@ impl Talker {
                     VoiceEvent::Left(why) => self.left = Some(why),
                     VoiceEvent::Trouble(why) => panic!("trouble: {}", why),
                     VoiceEvent::ScreenEnded(why) => panic!("screen sharing ended: {:?}", why),
+                    VoiceEvent::Reaction { identity, emoji } => {
+                        self.reactions.push((identity, emoji))
+                    }
+                    VoiceEvent::Devices { mics, speakers } => self.devices = Some((mics, speakers)),
+                    VoiceEvent::DeviceTrouble(why) => panic!("device trouble: {}", why),
                 }
             }
             for (id, p) in self.call.new_pictures() {
@@ -280,6 +291,41 @@ fn two_people_hear_each_other_in_a_huddle() {
     b.call.set_muted(false);
     a.until("Bo unmuted and heard again", |t| {
         t.other().is_some_and(|p| !p.muted && p.heard > 0.02)
+    });
+
+    // the call lists the microphones and speakers (made-up ones with a tone)
+    a.until("Ann's devices listed", |t| t.devices.is_some());
+    assert_eq!(a.devices.as_ref().unwrap().0[0].name, "Test microphone");
+
+    // Ann raises her hand: Bo sees it, and so does Bo after joining again
+    a.call.raise_hand(true);
+    a.until("Ann sees her own hand up", |t| {
+        t.people.iter().any(|p| p.me && p.hand)
+    });
+    b.until("Bo sees Ann's hand up", |t| {
+        t.other().is_some_and(|p| p.hand)
+    });
+    drop(b);
+    let mut b = Talker::with_video(bo.call_token(10), 660.0, [30, 40, 220]);
+    b.until("Bo, back, sees Ann's hand still up", |t| {
+        t.other().is_some_and(|p| p.name == "Ann" && p.hand)
+    });
+    a.until("Ann hears Bo again", |t| {
+        t.other().is_some_and(|p| p.heard > 0.02)
+    });
+    a.call.raise_hand(false);
+    b.until("Bo sees Ann's hand down", |t| {
+        t.other().is_some_and(|p| !p.hand)
+    });
+    // a reaction reaches Bo, and shows on Ann's own side as hers
+    a.call.react("\u{1F44F}");
+    b.until("Bo gets Ann's reaction", |t| {
+        t.reactions
+            .iter()
+            .any(|(who, e)| t.other().is_some_and(|p| &p.identity == who) && e == "\u{1F44F}")
+    });
+    a.until("Ann sees her reaction", |t| {
+        t.reactions.iter().any(|(who, _)| who == ME)
     });
 
     // video: each turns the camera on (a colored test picture) and sees the other's

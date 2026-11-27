@@ -73,6 +73,8 @@ pub struct Person {
     pub camera: bool,
     /// Sharing their screen.
     pub screen: bool,
+    /// Their hand is raised.
+    pub hand: bool,
 }
 
 impl Person {
@@ -93,6 +95,26 @@ pub enum Event {
     /// Screen sharing stopped without being asked to: why, or None when it
     /// was stopped from macOS's own controls.
     ScreenEnded(Option<ScreenTrouble>),
+    /// Someone (ME for you) sent a reaction: an emoji to show over their tile.
+    Reaction {
+        identity: String,
+        emoji: String,
+    },
+    /// The microphones and speakers there are (after joining, and again
+    /// when asked with `list_devices`).
+    Devices {
+        mics: Vec<Device>,
+        speakers: Vec<Device>,
+    },
+    /// A microphone, speaker or camera couldn't be switched to.
+    DeviceTrouble(String),
+}
+
+/// A microphone or speaker: what to ask for it by, and its name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
 }
 
 enum Cmd {
@@ -100,7 +122,69 @@ enum Cmd {
     Camera(bool),
     Screen(Option<Share>),
     Views(HashMap<String, f32>),
+    Hand(bool),
+    React(String),
+    ListDevices,
+    Mic(String),
+    Speaker(String),
+    /// The camera to use, by name (None: the first).
+    CameraDevice(Option<String>),
     Leave,
+}
+
+/// The data topic for hands and reactions, and what goes in it:
+/// "hand:1", "hand:0" or "react:<emoji>".
+const TOPIC: &str = "workboard-huddle";
+
+/// What a huddle message says.
+#[derive(Debug, PartialEq)]
+enum Signal {
+    Hand(bool),
+    React(String),
+}
+
+impl Signal {
+    fn parse(payload: &[u8]) -> Option<Signal> {
+        let text = std::str::from_utf8(payload).ok()?;
+        match text.split_once(':')? {
+            ("hand", "1") => Some(Signal::Hand(true)),
+            ("hand", "0") => Some(Signal::Hand(false)),
+            // a reaction is one emoji, a few characters at most
+            ("react", e) if !e.is_empty() && e.chars().count() <= 8 => {
+                Some(Signal::React(e.to_string()))
+            }
+            _ => None,
+        }
+    }
+
+    fn payload(&self) -> Vec<u8> {
+        match self {
+            Signal::Hand(up) => format!("hand:{}", if *up { 1 } else { 0 }),
+            Signal::React(e) => format!("react:{}", e),
+        }
+        .into_bytes()
+    }
+}
+
+/// Send a huddle message to everyone (or to the people in `to`).
+async fn signal(room: &Room, s: Signal, to: Vec<ParticipantIdentity>) {
+    let _ = room
+        .local_participant()
+        .publish_data(DataPacket {
+            payload: s.payload(),
+            topic: Some(TOPIC.to_string()),
+            reliable: true,
+            destination_identities: to,
+        })
+        .await;
+}
+
+/// The cameras on this computer, by name (a made-up one with test pictures).
+pub fn cameras(video: Video) -> Vec<String> {
+    match video {
+        Video::Pattern(_) => vec!["Test camera".to_string()],
+        Video::Camera => video::camera_names(),
+    }
 }
 
 /// Whose picture: a participant identity, or ME for your own camera (and
@@ -220,6 +304,36 @@ impl Call {
 
     pub fn set_muted(&self, muted: bool) {
         let _ = self.tx.send(Cmd::Mute(muted));
+    }
+
+    /// Raise or lower your hand.
+    pub fn raise_hand(&self, up: bool) {
+        let _ = self.tx.send(Cmd::Hand(up));
+    }
+
+    /// Send a reaction (an emoji) to everyone.
+    pub fn react(&self, emoji: &str) {
+        let _ = self.tx.send(Cmd::React(emoji.to_string()));
+    }
+
+    /// Ask for the microphones and speakers again (an Event::Devices comes).
+    pub fn list_devices(&self) {
+        let _ = self.tx.send(Cmd::ListDevices);
+    }
+
+    /// Use this microphone (a Device id).
+    pub fn use_mic(&self, id: &str) {
+        let _ = self.tx.send(Cmd::Mic(id.to_string()));
+    }
+
+    /// Play the call on this speaker (a Device id).
+    pub fn use_speaker(&self, id: &str) {
+        let _ = self.tx.send(Cmd::Speaker(id.to_string()));
+    }
+
+    /// Use this camera (by name, from `cameras`); None for the first.
+    pub fn use_camera(&self, name: Option<String>) {
+        let _ = self.tx.send(Cmd::CameraDevice(name));
     }
 
     pub fn leave(&self) {
@@ -379,6 +493,8 @@ fn people(
     speaking: &[String],
     camera_on: bool,
     screen_on: bool,
+    hands: &HashMap<String, bool>,
+    my_hand: bool,
 ) -> Vec<Person> {
     let me = room.local_participant();
     let mut out = vec![Person {
@@ -394,6 +510,7 @@ fn people(
         heard: 0.0,
         camera: camera_on,
         screen: screen_on,
+        hand: my_hand,
     }];
     let mut others: Vec<RemoteParticipant> = room.remote_participants().into_values().collect();
     others.sort_by_key(|p| p.identity().to_string());
@@ -414,12 +531,81 @@ fn people(
             speaking: speaking.contains(&id),
             muted: mics.is_empty() || mics.iter().all(|t| t.is_muted()),
             heard: levels.get(&id).copied().unwrap_or(0.0),
+            hand: hands.get(&id).copied().unwrap_or(false),
             name: p.name(),
             identity: id,
             me: false,
         });
     }
     out
+}
+
+/// The microphones and speakers (made-up ones when a tone stands in for
+/// the microphone).
+fn devices(platform: Option<&PlatformAudio>) -> Event {
+    match platform {
+        Some(p) => Event::Devices {
+            mics: p
+                .recording_devices()
+                .map(|d| Device {
+                    id: d.id.as_str().to_string(),
+                    name: d.name,
+                })
+                .collect(),
+            speakers: p
+                .playout_devices()
+                .map(|d| Device {
+                    id: d.id.as_str().to_string(),
+                    name: d.name,
+                })
+                .collect(),
+        },
+        None => Event::Devices {
+            mics: vec![Device {
+                id: "test-mic".into(),
+                name: "Test microphone".into(),
+            }],
+            speakers: vec![Device {
+                id: "test-speakers".into(),
+                name: "Test speakers".into(),
+            }],
+        },
+    }
+}
+
+/// Start feeding the camera `name` (None: the first) into `source`: your
+/// own picture goes to the pictures (ME), a camera problem to the app.
+fn start_camera(
+    video: Video,
+    name: Option<String>,
+    source: NativeVideoSource,
+    limits: Arc<video::Limits>,
+    pictures: &Pictures,
+    etx: &Sender<Event>,
+    wake: &Wake,
+) -> video::Feed {
+    let pics = pictures.clone();
+    let (etx2, wake2, wake3) = (etx.clone(), wake.clone(), wake.clone());
+    // (pictures come at the sending rate: a wake each)
+    video::start_feed(
+        video,
+        name,
+        source,
+        limits,
+        move |pic| {
+            match pic {
+                Some(pic) => put_picture(&pics, ME, pic),
+                None => {
+                    pics.lock().unwrap().remove(ME);
+                }
+            }
+            wake3();
+        },
+        move |why| {
+            let _ = etx2.send(Event::Trouble(why));
+            wake2();
+        },
+    )
 }
 
 async fn run(
@@ -481,10 +667,16 @@ async fn run(
         }
     };
     emit(Event::Joined);
+    emit(devices(platform.as_ref()));
+    // raised hands (yours, and the others' from their messages)
+    let mut my_hand = false;
+    let mut hands: HashMap<String, bool> = HashMap::new();
+    // the camera picked (None: the first)
+    let mut camera_name: Option<String> = None;
     let levels: Arc<Mutex<HashMap<String, f32>>> = Default::default();
     let mut speaking: Vec<String> = vec![];
     // the camera while it's on: what's published and what feeds it
-    let mut camera: Option<(LocalTrackPublication, video::Feed)> = None;
+    let mut camera: Option<(LocalTrackPublication, video::Feed, NativeVideoSource)> = None;
     let mut screen: Option<(LocalTrackPublication, video::Feed)> = None;
     // how large and often to send, following this computer's connection
     let camera_limits = video::Limits::new(quality::Kind::Camera);
@@ -527,8 +719,27 @@ async fn run(
                         asked.remove(&key);
                     }
                 }
+                Some(RoomEvent::DataReceived { payload, topic: Some(topic), participant: Some(p), .. }) if topic == TOPIC => {
+                    let id = p.identity().to_string();
+                    match Signal::parse(&payload) {
+                        Some(Signal::Hand(up)) => {
+                            hands.insert(id, up);
+                        }
+                        Some(Signal::React(emoji)) => {
+                            emit(Event::Reaction { identity: id, emoji });
+                        }
+                        None => {}
+                    }
+                }
+                // someone new hears from you that your hand is up
+                Some(RoomEvent::ParticipantConnected(p)) => {
+                    if my_hand {
+                        signal(&room, Signal::Hand(true), vec![p.identity()]).await;
+                    }
+                }
                 Some(RoomEvent::ParticipantDisconnected(p)) => {
                     let id = p.identity().to_string();
+                    hands.remove(&id);
                     unwatch(&mut watchers, &pictures, &id);
                     unwatch(&mut watchers, &pictures, &screen_key(&id));
                 }
@@ -548,22 +759,8 @@ async fn run(
                     let track = LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
                     match room.local_participant().publish_track(LocalTrack::Video(track), quality::camera_options()).await {
                         Ok(p) => {
-                            let pics = pictures.clone();
-                            let (etx2, wake2, wake3) = (etx.clone(), wake.clone(), wake.clone());
-                            // (pictures come at the sending rate: a wake each)
-                            let feed = video::start_feed(video, source, camera_limits.clone(), move |pic| {
-                                match pic {
-                                    Some(pic) => put_picture(&pics, ME, pic),
-                                    None => {
-                                        pics.lock().unwrap().remove(ME);
-                                    }
-                                }
-                                wake3();
-                            }, move |why| {
-                                let _ = etx2.send(Event::Trouble(why));
-                                wake2();
-                            });
-                            camera = Some((p, feed));
+                            let feed = start_camera(video, camera_name.clone(), source.clone(), camera_limits.clone(), &pictures, etx, wake);
+                            camera = Some((p, feed, source));
                         }
                         Err(e) => {
                             emit(Event::Trouble(format!("Couldn't send your video: {}", e)));
@@ -571,13 +768,46 @@ async fn run(
                     }
                 }
                 Some(Cmd::Camera(false)) => {
-                    if let Some((p, feed)) = camera.take() {
+                    if let Some((p, feed, _)) = camera.take() {
                         drop(feed);
                         let _ = room.local_participant().unpublish_track(&p.sid()).await;
                         pictures.lock().unwrap().remove(ME);
                     }
                 }
                 Some(Cmd::Camera(_)) => {}
+                // another camera: the same track, fed from it
+                Some(Cmd::CameraDevice(name)) => {
+                    camera_name = name;
+                    if let Some((_, feed, source)) = camera.as_mut() {
+                        let old = std::mem::replace(feed, start_camera(video, camera_name.clone(), source.clone(), camera_limits.clone(), &pictures, etx, wake));
+                        drop(old);
+                    }
+                }
+                Some(Cmd::Hand(up)) => {
+                    my_hand = up;
+                    signal(&room, Signal::Hand(up), vec![]).await;
+                }
+                Some(Cmd::React(emoji)) => {
+                    signal(&room, Signal::React(emoji.clone()), vec![]).await;
+                    emit(Event::Reaction { identity: ME.to_string(), emoji });
+                }
+                Some(Cmd::ListDevices) => {
+                    emit(devices(platform.as_ref()));
+                }
+                Some(Cmd::Mic(id)) => {
+                    if let Some(p) = &platform {
+                        if let Err(e) = p.switch_recording_device(&RecordingDeviceId::from_unchecked_guid(&id)) {
+                            emit(Event::DeviceTrouble(format!("Couldn't switch the microphone: {}", e)));
+                        }
+                    }
+                }
+                Some(Cmd::Speaker(id)) => {
+                    if let Some(p) = &platform {
+                        if let Err(e) = p.switch_playout_device(&PlayoutDeviceId::from_unchecked_guid(&id)) {
+                            emit(Event::DeviceTrouble(format!("Couldn't switch the speaker: {}", e)));
+                        }
+                    }
+                }
                 Some(Cmd::Screen(share)) => {
                     if let Some((p, feed)) = screen.take() {
                         drop(feed);
@@ -635,9 +865,9 @@ async fn run(
                         let _ = room.local_participant().unpublish_track(&p.sid()).await;
                     }
                 }
-                let now = people(&room, &levels.lock().unwrap(), &speaking, camera.is_some(), screen.is_some());
+                let now = people(&room, &levels.lock().unwrap(), &speaking, camera.is_some(), screen.is_some(), &hands, my_hand);
                 // levels drift a little all the time: compare them coarsely
-                let coarse = |v: &[Person]| v.iter().map(|p| (p.identity.clone(), p.speaking, p.muted, p.camera, p.screen, (p.heard * 20.0) as i32)).collect::<Vec<_>>();
+                let coarse = |v: &[Person]| v.iter().map(|p| (p.identity.clone(), p.speaking, p.muted, p.camera, p.screen, p.hand, (p.heard * 20.0) as i32)).collect::<Vec<_>>();
                 if coarse(&now) != coarse(&last_people) {
                     last_people = now.clone();
                     if !emit(Event::People(now)) {

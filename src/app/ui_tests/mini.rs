@@ -68,6 +68,7 @@ fn person(id: u64, dev: &str, me: bool, speaking: bool) -> wb_voice::Person {
         heard: 0.0,
         camera: false,
         screen: false,
+        hand: false,
     }
 }
 

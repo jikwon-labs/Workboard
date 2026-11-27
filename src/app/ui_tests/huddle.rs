@@ -139,6 +139,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
             heard: 0.0,
             camera: false,
             screen: false,
+            hand: false,
         },
         wb_voice::Person {
             identity: format!("{}-dev2", other.id),
@@ -149,6 +150,7 @@ fn huddle_bar_shows_people_mute_and_leave() {
             heard: 0.3,
             camera: true,
             screen: false,
+            hand: false,
         },
     ];
     h.settle();
@@ -233,6 +235,7 @@ fn huddle_shares_a_screen_and_shows_others_screens_large() {
         heard: 0.0,
         camera: true,
         screen,
+        hand: false,
     };
     h.app.huddle.channel = Some(ch);
     h.app.huddle.joined = true;
@@ -363,6 +366,7 @@ fn in_huddle(h: &mut Ui1) {
         heard: 0.0,
         camera: false,
         screen: false,
+        hand: false,
     };
     h.app.huddle.people = vec![person(me, "dev1", true)];
     for (i, id) in others.iter().enumerate() {
@@ -420,9 +424,35 @@ fn huddle_bar_and_screen_chooser_fit_the_window() {
                 let menu = h
                     .ctx
                     .memory(|m| m.area_rect(egui::Id::new("huddle_share_menu")));
+                let buttons: Vec<(&str, Rect)> = [
+                    "Mute",
+                    "Microphone and speaker",
+                    "Video",
+                    "Choose a camera",
+                    "Share screen",
+                    "Raise hand",
+                    "Reactions",
+                    "Open the huddle's conversation",
+                    "Leave",
+                    "Huddle in a small window",
+                ]
+                .iter()
+                .map(|n| (*n, h.rect(n)))
+                .collect();
                 let cut = h.cut_texts(window);
                 set_lang(Lang::En);
                 assert!(window.contains_rect(bar), "{}: bar {:?}", what, bar);
+                // every button inside the card (more rows when narrow)
+                for (n, r) in &buttons {
+                    assert!(
+                        bar.contains_rect(*r),
+                        "{}: {} {:?} outside the card {:?}",
+                        what,
+                        n,
+                        r,
+                        bar
+                    );
+                }
                 for t in &tabs {
                     assert!(
                         !bar.intersects(*t),
@@ -456,4 +486,106 @@ fn huddle_bar_and_screen_chooser_fit_the_window() {
             }
         }
     }
+}
+
+/// Raise hand, reactions and the microphone, speaker and camera menus: the
+/// hand shows on your tile and the button turns to Lower hand, a reaction
+/// picked (or one that comes from someone else) floats over the sender's
+/// tile, and a device picked in its menu is the one used.
+#[test]
+fn huddle_raises_a_hand_reacts_and_picks_devices() {
+    let mut h = Ui1::new();
+    in_huddle(&mut h);
+    let me = h.app.data.me;
+    let my_name = h.app.data.member(me).unwrap().name.clone();
+    let mine = format!("{} (you), listening", my_name);
+    assert!(h.has(&mine));
+
+    // the hand goes up on your tile, and down again
+    h.click("Raise hand");
+    assert!(h.app.huddle.hand);
+    assert!(h.has(&format!("{}, hand raised", mine)));
+    h.click("Lower hand");
+    assert!(!h.app.huddle.hand);
+    assert!(h.has(&mine));
+    // someone else's raised hand shows on theirs
+    h.app.huddle.people[1].hand = true;
+    let them = h.app.huddle.people[1].clone();
+    let their_name = h
+        .app
+        .data
+        .member(them.member().unwrap())
+        .unwrap()
+        .name
+        .clone();
+    h.settle();
+    assert!(h.has(&format!("{}, speaking, hand raised", their_name)));
+
+    // reactions: the menu opens above its button, a pick closes it and the
+    // reaction floats over your tile
+    h.click("Reactions");
+    assert_eq!(
+        h.app.huddle.menu,
+        Some(crate::app::huddle::HuddleMenu::Reactions)
+    );
+    let clap = "\u{1F44F}";
+    assert!(h.rect(&format!("React {}", clap)).bottom() < h.rect("Reactions").top());
+    h.click(&format!("React {}", clap));
+    assert!(h.app.huddle.menu.is_none());
+    assert!(h
+        .app
+        .huddle
+        .reactions
+        .iter()
+        .any(|(who, e, _)| who == wb_voice::ME && e == clap));
+    // and they go after a few seconds
+    let long_ago = std::time::Instant::now() - std::time::Duration::from_secs(10);
+    for r in h.app.huddle.reactions.iter_mut() {
+        r.2 = long_ago;
+    }
+    h.settle();
+    assert!(h.app.huddle.reactions.is_empty());
+
+    // the microphone's arrow lists the microphones and speakers; the first
+    // is checked until another is picked
+    h.app.huddle.mics = vec![
+        wb_voice::Device {
+            id: "m1".into(),
+            name: "MacBook Microphone".into(),
+        },
+        wb_voice::Device {
+            id: "m2".into(),
+            name: "USB Microphone".into(),
+        },
+    ];
+    h.app.huddle.speakers = vec![wb_voice::Device {
+        id: "s1".into(),
+        name: "MacBook Speakers".into(),
+    }];
+    h.click("Microphone and speaker");
+    assert_eq!(
+        h.app.huddle.menu,
+        Some(crate::app::huddle::HuddleMenu::Devices)
+    );
+    assert!(h.has("MacBook Microphone") && h.has("MacBook Speakers"));
+    h.click("USB Microphone");
+    assert_eq!(h.app.huddle.mic.as_deref(), Some("m2"));
+    assert!(h.app.huddle.menu.is_none());
+    // a click elsewhere closes a menu without picking
+    h.click("Microphone and speaker");
+    assert!(h.app.huddle.menu.is_some());
+    let away = h.rect("Message").center();
+    h.click_at(away);
+    assert!(h.app.huddle.menu.is_none());
+    assert_eq!(h.app.huddle.mic.as_deref(), Some("m2"));
+
+    // the camera's arrow lists the cameras
+    h.click("Choose a camera");
+    assert!(h.has("Test camera"));
+    h.click("Test camera");
+    assert_eq!(h.app.huddle.camera_pick.as_deref(), Some("Test camera"));
+    // the picks stay for the next huddle
+    h.app.leave_huddle();
+    assert_eq!(h.app.huddle.mic.as_deref(), Some("m2"));
+    assert_eq!(h.app.huddle.camera_pick.as_deref(), Some("Test camera"));
 }

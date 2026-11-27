@@ -3952,28 +3952,34 @@ impl App {
         let now = now_ts();
         let tomorrow = local_ts(today() + Duration::days(1), nine_am()).unwrap_or(now + 86400);
         popup(ui, &mb, more_id, 220.0, |ui| {
-            let row = |ui: &mut Ui, label: &str| menu_row_plain(ui, &t, tr(label), false);
-            if !m.text.is_empty() && row(ui, "Copy text").clicked() {
+            // each row has an icon for what it does, so it is told apart at a
+            // glance; the one that deletes is red
+            let row = |ui: &mut Ui, icon: Icon, label: &str| {
+                menu_row(ui, &t, tr(label), false, |p, c| {
+                    line_icon(p, icon, c, t.text2)
+                })
+            };
+            if !m.text.is_empty() && row(ui, Icon::Copy, "Copy text").clicked() {
                 ui.ctx().copy_text(m.text.clone());
                 acts.push(ChatAction::Copied);
                 close_popup(ui);
             }
-            if m.call.is_none() && row(ui, "Forward message").clicked() {
+            if m.call.is_none() && row(ui, Icon::Forward, "Forward message").clicked() {
                 acts.push(ChatAction::Forward { ch: cid, msg: m.id });
                 close_popup(ui);
             }
-            if top_level && m.author != me && row(ui, "Mark unread").clicked() {
+            if top_level && m.author != me && row(ui, Icon::Unread, "Mark unread").clicked() {
                 acts.push(ChatAction::MarkUnread { ch: cid, ts: m.ts });
                 close_popup(ui);
             }
             ui.separator();
-            for (label, at) in [
-                ("Remind me in 1 hour", Some(now + 3600)),
-                ("Remind me in 3 hours", Some(now + 3 * 3600)),
-                ("Remind me tomorrow", Some(tomorrow)),
-                ("Remind me at...", None),
+            for (icon, label, at) in [
+                (Icon::Alarm, "Remind me in 1 hour", Some(now + 3600)),
+                (Icon::Alarm, "Remind me in 3 hours", Some(now + 3 * 3600)),
+                (Icon::Sun, "Remind me tomorrow", Some(tomorrow)),
+                (Icon::Calendar, "Remind me at...", None),
             ] {
-                if row(ui, label).clicked() {
+                if row(ui, icon, label).clicked() {
                     acts.push(ChatAction::Remind {
                         ch: cid,
                         msg: m.id,
@@ -3984,20 +3990,23 @@ impl App {
             }
             if m.author == me {
                 ui.separator();
-                if m.call.is_none() && m.poll.is_none() && row(ui, "Edit message").clicked() {
+                if m.call.is_none()
+                    && m.poll.is_none()
+                    && row(ui, Icon::Edit, "Edit message").clicked()
+                {
                     acts.push(ChatAction::Edit { ch: cid, msg: m.id });
                     close_popup(ui);
                 }
                 // a second click deletes, so one slip doesn't lose a message
                 let armed = self.chat.delete == Some(m.id);
-                if row(
-                    ui,
-                    if armed {
-                        "Click again to delete"
-                    } else {
-                        "Delete message"
-                    },
-                )
+                let label = tr(if armed {
+                    "Click again to delete"
+                } else {
+                    "Delete message"
+                });
+                if menu_row_colored(ui, &t, label, t.danger, |p, c| {
+                    line_icon(p, Icon::Trash, c, t.danger)
+                })
                 .clicked()
                 {
                     if armed {

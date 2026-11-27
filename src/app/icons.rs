@@ -118,6 +118,9 @@ pub(crate) enum Icon {
     Folder,
     At,
     Volume,
+    Copy,
+    Forward,
+    Unread,
     Badge,
     Wifi,
     PersonPlus,
@@ -241,6 +244,9 @@ impl Icon {
         Icon::Folder,
         Icon::At,
         Icon::Volume,
+        Icon::Copy,
+        Icon::Forward,
+        Icon::Unread,
         Icon::Badge,
         Icon::Wifi,
         Icon::PersonPlus,
@@ -364,6 +370,9 @@ impl Icon {
             "folder" => Icon::Folder,
             "at" => Icon::At,
             "volume" => Icon::Volume,
+            "copy" => Icon::Copy,
+            "forward" => Icon::Forward,
+            "unread" => Icon::Unread,
             "badge" => Icon::Badge,
             "wifi" => Icon::Wifi,
             "person_plus" => Icon::PersonPlus,
@@ -488,6 +497,9 @@ impl Icon {
             Icon::Folder => "folder",
             Icon::At => "at",
             Icon::Volume => "volume",
+            Icon::Copy => "copy",
+            Icon::Forward => "forward",
+            Icon::Unread => "unread",
             Icon::Badge => "badge",
             Icon::Wifi => "wifi",
             Icon::PersonPlus => "person_plus",
@@ -1945,6 +1957,48 @@ pub(crate) fn line_icon(p: &egui::Painter, kind: Icon, c: Pos2, color: Color32) 
                 arc_points(c, 6.7, 0.0, 52.6_f32.to_radians() - 2.0 * PI),
                 s,
             ));
+        }
+        Icon::Copy => {
+            // two sheets: the front one whole, of the back one only the
+            // edges that show past it
+            p.rect_stroke(
+                Rect::from_center_size(c + vec2(-2.0, 2.0), vec2(10.0, 10.0)),
+                2.0,
+                s,
+                egui::StrokeKind::Middle,
+            );
+            let pts = vec![
+                c + vec2(-3.0, -3.0),
+                c + vec2(-3.0, -7.0),
+                c + vec2(7.0, -7.0),
+                c + vec2(7.0, 3.0),
+                c + vec2(3.0, 3.0),
+            ];
+            p.add(egui::Shape::line(pts, s));
+        }
+        Icon::Forward => {
+            // Reply turned around: the arrow points right
+            let mut arc = vec![];
+            for i in 0..=10 {
+                let a = std::f32::consts::PI * (1.5 - 0.5 * i as f32 / 10.0);
+                arc.push(c + vec2(-1.0, 4.0) + vec2(a.cos() * 6.0, a.sin() * 6.0));
+            }
+            arc.insert(0, c + vec2(6.0, -2.0));
+            p.add(egui::Shape::line(arc, s));
+            line(vec2(6.0, -2.0), vec2(3.0, -5.0));
+            line(vec2(6.0, -2.0), vec2(3.0, 1.0));
+        }
+        Icon::Unread => {
+            // a square whose top right corner is a dot
+            let pts = vec![
+                c + vec2(1.0, -6.0),
+                c + vec2(-7.0, -6.0),
+                c + vec2(-7.0, 7.0),
+                c + vec2(6.0, 7.0),
+                c + vec2(6.0, -1.0),
+            ];
+            p.add(egui::Shape::line(pts, s));
+            p.circle_filled(c + vec2(5.0, -5.0), 2.5, color);
         }
         Icon::Volume => {
             let pts = vec![

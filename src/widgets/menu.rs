@@ -303,6 +303,30 @@ pub fn menu_row_named(
     selected: bool,
     lead: impl FnOnce(&egui::Painter, Pos2),
 ) -> Response {
+    menu_row_in(ui, t, name, label, t.text, selected, lead)
+}
+
+/// A `menu_row` whose label is drawn in `color` (red for a row that
+/// deletes something).
+pub fn menu_row_colored(
+    ui: &mut Ui,
+    t: &Theme,
+    label: &str,
+    color: Color32,
+    lead: impl FnOnce(&egui::Painter, Pos2),
+) -> Response {
+    menu_row_in(ui, t, label, label, color, false, lead)
+}
+
+fn menu_row_in(
+    ui: &mut Ui,
+    t: &Theme,
+    name: &str,
+    label: &str,
+    color: Color32,
+    selected: bool,
+    lead: impl FnOnce(&egui::Painter, Pos2),
+) -> Response {
     let w = ui.available_width().max(160.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
     name_it(&resp, name);
@@ -321,7 +345,7 @@ pub fn menu_row_named(
         Align2::LEFT_CENTER,
         fit_text(ui.painter(), label, &font, room),
         font,
-        t.text,
+        color,
     );
     resp
 }

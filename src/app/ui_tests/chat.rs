@@ -961,6 +961,69 @@ fn click_more_actions_delete_needs_two_clicks() {
     );
 }
 
+/// Every row of a message's "..." menu has an icon at its left, so what it
+/// does shows at a glance, and "Delete message" is red, icon and words.
+#[test]
+fn message_menu_rows_have_icons_and_delete_is_red() {
+    let (mut h, _) = general_with_my_message("look at my menu");
+    h.click("More actions");
+    let danger = h.app.t().danger;
+    let rows = [
+        "Copy text",
+        "Forward message",
+        "Remind me in 1 hour",
+        "Remind me in 3 hours",
+        "Remind me tomorrow",
+        "Remind me at...",
+        "Edit message",
+        "Delete message",
+    ];
+    for name in rows {
+        let row = h.rect(name);
+        let slot = Rect::from_min_max(row.min, pos2(row.left() + 26.0, row.bottom()));
+        let icon = h.shapes_where(|s| {
+            (!matches!(s, egui::Shape::Text(_) | egui::Shape::Noop)
+                && slot.contains(s.visual_bounding_rect().center())
+                && s.visual_bounding_rect().width() < 20.0)
+                .then_some(())
+        });
+        assert!(!icon.is_empty(), "{:?} has an icon", name);
+    }
+    let words = |h: &Ui1, text: &str| {
+        h.shapes_where(|s| match s {
+            egui::Shape::Text(ts) if ts.galley.text() == text => {
+                ts.galley.job.sections.first().map(|x| x.format.color)
+            }
+            _ => None,
+        })
+    };
+    assert_eq!(words(&h, "Delete message"), vec![danger], "red words");
+    assert!(
+        !words(&h, "Edit message").contains(&danger),
+        "the others are not red"
+    );
+    let row = h.rect("Delete message");
+    let slot = Rect::from_min_max(row.min, pos2(row.left() + 26.0, row.bottom()));
+    let red_icon = h.shapes_where(|s| match s {
+        egui::Shape::LineSegment { points, stroke }
+            if stroke.color == danger && slot.contains(points[0]) =>
+        {
+            Some(())
+        }
+        egui::Shape::Path(p)
+            if p.stroke.color == egui::epaint::ColorMode::Solid(danger)
+                && slot.contains(p.points[0]) =>
+        {
+            Some(())
+        }
+        _ => None,
+    });
+    assert!(!red_icon.is_empty(), "a red bin");
+    // still asks before deleting, in red as well
+    h.click("Delete message");
+    assert_eq!(words(&h, "Click again to delete"), vec![danger]);
+}
+
 #[test]
 fn others_messages_cannot_be_edited_or_deleted() {
     let mut h = Ui1::new();

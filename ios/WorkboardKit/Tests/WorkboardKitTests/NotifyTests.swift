@@ -189,10 +189,91 @@ final class NotifyTests: XCTestCase {
         p.setChannelMode(301, "all")
         p.mutedUntil = 99
         p.replies = false
-        XCTAssertEqual(p.forServer, [
+        p.reactions = true
+        p.taskChanges = false
+        p.team = false
+        XCTAssertEqual(p.forServer(lang: "ko"), [
             "direct": true, "mentions": true, "replies": false, "channel_default": "mentions",
             "channel_modes": [["channel": 301, "mode": "all"]], "keywords": ["deploy"], "muted_until": 99,
+            "huddles": true, "reactions": true, "assigned": true, "comments": true, "task_changes": false,
+            "forms": true, "team": false, "goal_milestones": true, "lang": "ko",
         ])
+        XCTAssertEqual(p.forServer["lang"]?.string, NotifyPrefs.pushLanguage())
+    }
+
+    /// Banners from the server come in Korean when the phone's first
+    /// language is Korean, else in English.
+    func testThePushLanguageFollowsThePhone() {
+        XCTAssertEqual(NotifyPrefs.pushLanguage(["ko-KR", "en-US"]), "ko")
+        XCTAssertEqual(NotifyPrefs.pushLanguage(["ko"]), "ko")
+        XCTAssertEqual(NotifyPrefs.pushLanguage(["en-US", "ko-KR"]), "en")
+        XCTAssertEqual(NotifyPrefs.pushLanguage(["ja-JP"]), "en")
+        XCTAssertEqual(NotifyPrefs.pushLanguage([]), "en")
+    }
+
+    /// Goal milestones have no switch on the iPhone: the Mac's choice comes
+    /// with the synced choices, goes to the server, and is never written
+    /// back over the Mac's.
+    func testGoalMilestonesComeFromTheMac() throws {
+        XCTAssertEqual(NotifyPrefs().forServer(lang: "en")["goal_milestones"], true)
+        let mac: JSON = ["goal_milestones": false, "desktop": true]
+        var p = NotifyPrefs(mac: mac, mutedUntil: nil)
+        XCTAssertFalse(p.goalMilestones)
+        XCTAssertEqual(p.forServer(lang: "en")["goal_milestones"], false)
+        XCTAssertEqual(NotifyPrefs(mac: [:], mutedUntil: nil).goalMilestones, true, "the Mac's default")
+        // the iPhone's copy doesn't undo a change made on the Mac since
+        p.direct = false
+        let written = p.mac(base: ["goal_milestones": true])
+        XCTAssertEqual(written["goal_milestones"], true)
+        XCTAssertEqual(written["direct"], false)
+        XCTAssertNil(p.mac(base: nil)["goal_milestones"])
+        // kept on the phone across launches
+        let saved = try JSONDecoder().decode(NotifyPrefs.self, from: JSONEncoder().encode(p))
+        XCTAssertEqual(saved, p)
+        let old = try JSONDecoder().decode(NotifyPrefs.self, from: Data(#"{"direct": false}"#.utf8))
+        XCTAssertTrue(old.goalMilestones, "a file from an older build")
+    }
+
+    /// A call that starts while the app is away is pushed by the server;
+    /// the catch-up after reconnecting doesn't ring it again, but still
+    /// rings one the server didn't push.
+    func testACallThePushToldDoesNotRingAgain() {
+        let call = Note(key: "chat:301:900", kind: .huddle, title: "", body: "", target: .channel(301, thread: nil), ts: 1000)
+        let dm = Note(key: "chat:303:901", kind: .huddle, title: "", body: "", target: .channel(303, thread: nil), ts: 1000)
+        func shown(_ ch: UInt64, message: UInt64? = nil, kind: String? = nil, at: Int64 = 1001) -> Notify.Shown {
+            Notify.Shown(id: "n", channel: ch, message: message, thread: nil, ts: nil, shownAt: at, kind: kind)
+        }
+        XCTAssertEqual(Notify.callsNotPushed([call, dm], shown: []).map(\.key), ["chat:301:900", "chat:303:901"])
+        // the server's huddle push for that conversation
+        XCTAssertEqual(Notify.callsNotPushed([call, dm], shown: [shown(301, kind: "huddle")]).map(\.key), ["chat:303:901"])
+        // an older server's push of the call as a message (or this app's own)
+        XCTAssertEqual(Notify.callsNotPushed([call, dm], shown: [shown(303, message: 901)]).map(\.key), ["chat:301:900"])
+        // another message in the conversation isn't the call
+        XCTAssertEqual(Notify.callsNotPushed([call], shown: [shown(301, message: 5)]).count, 1)
+        // an old call's push left in the list doesn't hide a new call
+        XCTAssertEqual(Notify.callsNotPushed([call], shown: [shown(301, kind: "huddle", at: 500)]).count, 1)
+        XCTAssertEqual(Notify.callsNotPushed([call], shown: [shown(301, kind: "reaction")]).count, 1)
+    }
+
+    /// Where a tap on a notification goes: the server's "target" first,
+    /// else the older "task", "channel" and "parent".
+    func testATapOpensThePushTarget() {
+        func t(_ target: String?, task: UInt64? = nil, channel: UInt64? = nil, parent: UInt64? = nil) -> PushTarget {
+            PushTarget(target: target, task: task, channel: channel, parent: parent)
+        }
+        XCTAssertEqual(t("task:12", task: 12), .task(12))
+        XCTAssertEqual(t("chat:301", channel: 301), .chat(channel: 301, thread: nil))
+        XCTAssertEqual(t("chat:301:311", channel: 301, parent: 311), .chat(channel: 301, thread: 311))
+        XCTAssertEqual(t("goal:7"), .goal(7))
+        XCTAssertEqual(t("people"), .people)
+        // older pushes and the app's own notifications
+        XCTAssertEqual(t(nil, task: 5), .task(5))
+        XCTAssertEqual(t(nil, channel: 301, parent: 311), .chat(channel: 301, thread: 311))
+        XCTAssertEqual(t(nil), PushTarget.none)
+        // a target this build doesn't know falls back to the rest
+        XCTAssertEqual(t("whiteboard:3", channel: 301), .chat(channel: 301, thread: nil))
+        XCTAssertEqual(t("goal:x"), PushTarget.none)
+        XCTAssertEqual(t("whiteboard:3"), PushTarget.none)
     }
 
     /// A scan builds notes only for the last day (and keys only for the

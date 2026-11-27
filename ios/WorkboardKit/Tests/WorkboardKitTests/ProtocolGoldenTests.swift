@@ -61,6 +61,8 @@ final class ProtocolGoldenTests: XCTestCase {
         prefs.channelModes = [301: "nothing"]
         prefs.keywords = "launch, deploy"
         prefs.mutedUntil = 1763009999
+        prefs.comments = false
+        prefs.team = false
         let item = ScheduledItem(id: 1763000000123, channel: 301, parent: 5001, text: "Standup in 5 @Sam", at: 1763003600, mentions: [3])
         let built: [String: ClientMessage] = [
             "hello_token": hello {
@@ -78,7 +80,7 @@ final class ProtocolGoldenTests: XCTestCase {
             "resync": .resync,
             "set_password": .setPassword(email: "sam@example.com", password: "new-secret", oldPassword: "old-secret"),
             "set_password_first": .setPassword(email: "sam@example.com", password: "new-secret", oldPassword: nil),
-            "push_token": .pushToken(token: "apns-token", platform: "ios", env: "production", workspace: "macmini:8787", prefs: prefs.forServer),
+            "push_token": .pushToken(token: "apns-token", platform: "ios", env: "production", workspace: "macmini:8787", prefs: prefs.forServer(lang: "ko")),
             "push_token_stop": .pushToken(token: "", platform: "ios", env: "development"),
             "call_join": .callJoin(channel: 301),
             "typing": .typing(channel: 301, thread: 5001),

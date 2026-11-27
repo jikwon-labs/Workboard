@@ -29,6 +29,10 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
     public var meetingMinutes = 10
     /// My goals due today.
     public var goals = true
+    /// Someone else's progress takes my goal past 25, 50, 75 or 100%. Only
+    /// the Mac has a switch for it: the iPhone reads it from the synced
+    /// choices (`init(mac:)`) and passes it on to the server's pushes.
+    public var goalMilestones = true
     public var forms = true
     /// Someone joins the workspace (owners and admins).
     public var team = true
@@ -77,6 +81,7 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         meetings = b("meetings", meetings)
         meetingMinutes = n["meeting_minutes"]?.int.map { Int($0) } ?? meetingMinutes
         goals = b("goals", goals); forms = b("forms", forms); team = b("team", team); sound = b("sound", sound)
+        goalMilestones = b("goal_milestones", goalMilestones)
         badge = b("dock_badge", badge)
         channelDefault = n["channel_default"]?.string ?? channelDefault
         if let modes = n["channel_modes"]?.array {
@@ -90,7 +95,9 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
     }
 
     /// These choices in the Mac's shape, keeping what only the Mac has
-    /// (desktop banners, chat, reminders...) from `base`.
+    /// (desktop banners, chat, reminders, goal milestones...) from `base`.
+    /// `goalMilestones` is not written: the iPhone can't change it, and a
+    /// copy read before the Mac changed it would undo that change.
     public func mac(base: JSON?) -> JSON {
         var o = base?.object ?? [:]
         o["direct"] = .bool(direct); o["mentions"] = .bool(mentions); o["replies"] = .bool(replies)
@@ -118,9 +125,22 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         return keywordList.first { low.contains($0.lowercased()) }
     }
 
+    /// The language the server writes this phone's push banners in: "ko"
+    /// when the phone's first preferred language is Korean, else "en" (the
+    /// same rule as the app's History.korean).
+    public static func pushLanguage(_ preferred: [String] = Locale.preferredLanguages) -> String {
+        preferred.first?.hasPrefix("ko") == true ? "ko" : "en"
+    }
+
     /// What the server needs for this phone's pushes (wb_net::PushPrefs),
-    /// sent with the push token.
-    public var forServer: JSON {
+    /// sent with the push token, with banners in the phone's language.
+    public var forServer: JSON { forServer(lang: Self.pushLanguage()) }
+
+    /// `forServer` with banners in `lang`. The kinds after `muted_until`
+    /// tell the server this app takes huddles, reactions, task news, form
+    /// answers, people joining and goal milestones as pushes too (an app
+    /// that sends none of them gets only messages).
+    public func forServer(lang: String) -> JSON {
         let modes: [JSON] = channelModes.keys.sorted().map { id in
             let mode: String = channelModes[id] ?? ""
             return JSON.object(["channel": JSON.id(id), "mode": JSON.string(mode)])
@@ -134,6 +154,15 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         o["channel_modes"] = .array(modes)
         o["keywords"] = .array(words)
         o["muted_until"] = .int(mutedUntil)
+        o["huddles"] = .bool(huddles)
+        o["reactions"] = .bool(reactions)
+        o["assigned"] = .bool(assigned)
+        o["comments"] = .bool(comments)
+        o["task_changes"] = .bool(taskChanges)
+        o["forms"] = .bool(forms)
+        o["team"] = .bool(team)
+        o["goal_milestones"] = .bool(goalMilestones)
+        o["lang"] = .string(lang)
         return .object(o)
     }
 
@@ -147,6 +176,7 @@ public struct NotifyPrefs: Codable, Equatable, Sendable {
         comments = v(.comments, comments); taskChanges = v(.taskChanges, taskChanges); due = v(.due, due)
         dueTime = v(.dueTime, dueTime); meetings = v(.meetings, meetings); meetingMinutes = v(.meetingMinutes, meetingMinutes)
         goals = v(.goals, goals); forms = v(.forms, forms); team = v(.team, team); sound = v(.sound, sound)
+        goalMilestones = v(.goalMilestones, goalMilestones)
         badge = v(.badge, badge); channelDefault = v(.channelDefault, channelDefault)
         channelModes = v(.channelModes, channelModes); mutedUntil = v(.mutedUntil, mutedUntil)
         keywords = v(.keywords, keywords)
@@ -431,16 +461,6 @@ public enum Notify {
     /// huddle), not already told. `seen` gains every key of `all` (what
     /// exists with every kind on), so turning a kind on later doesn't bring
     /// back old news.
-    /// The kinds the server pushes to a phone that isn't connected
-    /// (server/src/push.rs): messages in DMs, mentions, thread replies,
-    /// channels set to every message and keywords.
-    public static func pushedByServer(_ k: Note.Kind) -> Bool {
-        switch k {
-        case .direct, .channel, .mention, .keyword, .reply: return true
-        case .huddle, .reaction, .assigned, .comment, .taskChange, .form, .member: return false
-        }
-    }
-
     public static func fresh(_ found: [Note], all: [String], seen: inout Set<String>, now: Int64) -> [Note] {
         var out: [Note] = []
         for n in found where seen.insert(n.key).inserted {
@@ -488,9 +508,10 @@ public enum Notify {
         }
     }
 
-    /// A notification shown on this iPhone, as `readOnes` looks at it: its
-    /// "channel", "id" (the message or reply), "parent" (a thread reply's)
-    /// and "ts" (the message's time), and when it was shown.
+    /// A notification shown on this iPhone, as `readOnes` and
+    /// `callsNotPushed` look at it: its "channel", "id" (the message or
+    /// reply), "parent" (a thread reply's), "ts" (the message's time) and
+    /// "kind" (the server's: "huddle", "reaction"...), and when it was shown.
     public struct Shown: Sendable {
         public let id: String
         public let channel: UInt64?
@@ -498,8 +519,29 @@ public enum Notify {
         public let thread: UInt64?
         public let ts: Int64?
         public let shownAt: Int64
-        public init(id: String, channel: UInt64?, message: UInt64?, thread: UInt64?, ts: Int64?, shownAt: Int64) {
-            self.id = id; self.channel = channel; self.message = message; self.thread = thread; self.ts = ts; self.shownAt = shownAt
+        public let kind: String?
+        public init(id: String, channel: UInt64?, message: UInt64?, thread: UInt64?, ts: Int64?, shownAt: Int64, kind: String? = nil) {
+            self.id = id; self.channel = channel; self.message = message; self.thread = thread; self.ts = ts; self.shownAt = shownAt; self.kind = kind
+        }
+    }
+
+    /// The calls in `calls` that no shown notification tells already. The
+    /// server pushes a call that starts while the app isn't connected, so
+    /// the catch-up after reconnecting rings only the ones it didn't (an
+    /// older server, or pushes not set up). A huddle push names its
+    /// conversation, and counts when it was shown no earlier than a minute
+    /// before the call started (an old call's push left in the list doesn't
+    /// hide a new one); a call told as a message (an older server, or this
+    /// app's own notification) names the message.
+    public static func callsNotPushed(_ calls: [Note], shown: [Shown]) -> [Note] {
+        calls.filter { n in
+            guard n.kind == .huddle, case .channel(let ch, _) = n.target else { return true }
+            let message = n.key.split(separator: ":").last.flatMap { UInt64($0) }
+            return !shown.contains { s in
+                guard s.channel == ch else { return false }
+                if let message, s.message == message { return true }
+                return s.kind == "huddle" && s.shownAt + 60 >= (n.ts ?? 0)
+            }
         }
     }
 

@@ -109,16 +109,24 @@ struct WorkboardApp: App {
         let (c, n, nv) = (client, notifier, nav)
         c.onUpdate = { n.scanSoon(client: c, nav: nv) }
         n.scan(client: c, nav: nv) // the first look only remembers what is there
-        appDelegate.onOpenTask = { id in nv.open(task: id) }
         appDelegate.currentChannel = { nv.currentChannel }
         appDelegate.otherWorkspace = { ws in c.savedWorkspace(pushKey: ws) != nil }
         // a push from a workspace kept on this iPhone opens that workspace first
-        let open: (UInt64, UInt64?, String?) -> Void = { ch, parent, ws in
+        let open: (PushTarget, String?) -> Void = { target, ws in
             if let w = c.savedWorkspace(pushKey: ws) { c.switchTo(w) }
-            nv.open(channel: ch, parent: parent)
+            switch target {
+            case .chat(let ch, let thread): nv.open(channel: ch, parent: thread)
+            case .task(let id): nv.open(task: id)
+            case .goal(let id): nv.open(goal: id)
+            // people joining: no screen of its own here, so the app opens where it was
+            case .people, .none: break
+            }
         }
         appDelegate.onOpen = open
-        if let (ch, parent, ws) = appDelegate.pendingOpen { open(ch, parent, ws) }
+        if let (target, ws) = appDelegate.pendingOpen {
+            appDelegate.pendingOpen = nil
+            open(target, ws)
+        }
         appDelegate.onDeviceToken = { hex in
             #if DEBUG
             c.setPushToken(hex, env: "development")
@@ -201,6 +209,12 @@ final class Nav {
     func open(task: UInt64) {
         showSettings = false
         path = [.task(task)]
+    }
+
+    /// Open a goal from a notification (its milestones).
+    func open(goal: UInt64) {
+        showSettings = false
+        path = [.place(.tools), .app("goals"), .goal(goal)]
     }
 
     /// The task on screen, if any (no notification for it).

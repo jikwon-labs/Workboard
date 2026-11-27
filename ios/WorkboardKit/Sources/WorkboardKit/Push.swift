@@ -146,3 +146,38 @@ extension SyncClient {
         return false
     }
 }
+
+/// Where tapping a notification goes. The server's pushes say it in
+/// "target" ("task:12", "chat:301", "chat:301:311", "people", "goal:7");
+/// older pushes and this app's own notifications say it with "task", or
+/// "channel" and "parent".
+public enum PushTarget: Equatable, Sendable {
+    case chat(channel: UInt64, thread: UInt64?)
+    case task(UInt64)
+    case goal(UInt64)
+    case people
+    /// Nothing to open: the app opens where it was.
+    case none
+
+    public init(target: String?, task: UInt64?, channel: UInt64?, parent: UInt64?) {
+        let parts = (target ?? "").split(separator: ":").map(String.init)
+        let ids = parts.dropFirst().map { UInt64($0) }
+        let known = !ids.contains(nil)
+        switch (parts.first, ids.count) {
+        case ("task", 1) where known: self = .task(ids[0]!)
+        case ("chat", 1) where known: self = .chat(channel: ids[0]!, thread: nil)
+        case ("chat", 2) where known: self = .chat(channel: ids[0]!, thread: ids[1])
+        case ("goal", 1) where known: self = .goal(ids[0]!)
+        case ("people", 0): self = .people
+        default:
+            // no target, or one this build doesn't know
+            if let task {
+                self = .task(task)
+            } else if let channel {
+                self = .chat(channel: channel, thread: parent)
+            } else {
+                self = .none
+            }
+        }
+    }
+}

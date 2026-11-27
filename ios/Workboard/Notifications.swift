@@ -13,6 +13,13 @@
 //   {"aps": {"alert": {"title": "...", "body": "..."}, "thread-id": "ch-301"},
 //    "channel": 301, "parent": 311}
 // ("parent" only for thread replies). Tapping it opens the conversation.
+// The server also pushes huddles, reactions to my messages, task news
+// (assigned, comments, mentions, changes), form answers, people joining and
+// goal milestones, in the phone's language (NotifyPrefs.forServer sends
+// which ones this phone wants and "lang"). Those carry "kind" and "target"
+// ("task:12", "chat:301", "chat:301:311", "people" or "goal:7"; PushTarget):
+// a tap opens the task, conversation or goal; "people" has no screen of its
+// own, so it only opens the app.
 // Every workspace kept on this iPhone stays registered, and the server adds
 // "ws" (this iPhone's name for the workspace, SyncClient.pushKey): a push from
 // a workspace that isn't open always shows, and tapping it switches to that
@@ -34,14 +41,13 @@ import WorkboardKit
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Set by the app once its state exists.
     @MainActor var onDeviceToken: (String) -> Void = { _ in }
-    /// (channel, thread, the notification's "ws")
-    @MainActor var onOpen: (UInt64, UInt64?, String?) -> Void = { _, _, _ in }
-    @MainActor var onOpenTask: (UInt64) -> Void = { _ in }
+    /// A tapped notification: where it goes, and its "ws".
+    @MainActor var onOpen: ((PushTarget, String?) -> Void)?
     @MainActor var currentChannel: () -> UInt64? = { nil }
     /// Whether a notification's "ws" is for a workspace that isn't open.
     @MainActor var otherWorkspace: (String?) -> Bool = { _ in false }
-    /// A tap that arrived before the app was ready.
-    @MainActor var pendingOpen: (UInt64, UInt64?, String?)?
+    /// A tap that arrived before the app was ready (taken by `wire`).
+    @MainActor var pendingOpen: (PushTarget, String?)?
     /// Takes in a quiet push (what I read on my other devices, its "ws");
     /// true when something changed. Set when the app starts (before any
     /// screen: iOS may start the app in the background for the push).
@@ -106,17 +112,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        let task = Notifier.number(info["task"])
-        let ch = Notifier.channel(in: info)
-        let parent = Notifier.number(info["parent"])
+        let target = PushTarget(target: info["target"] as? String, task: Notifier.number(info["task"]),
+                                channel: Notifier.channel(in: info), parent: Notifier.number(info["parent"]))
         let ws = info["ws"] as? String
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                if let task {
-                    self.onOpenTask(task)
-                } else if let ch {
-                    self.pendingOpen = (ch, parent, ws)
-                    self.onOpen(ch, parent, ws)
+                // still opens the app, and the workspace a push came from
+                if let open = self.onOpen {
+                    open(target, ws)
+                } else {
+                    self.pendingOpen = (target, ws)
                 }
             }
             completionHandler()
@@ -227,9 +232,20 @@ final class Notifier {
         fresh.removeAll { active && visible($0.target, nav: nav) }
         // back after being away (opened, brought forward, reconnected): what
         // happened meanwhile shows as unread and in the Inbox, and the server
-        // pushed the messages among it already; only a call still rings
-        if client.catchingUp { fresh.removeAll { $0.kind != .huddle } }
-        deliver(fresh, view: client.view)
+        // pushed it already; only a call still rings, unless the server
+        // pushed that too
+        if client.catchingUp {
+            let calls = fresh.filter { $0.kind == .huddle }
+            if !calls.isEmpty {
+                let view = client.view
+                Task {
+                    let shown = await self.shown()
+                    self.deliver(Notify.callsNotPushed(calls, shown: shown), view: view)
+                }
+            }
+        } else {
+            deliver(fresh, view: client.view)
+        }
         updateBadge(data, view: client.view, me: me, inbox: inbox)
         Task { await clearRead(data) }
         scheduleClock(client: client)
@@ -246,8 +262,13 @@ final class Notifier {
     /// Take away the notifications of what I have read, here or on my other
     /// devices (Notify.readOnes).
     func clearRead(_ data: JSON) async {
-        let center = UNUserNotificationCenter.current()
-        let shown = await center.deliveredNotifications().map { n in
+        let gone = Notify.readOnes(await shown(), data: data)
+        if !gone.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: gone) }
+    }
+
+    /// The notifications in Notification Center, as Notify looks at them.
+    func shown() async -> [Notify.Shown] {
+        await UNUserNotificationCenter.current().deliveredNotifications().map { n in
             let info = n.request.content.userInfo
             return Notify.Shown(
                 id: n.request.identifier,
@@ -255,10 +276,9 @@ final class Notifier {
                 message: Notifier.number(info["id"]),
                 thread: Notifier.number(info["parent"]),
                 ts: Notifier.number(info["ts"]).map { Int64(clamping: $0) },
-                shownAt: Int64(n.date.timeIntervalSince1970))
+                shownAt: Int64(n.date.timeIntervalSince1970),
+                kind: info["kind"] as? String)
         }
-        let gone = Notify.readOnes(shown, data: data)
-        if !gone.isEmpty { center.removeDeliveredNotifications(withIdentifiers: gone) }
     }
 
     /// The conversation or task already on screen needs no notification.

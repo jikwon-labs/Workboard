@@ -9,8 +9,8 @@
 // How it is announced (`deliver`): nothing when I'm already looking at it; a
 // toast and a short sound when the app is in front; otherwise a banner in
 // Notification Center (src/notifier.rs), and a Dock bounce for direct
-// messages, mentions and huddles. The Dock badge counts the Inbox and unread
-// direct messages. "Pause notifications" (`muted_until`) and the quiet hours
+// messages, mentions and huddles. The Dock badge counts the Inbox, unread
+// direct messages and what came in from the other workspaces (watch.rs). "Pause notifications" (`muted_until`) and the quiet hours
 // of "Pause notifications on a schedule" silence the banners, sounds and
 // bounces (`paused_at`); the unread counts stay.
 //
@@ -1127,7 +1127,8 @@ impl App {
     }
 
     /// The number on the Dock icon: the Inbox badge plus unread direct
-    /// messages, also while notifications are paused.
+    /// messages and the other workspaces' notes, also while notifications
+    /// are paused.
     pub(super) fn dock_count(&self) -> usize {
         if !self.data.extra.notify.dock_badge {
             return 0;
@@ -1143,7 +1144,10 @@ impl App {
             // (its author's clock behind) still counts and a read one doesn't
             .map(|c| self.unread_here(c))
             .sum();
-        self.inbox_badge() + dms
+        // and what came in for me in the other workspaces (the workspace
+        // button's red number), so the Dock and the app switcher don't read
+        // "nothing" while the app shows some
+        self.inbox_badge() + dms + self.ws_unread_total()
     }
 
     /// Once a frame: banner clicks, news after changes came in, the clock,

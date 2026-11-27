@@ -40,10 +40,13 @@ impl App {
                 egui::Frame::new()
                     .inner_margin(egui::Margin::symmetric(18, 0))
                     .show(ui, |ui| {
+                        let mut others_shown = false;
                         if self.inbox_tab == InboxTab::Primary {
+                            others_shown = self.other_workspaces_block(ui);
                             self.reminders_block(ui);
                         }
-                        // reminders are waiting above: not "all caught up"
+                        // reminders or other workspaces' notes are waiting
+                        // above: not "all caught up"
                         let reminders_shown = self.inbox_tab == InboxTab::Primary
                             && self
                                 .data
@@ -51,7 +54,7 @@ impl App {
                                 .reminders
                                 .iter()
                                 .any(|r| r.owner == self.data.me && !r.done);
-                        if items.is_empty() && reminders_shown && !filtered_out {
+                        if items.is_empty() && (reminders_shown || others_shown) && !filtered_out {
                             ui.add_space(16.0);
                             ui.label(
                                 RichText::new(tr("No new comments, mentions or assignments."))
@@ -66,6 +69,73 @@ impl App {
                         }
                     });
             });
+    }
+
+    /// What came in for me in the other workspaces on this computer (the
+    /// red number on the workspace button), one row each that opens it:
+    /// the Inbox only lists the open workspace's own. Whether any was shown.
+    fn other_workspaces_block(&mut self, ui: &mut Ui) -> bool {
+        let t = self.t();
+        let waiting: Vec<(WsEntry, usize)> = self
+            .workspace_order()
+            .into_iter()
+            .map(|w| {
+                let n = self.ws_unread(&w.file);
+                (w, n)
+            })
+            .filter(|(_, n)| *n > 0)
+            .collect();
+        if waiting.is_empty() {
+            return false;
+        }
+        ui.add_space(8.0);
+        ui.label(RichText::new(tr("In other workspaces")).strong());
+        let mut open = None;
+        for (w, n) in waiting {
+            let width = ui.available_width();
+            let (r, resp) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
+            name_it(&resp, &format!("Open workspace {}", w.name));
+            if resp.hovered() {
+                ui.painter().rect_filled(r, 6.0, t.hover);
+            }
+            line_icon(
+                ui.painter(),
+                Icon::Building,
+                r.left_center() + vec2(14.0, 0.0),
+                t.text2,
+            );
+            let g = ui
+                .painter()
+                .layout_no_wrap(w.name.clone(), FontId::proportional(14.0), t.text);
+            let name_w = g.size().x;
+            ui.painter().galley(
+                pos2(r.left() + 32.0, r.center().y - g.size().y / 2.0),
+                g,
+                t.text,
+            );
+            super::shell::paint_unread_badge(
+                ui.painter(),
+                t.danger,
+                pos2(r.left() + 32.0 + name_w + 8.0, r.center().y),
+                Align2::LEFT_CENTER,
+                n,
+            );
+            ui.painter().text(
+                r.right_center() - vec2(10.0, 0.0),
+                Align2::RIGHT_CENTER,
+                tr("Open"),
+                FontId::proportional(13.0),
+                t.text2,
+            );
+            if resp.clicked() {
+                open = Some(w.file);
+            }
+        }
+        ui.add_space(8.0);
+        if let Some(file) = open {
+            self.switch_workspace(&file);
+        }
+        true
     }
 
     /// Primary / Other / Later / Cleared along the top.

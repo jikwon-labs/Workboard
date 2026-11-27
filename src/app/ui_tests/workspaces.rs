@@ -577,3 +577,32 @@ fn going_back_to_a_workspace_opens_where_it_was_left() {
     let other = App::build(None, Some(Data::seed()));
     assert!(other.ws_spots.is_empty());
 }
+
+#[test]
+fn the_inbox_points_at_what_came_in_in_the_other_workspaces() {
+    let _home = own_home("ws-unread-inbox");
+    let mut h = Ui1::new();
+    let (side, third) = three_workspaces(&mut h);
+    h.settle();
+    h.click("Inbox");
+    assert!(!h.has("In other workspaces"), "nothing came in");
+    let dock = h.app.dock_count();
+    h.app.watch_rt.unread.insert(side.clone(), 2);
+    h.app.watch_rt.unread.insert(third.clone(), 1);
+    h.settle();
+    // the Inbox doesn't say "all caught up" while the workspace button shows 3
+    assert!(h.has("In other workspaces"));
+    assert!(!h.has("You're all caught up"));
+    assert_eq!(
+        red_badge_in(&h, "Open workspace Side Biz"),
+        Some("2".into())
+    );
+    assert_eq!(red_badge_in(&h, "Open workspace Third"), Some("1".into()));
+    // and the Dock (and the app switcher) counts them too
+    assert_eq!(h.app.dock_count(), dock + 3);
+    // a row opens that workspace, which then has nothing waiting
+    h.click("Open workspace Side Biz");
+    h.settle();
+    assert_eq!(h.app.ws_file, side);
+    assert_eq!(h.app.ws_unread(&side), 0);
+}

@@ -1049,8 +1049,15 @@ fn open_in_channel_goes_to_the_post_and_lights_it_up() {
             .any(|(r, _)| r.top() > 120.0 && r.bottom() < composer.top()),
         "the post is in sight: {title:?}, composer at {composer:?}"
     );
+    // (the post's own title, not the banner's over the messages)
     let lit = |h: &Ui1| {
-        let at = h.painted_text("Office move")[0].0;
+        let banner = h.rect("Announcement banner");
+        let at = h
+            .painted_text("Office move")
+            .into_iter()
+            .map(|t| t.0)
+            .find(|r| !banner.contains(r.center()))
+            .unwrap();
         h.shapes.iter().any(|c| match &c.shape {
             egui::Shape::Rect(r) => {
                 r.rect.contains(at.center())

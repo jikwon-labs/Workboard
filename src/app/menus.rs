@@ -129,6 +129,10 @@ pub(super) enum Modal {
         title: String,
         url: String,
     },
+    /// "Share with the team?" for my AI chat `id`.
+    ShareAiChat {
+        id: u64,
+    },
     SwitchUser,
     NewDashboard {
         name: String,
@@ -1605,6 +1609,7 @@ impl App {
             Modal::Update => tr("Check for updates").into(),
             Modal::SlackImport(_) => tr("Import from Slack").into(),
             Modal::Bookmark { .. } => tr("Add bookmark").into(),
+            Modal::ShareAiChat { .. } => tr("Share with the team").into(),
             Modal::SwitchUser => tr("Switch person").into(),
             Modal::Ai(d) => d.title.clone(),
             Modal::NewDashboard { .. } => tr("Create Dashboard").into(),
@@ -1630,6 +1635,8 @@ impl App {
                 tr("Remove")
             } else if *kind == "invite" {
                 tr("Cancel invite")
+            } else if *kind == "ai_chat" {
+                tr("Delete chat")
             } else {
                 tr("Delete")
             }
@@ -1845,6 +1852,7 @@ impl App {
             Modal::Update => close = crate::updater::status_ui(ui, t, true),
             Modal::Bookmark { title, url } => close = self.bookmark_body(ui, t, title, url),
             Modal::Ai(d) => close = self.ai_dialog_body(ui, t, d),
+            Modal::ShareAiChat { id } => close = self.share_ai_chat_body(ui, t, *id),
             Modal::SwitchUser if self.on_server() => close = self.switch_user_on_server_body(ui, t),
             Modal::SwitchUser => close = self.switch_user_body(ui, t),
             Modal::ConfirmRemove { kind, id, name } => {

@@ -943,6 +943,45 @@ fn personal_items_stay_on_this_computer() {
 }
 
 #[test]
+fn ai_chats_reach_the_team_only_when_shared() {
+    let (mut a, _, _, _) = pair(json!([]));
+    a["extra"]["ai_chats"] = json!([
+        {"id": 5, "title": "Mine", "by": 1, "created": 1, "personal": true,
+         "turns": [{"id": 50, "question": "q", "answer": "secret", "ts": 2}]},
+        {"id": 6, "title": "Shared", "by": 1, "created": 1,
+         "turns": [{"id": 60, "question": "q", "answer": "a", "ts": 2}]}
+    ]);
+    let out = shareable(&a);
+    let ids: Vec<u64> = out["extra"]["ai_chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(ids, vec![6]);
+    assert!(!out.to_string().contains("secret"));
+    // the team's copy (without the personal one) keeps it here
+    let mut ma = meta_of(&a);
+    save(&mut a, &mut ma, 20);
+    let team = shareable(&a);
+    merge(&mut a, &[team.clone()]);
+    assert_eq!(a["extra"]["ai_chats"].as_array().unwrap().len(), 2);
+    // a teammate's copy gets the shared one, turns and all
+    let mut b = json!({"extra": {"ai_chats": []}});
+    merge(&mut b, &[team]);
+    assert_eq!(b["extra"]["ai_chats"][0]["id"], 6);
+    assert_eq!(b["extra"]["ai_chats"][0]["turns"][0]["answer"], "a");
+    // taken back (deleted here), it is deleted for the teammate too
+    a["extra"]["ai_chats"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|c| c["id"] != 6);
+    save(&mut a, &mut ma, 30);
+    merge(&mut b, &[shareable(&a)]);
+    assert!(b["extra"]["ai_chats"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn copies_from_older_apps_are_told_apart() {
     let new = json!({"app": "0.1.7", "extra": {"sync": {"v": META_V}}});
     assert_eq!(older_app(&new, "0.1.7"), None);

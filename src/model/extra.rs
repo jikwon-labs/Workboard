@@ -586,6 +586,40 @@ pub struct Bookmark {
     pub personal: bool,
 }
 
+/// A conversation on the AI page. It stays on this computer (`personal`,
+/// left out of the copy teammates get by `wb_sync::shareable`) until the
+/// person who asked shares it; then everyone in the workspace can read it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct AiChat {
+    pub id: u64,
+    /// the first question, shortened
+    pub title: String,
+    /// who asked the questions
+    pub by: u64,
+    pub created: i64,
+    /// the answered questions, oldest first
+    #[serde(default)]
+    pub turns: Vec<AiChatTurn>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub personal: bool,
+}
+
+/// One answered question of an `AiChat`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct AiChatTurn {
+    pub id: u64,
+    pub question: String,
+    pub answer: String,
+    pub ts: i64,
+}
+
+impl AiChat {
+    /// When it was last asked something (for the newest-first order).
+    pub fn last_ts(&self) -> i64 {
+        self.turns.last().map_or(self.created, |t| t.ts)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Dashboard {
     pub id: u64,
@@ -847,6 +881,12 @@ pub struct Extra {
     /// (`Data::keep_old_bookmarks_personal`).
     #[serde(default)]
     pub bookmarks_shared: bool,
+    /// AI page conversations: mine stay on this computer until I share
+    /// one (`AiChat::personal`); shared ones are everyone's to read.
+    /// Written even when empty, like the other shared lists, so a merge
+    /// that fills in the list finds nothing new.
+    #[serde(default)]
+    pub ai_chats: Vec<AiChat>,
     pub dashboards: Vec<Dashboard>,
     pub notepad: String,
     pub apps: ClickApps,
@@ -982,6 +1022,7 @@ impl Default for Extra {
             templates: vec![],
             bookmarks: vec![],
             bookmarks_shared: true,
+            ai_chats: vec![],
             dashboards: vec![],
             notepad: String::new(),
             apps: ClickApps::default(),

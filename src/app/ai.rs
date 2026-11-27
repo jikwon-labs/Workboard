@@ -43,10 +43,13 @@ pub(super) struct AiJob {
     pub state: AiState,
 }
 
-/// A question on the AI page and the job answering it.
+/// A question on the AI page and the job answering it, until its answer
+/// is in: then it becomes a turn of its chat (`Extra::ai_chats`).
 pub(super) struct AiQuestion {
     pub question: String,
     pub job: u64,
+    /// the chat it goes in (made when its first answer comes)
+    pub chat: u64,
 }
 
 #[derive(Default)]
@@ -58,8 +61,11 @@ pub(super) struct AiRt {
     offered_at: Option<String>,
     next: u64,
     pub jobs: BTreeMap<u64, AiJob>,
-    /// the AI page's conversation, oldest first
+    /// questions on the AI page still being answered, or whose answer
+    /// failed, oldest first: answered ones are kept in `Extra::ai_chats`
     pub chat: Vec<AiQuestion>,
+    /// the chat the AI page shows; None for a new one
+    pub open: Option<u64>,
     /// the question being typed there
     pub draft: String,
     /// a task window or dialog was open at the end of the last frame: an
@@ -485,6 +491,7 @@ impl App {
             self.ai.model = None;
             self.ai_fail_going();
         }
+        self.ai_keep_answers();
         let mut shown: HashSet<u64> = self.ai.chat.iter().map(|q| q.job).collect();
         if let Some(Modal::Ai(d)) = &self.modal {
             shown.insert(d.job);
@@ -504,6 +511,183 @@ impl App {
                     }
                 }
             }
+        }
+    }
+
+    /// Puts each answered question of the AI page into its chat, kept in
+    /// the workspace file on this computer (and shared with the team once
+    /// its chat is).
+    fn ai_keep_answers(&mut self) {
+        let done: Vec<usize> = (0..self.ai.chat.len())
+            .filter(|&i| {
+                self.ai
+                    .jobs
+                    .get(&self.ai.chat[i].job)
+                    .is_some_and(|j| j.state == AiState::Done && !j.text.trim().is_empty())
+            })
+            .collect();
+        for i in done.into_iter().rev() {
+            let q = self.ai.chat.remove(i);
+            let Some(j) = self.ai.jobs.remove(&q.job) else {
+                continue;
+            };
+            let turn = AiChatTurn {
+                id: self.data.new_id(),
+                question: q.question.clone(),
+                answer: j.text,
+                ts: crate::model::now_ts(),
+            };
+            match self.data.extra.ai_chats.iter_mut().find(|c| c.id == q.chat) {
+                Some(c) => c.turns.push(turn),
+                None => self.data.extra.ai_chats.push(AiChat {
+                    id: q.chat,
+                    title: chat_title(&q.question),
+                    by: self.data.me,
+                    created: turn.ts,
+                    turns: vec![turn],
+                    personal: true,
+                }),
+            }
+            self.dirty = true;
+        }
+    }
+
+    /// The chat with id `id`, if it is still there.
+    pub(super) fn ai_chat(&self, id: u64) -> Option<&AiChat> {
+        self.data.extra.ai_chats.iter().find(|c| c.id == id)
+    }
+
+    /// The AI chats the sidebar lists, newest first: mine, and the ones
+    /// teammates shared.
+    pub(super) fn ai_chats_listed(&self) -> Vec<&AiChat> {
+        let mut v: Vec<&AiChat> = self.data.extra.ai_chats.iter().collect();
+        v.sort_by_key(|c| std::cmp::Reverse(c.last_ts()));
+        v
+    }
+
+    /// Opens chat `id` on the AI page (None: a new chat).
+    pub(super) fn ai_open_chat(&mut self, id: Option<u64>) {
+        self.ai.open = id;
+        // a failed question of the chat left behind goes
+        self.ai.chat.retain(|q| {
+            Some(q.chat) == id
+                || self
+                    .ai
+                    .jobs
+                    .get(&q.job)
+                    .is_some_and(|j| j.state == AiState::Going)
+        });
+        self.section = Section::Ai;
+    }
+
+    /// Shares my chat `id` with everyone in the workspace.
+    pub(super) fn ai_share_chat(&mut self, id: u64) {
+        let me = self.data.me;
+        if let Some(c) = self
+            .data
+            .extra
+            .ai_chats
+            .iter_mut()
+            .find(|c| c.id == id && c.by == me)
+        {
+            c.personal = false;
+            self.dirty = true;
+            self.toast(tr("Shared with the team"));
+        }
+    }
+
+    /// The "Share with the team?" dialog: the answers came from what I may
+    /// see, so they can tell teammates about things they can't. True closes.
+    pub(super) fn share_ai_chat_body(&mut self, ui: &mut Ui, t: &Theme, id: u64) -> bool {
+        ui.label(tr(
+            "Everyone in this workspace will be able to read this chat.",
+        ));
+        ui.add_space(6.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new(tr("The answers used what only you can see, like your private channels and direct messages, so they can tell others about those. Read them before you share."))
+                    .color(crate::widgets::WARN_ORANGE),
+            )
+            .wrap(),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(tr("You can stop sharing at any time."))
+                .size(12.0)
+                .color(t.text3),
+        );
+        let (share, cancel) = dialog_footer(ui, t, tr("Share"), true);
+        if share {
+            self.ai_share_chat(id);
+        }
+        share || cancel
+    }
+
+    /// Takes my chat `id` back from the team: it leaves their sidebars and
+    /// stays on this computer, as a chat of its own (new ids, since the
+    /// shared one is deleted for everyone).
+    pub(super) fn ai_unshare_chat(&mut self, id: u64) {
+        let me = self.data.me;
+        let Some(i) = self
+            .data
+            .extra
+            .ai_chats
+            .iter()
+            .position(|c| c.id == id && c.by == me && !c.personal)
+        else {
+            return;
+        };
+        let old = self.data.extra.ai_chats.remove(i);
+        let copy = self.ai_chat_copy(&old);
+        let new_id = copy.id;
+        self.data.extra.ai_chats.insert(i, copy);
+        for q in &mut self.ai.chat {
+            if q.chat == id {
+                q.chat = new_id;
+            }
+        }
+        if self.ai.open == Some(id) {
+            self.ai.open = Some(new_id);
+        }
+        self.dirty = true;
+        self.toast(tr("Only you can see this chat now"));
+    }
+
+    /// A copy of `c` that is mine and only on this computer, with new ids.
+    fn ai_chat_copy(&mut self, c: &AiChat) -> AiChat {
+        let id = self.data.new_id();
+        let turns = c
+            .turns
+            .iter()
+            .map(|t| AiChatTurn {
+                id: self.data.new_id(),
+                ..t.clone()
+            })
+            .collect();
+        AiChat {
+            id,
+            title: c.title.clone(),
+            by: self.data.me,
+            created: crate::model::now_ts(),
+            turns,
+            personal: true,
+        }
+    }
+
+    /// Deletes my chat `id` (for the team too when it was shared).
+    pub(super) fn ai_delete_chat(&mut self, id: u64) {
+        let me = self.data.me;
+        let before = self.data.extra.ai_chats.len();
+        self.data
+            .extra
+            .ai_chats
+            .retain(|c| !(c.id == id && c.by == me));
+        if self.data.extra.ai_chats.len() != before {
+            self.ai.chat.retain(|q| q.chat != id);
+            if self.ai.open == Some(id) {
+                self.ai.open = None;
+            }
+            self.dirty = true;
         }
     }
 
@@ -1034,20 +1218,42 @@ impl App {
 
     // ------------------------------------------------------- the AI page
 
-    /// Asks `question` on the AI page, after the answered questions before it.
+    /// Asks `question` on the AI page, after the answered questions of the
+    /// chat it shows. A teammate's shared chat goes on in a copy of my own.
     fn ai_ask_question(&mut self, question: String) {
-        let mut history: Vec<AiTurn> = self
+        let me = self.data.me;
+        let theirs = self
             .ai
-            .chat
-            .iter()
-            .filter_map(|q| {
-                let j = self.ai.jobs.get(&q.job)?;
-                (j.state == AiState::Done && !j.text.trim().is_empty()).then(|| AiTurn {
-                    question: q.question.clone(),
-                    answer: j.text.clone(),
-                })
+            .open
+            .and_then(|id| self.ai_chat(id))
+            .filter(|c| c.by != me)
+            .cloned();
+        if let Some(c) = theirs {
+            let copy = self.ai_chat_copy(&c);
+            self.ai.open = Some(copy.id);
+            self.data.extra.ai_chats.push(copy);
+            self.dirty = true;
+        }
+        let chat = match self.ai.open {
+            Some(id) => id,
+            None => {
+                let id = self.data.new_id();
+                self.ai.open = Some(id);
+                id
+            }
+        };
+        let mut history: Vec<AiTurn> = self
+            .ai_chat(chat)
+            .map(|c| {
+                c.turns
+                    .iter()
+                    .map(|t| AiTurn {
+                        question: t.question.clone(),
+                        answer: t.answer.clone(),
+                    })
+                    .collect()
             })
-            .collect();
+            .unwrap_or_default();
         // the server reads only the newest few
         let n = history.len();
         history.drain(..n.saturating_sub(MAX_HISTORY));
@@ -1055,12 +1261,25 @@ impl App {
             question: question.clone(),
             history,
         });
-        self.ai.chat.push(AiQuestion { question, job });
+        self.ai.chat.push(AiQuestion {
+            question,
+            job,
+            chat,
+        });
     }
 
-    /// Whether the newest question is still being answered.
+    /// The questions of the chat the AI page shows that aren't in it yet
+    /// (being answered, or failed).
+    fn ai_live(&self) -> Vec<&AiQuestion> {
+        match self.ai.open {
+            Some(id) => self.ai.chat.iter().filter(|q| q.chat == id).collect(),
+            None => vec![],
+        }
+    }
+
+    /// Whether a question of the chat the AI page shows is being answered.
     fn ai_answering(&self) -> bool {
-        self.ai.chat.last().is_some_and(|q| {
+        self.ai_live().iter().any(|q| {
             self.ai
                 .jobs
                 .get(&q.job)
@@ -1075,6 +1294,26 @@ impl App {
     pub(super) fn ai_page(&mut self, ui: &mut Ui) {
         let t = self.t();
         let offered = self.ai_offered();
+        // a chat that went (deleted, or taken back by who shared it) with
+        // nothing of it still coming leaves a new chat
+        if let Some(id) = self.ai.open {
+            if self.ai_chat(id).is_none() && self.ai_live().is_empty() {
+                self.ai.open = None;
+            }
+        }
+        let me = self.data.me;
+        let open = self
+            .ai
+            .open
+            .and_then(|id| self.ai_chat(id))
+            .map(|c| (c.id, c.title.clone(), c.by, c.personal));
+        let owner = open.as_ref().filter(|o| o.2 != me).map(|o| {
+            self.data
+                .member(o.2)
+                .map_or(String::new(), |m| m.shown().to_string())
+        });
+        let has_chats = !self.data.extra.ai_chats.is_empty();
+        let side_list = has_chats && ui.available_width() >= 820.0;
         let mut close = false;
         let mut ask: Option<String> = None;
         // a failed question asked again takes its place
@@ -1093,7 +1332,29 @@ impl App {
                     ai_badge(ui, 24.0);
                     ui.add_space(2.0);
                     ui.label(RichText::new(tr("AI")).size(17.0).strong().color(t.text));
-                    if let Some(m) = self.ai.model.clone().filter(|_| offered) {
+                    if let Some((_, title, _, personal)) = &open {
+                        ui.add_space(6.0);
+                        let room = (ui.available_width() - 420.0).max(60.0);
+                        ui.allocate_ui(vec2(room, 30.0), |ui| {
+                            ui.horizontal_centered(|ui| {
+                                let l = ui.add(
+                                    egui::Label::new(
+                                        RichText::new(title.as_str()).size(14.0).color(t.text2),
+                                    )
+                                    .truncate(),
+                                );
+                                name_it(&l, "AI chat title");
+                                if !personal {
+                                    let note = match &owner {
+                                        Some(n) => trf!("Shared by {}", n),
+                                        None => tr("Shared with the team").to_string(),
+                                    };
+                                    ui.label(RichText::new(note).size(11.5).color(t.text3));
+                                }
+                            });
+                        });
+                    }
+                    if let Some(m) = self.ai.model.clone().filter(|_| offered && open.is_none()) {
                         ui.add_space(4.0);
                         egui::Frame::new()
                             .fill(t.hover)
@@ -1107,11 +1368,70 @@ impl App {
                         close = icon_button(ui, &t, Icon::Close, "", "Close AI", false)
                             .on_hover_text(format!("{} (Esc)", tr("Close")))
                             .clicked();
-                        if !self.ai.chat.is_empty()
+                        // a narrow window has no room for the chats beside
+                        // the conversation: they are in a menu
+                        if !side_list && has_chats {
+                            let b = icon_button(ui, &t, Icon::List, "", "AI chats", false)
+                                .on_hover_text(tr("AI Chats"));
+                            crate::widgets::click_menu(&b, |ui| {
+                                ui.set_width(280.0);
+                                egui::ScrollArea::vertical()
+                                    .max_height(360.0)
+                                    .show(ui, |ui| {
+                                        if self.ai_chat_list(ui, &t) {
+                                            ui.close_menu();
+                                        }
+                                    });
+                            });
+                        }
+                        if (open.is_some() || !self.ai_live().is_empty())
                             && icon_button(ui, &t, Icon::Edit, tr("New chat"), "New chat", true)
                                 .clicked()
                         {
-                            self.ai.chat.clear();
+                            self.ai_open_chat(None);
+                        }
+                        // only who asked shares, takes back or deletes a chat
+                        if let Some((id, title, by, personal)) = open.clone() {
+                            if by == me {
+                                if icon_button(ui, &t, Icon::Trash, "", "Delete chat", false)
+                                    .on_hover_text(tr("Delete chat"))
+                                    .clicked()
+                                {
+                                    self.modal = Some(Modal::ConfirmRemove {
+                                        kind: "ai_chat",
+                                        id,
+                                        name: title,
+                                    });
+                                }
+                                if personal {
+                                    if icon_button(
+                                        ui,
+                                        &t,
+                                        Icon::Share,
+                                        tr("Share"),
+                                        "Share chat",
+                                        true,
+                                    )
+                                    .on_hover_text(tr(
+                                        "Let everyone in this workspace read this chat",
+                                    ))
+                                    .clicked()
+                                    {
+                                        self.modal = Some(Modal::ShareAiChat { id });
+                                    }
+                                } else if icon_button(
+                                    ui,
+                                    &t,
+                                    Icon::Lock,
+                                    tr("Stop sharing"),
+                                    "Stop sharing chat",
+                                    true,
+                                )
+                                .clicked()
+                                {
+                                    self.ai_unshare_chat(id);
+                                }
+                            }
                         }
                     });
                 });
@@ -1119,12 +1439,53 @@ impl App {
         let line = ui.available_rect_before_wrap();
         ui.painter()
             .hline(line.x_range(), line.top(), Stroke::new(1.0_f32, t.border));
+        // ---- the kept chats at the left of a wide window
+        let mut body = ui.available_rect_before_wrap();
+        if side_list {
+            let list = Rect::from_min_max(body.min, pos2(body.left() + 250.0, body.bottom()));
+            ui.painter()
+                .vline(list.right(), list.y_range(), Stroke::new(1.0_f32, t.border));
+            let mut lui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(list.shrink2(vec2(8.0, 8.0)))
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            egui::ScrollArea::vertical()
+                .id_salt("ai_chats_list")
+                .auto_shrink([false, false])
+                .show(&mut lui, |ui| {
+                    ui.label(
+                        RichText::new(tr("AI Chats"))
+                            .size(12.5)
+                            .strong()
+                            .color(t.text3),
+                    );
+                    ui.add_space(4.0);
+                    self.ai_chat_list(ui, &t);
+                });
+            body.min.x = list.right() + 1.0;
+        }
         // ---- body: a centred column
-        let body = ui.available_rect_before_wrap();
         ui.allocate_rect(body, Sense::hover());
         let col_w = (body.width() - 48.0).clamp(300.0, 720.0);
         let col_x = body.center().x - col_w / 2.0;
-        if self.ai.chat.is_empty() {
+        // the chat's answered questions, then the ones still coming or failed
+        let saved: Vec<(String, String)> = open
+            .as_ref()
+            .and_then(|o| self.ai_chat(o.0))
+            .map(|c| {
+                c.turns
+                    .iter()
+                    .map(|t| (t.question.clone(), t.answer.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let live: Vec<(String, u64)> = self
+            .ai_live()
+            .iter()
+            .map(|q| (q.question.clone(), q.job))
+            .collect();
+        if saved.is_empty() && live.is_empty() {
             let mut cui = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(Rect::from_min_max(
@@ -1210,21 +1571,34 @@ impl App {
                 .stick_to_bottom(true)
                 .show(&mut lui, |ui| {
                     ui.add_space(20.0);
-                    let turns: Vec<(String, u64)> = self
-                        .ai
-                        .chat
-                        .iter()
-                        .map(|q| (q.question.clone(), q.job))
-                        .collect();
-                    let last = turns.len().saturating_sub(1);
-                    for (i, (q, job)) in turns.into_iter().enumerate() {
+                    let n = saved.len() + live.len();
+                    let turns =
+                        saved
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (q, a))| (q.clone(), None, Some(a.clone()), i))
+                            .chain(live.iter().enumerate().map(|(i, (q, job))| {
+                                (q.clone(), Some(*job), None, saved.len() + i)
+                            }))
+                            .collect::<Vec<_>>();
+                    for (q, job, answer, i) in turns {
                         ui.horizontal(|ui| {
                             ui.add_space((col_x - list.left()).max(0.0));
                             ui.vertical(|ui| {
                                 ui.set_width(col_w);
-                                if let Some(again) = self.ai_turn(ui, &t, &q, job, i == last) {
+                                let (state, text) = match (job, answer) {
+                                    (_, Some(a)) => (AiState::Done, a),
+                                    (Some(job), None) => match self.ai.jobs.get(&job) {
+                                        Some(j) => (j.state.clone(), j.text.clone()),
+                                        None => (AiState::Failed(tr(BROKE).into()), String::new()),
+                                    },
+                                    (None, None) => (AiState::Done, String::new()),
+                                };
+                                if let Some(again) =
+                                    self.ai_turn(ui, &t, &q, &state, &text, i, i + 1 == n)
+                                {
                                     ask = Some(again);
-                                    retry = Some(job);
+                                    retry = job;
                                 }
                             });
                         });
@@ -1239,6 +1613,17 @@ impl App {
                     ))
                     .layout(Layout::top_down(Align::Min)),
             );
+            if let Some(n) = &owner {
+                fui.label(
+                    RichText::new(trf!(
+                        "{} shared this chat. What you ask goes on in a chat of your own.",
+                        n
+                    ))
+                    .size(11.5)
+                    .color(t.text3),
+                );
+                fui.add_space(4.0);
+            }
             if let Some(q) = self.ai_composer(&mut fui, &t, offered) {
                 ask = Some(q);
             }
@@ -1261,6 +1646,20 @@ impl App {
                 if let Some(job) = retry {
                     self.ai.chat.retain(|x| x.job != job);
                 }
+                // a failed question goes when another is asked: what is
+                // kept are the answered ones
+                let failed: Vec<u64> = self
+                    .ai_live()
+                    .iter()
+                    .filter(|x| {
+                        self.ai
+                            .jobs
+                            .get(&x.job)
+                            .map_or(true, |j| matches!(j.state, AiState::Failed(_)))
+                    })
+                    .map(|x| x.job)
+                    .collect();
+                self.ai.chat.retain(|x| !failed.contains(&x.job));
                 self.ai_ask_question(q);
             }
         }
@@ -1277,6 +1676,74 @@ impl App {
                 self.section = Section::Home;
             }
         }
+    }
+
+    /// The kept chats, newest first: mine and the ones teammates shared
+    /// (with who shared it). Gives whether one was clicked.
+    fn ai_chat_list(&mut self, ui: &mut Ui, t: &Theme) -> bool {
+        let me = self.data.me;
+        let rows: Vec<(u64, String, Option<String>)> = self
+            .ai_chats_listed()
+            .into_iter()
+            .map(|c| {
+                let note = if c.by != me {
+                    Some(trf!(
+                        "Shared by {}",
+                        self.data.member(c.by).map_or("", |m| m.shown())
+                    ))
+                } else if !c.personal {
+                    Some(tr("Shared with the team").to_string())
+                } else {
+                    None
+                };
+                (c.id, c.title.clone(), note)
+            })
+            .collect();
+        let mut picked = None;
+        for (id, title, note) in rows {
+            let w = ui.available_width();
+            let h = if note.is_some() { 46.0 } else { 32.0 };
+            let (r, resp) = ui.allocate_exact_size(vec2(w, h), Sense::click());
+            name_it(&resp, &format!("AI chat {}", title));
+            if self.ai.open == Some(id) {
+                ui.painter().rect_filled(r, 7.0, t.row_selected);
+            } else if resp.hovered() {
+                ui.painter().rect_filled(r, 7.0, t.hover);
+            }
+            let x = r.left() + 10.0;
+            let top = if note.is_some() {
+                r.top() + 15.0
+            } else {
+                r.center().y
+            };
+            paint_fit(
+                ui,
+                pos2(x, top),
+                Align2::LEFT_CENTER,
+                &title,
+                FontId::proportional(13.5),
+                t.text,
+                w - 20.0,
+            );
+            if let Some(n) = &note {
+                paint_fit(
+                    ui,
+                    pos2(x, r.top() + 33.0),
+                    Align2::LEFT_CENTER,
+                    n,
+                    FontId::proportional(11.5),
+                    t.text3,
+                    w - 20.0,
+                );
+            }
+            if resp.clicked() {
+                picked = Some(id);
+            }
+        }
+        if let Some(id) = picked {
+            self.ai_open_chat(Some(id));
+        }
+        picked.is_some()
     }
 
     /// What the AI page says under its title, by how things stand.
@@ -1379,7 +1846,17 @@ impl App {
 
     /// One question and its answer on the AI page; a question to ask again
     /// when its "Try again" is clicked.
-    fn ai_turn(&mut self, ui: &mut Ui, t: &Theme, q: &str, job: u64, last: bool) -> Option<String> {
+    #[allow(clippy::too_many_arguments)]
+    fn ai_turn(
+        &mut self,
+        ui: &mut Ui,
+        t: &Theme,
+        q: &str,
+        state: &AiState,
+        text: &str,
+        n: usize,
+        last: bool,
+    ) -> Option<String> {
         let mut again = None;
         let w = ui.available_width();
         // the question, in a bubble on the right
@@ -1399,10 +1876,6 @@ impl App {
                 });
         });
         ui.add_space(14.0);
-        let (state, text) = match self.ai.jobs.get(&job) {
-            Some(j) => (j.state.clone(), j.text.clone()),
-            None => (AiState::Failed(tr(BROKE).into()), String::new()),
-        };
         // the answer, beside the AI's badge
         ui.horizontal_top(|ui| {
             ai_badge(ui, 26.0);
@@ -1410,12 +1883,12 @@ impl App {
             ui.vertical(|ui| {
                 ui.set_width((w - 40.0).max(100.0));
                 ui.add_space(3.0);
-                if state == AiState::Going && text.is_empty() {
+                if *state == AiState::Going && text.is_empty() {
                     thinking(ui, t);
                 } else if !text.is_empty() {
-                    self.ai_rich(ui, &text);
+                    self.ai_rich(ui, text);
                 }
-                match &state {
+                match state {
                     AiState::Failed(why) => {
                         ui.add_space(4.0);
                         ui.label(RichText::new(why.as_str()).color(crate::widgets::WARN_ORANGE));
@@ -1433,14 +1906,14 @@ impl App {
                             t,
                             Icon::Docs,
                             tr("Copy"),
-                            &format!("Copy answer {}", job),
+                            &format!("Copy answer {}", n + 1),
                             false,
                             0.0,
                             t.text3,
                             t.text3,
                         );
                         if b.clicked() {
-                            ui.ctx().copy_text(text.clone());
+                            ui.ctx().copy_text(text.to_string());
                             self.toast(tr("Copied"));
                         }
                     }
@@ -1449,6 +1922,16 @@ impl App {
             });
         });
         again
+    }
+}
+
+/// The name a new chat gets: its first question on one line, shortened.
+pub(super) fn chat_title(question: &str) -> String {
+    let one: String = question.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.chars().count() <= 60 {
+        one
+    } else {
+        format!("{}…", one.chars().take(59).collect::<String>().trim_end())
     }
 }
 

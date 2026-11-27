@@ -28,7 +28,7 @@ import Foundation
 public enum Sync {
     /// Collections that belong to the whole team (SHARED).
     public static let shared: [String] = [
-        "spaces", "tasks", "members", "docs", "channels", "extra.goals", "extra.forms", "extra.whiteboards", "extra.meetings", "extra.fields", "extra.automations", "extra.templates", "extra.dashboards", "extra.teams", "extra.bookmarks",
+        "spaces", "tasks", "members", "docs", "channels", "extra.goals", "extra.forms", "extra.whiteboards", "extra.meetings", "extra.fields", "extra.automations", "extra.templates", "extra.dashboards", "extra.teams", "extra.bookmarks", "extra.ai_chats",
     ]
     /// The SyncMeta.v this version writes (META_V): 1 = an item's place
     /// counts in its fingerprint, 2 = `moved` is kept and fields at their

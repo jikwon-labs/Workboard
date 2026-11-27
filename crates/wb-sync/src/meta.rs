@@ -20,6 +20,9 @@ pub const SHARED: &[&str] = &[
     "extra.dashboards",
     "extra.teams",
     "extra.bookmarks",
+    // AI page conversations: only shared ones reach the team, the rest are
+    // marked `personal` and stay on the asker's computer
+    "extra.ai_chats",
 ];
 
 /// Single settings that belong to the whole team (not lists of items): the

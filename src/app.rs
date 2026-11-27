@@ -1083,6 +1083,8 @@ struct SideUi {
     unread_rows: Vec<Rect>,
     /// Where the sidebar scrolls to next frame (after a click on that pill).
     scroll_to: Option<f32>,
+    /// "Show all" under AI Chats: every chat, not only the newest few.
+    ai_all: bool,
 }
 
 impl App {

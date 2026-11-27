@@ -190,6 +190,37 @@ fn ai_job(a: &mut App, state: AiState) {
     );
 }
 
+/// The AI page with a kept chat shared with the team: mine, or a teammate's.
+fn ai_shared_chat(a: &mut App, mine: bool) {
+    ai_on(a);
+    let by = if mine {
+        a.data.me
+    } else {
+        a.data
+            .members
+            .iter()
+            .find(|m| m.id != a.data.me)
+            .unwrap()
+            .id
+    };
+    a.data.extra.ai_chats.push(crate::model::AiChat {
+        id: 902,
+        title: "이번 주 general 채널에서 무슨 일이 있었는지 정리해 줘, 마감이 가까운 작업도 같이"
+            .into(),
+        by,
+        created: 1,
+        turns: vec![crate::model::AiChatTurn {
+            id: 903,
+            question: "이번 주 general 채널에서 무슨 일이 있었는지 정리해 줘".into(),
+            answer: "요약: 홈페이지 시안과 뉴스레터 초안을 마무리했습니다.".into(),
+            ts: 2,
+        }],
+        personal: false,
+    });
+    a.ai.open = Some(902);
+    a.section = Section::Ai;
+}
+
 fn home_list(a: &mut App) {
     a.section = Section::Home;
     a.loc = Location::List(first_list(a));
@@ -1051,7 +1082,9 @@ pub(super) fn extra_screens(_h: &Ui1) -> Vec<(String, Go)> {
             a.ai.chat.push(AiQuestion {
                 question: "이번 주 general 채널에서 무슨 일이 있었는지 정리해 줘".into(),
                 job: 900,
+                chat: 901,
             });
+            a.ai.open = Some(901);
             a.section = Section::Ai;
         }),
     );
@@ -1063,8 +1096,20 @@ pub(super) fn extra_screens(_h: &Ui1) -> Vec<(String, Go)> {
             a.ai.chat.push(AiQuestion {
                 question: "q".into(),
                 job: 900,
+                chat: 901,
             });
+            a.ai.open = Some(901);
             a.section = Section::Ai;
+        }),
+    );
+    // a kept chat of mine shared with the team, and a teammate's
+    x("ai chat shared", app(|a| ai_shared_chat(a, true)));
+    x("ai chat teammate", app(|a| ai_shared_chat(a, false)));
+    x(
+        "modal share ai chat",
+        app(|a| {
+            ai_on(a);
+            a.modal = Some(Modal::ShareAiChat { id: 902 });
         }),
     );
     x(

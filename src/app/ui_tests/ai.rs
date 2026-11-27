@@ -31,15 +31,23 @@ fn on_ai_server(answer: &str) -> (Ui1, TestServer, Arc<FakeClaude>) {
     (h, server, fake)
 }
 
-/// Whether `n` requests are answered.
+/// Whether `n` requests are answered: in a dialog, or questions of the
+/// chat the AI page shows (kept in the chat once answered).
 fn answered(h: &Ui1, n: usize) -> bool {
-    h.app
+    let done = h
+        .app
         .ai
         .jobs
         .values()
         .filter(|j| j.state == AiState::Done)
-        .count()
-        >= n
+        .count();
+    let kept = h
+        .app
+        .ai
+        .open
+        .and_then(|id| h.app.data.extra.ai_chats.iter().find(|c| c.id == id))
+        .map_or(0, |c| c.turns.len());
+    done + kept >= n
 }
 
 /// Clicks on `part` inside a painted text that also holds `within`.
@@ -197,7 +205,9 @@ fn a_failed_answer_can_be_asked_again() {
     h.settle();
     h.click("Try again");
     h.net_until("the answer", |h| answered(h, 1));
-    assert_eq!(h.app.ai.chat.len(), 1, "asked again in its place");
+    assert!(h.app.ai.chat.is_empty(), "asked again in its place");
+    assert_eq!(h.app.data.extra.ai_chats.len(), 1);
+    assert_eq!(h.app.data.extra.ai_chats[0].turns.len(), 1);
     assert!(shown_containing(&h, "Fine now.").is_some());
 }
 
@@ -510,6 +520,9 @@ fn another_workspace_never_sees_the_conversation() {
     if let Some(c) = h.app.data.extra.shared.as_mut() {
         c.server = Some("127.0.0.1:1".into());
     }
+    // (the chat is kept in the first workspace's file, which the other
+    // workspace doesn't read)
+    h.app.data.extra.ai_chats.clear();
     h.settle();
     assert!(h.app.ai.chat.is_empty() && h.app.ai.jobs.is_empty());
     assert!(h.app.ai.draft.is_empty());
@@ -534,4 +547,188 @@ fn the_ai_page_opens_with_the_cursor_in_its_box() {
     h.key(egui::Key::Escape);
     h.settle();
     assert_ne!(h.app.section, Section::Ai, "Escape leaves the page");
+}
+
+/// Hands this app's changes to the team server.
+fn send(h: &mut Ui1) {
+    h.app.sync_note_change();
+    h.app.write_shared();
+}
+
+/// Takes in what the team server sends until `cond` holds, then draws.
+fn receive(h: &mut Ui1, what: &str, cond: impl Fn(&App) -> bool) {
+    crate::app::tests::net_until(&mut h.app, what, cond);
+    h.settle();
+}
+
+/// The AI chats in the copy the team server keeps.
+fn chats_on_server(server: &TestServer) -> Vec<u64> {
+    let file = server.home.join(workboard_server::WORKSPACE_FILE);
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    v["extra"]["ai_chats"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| c["id"].as_u64())
+        .collect()
+}
+
+/// An answered question is kept as a chat in the sidebar and in the
+/// workspace file (so it is there after a restart), but stays on this
+/// computer: the server and the teammate never get it. Shared (after a
+/// warning), the teammate finds it in their sidebar and reads it; what
+/// they ask goes on in a chat of their own. Taken back, it leaves the
+/// teammate's sidebar and stays with its owner. Only who asked shares or
+/// deletes a chat.
+#[test]
+fn ai_chats_are_kept_on_this_computer_and_shared_only_when_asked() {
+    let fake = FakeClaude::new("The launch is on Friday.");
+    let server = TestServer::with_ai(fake.clone());
+    let addr = server.addr();
+    let mut a = Ui1::new();
+    crate::app::tests::share_on(&mut a.app, &server);
+    let code = crate::app::tests::invite_code_for_sam(&mut a.app, &server);
+    a.net_until("the server's AI at A", |h| h.app.ai_offered());
+    let mut b = Ui1::with_data(crate::app::tests::blank_as("Theirs", 1, "B"));
+    b.app.connect_server(&addr, &code.to_lowercase()).unwrap();
+    receive(&mut b, "B joined", |x| x.data.extra.shared.is_some());
+    b.net_until("the server's AI at B", |h| h.app.ai_offered());
+
+    // A asks; the answer is kept as a chat named after the question
+    a.click("Rail AI");
+    a.click("Ask AI");
+    a.type_text("When is the launch?");
+    a.key(egui::Key::Enter);
+    a.net_until("the answer", |h| answered(h, 1));
+    let chat = a.app.ai.open.expect("the chat shown");
+    let c = a.app.ai_chat(chat).unwrap().clone();
+    assert_eq!(c.title, "When is the launch?");
+    assert_eq!(c.by, a.app.data.me);
+    assert!(c.personal, "only on this computer");
+    assert_eq!(c.turns[0].answer, "The launch is on Friday.");
+    // in the workspace file, read back as it was
+    let file = serde_json::to_string(&a.app.data).unwrap();
+    let back: crate::model::Data = serde_json::from_str(&file).unwrap();
+    assert_eq!(back.extra.ai_chats, a.app.data.extra.ai_chats);
+    // a new chat, then the kept one from the sidebar
+    a.click("New chat");
+    assert_eq!(a.app.ai.open, None);
+    assert!(shown_containing(&a, "The launch is on Friday.").is_none());
+    a.click("AI chat When is the launch?");
+    assert_eq!(a.app.ai.open, Some(chat));
+    assert!(shown_containing(&a, "The launch is on Friday.").is_some());
+    // never sent: not on the server, not at the teammate
+    send(&mut a);
+    crate::app::tests::net_until_saved(&mut a.app, &server.home);
+    a.settle();
+    assert!(!chats_on_server(&server).contains(&chat));
+    b.settle();
+    assert!(b.app.ai_chat(chat).is_none());
+    assert!(!b.has("When is the launch?"), "not in B's sidebar");
+
+    // sharing warns first; Cancel keeps it to A
+    a.click("Share chat");
+    assert!(matches!(a.app.modal, Some(Modal::ShareAiChat { .. })));
+    assert!(shown_containing(&a, "only you can see").is_some());
+    a.click("Cancel");
+    assert!(a.app.ai_chat(chat).unwrap().personal);
+    a.click("Share chat");
+    a.click("Share");
+    assert!(!a.app.ai_chat(chat).unwrap().personal);
+    assert!(a.has("Stop sharing chat") && !a.has("Share chat"));
+    send(&mut a);
+    receive(&mut b, "the shared chat at B", |x| {
+        x.ai_chat(chat).is_some()
+    });
+    assert!(
+        workboard_server::testing::wait_until(
+            std::time::Duration::from_secs(10),
+            std::time::Duration::from_millis(50),
+            || chats_on_server(&server).contains(&chat)
+        ),
+        "the server keeps the shared chat"
+    );
+
+    // B reads it from the sidebar, with who shared it; B can't share,
+    // take back or delete it
+    b.click("Rail AI");
+    b.click("AI chat When is the launch?");
+    assert_eq!(b.app.ai.open, Some(chat));
+    assert!(shown_containing(&b, "The launch is on Friday.").is_some());
+    assert!(shown_containing(&b, "shared this chat").is_some());
+    assert!(!b.has("Share chat") && !b.has("Stop sharing chat") && !b.has("Delete chat"));
+    // what B asks goes on in B's own chat, with A's turns along
+    *fake.answer.lock().unwrap() = "Bora leads it.".into();
+    b.click("Ask AI");
+    b.type_text("Who leads it?");
+    b.key(egui::Key::Enter);
+    b.net_until("B's answer", |h| answered(h, 2));
+    let mine = b.app.ai.open.unwrap();
+    assert_ne!(mine, chat);
+    let bc = b.app.ai_chat(mine).unwrap().clone();
+    assert_eq!(bc.by, b.app.data.me);
+    assert!(bc.personal);
+    assert_eq!(bc.turns.len(), 2);
+    let msgs = fake.asked().last().unwrap()["messages"].clone();
+    assert_eq!(msgs[0]["content"], "When is the launch?");
+    assert_eq!(
+        b.app.ai_chat(chat).unwrap().turns.len(),
+        1,
+        "A's chat as it was"
+    );
+    // B's own chat doesn't reach A
+    send(&mut b);
+    crate::app::tests::net_until_saved(&mut b.app, &server.home);
+    assert!(!chats_on_server(&server).contains(&mine));
+
+    // A takes it back: it leaves B, and A keeps it as a private chat
+    a.click("Stop sharing chat");
+    let kept = a.app.ai.open.unwrap();
+    assert_ne!(kept, chat);
+    assert!(a.app.ai_chat(kept).unwrap().personal);
+    assert_eq!(a.app.ai_chat(kept).unwrap().turns.len(), 1);
+    send(&mut a);
+    receive(&mut b, "the chat gone at B", |x| x.ai_chat(chat).is_none());
+    assert!(b.app.ai_chat(mine).is_some(), "B's own chat stays");
+    assert!(!chats_on_server(&server).contains(&kept));
+
+    // A deletes it, after saying so
+    a.click("Delete chat");
+    assert!(
+        matches!(a.app.modal, Some(Modal::ConfirmRemove { kind: "ai_chat", id, .. }) if id == kept),
+        "{:?}",
+        a.app.modal.is_some()
+    );
+    a.click("Delete");
+    assert!(a.app.ai_chat(kept).is_none());
+    assert_eq!(a.app.ai.open, None);
+    assert!(!a.has("AI chat When is the launch?"));
+}
+
+/// The sidebar lists the newest few chats and "Show all" the rest.
+#[test]
+fn the_sidebar_lists_the_newest_ai_chats() {
+    let mut h = Ui1::new();
+    for i in 0..7u64 {
+        let me = h.app.data.me;
+        h.app.data.extra.ai_chats.push(crate::model::AiChat {
+            id: 9000 + i,
+            title: format!("Question {}", i),
+            by: me,
+            created: 100 + i as i64,
+            turns: vec![],
+            personal: true,
+        });
+    }
+    h.settle();
+    assert!(h.has("Question 6") && h.has("Question 2"));
+    assert!(!h.has("Question 1"), "only the newest five");
+    h.click("Show all");
+    assert!(h.has("Question 1") && h.has("Question 0"));
+    h.click("Show fewer");
+    assert!(!h.has("Question 0"));
+    h.click_side("Question 4", false);
+    assert_eq!(h.app.section, Section::Ai);
+    assert_eq!(h.app.ai.open, Some(9004));
 }

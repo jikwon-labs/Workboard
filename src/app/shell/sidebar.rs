@@ -115,12 +115,7 @@ impl App {
                         );
 
                         if !self.hidden("AI Chats") {
-                            // the row is the one way in (a "..." on the
-                            // heading opened the same page)
-                            let (folded, _) = self.side_header(ui, "AI Chats", &[], 0);
-                            if !folded && self.add_row(ui, "Ask, Build, Create").clicked() {
-                                self.section = Section::Ai;
-                            }
+                            self.sidebar_ai_chats(ui);
                         }
 
                         self.sidebar_favorites(ui);
@@ -528,6 +523,81 @@ impl App {
     }
 
     /// Favorites: the favourite places, then the favourite tasks.
+    /// AI Chats: the row that starts a new chat (the one way in; a "..."
+    /// on the heading opened the same page), then the chats, newest first:
+    /// mine, kept on this computer, and the ones teammates shared.
+    fn sidebar_ai_chats(&mut self, ui: &mut Ui) {
+        const FEW: usize = 5;
+        let (folded, _) = self.side_header(ui, "AI Chats", &[], 0);
+        if !self.fold_shows(folded, "") {
+            return;
+        }
+        if !self.side_searching() && self.add_row(ui, "Ask, Build, Create").clicked() {
+            self.ai_open_chat(None);
+        }
+        let me = self.data.me;
+        let chats: Vec<(u64, String, Option<String>)> = self
+            .ai_chats_listed()
+            .into_iter()
+            .filter(|c| self.matches_search(&c.title))
+            .map(|c| {
+                let note = if c.by != me {
+                    Some(
+                        self.data
+                            .member(c.by)
+                            .map_or(String::new(), |m| m.shown().to_string()),
+                    )
+                } else if !c.personal {
+                    Some(tr("Shared").to_string())
+                } else {
+                    None
+                };
+                (c.id, c.title.clone(), note)
+            })
+            .collect();
+        let all = self.side.ai_all || self.side_searching();
+        let t = self.t();
+        let n = chats.len();
+        for (id, title, note) in chats.into_iter().take(if all { usize::MAX } else { FEW }) {
+            let sel = self.section == Section::Ai && self.ai.open == Some(id);
+            let col = t.text3;
+            let r = self.side_row(
+                ui,
+                0.0,
+                sel,
+                |p, c| super::icons::line_icon_scaled(p, Icon::Chat, c, col, 0.8),
+                &title,
+                note.as_deref(),
+                None,
+                true,
+            );
+            if r.clicked() {
+                self.ai_open_chat(Some(id));
+            }
+        }
+        if n > FEW && !self.side_searching() {
+            let label = if self.side.ai_all {
+                "Show fewer"
+            } else {
+                "Show all"
+            };
+            let col = t.text3;
+            let r = self.side_row_tr(
+                ui,
+                0.0,
+                false,
+                |p, c| super::icons::line_icon_scaled(p, Icon::Dots, c, col, 0.8),
+                label,
+                None,
+                None,
+                true,
+            );
+            if r.clicked() {
+                self.side.ai_all = !self.side.ai_all;
+            }
+        }
+    }
+
     fn sidebar_favorites(&mut self, ui: &mut Ui) {
         // (while searching, the heading only shows with a match under it)
         let fav_tasks: Vec<(u64, String)> = self.favorite_tasks();

@@ -1037,6 +1037,10 @@ impl App {
             "form" => trf!("Delete the form \"{}\"? It goes to Trash.", name),
             "goal" => trf!("Delete the goal \"{}\"? It goes to Trash.", name),
             "meeting" => trf!("Delete the meeting \"{}\"? This can't be undone.", name),
+            "ai_chat" => trf!(
+                "Delete the AI chat \"{}\"? This can't be undone. If you shared it, it goes for everyone.",
+                name
+            ),
             "team" => trf!("Delete the team \"{}\"? It goes to Trash.", name),
             "invite" => trf!(
                 "Cancel the invite for {}? Their invite code stops working and they leave the list.",
@@ -1077,6 +1081,11 @@ impl App {
     /// removes a person, once confirmed. All but meetings and people go to
     /// Trash, where Restore brings them back.
     pub(super) fn remove_item(&mut self, kind: &str, id: u64) {
+        if kind == "ai_chat" {
+            // a chat doesn't go to Trash: it is the AI's answers, asked again easily
+            self.ai_delete_chat(id);
+            return;
+        }
         let x = &self.data.extra;
         let trashed = match kind {
             "dashboard" => x

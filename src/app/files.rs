@@ -470,7 +470,7 @@ impl Files {
     /// The file in the cache, when it's there.
     pub fn local(&self, sha: &str) -> Option<PathBuf> {
         let p = self.dir.join(sha);
-        (wb_server_name_ok(sha) && p.is_file()).then_some(p)
+        (wb_server_name_ok(sha) && holds_file(&p, sha)).then_some(p)
     }
 
     pub fn state(&self, sha: &str) -> Option<Transfer> {
@@ -616,7 +616,9 @@ impl Files {
             match remote {
                 Remote::None => {}
                 Remote::Folder(f) => {
-                    if self.local(&p.file).is_none() || f.join("files").join(&p.file).is_file() {
+                    if self.local(&p.file).is_none()
+                        || holds_file(&f.join("files").join(&p.file), &p.file)
+                    {
                         continue;
                     }
                     self.wait_for(&p, &target);
@@ -711,7 +713,7 @@ impl Files {
     /// Copy a cached file into the shared folder's files/ (quietly; for
     /// files sent before the workspace was shared).
     pub fn to_folder(&self, att: &Attachment, folder: &Path) {
-        if self.local(&att.file).is_some() && !folder.join(&att.file).is_file() {
+        if self.local(&att.file).is_some() && !holds_file(&folder.join(&att.file), &att.file) {
             let _ = self.lane(att.kind).send(Job::ToFolder {
                 sha: att.file.clone(),
                 folder: folder.to_path_buf(),
@@ -979,7 +981,7 @@ impl Files {
                         }
                     }
                     // there now, or gone from the cache (nothing to copy)
-                    if folder.join(&sha).is_file() || self.local(&sha).is_none() {
+                    if holds_file(&folder.join(&sha), &sha) || self.local(&sha).is_none() {
                         self.background.remove(&sha);
                         self.backlog_dirty = true;
                         continue;
@@ -1207,6 +1209,16 @@ fn touch(p: &Path) {
     }
 }
 
+/// The sha256 of no bytes at all: the one file that may really be empty.
+const EMPTY_SHA: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/// `p` holds the file named `sha`. An empty file under any other hash is a
+/// broken copy (`with_ext` could once empty a cached video): it counts as
+/// missing, so the file is fetched or copied again.
+fn holds_file(p: &Path, sha: &str) -> bool {
+    std::fs::metadata(p).is_ok_and(|m| m.is_file() && (m.len() > 0 || sha == EMPTY_SHA))
+}
+
 /// "mov" for "Clip.MOV"; empty without one.
 /// The short label a plain file's tile shows for its kind: "PDF", "MD";
 /// "FILE" without an extension.
@@ -1270,16 +1282,30 @@ fn ext_of(name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// <dir>/<sha>.<ext>: a hard link to the cached file (a copy if linking fails).
-fn with_ext(dir: &Path, sha: &str, ext: &str) -> PathBuf {
+/// <dir>/<sha>.<ext>: a hard link to the cached file (a copy if linking
+/// fails). It's made under a temporary name and then renamed, because the
+/// UI and the media thread can ask for it at the same moment: copying
+/// straight onto the name copied the file onto itself (the link the other
+/// thread had just made), which left the cached file empty.
+pub(super) fn with_ext(dir: &Path, sha: &str, ext: &str) -> PathBuf {
     let plain = dir.join(sha);
     if ext.is_empty() {
         return plain;
     }
     let named = dir.join(format!("{}.{}", sha, ext));
-    if !named.exists() && std::fs::hard_link(&plain, &named).is_err() {
-        let _ = std::fs::copy(&plain, &named);
+    let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).ok();
+    // there already, unless it's left over from an emptied copy
+    let have = size(&named);
+    if have.is_some() && have == size(&plain) {
+        return named;
     }
+    let tmp = dir.join(format!(".copy-{:x}", wb_sync::random_u64()));
+    if std::fs::hard_link(&plain, &tmp).is_ok() || std::fs::copy(&plain, &tmp).is_ok() {
+        let _ = std::fs::rename(&tmp, &named);
+    }
+    // gone when renamed; still there when the rename failed or did nothing
+    // (both names already the same file, after the other thread's rename)
+    let _ = std::fs::remove_file(&tmp);
     named
 }
 
@@ -1308,9 +1334,13 @@ fn store(dir: &Path, from: &Path, sha: &str) -> Result<(), String> {
         return Err("not a file name".into());
     }
     let dest = dir.join(sha);
-    if dest.is_file() {
+    if holds_file(&dest, sha) {
         touch(&dest);
         return Ok(());
+    }
+    // an emptied copy isn't the file: don't pass it on
+    if !holds_file(from, sha) {
+        return Err("the file is empty".into());
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let tmp = dir.join(format!(".copy-{:x}", wb_sync::random_u64()));

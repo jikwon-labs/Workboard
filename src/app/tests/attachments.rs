@@ -1426,3 +1426,89 @@ fn a_voice_message_goes_through_the_server_and_plays_on_the_other_computer() {
         );
     }
 }
+
+#[test]
+fn naming_a_cached_file_from_two_threads_leaves_it_whole() {
+    // the frame a video arrives, the UI (to play it) and the media thread
+    // (for its still) both ask for "<sha>.mov"; copying onto the link the
+    // other had just made copied the file onto itself and emptied it
+    let dir = workboard_server::testing::temp_home("with-ext");
+    std::fs::create_dir_all(&dir).unwrap();
+    let body = vec![7u8; 64 << 10];
+    for i in 0..200 {
+        let sha = format!("{:064x}", i);
+        std::fs::write(dir.join(&sha), &body).unwrap();
+        let go = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let named: Vec<_> = (0..2)
+            .map(|_| {
+                let (go, dir, sha) = (go.clone(), dir.clone(), sha.clone());
+                std::thread::spawn(move || {
+                    go.wait();
+                    crate::app::files::with_ext(&dir, &sha, "mov")
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|t| t.join().unwrap())
+            .collect();
+        assert_eq!(
+            std::fs::metadata(dir.join(&sha)).unwrap().len(),
+            body.len() as u64,
+            "the cached file, try {}",
+            i
+        );
+        for n in &named {
+            assert_eq!(std::fs::read(n).unwrap(), body, "the named copy, try {}", i);
+        }
+    }
+    let left: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with('.'))
+        .collect();
+    assert!(left.is_empty(), "nothing half made left: {:?}", left);
+}
+
+#[test]
+fn an_emptied_cached_file_is_fetched_again() {
+    let ServerTeam {
+        server: _server,
+        mut a,
+        mut b,
+    } = ServerTeam::start();
+    let pic = test_picture("emptied.png", 64, 48);
+    a.add_media(false, Some(pic.clone()), None);
+    let att = until_ready(&mut a, false)[0].clone();
+
+    // B's copy was emptied (by the old `with_ext`), and so was its named link
+    let dir = b.files.dir().to_path_buf();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(&att.file), b"").unwrap();
+    std::fs::write(dir.join(format!("{}.png", att.file)), b"").unwrap();
+    assert!(b.files.local(&att.file).is_none(), "empty isn't the file");
+
+    let remote = b.media_remote();
+    let sha = att.file.clone();
+    b.files.settle(&remote, |f| {
+        f.want(&att, crate::app::files::THUMB);
+        f.local(&sha).is_some() && f.decoded(&sha, crate::app::files::THUMB)
+    });
+    let whole = std::fs::read(&pic).unwrap();
+    assert_eq!(std::fs::read(b.files.local(&sha).unwrap()).unwrap(), whole);
+    assert_eq!(
+        std::fs::read(b.files.playable(&att).unwrap()).unwrap(),
+        whole,
+        "the named link follows the fetched file"
+    );
+}
+
+#[test]
+fn a_file_that_really_is_empty_counts_as_there() {
+    let a = app();
+    let dir = a.files.dir().to_path_buf();
+    std::fs::create_dir_all(&dir).unwrap();
+    let empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    std::fs::write(dir.join(empty), b"").unwrap();
+    assert!(a.files.local(empty).is_some());
+}

@@ -29,6 +29,8 @@ pub(super) enum ChannelPanel {
     #[default]
     All,
     Pinned,
+    /// Posts sent as announcements (the Post tab of the box).
+    Announcements,
     Replies,
     Tasks,
     Saved,
@@ -38,9 +40,10 @@ pub(super) enum ChannelPanel {
 
 impl ChannelPanel {
     /// The kinds a conversation can be narrowed to, in its menu's order.
-    pub(super) const KINDS: [ChannelPanel; 6] = [
+    pub(super) const KINDS: [ChannelPanel; 7] = [
         ChannelPanel::Replies,
         ChannelPanel::Pinned,
+        ChannelPanel::Announcements,
         ChannelPanel::Saved,
         ChannelPanel::Files,
         ChannelPanel::Links,
@@ -52,6 +55,7 @@ impl ChannelPanel {
         match self {
             ChannelPanel::All => "all",
             ChannelPanel::Pinned => "pinned",
+            ChannelPanel::Announcements => "announcements",
             ChannelPanel::Replies => "replies",
             ChannelPanel::Tasks => "tasks",
             ChannelPanel::Saved => "saved",
@@ -65,6 +69,7 @@ impl ChannelPanel {
         match self {
             ChannelPanel::All => "All messages",
             ChannelPanel::Pinned => "Pinned messages",
+            ChannelPanel::Announcements => "Announcements",
             ChannelPanel::Replies => "Replies",
             ChannelPanel::Tasks => "Turned into tasks",
             ChannelPanel::Saved => "Saved",
@@ -77,6 +82,7 @@ impl ChannelPanel {
         match self {
             ChannelPanel::All => Icon::Chat,
             ChannelPanel::Pinned => Icon::Pin,
+            ChannelPanel::Announcements => Icon::Megaphone,
             ChannelPanel::Replies => Icon::Reply,
             ChannelPanel::Tasks => Icon::Task,
             ChannelPanel::Saved => Icon::Bookmark,
@@ -1805,12 +1811,119 @@ impl App {
         step
     }
 
+    /// The conversation's newest announcement over its messages: clicking
+    /// it goes to the post, "All" lists every announcement (the panel's
+    /// Announcements), the x hides it until a newer one is posted.
+    fn announcement_banner(&mut self, ui: &mut Ui, cid: u64) {
+        let Some((mid, line, who, ts)) = self
+            .data
+            .channels
+            .iter()
+            .find(|c| c.id == cid)
+            .and_then(|c| c.messages.iter().rev().find(|m| is_announcement(m)))
+            .map(|m| {
+                (
+                    m.id,
+                    announcement_line(m),
+                    m.bot.clone().unwrap_or_else(|| self.who(m.author)),
+                    m.ts,
+                )
+            })
+        else {
+            return;
+        };
+        if self.chat.hidden_notice.get(&cid) == Some(&mid) {
+            return;
+        }
+        let t = self.t();
+        let when = local(ts).map(|x| x.text("%-I:%M %p")).unwrap_or_default();
+        ui.add_space(8.0);
+        egui::Frame::new()
+            .outer_margin(egui::Margin::symmetric(16, 0))
+            .show(ui, |ui| {
+                let w = ui.available_width();
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 38.0), Sense::click());
+                let fill = if resp.hovered() { t.hover } else { t.card };
+                ui.painter().rect(
+                    r,
+                    8.0,
+                    fill,
+                    Stroke::new(1.0_f32, t.border),
+                    egui::StrokeKind::Inside,
+                );
+                line_icon(
+                    ui.painter(),
+                    Icon::Megaphone,
+                    r.left_center() + vec2(18.0, 0.0),
+                    t.primary,
+                );
+                // at the right: who and when, then All and the x
+                let x_r =
+                    Rect::from_center_size(r.right_center() - vec2(18.0, 0.0), vec2(24.0, 24.0));
+                let all_text = tr("Show all");
+                let all_g = ui.painter().layout_no_wrap(
+                    all_text.to_string(),
+                    FontId::proportional(13.0),
+                    t.primary,
+                );
+                let all_r = Rect::from_center_size(
+                    pos2(x_r.left() - 8.0 - all_g.size().x / 2.0 - 6.0, r.center().y),
+                    all_g.size() + vec2(12.0, 8.0),
+                );
+                let meta = format!("{who} \u{00B7} {when}");
+                let meta_w = (r.width() * 0.3).min(160.0);
+                let meta_r = paint_fit(
+                    ui,
+                    pos2(all_r.left() - 10.0, r.center().y),
+                    Align2::RIGHT_CENTER,
+                    &meta,
+                    FontId::proportional(12.0),
+                    t.text3,
+                    meta_w,
+                );
+                paint_fit(
+                    ui,
+                    r.left_center() + vec2(34.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    &line,
+                    FontId::proportional(14.0),
+                    t.text,
+                    (meta_r.left() - 12.0 - (r.left() + 34.0)).max(20.0),
+                );
+                name_it(&resp, "Announcement banner");
+                let all = ui.interact(all_r, ui.id().with(("notice_all", cid)), Sense::click());
+                if all.hovered() {
+                    ui.painter().rect_filled(all_r, 6.0, t.accent_bg);
+                }
+                ui.painter()
+                    .galley(all_r.center() - all_g.size() / 2.0, all_g, t.primary);
+                name_it(&all, "All announcements");
+                let x = ui.interact(x_r, ui.id().with(("notice_hide", cid)), Sense::click());
+                if x.hovered() {
+                    ui.painter().rect_filled(x_r, 6.0, t.hover);
+                }
+                line_icon(ui.painter(), Icon::Close, x_r.center(), t.text3);
+                name_it(&x, "Hide announcement");
+                if x.clicked() {
+                    self.chat.hidden_notice.insert(cid, mid);
+                } else if all.clicked() {
+                    self.channel_panel = ChannelPanel::Announcements;
+                } else if resp
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    self.chat.jump_to = Some(mid);
+                }
+            });
+    }
+
     /// The chip naming the kind of messages picked in the panel beside them
     /// (all of them show again on clicking it).
     fn panel_chip(&mut self, ui: &mut Ui) {
         let label = match self.channel_panel {
             ChannelPanel::All => return,
             ChannelPanel::Pinned => tr("Pinned messages"),
+            ChannelPanel::Announcements => tr("Announcements"),
             ChannelPanel::Replies => tr("Messages with replies"),
             ChannelPanel::Saved => tr("Saved messages"),
             ChannelPanel::Files => tr("Messages with files"),
@@ -2484,6 +2597,7 @@ impl App {
                     .filter(|p| {
                         msg(p).is_some_and(|m| match panel {
                             ChannelPanel::Pinned => m.pinned,
+                            ChannelPanel::Announcements => is_announcement(m),
                             ChannelPanel::Replies => !m.replies.is_empty(),
                             ChannelPanel::Tasks => m.task.is_some(),
                             ChannelPanel::Saved => m.saved || m.replies.iter().any(|r| r.saved),
@@ -2512,6 +2626,9 @@ impl App {
             let before = self.chat.find_at.as_ref().filter(|(c, _, _)| *c == cid).map(|(_, f, h)| (f.clone(), *h));
             let mut cur = before.as_ref().filter(|(f, _)| *f == find_text).and_then(|(_, h)| hits.iter().position(|x| x == h)).or(hits.len().checked_sub(1));
             let step = self.channel_chips(ui, find_id, finding.then_some((cur, hits.len())));
+            if panel == ChannelPanel::All {
+                self.announcement_banner(ui, cid);
+            }
             if let (Some(s), Some(i)) = (step, cur) {
                 cur = Some((i as isize + s).rem_euclid(hits.len() as isize) as usize);
             }
@@ -5570,6 +5687,27 @@ fn new_below(ui: &mut Ui, t: &Theme, list: Rect, n: usize) -> bool {
 /// The title the app gives a post sent without one. It is stored in English
 /// like typed text, so it is put in the reader's language where it is shown.
 pub(super) const DEFAULT_POST_TITLE: &str = "Update";
+
+/// A post sent as an announcement: the box's Post tab, the iPhone's post,
+/// or a post from before types were kept (the Posts page counts those as
+/// announcements too).
+pub(super) fn is_announcement(m: &Message) -> bool {
+    m.post_title.is_some() && (m.post_type.is_empty() || m.post_type == "Announcement")
+}
+
+/// What an announcement says in one line: its title, else its text.
+fn announcement_line(m: &Message) -> String {
+    match typed_post_title(m) {
+        Some(t) => t.to_string(),
+        None => m
+            .text
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| tr(DEFAULT_POST_TITLE).to_string()),
+    }
+}
 
 /// A post's title as someone wrote it: not blank and not the app's own
 /// default title (which nobody wrote, so isn't searched or matched).

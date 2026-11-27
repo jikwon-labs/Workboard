@@ -5512,6 +5512,28 @@
         }
       }
     },
+    "Announcements": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "공지"
+          }
+        }
+      }
+    },
+    "Hide announcement": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "공지 숨기기"
+          }
+        }
+      }
+    },
     "Pinned messages": {
       "extractionState": "manual",
       "localizations": {
@@ -6884,6 +6906,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "/ 명령 (워크스페이스 전체)"
+          }
+        }
+      }
+    },
+    "Show all": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "모두 보기"
           }
         }
       }

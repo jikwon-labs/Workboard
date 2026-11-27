@@ -13,6 +13,7 @@ extension MessageFilter {
         case .all: return "All messages"
         case .replies: return "Replies"
         case .pinned: return "Pinned messages"
+        case .announcements: return "Announcements"
         case .saved: return "Saved"
         case .files: return "Files"
         case .links: return "Links"
@@ -26,6 +27,7 @@ extension MessageFilter {
         case .all: return "All messages"
         case .replies: return "Messages with replies"
         case .pinned: return "Pinned messages"
+        case .announcements: return "Announcements"
         case .saved: return "Saved messages"
         case .files: return "Messages with files"
         case .links: return "Messages with links"
@@ -38,6 +40,7 @@ extension MessageFilter {
         case .all: return "bubble.left.and.bubble.right"
         case .replies: return "arrowshape.turn.up.left"
         case .pinned: return "pin"
+        case .announcements: return "megaphone"
         case .saved: return "bookmark"
         case .files: return "paperclip"
         case .links: return "link"
@@ -87,6 +90,56 @@ struct MessageFilterBanner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.bar)
+    }
+}
+
+/// The conversation's newest announcement over its messages: tapping it
+/// goes to the post, "Show all" lists only the announcements, the x hides
+/// it until a newer one is posted.
+struct AnnouncementBanner: View {
+    let message: MessageView
+    let author: String
+    let show: () -> Void
+    let showAll: () -> Void
+    let hide: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: show) {
+                HStack(spacing: 8) {
+                    Image(systemName: "megaphone").foregroundStyle(Color.accentColor).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(verbatim: line).font(.subheadline.weight(.medium)).lineLimit(1)
+                        Text(verbatim: "\(author) · \(Fmt.time(message.ts))").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("announcementBanner")
+            Button("Show all", action: showAll)
+                .font(.subheadline)
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("allAnnouncementsButton")
+            Button(action: hide) {
+                Image(systemName: "xmark").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Hide announcement")
+            .accessibilityIdentifier("hideAnnouncementButton")
+        }
+        .pill(horizontal: 12, vertical: 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    /// Its title, else the first line of its text.
+    var line: String {
+        if let t = message.postTitle?.trimmed, !t.isEmpty, !message.hasDefaultPostTitle { return t }
+        return message.text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
+            ?? String(localized: "Update")
     }
 }
 

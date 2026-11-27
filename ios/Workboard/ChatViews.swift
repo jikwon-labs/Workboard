@@ -271,6 +271,8 @@ struct ConversationView: View {
     @State private var filter: MessageFilter = .all
     /// A message to scroll to once the list is back ("Show in conversation").
     @State private var jump: UInt64?
+    /// The announcement whose banner was hidden (a newer one shows again).
+    @State private var hiddenNotice: UInt64?
     /// How many of the newest messages the list holds; scrolling to its
     /// top brings in older ones. A long history isn't laid out at once.
     @State private var window = ConversationView.page
@@ -299,7 +301,17 @@ struct ConversationView: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if filter != .all { MessageFilterBanner(filter: $filter) }
+                if filter != .all {
+                    MessageFilterBanner(filter: $filter)
+                } else if let n = c.latestAnnouncement, n.id != hiddenNotice {
+                    AnnouncementBanner(
+                        message: n,
+                        author: n.bot ?? v.member(n.author)?.name ?? String(localized: "Someone"),
+                        show: { jump = n.id },
+                        showAll: { withAnimation { filter = .announcements } },
+                        hide: { withAnimation { hiddenNotice = n.id } }
+                    )
+                }
             }
             .onAppear {
                 readLine = c.firstUnread(me: me)

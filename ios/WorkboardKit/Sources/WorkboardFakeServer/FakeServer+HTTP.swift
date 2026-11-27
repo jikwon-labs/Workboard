@@ -76,7 +76,8 @@ extension FakeServer {
                 // &poll=... sends a poll (below); &file=NAME sends a file (&kind=Image: a small picture;
                 // &kind=Audio: a few seconds of silence as a WAV, so NAME
                 // should end in .wav), kept here so the app can fetch it;
-                // &reply=ID sends it as a reply in that message's thread
+                // &reply=ID sends it as a reply in that message's thread;
+                // &post=TITLE sends it as an announcement with that title
                 var attachments: [JSON] = []
                 if let name = q("file") {
                     let picture = q("kind") == "Image"
@@ -104,6 +105,9 @@ extension FakeServer {
                             Edits.vote(&snap, channel: ch, message: id, option: i, me: who)
                         }
                     }
+                } else if let title = q("post") {
+                    // &post=TITLE: a post (an announcement) with the text under it
+                    Edits.sendPost(&snap, channel: ch, title: title, text: text, me: author, id: id, ts: nowTs())
                 } else if let parent = q("reply").flatMap({ UInt64($0) }) {
                     Edits.sendReply(&snap, channel: ch, to: parent, text: text, attachments: attachments, me: author, id: id, ts: nowTs())
                 } else {

@@ -878,6 +878,9 @@ struct ChatUi {
     /// The message just gone to (conversation, message) and when (egui
     /// time): lit up for a moment.
     flash: Option<(u64, u64, f64)>,
+    /// The announcement whose banner was hidden in each conversation (by
+    /// conversation): a newer one shows again. Until the app quits.
+    hidden_notice: std::collections::HashMap<u64, u64>,
     /// The match the channel's find box is at: (conversation, the words
     /// in the box, the match as message and place in it, see
     /// `chat::Found`). Kept by message, so messages coming in don't move it.

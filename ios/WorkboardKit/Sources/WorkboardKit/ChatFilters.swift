@@ -7,7 +7,7 @@ import Foundation
 
 /// What a conversation shows (the channel panel's filters on the Mac).
 public enum MessageFilter: String, CaseIterable, Sendable {
-    case all, replies, pinned, saved, files, links, tasks
+    case all, replies, pinned, announcements, saved, files, links, tasks
 
     /// Whether the message (with its thread) is shown under this filter.
     public func keeps(_ m: MessageView) -> Bool {
@@ -15,6 +15,7 @@ public enum MessageFilter: String, CaseIterable, Sendable {
         case .all: return true
         case .replies: return !m.replies.isEmpty
         case .pinned: return m.pinned
+        case .announcements: return m.isAnnouncement
         case .saved: return m.saved || m.replies.contains { $0.saved }
         case .files: return m.hasFiles || m.replies.contains { $0.hasFiles }
         case .links: return m.hasLink || m.replies.contains { $0.hasLink }
@@ -24,6 +25,10 @@ public enum MessageFilter: String, CaseIterable, Sendable {
 }
 
 extension MessageView {
+    /// A post sent as an announcement, or a post from before types were
+    /// kept (is_announcement on the Mac).
+    public var isAnnouncement: Bool { postTitle != nil && (postType.isEmpty || postType == "Announcement") }
+
     /// Pictures, videos or other files were sent in it (has_files on the Mac).
     public var hasFiles: Bool { !attachments.isEmpty }
 
@@ -42,6 +47,9 @@ public struct ConversationFile: Hashable, Sendable {
 }
 
 extension ChannelView {
+    /// The newest announcement, shown over the messages.
+    public var latestAnnouncement: MessageView? { messages.last(where: \.isAnnouncement) }
+
     /// Every file sent in the conversation and its threads, newest first.
     public var files: [ConversationFile] {
         var out: [ConversationFile] = []

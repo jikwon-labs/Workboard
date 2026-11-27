@@ -770,6 +770,7 @@ fn channel_find_and_message_chips_keep_the_channel_inside() {
                     .collect();
             for p in [
                 ChannelPanel::Pinned,
+                ChannelPanel::Announcements,
                 ChannelPanel::Replies,
                 ChannelPanel::Tasks,
                 ChannelPanel::Saved,

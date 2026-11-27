@@ -17,10 +17,11 @@ final class ChatFiltersUITests: WorkboardUITestCase {
 
     /// A message from Alex on the 18789 server, with a file (&kind=Image:
     /// a picture) or as a reply in a thread.
-    func send(_ text: String, channel: Int, file: String? = nil, picture: Bool = false, reply: Int? = nil) {
+    func send(_ text: String, channel: Int, file: String? = nil, picture: Bool = false, reply: Int? = nil, post: String? = nil) {
         var q = "channel=\(channel)&author=2&text=\(text.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!)"
         if let file { q += "&file=\(file)" + (picture ? "&kind=Image" : "") }
         if let reply { q += "&reply=\(reply)" }
+        if let post { q += "&post=\(post.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!)" }
         admin(port: 18789, "say?" + q)
     }
 
@@ -49,6 +50,35 @@ final class ChatFiltersUITests: WorkboardUITestCase {
         pick(b, "Files")
         XCTAssertTrue(b.staticTexts["No files in this conversation yet"].waitForExistence(timeout: 5))
         XCTAssertFalse(b.descendants(matching: .any)["message-331"].exists, "the gallery, not the messages")
+    }
+
+    /// The newest announcement shows over the messages: Show all lists only
+    /// the announcements, tapping it goes to the post, the x hides it.
+    func testNewestAnnouncementOverTheMessages() {
+        let tag = "\(Int.random(in: 100000...999999))"
+        send("plain \(tag)", channel: 303)
+        send("Read before Friday", channel: 303, post: "Office move \(tag)")
+        let a = launchFresh(["-wbOpen", "channel:303"], server: adminServer)
+        let banner = a.buttons["announcementBanner"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 10))
+        XCTAssertTrue(banner.label.contains("Office move \(tag)"), banner.label)
+        let plain = a.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "plain \(tag)")).firstMatch
+        XCTAssertTrue(plain.waitForExistence(timeout: 5))
+
+        a.buttons["allAnnouncementsButton"].tap()
+        let filterBanner = a.staticTexts["filterBanner"]
+        XCTAssertTrue(filterBanner.waitForExistence(timeout: 5))
+        XCTAssertEqual(filterBanner.label, "Announcements")
+        XCTAssertFalse(plain.exists, "only the announcements")
+        XCTAssertFalse(banner.exists, "the filter's banner in its place")
+        a.buttons["clearFilterButton"].tap()
+        XCTAssertTrue(banner.waitForExistence(timeout: 5))
+        banner.tap()
+        a.buttons["hideAnnouncementButton"].tap()
+        XCTAssertFalse(banner.waitForExistence(timeout: 2), "hidden")
+        // the filter menu has it too
+        pick(a, "Announcements")
+        XCTAssertEqual(a.staticTexts["filterBanner"].label, "Announcements")
     }
 
     /// Files shows pictures in a grid and other files in a list, with those

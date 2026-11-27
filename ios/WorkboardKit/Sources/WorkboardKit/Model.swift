@@ -455,6 +455,9 @@ public struct MessageView: Identifiable, Hashable, Sendable {
     public let ts: Int64
     public let replies: [MessageView]
     public let postTitle: String?
+    /// The kind of post ("Announcement", "Update", "Idea", "Question"; empty
+    /// for a post from before types were kept).
+    public let postType: String
     public let pinned: Bool
     public let call: String?
     public let reactions: [ReactionView]
@@ -511,6 +514,7 @@ public struct MessageView: Identifiable, Hashable, Sendable {
         ts = j["ts"]?.int ?? 0
         replies = (j["replies"]?.array ?? []).map(MessageView.init)
         postTitle = j["post_title"]?.string
+        postType = j["post_type"]?.string ?? ""
         pinned = j["pinned"]?.bool ?? false
         call = j["call"]?.string
     }

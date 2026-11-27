@@ -4737,3 +4737,91 @@ fn the_header_has_the_conversation_tools_i_pick() {
     h.click("Channel settings");
     assert!(matches!(h.app.modal, Some(Modal::ChannelSettings(c)) if c == dm));
 }
+
+/// The newest announcement shows over a channel's messages: clicking it
+/// goes to the post, "Show all" lists only the announcements (as the
+/// panel's Announcements row does), the x hides it until a newer one.
+/// Other kinds of posts aren't announcements.
+#[test]
+fn the_newest_announcement_shows_over_the_channel_and_all_of_them_on_their_own() {
+    use crate::app::chat::ChannelPanel;
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let me = h.app.data.me;
+    let now = now_ts();
+    let post = |h: &mut Ui1, title: &str, kind: &str, ts: i64| {
+        let id = h.app.data.new_id();
+        let mut m = crate::app::slack::new_message(id, me, "Read this".into(), ts);
+        m.post_title = Some(title.into());
+        m.post_type = kind.into();
+        let c = h
+            .app
+            .data
+            .channels
+            .iter_mut()
+            .find(|c| c.id == cid)
+            .unwrap();
+        c.messages.push(m);
+        id
+    };
+    assert!(!h.has("Announcement banner"), "none before the first");
+    let old = post(&mut h, "Office move on Monday", "Announcement", now - 30);
+    let news = post(&mut h, "Party on Friday", "", now - 20);
+    post(&mut h, "Try the new coffee", "Idea", now - 10);
+    let plain =
+        crate::app::slack::new_message(h.app.data.new_id(), me, "Lunch at noon".into(), now);
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .push(plain);
+    h.settle();
+
+    // the newest announcement, not the idea after it
+    let banner = h.rect("Announcement banner");
+    let in_banner = |h: &Ui1, text: &str| {
+        h.painted_text(text)
+            .iter()
+            .any(|(r, _)| banner.contains(r.center()))
+    };
+    assert!(in_banner(&h, "Party on Friday"));
+    assert!(!in_banner(&h, "Try the new coffee"));
+    assert!(banner.bottom() < h.painted_text("Lunch at noon")[0].0.top());
+
+    // Show all: only the announcements, the banner gives way to the chip
+    h.click("All announcements");
+    assert_eq!(h.app.channel_panel, ChannelPanel::Announcements);
+    assert!(h.has("Announcements  \u{00D7}"));
+    assert!(!h.has("Announcement banner"));
+    assert!(shown(&h, "Office move on Monday") && shown(&h, "Party on Friday"));
+    assert!(!shown(&h, "Try the new coffee") && !shown(&h, "Lunch at noon"));
+    h.click("Announcements  \u{00D7}");
+    assert_eq!(h.app.channel_panel, ChannelPanel::All);
+    // the side panel's row shows the same
+    panel_row(&mut h, "Announcements");
+    assert_eq!(h.app.channel_panel, ChannelPanel::Announcements);
+    panel_row(&mut h, "Announcements");
+    assert_eq!(h.app.channel_panel, ChannelPanel::All);
+
+    // clicking it goes to the post, lit up
+    h.click("Announcement banner");
+    h.settle();
+    assert_eq!(h.app.chat.flash.map(|f| (f.0, f.1)), Some((cid, news)));
+
+    // hidden: gone until a newer one is posted
+    h.click("Hide announcement");
+    assert!(!h.has("Announcement banner"));
+    let _ = old;
+    post(&mut h, "Fire drill at 3", "Announcement", now + 5);
+    h.settle();
+    assert!(h.has("Announcement banner"));
+    let banner = h.rect("Announcement banner");
+    assert!(h
+        .painted_text("Fire drill at 3")
+        .iter()
+        .any(|(r, _)| banner.contains(r.center())));
+}

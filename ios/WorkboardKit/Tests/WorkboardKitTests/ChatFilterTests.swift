@@ -41,6 +41,18 @@ final class ChatFilterTests: XCTestCase {
         XCTAssertEqual(ids(.links), [9, 10])
     }
 
+    func testAnnouncementsAreTheMacsAnnouncementPosts() {
+        let plain = msg(1, "hi", ts: 10)
+        let announcement = msg(2, "Read this", ts: 20, extra: ["post_title": "Office move", "post_type": "Announcement"])
+        let old = msg(3, "From before types", ts: 30, extra: ["post_title": "Party", "post_type": ""])
+        let idea = msg(4, "Coffee?", ts: 40, extra: ["post_title": "New coffee", "post_type": "Idea"])
+        let all = [plain, announcement, old, idea].map(MessageView.init)
+        XCTAssertEqual(all.filter(MessageFilter.announcements.keeps).map(\.id), [2, 3])
+        let c = ChannelView(["id": 301, "name": "general", "kind": "Channel", "members": [1], "messages": [plain, announcement, old, idea]])
+        XCTAssertEqual(c.latestAnnouncement?.id, 3, "the newest announcement, not the idea after it")
+        XCTAssertNil(ChannelView(["id": 302, "name": "x", "kind": "Channel", "members": [1], "messages": [plain]]).latestAnnouncement)
+    }
+
     func testFilesNewestFirstWithThreadReplies() {
         let c = ChannelView(["id": 301, "name": "general", "kind": "Channel", "members": [1, 2], "messages": [
             msg(1, "", ts: 100, extra: ["attachments": [file, picture]]),

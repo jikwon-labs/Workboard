@@ -416,8 +416,20 @@ pub(super) fn extra_screens(_h: &Ui1) -> Vec<(String, Go)> {
             a.chat.profile = Some(a.data.me);
         }),
     );
+    x(
+        "chat announcement banner",
+        app(|a| {
+            a.section = Section::Chat;
+            a.chat.open = Some(general(a));
+            add_post(a);
+        }),
+    );
     for (name, p) in [
         ("pinned", crate::app::chat::ChannelPanel::Pinned),
+        (
+            "announcements",
+            crate::app::chat::ChannelPanel::Announcements,
+        ),
         ("replies", crate::app::chat::ChannelPanel::Replies),
         ("tasks", crate::app::chat::ChannelPanel::Tasks),
         ("saved", crate::app::chat::ChannelPanel::Saved),

@@ -303,12 +303,15 @@ impl Style {
     /// Use this style for interactive things.
     /// Note that you must already have a response,
     /// i.e. you must allocate space and interact BEFORE painting the widget!
-    pub fn interact(&self, response: &Response) -> &WidgetVisuals {
-        self.visuals.widgets.style(response)
+    /// Workboard patch: by value, eased between the resting and hovered
+    /// looks over `animation_time` (see `Widgets::eased`), so a hover fill
+    /// fades in and out instead of switching at once.
+    pub fn interact(&self, response: &Response) -> WidgetVisuals {
+        self.visuals.widgets.eased(response, self.animation_time)
     }
 
     pub fn interact_selectable(&self, response: &Response, selected: bool) -> WidgetVisuals {
-        let mut visuals = *self.visuals.widgets.style(response);
+        let mut visuals = self.visuals.widgets.eased(response, self.animation_time);
         if selected {
             visuals.weak_bg_fill = self.visuals.selection.bg_fill;
             visuals.bg_fill = self.visuals.selection.bg_fill;
@@ -1072,6 +1075,27 @@ pub struct Widgets {
 }
 
 impl Widgets {
+    /// Workboard patch: the look `style` picks, except that going between
+    /// resting and hovered eases over `secs` (a press and focus show at
+    /// once). With `secs` 0 it is `style`.
+    pub fn eased(&self, response: &Response, secs: f32) -> WidgetVisuals {
+        let picked = *self.style(response);
+        if secs <= 0.0 || !response.sense.interactive() {
+            return picked;
+        }
+        let on = response.hovered() || response.highlighted();
+        let k = response
+            .ctx
+            .animate_bool_with_time(response.id.with("__wb_hover_ease"), on, secs);
+        if response.is_pointer_button_down_on() || response.has_focus() || response.clicked() {
+            return picked;
+        }
+        if k <= 0.0 || k >= 1.0 {
+            return picked;
+        }
+        self.inactive.lerp(&self.hovered, k)
+    }
+
     pub fn style(&self, response: &Response) -> &WidgetVisuals {
         if !response.sense.interactive() {
             &self.noninteractive
@@ -1117,6 +1141,27 @@ pub struct WidgetVisuals {
 }
 
 impl WidgetVisuals {
+    /// Workboard patch: `k` of the way from `self` to `other` (0 is self).
+    pub fn lerp(&self, other: &Self, k: f32) -> Self {
+        let color = |a: Color32, b: Color32| a.lerp_to_gamma(b, k);
+        let stroke = |a: Stroke, b: Stroke| Stroke {
+            width: emath::lerp(a.width..=b.width, k),
+            color: color(a.color, b.color),
+        };
+        Self {
+            bg_fill: color(self.bg_fill, other.bg_fill),
+            weak_bg_fill: color(self.weak_bg_fill, other.weak_bg_fill),
+            bg_stroke: stroke(self.bg_stroke, other.bg_stroke),
+            corner_radius: if k < 0.5 {
+                self.corner_radius
+            } else {
+                other.corner_radius
+            },
+            fg_stroke: stroke(self.fg_stroke, other.fg_stroke),
+            expansion: emath::lerp(self.expansion..=other.expansion, k),
+        }
+    }
+
     #[inline(always)]
     pub fn text_color(&self) -> Color32 {
         self.fg_stroke.color

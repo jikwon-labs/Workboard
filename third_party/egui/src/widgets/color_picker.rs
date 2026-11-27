@@ -91,7 +91,7 @@ fn color_button(ui: &mut Ui, color: Color32, open: bool) -> Response {
 
     if ui.is_rect_visible(rect) {
         let visuals = if open {
-            &ui.visuals().widgets.open
+            ui.visuals().widgets.open
         } else {
             ui.style().interact(&response)
         };

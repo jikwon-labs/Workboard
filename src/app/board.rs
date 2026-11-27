@@ -351,12 +351,13 @@ impl App {
             .interact(rect, id, Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::Grab);
         let drawn = self.card(ui, task, w, true);
-        if body.hovered() {
+        let lit = crate::motion::hover(&body);
+        if lit > 0.0 {
             // a darker outline says the card can be opened or picked up
             ui.painter().rect_stroke(
                 drawn,
                 8.0,
-                Stroke::new(1.0_f32, hover_line(ui)),
+                Stroke::new(1.0_f32, hover_line(ui).gamma_multiply(lit)),
                 egui::StrokeKind::Inside,
             );
         }

@@ -63,10 +63,17 @@ impl App {
         // the highlight also covers the selection box drawn just left of the row
         let band = rect.with_min_x(rect.left() - 10.0);
         let band_hover = ui.rect_contains_pointer(band) && self.row.drag.is_none();
+        let lit = crate::motion::toggle(
+            ui.ctx(),
+            resp.id.with("row_hover"),
+            resp.hovered() || band_hover || self.row.drag == Some(task.id),
+            crate::motion::HOVER,
+        );
         if self.selected.contains(&task.id) {
             ui.painter().rect_filled(band, 0.0, t.selected_bg);
-        } else if resp.hovered() || band_hover || self.row.drag == Some(task.id) {
-            ui.painter().rect_filled(band, 0.0, t.hover);
+        } else if lit > 0.0 {
+            ui.painter()
+                .rect_filled(band, 0.0, t.hover.gamma_multiply(lit));
         }
         if self.row.focus == Some(task.id) {
             ui.painter().rect_stroke(

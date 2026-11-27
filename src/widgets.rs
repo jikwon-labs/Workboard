@@ -257,7 +257,14 @@ pub fn paint_switch(ui: &Ui, t: &Theme, resp: &Response, r: Rect, on: bool) {
     } else {
         Color32::from_gray(212)
     };
-    let bg = if on { t.primary } else { off };
+    // the knob slides across and the colour follows it
+    let k = crate::motion::toggle(
+        ui.ctx(),
+        resp.id.with("switch_on"),
+        on,
+        crate::motion::TOGGLE,
+    );
+    let bg = off.lerp_to_gamma(t.primary, k);
     let bg = if resp.enabled() {
         bg
     } else {
@@ -265,13 +272,20 @@ pub fn paint_switch(ui: &Ui, t: &Theme, resp: &Response, r: Rect, on: bool) {
     };
     ui.painter().rect_filled(r, 10.0, bg);
     hover_bg(ui, resp, r, 10.0);
-    let x = if on {
-        r.right() - 10.0
-    } else {
-        r.left() + 10.0
-    };
-    let knob = if on { t.on_primary } else { Color32::WHITE };
-    ui.painter().circle_filled(pos2(x, r.center().y), 7.0, knob);
+    let x = egui::lerp((r.left() + 10.0)..=(r.right() - 10.0), k);
+    let knob = Color32::WHITE.lerp_to_gamma(t.on_primary, k);
+    // a press makes the knob a little wider, as on the system's switches
+    let press = crate::motion::toggle(
+        ui.ctx(),
+        resp.id.with("switch_press"),
+        resp.is_pointer_button_down_on(),
+        crate::motion::HOVER,
+    );
+    let c = pos2(x, r.center().y);
+    let w = 3.0 * press;
+    let knob_rect = Rect::from_center_size(c, vec2(14.0 + w, 14.0));
+    let knob_rect = knob_rect.translate(vec2(if k > 0.5 { -w / 2.0 } else { w / 2.0 }, 0.0));
+    ui.painter().rect_filled(knob_rect, 7.0, knob);
 }
 
 /// Where `theme::apply` leaves the accent colour for widgets that are not
@@ -351,23 +365,15 @@ impl egui::Widget for Check<'_> {
             );
             let enabled = resp.enabled();
             let fade = |c: Color32| if enabled { c } else { c.gamma_multiply(0.5) };
-            if on {
-                let fill = if resp.hovered() {
-                    accent.gamma_multiply(0.85).to_opaque()
-                } else {
-                    accent
-                };
-                ui.painter().rect_filled(b, 3.5, fade(fill));
-                let c = b.center();
-                ui.painter().add(egui::Shape::line(
-                    vec![
-                        c + vec2(-3.6, 0.2),
-                        c + vec2(-1.0, 2.8),
-                        c + vec2(3.8, -2.6),
-                    ],
-                    Stroke::new(1.8_f32, fade(on_accent(ui))),
-                ));
-            } else {
+            // turning on: the fill grows out of the box and the tick draws
+            // itself from left to right; turning off runs it backwards
+            let k = crate::motion::toggle(
+                ui.ctx(),
+                resp.id.with("check_on"),
+                on,
+                crate::motion::TOGGLE,
+            );
+            if k < 1.0 {
                 let line = match (dark, resp.hovered()) {
                     (true, false) => Color32::from_gray(110),
                     (true, true) => Color32::from_gray(150),
@@ -381,6 +387,36 @@ impl egui::Widget for Check<'_> {
                     Stroke::new(1.2_f32, fade(line)),
                     egui::StrokeKind::Inside,
                 );
+            }
+            if k > 0.0 {
+                let fill = if resp.hovered() {
+                    accent.gamma_multiply(0.85).to_opaque()
+                } else {
+                    accent
+                };
+                let grow = crate::motion::ease_out(k);
+                let fb = Rect::from_center_size(b.center(), b.size() * (0.55 + 0.45 * grow));
+                ui.painter()
+                    .rect_filled(fb, 3.5, fade(fill).gamma_multiply(grow.max(0.2)));
+                let c = b.center();
+                let pts = [
+                    c + vec2(-3.6, 0.2),
+                    c + vec2(-1.0, 2.8),
+                    c + vec2(3.8, -2.6),
+                ];
+                // the tick as far along as `k` (the short stroke is a third)
+                let along = k;
+                let mut line = vec![pts[0]];
+                if along <= 0.34 {
+                    line.push(pts[0] + (pts[1] - pts[0]) * (along / 0.34));
+                } else {
+                    line.push(pts[1]);
+                    line.push(pts[1] + (pts[2] - pts[1]) * ((along - 0.34) / 0.66));
+                }
+                ui.painter().add(egui::Shape::line(
+                    line,
+                    Stroke::new(1.8_f32, fade(on_accent(ui))),
+                ));
             }
             if let Some(g) = galley {
                 let color = ui.style().interact(&resp).text_color();
@@ -566,13 +602,7 @@ impl egui::Widget for Ghost<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let slot = ui.painter().add(egui::Shape::Noop);
         let r = ui.add(self.0.frame(false));
-        if r.enabled() && (r.hovered() || r.is_pointer_button_down_on()) {
-            let fill = hover_fill(ui);
-            let fill = if r.is_pointer_button_down_on() {
-                fill.gamma_multiply(1.5)
-            } else {
-                fill
-            };
+        if let Some(fill) = crate::motion::hover_fill(&r, hover_fill(ui)) {
             let pad = vec2(
                 if r.rect.width() < 28.0 { 3.0 } else { 6.0 },
                 if r.rect.height() < 22.0 { 2.0 } else { 0.0 },
@@ -599,13 +629,7 @@ impl egui::Widget for Ghost<'_> {
 /// which is taller than wide, so it came out as an upright pill.
 pub fn close_x(ui: &mut Ui, size: f32, color: Color32) -> Response {
     let (r, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
-    if resp.enabled() && (resp.hovered() || resp.is_pointer_button_down_on()) {
-        let fill = hover_fill(ui);
-        let fill = if resp.is_pointer_button_down_on() {
-            fill.gamma_multiply(1.5)
-        } else {
-            fill
-        };
+    if let Some(fill) = crate::motion::hover_fill(&resp, hover_fill(ui)) {
         ui.painter().circle_filled(r.center(), size / 2.0, fill);
     }
     let h = (size * 0.16).max(3.0);
@@ -626,12 +650,7 @@ pub struct Tint<W>(pub W);
 impl<W: egui::Widget> egui::Widget for Tint<W> {
     fn ui(self, ui: &mut Ui) -> Response {
         let r = ui.add(self.0);
-        if r.enabled() && r.hovered() {
-            let tint = if r.is_pointer_button_down_on() {
-                hover_fill(ui).gamma_multiply(1.5)
-            } else {
-                hover_fill(ui)
-            };
+        if let Some(tint) = crate::motion::hover_fill(&r, hover_fill(ui)) {
             ui.painter().rect_filled(r.rect, 6.0, tint);
         }
         r
@@ -641,19 +660,22 @@ impl<W: egui::Widget> egui::Widget for Tint<W> {
 /// For a painted control: draws the hover fill over `rect` while the pointer is
 /// on it. Call it before painting the control's own shapes.
 pub fn hover_bg(ui: &Ui, resp: &Response, rect: Rect, radius: f32) {
-    if resp.enabled() && resp.hovered() {
-        ui.painter().rect_filled(rect, radius, hover_fill(ui));
+    let k = crate::motion::hover(resp);
+    if k > 0.0 {
+        ui.painter()
+            .rect_filled(rect, radius, hover_fill(ui).gamma_multiply(k));
     }
 }
 
 /// For a painted swatch, avatar or icon tile: a thin ring around `rect` while the
 /// pointer is on it (`radius` half the width makes it a circle).
 pub fn hover_ring(ui: &Ui, resp: &Response, rect: Rect, radius: f32) {
-    if resp.enabled() && resp.hovered() {
+    let k = crate::motion::hover(resp);
+    if k > 0.0 {
         ui.painter().rect_stroke(
             rect,
             radius,
-            Stroke::new(1.5_f32, hover_line(ui)),
+            Stroke::new(1.5_f32, hover_line(ui).gamma_multiply(k)),
             egui::StrokeKind::Outside,
         );
     }

@@ -209,6 +209,9 @@ pub fn apply(ctx: &egui::Context, t: &Theme) {
         d.insert_temp(egui::Id::new(crate::widgets::ON_ACCENT_ID), t.on_primary);
     });
     ctx.style_mut(|s| {
+        // hover fades, popups growing in, sections opening (crate::motion);
+        // none in tests and screenshots, which read one frame
+        s.animation_time = if crate::motion::enabled() { 0.14 } else { 0.0 };
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
         // 5.5 above and below 14 px text (17 px tall) makes framed buttons
         // and drop-downs 28 px, the height of a primary button and a text

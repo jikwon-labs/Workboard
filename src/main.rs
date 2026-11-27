@@ -11,6 +11,7 @@ mod i18n;
 mod linkpreview;
 mod links;
 mod model;
+mod motion;
 mod notifier;
 mod os;
 mod scrub;
@@ -126,6 +127,9 @@ fn main() -> eframe::Result<()> {
     if !shot && single::start() == single::Start::Handed {
         return Ok(());
     }
+    // movements are off for a screenshot (one frame) and when the system
+    // asks for reduced motion
+    motion::set_enabled(!shot && !os::reduce_motion());
     links::listen();
     os::adopt_scenes();
     // iPad: hang up while in the background, so the server pushes instead

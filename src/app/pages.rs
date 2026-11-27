@@ -23,6 +23,26 @@ pub enum Section {
     Settings,
 }
 
+impl App {
+    /// Which page is showing, as a number: it changes when a different
+    /// section, List, channel, doc or settings tab is opened (the page
+    /// then rises into place, `crate::motion::enter`).
+    pub(super) fn shown_page(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.section.hash(&mut h);
+        format!("{:?}", self.loc).hash(&mut h);
+        match self.section {
+            Section::Chat => self.chat.open.hash(&mut h),
+            Section::Docs => self.doc_open.hash(&mut h),
+            Section::Dashboards => self.dash_open.hash(&mut h),
+            Section::Settings => format!("{:?}", self.settings_tab).hash(&mut h),
+            _ => {}
+        }
+        h.finish()
+    }
+}
+
 fn bar_row(
     ui: &mut Ui,
     t: &Theme,

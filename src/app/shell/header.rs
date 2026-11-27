@@ -635,9 +635,11 @@ impl App {
                     resp.on_hover_text(tr(v.label()))
                 };
                 name_it(&resp, &format!("View {}", v.label()));
-                if resp.hovered() && !sel {
-                    ui.painter()
-                        .rect_filled(r.shrink2(vec2(0.0, 5.0)), 6.0, t.hover);
+                if !sel {
+                    if let Some(fill) = crate::motion::hover_fill(&resp, t.hover) {
+                        ui.painter()
+                            .rect_filled(r.shrink2(vec2(0.0, 5.0)), 6.0, fill);
+                    }
                 }
                 paint_view_icon(ui.painter(), pos2(r.left() + 13.0, r.center().y), v);
                 let gc = if sel { t.text } else { t.text2 };
@@ -652,14 +654,17 @@ impl App {
                         g,
                         gc,
                     );
-                    ui.painter().rect_filled(
+                    // the line slides over from the tab chosen before
+                    let line = crate::motion::glide_rect(
+                        ui.ctx(),
+                        egui::Id::new("view_tab_line"),
                         Rect::from_min_max(
                             pos2(r.left() + 2.0, r.bottom() - 2.0),
                             pos2(r.right() - 2.0, r.bottom()),
                         ),
-                        1.0,
-                        t.text,
+                        crate::motion::TOGGLE,
                     );
+                    ui.painter().rect_filled(line, 1.0, t.text);
                 }
                 if resp.clicked() {
                     self.view = v;

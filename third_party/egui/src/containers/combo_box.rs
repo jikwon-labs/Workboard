@@ -374,7 +374,7 @@ fn combo_box_dyn<'c, R>(
         if ui.is_rect_visible(rect) {
             let icon_rect = Align2::RIGHT_CENTER.align_size_within_rect(icon_size, rect);
             let visuals = if is_popup_open {
-                &ui.visuals().widgets.open
+                ui.visuals().widgets.open
             } else {
                 ui.style().interact(&response)
             };
@@ -383,7 +383,7 @@ fn combo_box_dyn<'c, R>(
                 icon(
                     ui,
                     icon_rect.expand(visuals.expansion),
-                    visuals,
+                    &visuals,
                     is_popup_open,
                     above_or_below,
                 );
@@ -391,7 +391,7 @@ fn combo_box_dyn<'c, R>(
                 paint_default_icon(
                     ui.painter(),
                     icon_rect.expand(visuals.expansion),
-                    visuals,
+                    &visuals,
                     above_or_below,
                 );
             }
@@ -462,7 +462,7 @@ fn button_frame(
 
     if ui.is_rect_visible(outer_rect) {
         let visuals = if is_popup_open {
-            &ui.visuals().widgets.open
+            ui.visuals().widgets.open
         } else {
             ui.style().interact(&response)
         };

@@ -3058,6 +3058,18 @@ impl App {
 
     fn content(&mut self, ctx: &egui::Context) {
         let t = self.t();
+        // a page that changes fades in; a new view of the same List does the
+        // same under the header. Fading only: sliding it while the header
+        // and toolbar above stay put read as the layout jumping
+        let key = self.shown_page();
+        // (one key for every page, so a change between sections is seen;
+        // the view has its own)
+        let key = ("page_fade", key);
+        let view_key = ("view_fade", self.view as u64);
+        fn fade_in<R>(ui: &mut Ui, key: (&str, u64), add: impl FnOnce(&mut Ui) -> R) -> R {
+            let id = egui::Id::new(key.0);
+            crate::motion::enter(ui, id, key.1, vec2(0.0, 0.0), add)
+        }
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
@@ -3099,32 +3111,42 @@ impl App {
                         let shown =
                             egui::CentralPanel::default()
                                 .frame(page)
-                                .show_inside(ui, |ui| match self.loc {
-                                    Location::Home => self.home(ui),
-                                    Location::Inbox => self.inbox_page(ui),
-                                    Location::Replies => {
-                                        self.comments_page(ui, CommentsPage::Replies)
-                                    }
-                                    Location::Assigned => {
-                                        self.comments_page(ui, CommentsPage::Assigned)
-                                    }
-                                    _ => {
-                                        self.header(ui);
-                                        let rect = ui.available_rect_before_wrap();
-                                        ui.scope_builder(
-                                            egui::UiBuilder::new()
-                                                .max_rect(rect.shrink2(vec2(16.0, 0.0))),
-                                            |ui| match self.view {
-                                                ViewKind::Overview => self.overview_view(ui),
-                                                ViewKind::List => self.list_view(ui),
-                                                ViewKind::Board => self.board_view(ui),
-                                                ViewKind::Calendar => self.calendar_view(ui),
-                                                ViewKind::Gantt => self.gantt_view(ui),
-                                                ViewKind::Timeline => self.timeline_view(ui),
-                                                ViewKind::Table => self.table_view(ui),
-                                            },
-                                        );
-                                    }
+                                .show_inside(ui, |ui| {
+                                    fade_in(ui, key, |ui| match self.loc {
+                                        Location::Home => self.home(ui),
+                                        Location::Inbox => self.inbox_page(ui),
+                                        Location::Replies => {
+                                            self.comments_page(ui, CommentsPage::Replies)
+                                        }
+                                        Location::Assigned => {
+                                            self.comments_page(ui, CommentsPage::Assigned)
+                                        }
+                                        _ => {
+                                            self.header(ui);
+                                            let rect = ui.available_rect_before_wrap();
+                                            ui.scope_builder(
+                                                egui::UiBuilder::new()
+                                                    .max_rect(rect.shrink2(vec2(16.0, 0.0))),
+                                                |ui| {
+                                                    fade_in(ui, view_key, |ui| match self.view {
+                                                        ViewKind::Overview => {
+                                                            self.overview_view(ui)
+                                                        }
+                                                        ViewKind::List => self.list_view(ui),
+                                                        ViewKind::Board => self.board_view(ui),
+                                                        ViewKind::Calendar => {
+                                                            self.calendar_view(ui)
+                                                        }
+                                                        ViewKind::Gantt => self.gantt_view(ui),
+                                                        ViewKind::Timeline => {
+                                                            self.timeline_view(ui)
+                                                        }
+                                                        ViewKind::Table => self.table_view(ui),
+                                                    })
+                                                },
+                                            );
+                                        }
+                                    })
                                 });
                         // the bar of bulk actions keeps to the page
                         ui.ctx().data_mut(|d| {
@@ -3135,76 +3157,76 @@ impl App {
                         self.sidebar(ui);
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.chat(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.chat(ui)));
                     }
                     Section::Planner => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.planner(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.planner(ui)));
                     }
                     Section::Posts => {
                         self.sidebar(ui);
                         self.profile_panel(ui);
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.posts_page(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.posts_page(ui)));
                     }
                     Section::Meetings => {
                         self.sidebar(ui);
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.meetings_page(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.meetings_page(ui)));
                     }
                     Section::People => {
                         self.people_profile_panel(ui);
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.people_page(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.people_page(ui)));
                     }
                     Section::Goals => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.goals_hub(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.goals_hub(ui)));
                     }
                     Section::Forms => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.forms_hub(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.forms_hub(ui)));
                     }
                     Section::Whiteboards => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.whiteboards_hub(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.whiteboards_hub(ui)));
                     }
                     Section::Settings => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.settings_page(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.settings_page(ui)));
                     }
                     Section::Ai => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.ai_page(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.ai_page(ui)));
                     }
                     Section::Teams => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.teams_hub(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.teams_hub(ui)));
                     }
                     Section::Docs => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.docs_hub(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.docs_hub(ui)));
                     }
                     Section::Dashboards => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.dashboards_hub(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.dashboards_hub(ui)));
                     }
                     Section::Timesheets => {
                         egui::CentralPanel::default()
                             .frame(page)
-                            .show_inside(ui, |ui| self.timesheets_hub(ui));
+                            .show_inside(ui, |ui| fade_in(ui, key, |ui| self.timesheets_hub(ui)));
                     }
                 }
                 ui.painter().rect_stroke(

@@ -1142,3 +1142,24 @@ mod tests {
         }
     }
 }
+
+/// The system setting to reduce motion (Accessibility > Display): the
+/// app's own movements stay off then.
+#[cfg(all(target_os = "macos", not(test)))]
+pub fn reduce_motion() -> bool {
+    use objc::runtime::{Object, BOOL, NO};
+    use objc::{class, msg_send, sel, sel_impl};
+    unsafe {
+        let ws: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if ws.is_null() {
+            return false;
+        }
+        let on: BOOL = msg_send![ws, accessibilityDisplayShouldReduceMotion];
+        on != NO
+    }
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+pub fn reduce_motion() -> bool {
+    false
+}

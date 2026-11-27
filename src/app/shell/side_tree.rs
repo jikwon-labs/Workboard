@@ -65,8 +65,8 @@ impl App {
         name_it(&resp, label);
         if selected {
             ui.painter().rect_filled(rect, 7.0, t.row_selected);
-        } else if resp.hovered() {
-            ui.painter().rect_filled(rect, 7.0, t.hover);
+        } else if let Some(fill) = crate::motion::hover_fill(&resp, t.hover) {
+            ui.painter().rect_filled(rect, 7.0, fill);
         }
         let x = rect.left() + 8.0 + indent;
         lead(ui.painter(), pos2(x + 8.0, rect.center().y));
@@ -232,8 +232,8 @@ impl App {
                         t.row_selected
                     },
                 );
-            } else if resp.hovered() {
-                ui.painter().rect_filled(br, 5.0, t.row_selected);
+            } else if let Some(fill) = crate::motion::hover_fill(&resp, t.row_selected) {
+                ui.painter().rect_filled(br, 5.0, fill);
             }
             if boxed {
                 name_it(&resp, &format!("Sidebar {}", tip));

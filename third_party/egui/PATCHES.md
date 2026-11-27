@@ -37,6 +37,17 @@ the egui contributors) so text boxes edit like the Mac. Used through
   lines a menu up with a button at the right edge of the window this way).
   Before, egui only opened submenus to the right.
 
+- `src/style.rs`: `Style::interact` returns the look by value, eased
+  between resting and hovered over `animation_time` (`Widgets::eased`,
+  `WidgetVisuals::lerp`), so hover fills fade in and out instead of
+  switching at once. Callers in `menu.rs`, `combo_box.rs` and
+  `color_picker.rs` take the value. With `animation_time` 0 it is the
+  old look.
+- `src/containers/area.rs` (`Prepared::end`): a popup, menu or window that
+  has just come up grows from 94% around its pivot and travels a few
+  points while it fades in (not tooltips, nor an area covering the whole
+  window). Only the shapes move; input is untouched.
+
 - `src/lib.rs`: `#![allow(warnings)]`, so the old code does not fill every
   build with warnings.
 

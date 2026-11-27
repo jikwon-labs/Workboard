@@ -520,9 +520,9 @@ impl SubMenuButton {
         response: &Response,
         menu_state: &MenuState,
         sub_id: Id,
-    ) -> &'a WidgetVisuals {
+    ) -> WidgetVisuals {
         if menu_state.is_open(sub_id) && !response.hovered() {
-            &ui.style().visuals.widgets.open
+            ui.style().visuals.widgets.open
         } else {
             ui.style().interact(response)
         }

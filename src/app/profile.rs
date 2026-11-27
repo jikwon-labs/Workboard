@@ -148,11 +148,14 @@ impl App {
             // thread does
             let avail = ui.available_width();
             let w = (avail - 340.0).clamp(240.0, PROFILE_W);
-            egui::SidePanel::right("profile")
-                .exact_width(w)
-                .resizable(false)
-                .frame(frame)
-                .show_inside(ui, |ui| self.profile_side_body(ui, &m, &mut close));
+            // slides in from the right as it opens or shows someone else
+            crate::motion::enter(ui, egui::Id::new("profile_in"), id, vec2(28.0, 0.0), |ui| {
+                egui::SidePanel::right("profile")
+                    .exact_width(w)
+                    .resizable(false)
+                    .frame(frame)
+                    .show_inside(ui, |ui| self.profile_side_body(ui, &m, &mut close))
+            });
         }
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape))
             && self.modal.is_none()

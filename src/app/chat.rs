@@ -1501,146 +1501,161 @@ impl App {
         } else {
             (ui.available_width() * 0.3).clamp(170.0, 230.0)
         };
-        egui::SidePanel::right(egui::Id::new(("chan_panel", cid)))
-            .exact_width(panel_w)
-            .resizable(false)
-            .show_separator_line(false)
-            .frame(egui::Frame::new().inner_margin(egui::Margin {
-                left: 8,
-                right: 12,
-                top: 12,
-                bottom: 8,
-            }))
-            .show_inside(ui, |ui| {
-                // it scrolls when the window is short (an iPad's keyboard up),
-                // instead of making the messages beside it as tall as it is
-                egui::ScrollArea::vertical()
-                    .id_salt(("chan_panel_scroll", cid))
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        egui::Frame::new()
-                            .stroke(Stroke::new(1.0_f32, t.border))
-                            .corner_radius(10)
-                            .inner_margin(egui::Margin::same(6))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                let rows: [(Icon, &str, PanelRow); 9] = [
-                                    (Icon::Person, "Followers", PanelRow::Followers),
-                                    (Icon::Search, "Find in channel", PanelRow::Find),
-                                    (
-                                        Icon::Reply,
-                                        "Replies",
-                                        PanelRow::Show(ChannelPanel::Replies),
-                                    ),
-                                    (
-                                        Icon::Pin,
-                                        "Pinned messages",
-                                        PanelRow::Show(ChannelPanel::Pinned),
-                                    ),
-                                    (Icon::Bookmark, "Saved", PanelRow::Show(ChannelPanel::Saved)),
-                                    (Icon::Attach, "Files", PanelRow::Show(ChannelPanel::Files)),
-                                    (Icon::Link, "Links", PanelRow::Show(ChannelPanel::Links)),
-                                    (
-                                        Icon::Task,
-                                        "Turned into tasks",
-                                        PanelRow::Show(ChannelPanel::Tasks),
-                                    ),
-                                    (Icon::Settings, "Settings", PanelRow::Settings),
-                                ];
-                                for (icon, label, code) in rows {
-                                    let w = ui.available_width();
-                                    let (r, resp) =
-                                        ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                                    let sel = code == PanelRow::Show(self.channel_panel);
-                                    if sel {
-                                        ui.painter().rect_filled(r, 6.0, t.row_selected);
-                                    } else if resp.hovered() {
-                                        ui.painter().rect_filled(r, 6.0, t.hover);
-                                    }
-                                    let at = if icons_only {
-                                        r.center() - vec2(12.0, 0.0)
-                                    } else {
-                                        r.left_center()
-                                    };
-                                    if code == PanelRow::Followers {
-                                        paint_avatars(
-                                            ui.painter(),
-                                            at + vec2(4.0, 0.0),
-                                            8.0,
-                                            &channel
-                                                .members
-                                                .iter()
-                                                .take(1)
-                                                .copied()
-                                                .collect::<Vec<_>>(),
-                                            &self.data,
-                                            t.bg,
-                                        );
-                                    } else {
-                                        line_icon(
-                                            ui.painter(),
-                                            icon,
-                                            at + vec2(12.0, 0.0),
-                                            t.text2,
-                                        );
-                                    }
-                                    let resp = if icons_only {
-                                        name_it(&resp, label);
-                                        resp.on_hover_text(tr(label))
-                                    } else {
-                                        let count_w = if code == PanelRow::Followers {
-                                            24.0
+        // slides in from the right as it opens
+        let panel_in = egui::Id::new("chan_panel_in");
+        crate::motion::enter(ui, panel_in, cid, vec2(24.0, 0.0), |ui| {
+            egui::SidePanel::right(egui::Id::new(("chan_panel", cid)))
+                .exact_width(panel_w)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(egui::Frame::new().inner_margin(egui::Margin {
+                    left: 8,
+                    right: 12,
+                    top: 12,
+                    bottom: 8,
+                }))
+                .show_inside(ui, |ui| {
+                    // it scrolls when the window is short (an iPad's keyboard up),
+                    // instead of making the messages beside it as tall as it is
+                    egui::ScrollArea::vertical()
+                        .id_salt(("chan_panel_scroll", cid))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            egui::Frame::new()
+                                .stroke(Stroke::new(1.0_f32, t.border))
+                                .corner_radius(10)
+                                .inner_margin(egui::Margin::same(6))
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    let rows: [(Icon, &str, PanelRow); 9] = [
+                                        (Icon::Person, "Followers", PanelRow::Followers),
+                                        (Icon::Search, "Find in channel", PanelRow::Find),
+                                        (
+                                            Icon::Reply,
+                                            "Replies",
+                                            PanelRow::Show(ChannelPanel::Replies),
+                                        ),
+                                        (
+                                            Icon::Pin,
+                                            "Pinned messages",
+                                            PanelRow::Show(ChannelPanel::Pinned),
+                                        ),
+                                        (
+                                            Icon::Bookmark,
+                                            "Saved",
+                                            PanelRow::Show(ChannelPanel::Saved),
+                                        ),
+                                        (
+                                            Icon::Attach,
+                                            "Files",
+                                            PanelRow::Show(ChannelPanel::Files),
+                                        ),
+                                        (Icon::Link, "Links", PanelRow::Show(ChannelPanel::Links)),
+                                        (
+                                            Icon::Task,
+                                            "Turned into tasks",
+                                            PanelRow::Show(ChannelPanel::Tasks),
+                                        ),
+                                        (Icon::Settings, "Settings", PanelRow::Settings),
+                                    ];
+                                    for (icon, label, code) in rows {
+                                        let w = ui.available_width();
+                                        let (r, resp) =
+                                            ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+                                        let sel = code == PanelRow::Show(self.channel_panel);
+                                        if sel {
+                                            ui.painter().rect_filled(r, 6.0, t.row_selected);
+                                        } else if resp.hovered() {
+                                            ui.painter().rect_filled(r, 6.0, t.hover);
+                                        }
+                                        let at = if icons_only {
+                                            r.center() - vec2(12.0, 0.0)
                                         } else {
-                                            0.0
+                                            r.left_center()
                                         };
-                                        paint_fit(
-                                            ui,
-                                            r.left_center() + vec2(28.0, 0.0),
-                                            Align2::LEFT_CENTER,
-                                            tr(label),
-                                            FontId::proportional(14.0),
-                                            t.text,
-                                            w - 32.0 - count_w,
-                                        );
                                         if code == PanelRow::Followers {
-                                            ui.painter().text(
-                                                r.right_center() - vec2(8.0, 0.0),
-                                                Align2::RIGHT_CENTER,
-                                                channel.members.len().to_string(),
-                                                FontId::proportional(12.0),
-                                                t.text3,
+                                            paint_avatars(
+                                                ui.painter(),
+                                                at + vec2(4.0, 0.0),
+                                                8.0,
+                                                &channel
+                                                    .members
+                                                    .iter()
+                                                    .take(1)
+                                                    .copied()
+                                                    .collect::<Vec<_>>(),
+                                                &self.data,
+                                                t.bg,
+                                            );
+                                        } else {
+                                            line_icon(
+                                                ui.painter(),
+                                                icon,
+                                                at + vec2(12.0, 0.0),
+                                                t.text2,
                                             );
                                         }
-                                        resp
-                                    };
-                                    if resp.clicked() {
-                                        match code {
-                                            PanelRow::Followers | PanelRow::Settings => {
-                                                self.modal = Some(Modal::ChannelSettings(cid))
+                                        let resp = if icons_only {
+                                            name_it(&resp, label);
+                                            resp.on_hover_text(tr(label))
+                                        } else {
+                                            let count_w = if code == PanelRow::Followers {
+                                                24.0
+                                            } else {
+                                                0.0
+                                            };
+                                            paint_fit(
+                                                ui,
+                                                r.left_center() + vec2(28.0, 0.0),
+                                                Align2::LEFT_CENTER,
+                                                tr(label),
+                                                FontId::proportional(14.0),
+                                                t.text,
+                                                w - 32.0 - count_w,
+                                            );
+                                            if code == PanelRow::Followers {
+                                                ui.painter().text(
+                                                    r.right_center() - vec2(8.0, 0.0),
+                                                    Align2::RIGHT_CENTER,
+                                                    channel.members.len().to_string(),
+                                                    FontId::proportional(12.0),
+                                                    t.text3,
+                                                );
                                             }
-                                            PanelRow::Find => {
-                                                // opened with the cursor in it, as Cmd+F
-                                                self.channel_find = if self.channel_find.is_some() {
-                                                    None
-                                                } else {
-                                                    let id = egui::Id::new(("chan_find", cid));
-                                                    ui.memory_mut(|m| m.request_focus(id));
-                                                    Some(String::new())
+                                            resp
+                                        };
+                                        if resp.clicked() {
+                                            match code {
+                                                PanelRow::Followers | PanelRow::Settings => {
+                                                    self.modal = Some(Modal::ChannelSettings(cid))
                                                 }
-                                            }
-                                            PanelRow::Show(c) => {
-                                                self.channel_panel = if self.channel_panel == c {
-                                                    ChannelPanel::All
-                                                } else {
-                                                    c
+                                                PanelRow::Find => {
+                                                    // opened with the cursor in it, as Cmd+F
+                                                    self.channel_find =
+                                                        if self.channel_find.is_some() {
+                                                            None
+                                                        } else {
+                                                            let id =
+                                                                egui::Id::new(("chan_find", cid));
+                                                            ui.memory_mut(|m| m.request_focus(id));
+                                                            Some(String::new())
+                                                        }
+                                                }
+                                                PanelRow::Show(c) => {
+                                                    self.channel_panel = if self.channel_panel == c
+                                                    {
+                                                        ChannelPanel::All
+                                                    } else {
+                                                        c
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                            });
-                    });
-            });
+                                });
+                        });
+                });
+        });
     }
 
     /// The row over a channel's messages: bookmarks, the kind of messages
@@ -2305,9 +2320,18 @@ impl App {
                         });
                     thread_rect = Some(over);
                 } else {
-                    let panel = panel.frame(frame).show_inside(ui, |ui| {
-                        self.thread_body(ui, cid, &channel, tid, &parent, false, &mut acts);
-                    });
+                    // slides in from the right as it opens or shows another thread
+                    let panel = crate::motion::enter(
+                        ui,
+                        egui::Id::new("thread_panel_in"),
+                        tid,
+                        vec2(28.0, 0.0),
+                        |ui| {
+                            panel.frame(frame).show_inside(ui, |ui| {
+                                self.thread_body(ui, cid, &channel, tid, &parent, false, &mut acts);
+                            })
+                        },
+                    );
                     thread_rect = Some(panel.response.rect);
                 }
                 self.chat.thread_panel_pass = ui.ctx().cumulative_pass_nr();

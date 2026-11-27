@@ -1025,8 +1025,12 @@ impl App {
                     };
                     if active {
                         p.circle_filled(ibox.center(), 17.0, Color32::from_white_alpha(46));
-                    } else if resp.hovered() && lift.is_none() {
-                        p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
+                    } else if lift.is_none() {
+                        if let Some(fill) =
+                            crate::motion::hover_fill(&resp, Color32::from_white_alpha(30))
+                        {
+                            p.rect_filled(ibox, 8.0, fill);
+                        }
                     }
                     line_icon(&p, rail_icon(label), ibox.center(), white);
                     let pressed = next_key(&p, ibox);
@@ -1084,8 +1088,10 @@ impl App {
                     || hidden.iter().any(|l| section_of(l) == Some(self.section));
                 if more_active {
                     p.circle_filled(ibox.center(), 17.0, Color32::from_white_alpha(46));
-                } else if resp.hovered() {
-                    p.rect_filled(ibox, 8.0, Color32::from_white_alpha(30));
+                } else if let Some(fill) =
+                    crate::motion::hover_fill(&resp, Color32::from_white_alpha(30))
+                {
+                    p.rect_filled(ibox, 8.0, fill);
                 }
                 line_icon(&p, Icon::More, ibox.center(), white);
                 p.text(

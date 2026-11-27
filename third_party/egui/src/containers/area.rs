@@ -587,6 +587,7 @@ impl Prepared {
             mut state,
             move_response: mut response,
             sizing_pass,
+            fade_in,
             ..
         } = self;
 
@@ -597,6 +598,39 @@ impl Prepared {
         let final_rect = state.rect();
         response.rect = final_rect;
         response.interact_rect = final_rect;
+
+        // Workboard patch: a popup, menu or window that has just come up
+        // grows into place from a little smaller (from its pivot: a menu
+        // from the corner under its button, a centred dialog from its
+        // middle) while it fades in. Only the picture: clicks already land
+        // where things settle. Not tooltips, and not an area that covers
+        // half the window or more (a dimming backdrop would leave an edge bare).
+        let secs = ctx.style().animation_time * 1.6;
+        if fade_in && secs > 0.0 && matches!(layer_id.order, Order::Middle | Order::Foreground) {
+            if let Some(shown_at) = state.last_became_visible_at {
+                let age = ctx.input(|i| (i.time - shown_at) as f32 + i.predicted_dt / 2.0);
+                let t = (age / secs).clamp(0.0, 1.0);
+                let screen = ctx.screen_rect();
+                // a large one (a backdrop, a sheet over the page) only fades:
+                // growing from a corner shows at that size
+                let covers = final_rect.area() >= screen.area() * 0.5;
+                if t < 1.0 && !covers && !sizing_pass {
+                    let u = 1.0 - t;
+                    let eased = 1.0 - u * u * u;
+                    let scale = 0.94 + 0.06 * eased;
+                    let pivot = state.pivot.pos_in_rect(&final_rect);
+                    // and a few points of travel: a menu hung from its top
+                    // drops from its button, anything else rises
+                    let from_top = state.pivot.y().to_factor() < 0.25;
+                    let rise = Vec2::new(0.0, (if from_top { -4.0 } else { 6.0 }) * (1.0 - eased));
+                    let tf = emath::TSTransform::from_translation(pivot.to_vec2() + rise)
+                        * emath::TSTransform::from_scaling(scale)
+                        * emath::TSTransform::from_translation(-pivot.to_vec2());
+                    ctx.transform_layer_shapes(layer_id, tf);
+                    ctx.request_repaint();
+                }
+            }
+        }
 
         ctx.memory_mut(|m| m.areas_mut().set_state(layer_id, state));
 

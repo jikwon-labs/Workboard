@@ -713,6 +713,9 @@ impl App {
         }
         self.ws_places.clear();
         self.ws_spots.clear();
+        if self.persist {
+            Data::save_workspace_spots(&self.ws_spots);
+        }
         self.loc = self
             .data
             .first_list()

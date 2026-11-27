@@ -796,18 +796,26 @@ impl App {
         if self.persist {
             self.save_now();
         }
-        let left = self.ws_file.clone();
-        self.ws_spots
-            .insert(left, (self.nav_spot(), self.open_task));
+        self.remember_ws_spot();
         self.open_workspace(file);
         if self.ws_file == file {
             self.back_to_ws_spot();
         }
     }
 
-    /// The workspace just opened was open earlier this run: back to the page
-    /// it showed then, and its open task, when they are still there.
-    fn back_to_ws_spot(&mut self) {
+    /// Notes where the open workspace is (it is being left, or the app is
+    /// quitting), on this computer for the next start too.
+    pub(super) fn remember_ws_spot(&mut self) {
+        self.ws_spots
+            .insert(self.ws_file.clone(), (self.nav_spot(), self.open_task));
+        if self.persist {
+            Data::save_workspace_spots(&self.ws_spots);
+        }
+    }
+
+    /// The workspace just opened was left earlier: back to the page it
+    /// showed then, and its open task, when they are still there.
+    pub(super) fn back_to_ws_spot(&mut self) {
         let Some((spot, task)) = self.ws_spots.get(&self.ws_file).copied() else {
             return;
         };

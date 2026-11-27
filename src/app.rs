@@ -656,8 +656,9 @@ pub struct App {
     push_rt: push::PushRt,
     /// Where each workspace file lives (team server, shared folder, this computer), read once.
     ws_places: HashMap<String, &'static str>,
-    /// The page each workspace left this run showed, and its open task:
-    /// switching back to a workspace opens it there again.
+    /// The page each workspace showed when it was left, and its open task:
+    /// switching back to a workspace, or the next start, opens it there
+    /// again (kept in workspace-spots.json on this computer).
     ws_spots: HashMap<String, (nav::NavSpot, Option<u64>)>,
     create_text: String,
     new_message_open: bool,
@@ -1308,7 +1309,11 @@ impl App {
             watch_rt: Default::default(),
             push_rt: Default::default(),
             ws_places: HashMap::new(),
-            ws_spots: HashMap::new(),
+            ws_spots: if persist {
+                Data::workspace_spots()
+            } else {
+                HashMap::new()
+            },
             create_text: String::new(),
             new_message_open: false,
             dash_open: None,
@@ -1394,6 +1399,8 @@ impl App {
             reminder_about: (None, None),
             link_pending: None,
         };
+        // back where the workspace was left when the app last closed
+        app.back_to_ws_spot();
         // for screenshots of the whiteboard page: --whiteboard new (a board
         // just made), <template name> (a board made from it), or list (a few
         // boards and the page that lists them)
@@ -6013,6 +6020,7 @@ impl App {
         if self.persist {
             self.finish_before_quit();
             self.save_now();
+            self.remember_ws_spot();
         }
         // after saving: a Windows update waits for this to start the new version
         crate::updater::relaunch_if_updated();

@@ -106,6 +106,23 @@ impl Data {
         );
     }
 
+    /// Where each workspace was left on this computer (the app keeps what
+    /// goes in it): read back on the next start. Never sent to the team.
+    pub fn workspace_spots<T: serde::de::DeserializeOwned>() -> std::collections::HashMap<String, T>
+    {
+        std::fs::read_to_string(Self::dir().join("workspace-spots.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save_workspace_spots<T: serde::Serialize>(spots: &std::collections::HashMap<String, T>) {
+        let _ = std::fs::create_dir_all(Self::dir());
+        if let Ok(s) = serde_json::to_string(spots) {
+            let _ = std::fs::write(Self::dir().join("workspace-spots.json"), s);
+        }
+    }
+
     pub fn set_last_workspace(file: &str) {
         let _ = std::fs::create_dir_all(Self::dir());
         let _ = std::fs::write(Self::dir().join("last-workspace"), file);

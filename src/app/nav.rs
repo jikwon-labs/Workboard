@@ -9,7 +9,7 @@ use super::*;
 /// One page in the back / forward history: the section, the place in the
 /// tree, and the item open in that section (channel, doc, whiteboard, form or
 /// dashboard), so #a -> #b -> Back returns to #a.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub(super) struct NavSpot {
     pub section: Section,
     pub loc: Location,

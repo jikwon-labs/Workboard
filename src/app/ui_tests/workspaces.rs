@@ -553,4 +553,26 @@ fn going_back_to_a_workspace_opens_where_it_was_left() {
     assert_eq!(h.app.ws_file, "data.json");
     assert_ne!(h.app.loc, personal);
     assert!(h.app.data.location_exists(h.app.loc));
+    // quitting there and starting again: the same page and task
+    h.app.persist = true;
+    h.key_with(egui::Key::Num2, workspace_mods());
+    h.app.actions.push(Action::Go(Location::Inbox));
+    h.settle();
+    h.key_with(egui::Key::Num1, workspace_mods());
+    let first = h.app.loc;
+    h.click_left("Task Write copy for landing page", 120.0);
+    let task = h.app.open_task.expect("the task opened");
+    h.app.exit();
+    let again = App::build(None, None);
+    assert_eq!(again.ws_file, "data.json");
+    assert_eq!(again.loc, first);
+    assert_eq!(again.open_task, Some(task));
+    // and Side Biz, left on its Inbox before the quit
+    let mut again = again;
+    again.open_task = None;
+    again.switch_workspace(&side);
+    assert_eq!(again.loc, Location::Inbox);
+    // nothing kept from a run that didn't save (tests, screenshots)
+    let other = App::build(None, Some(Data::seed()));
+    assert!(other.ws_spots.is_empty());
 }

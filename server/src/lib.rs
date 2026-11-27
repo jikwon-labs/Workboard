@@ -130,6 +130,7 @@ mod jobs;
 pub mod joins;
 mod livekit;
 mod mine;
+pub mod news;
 mod notify;
 mod routes;
 mod schedule;

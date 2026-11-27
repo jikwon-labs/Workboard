@@ -385,6 +385,13 @@ impl Hub {
                 return;
             }
             self.broadcast_canon(&mut g, false);
+            // owners and admins whose app is quit hear of it (news.rs)
+            if let Some(c) = g.canon.as_deref() {
+                let saved = &g.saved;
+                let manages = |m: u64| matches!(saved.role_of(m), Role::Owner | Role::Admin);
+                let notes = news::joined_notes(c, member, &manages);
+                self.notify(&g.saved, notes);
+            }
             g.canon
                 .as_deref()
                 .and_then(|c| joins::join_news(c, member, now_ms(), || wb_sync::random_u64() >> 12))

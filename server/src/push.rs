@@ -13,7 +13,17 @@
 //   - and what each phone's choices add or take away (`prefs` on push_token,
 //     wb_net::PushPrefs, `wanted`): channels set to every message or to
 //     nothing, keywords, paused notifications, DMs, mentions or replies off;
-// never the author (nor the member whose app sent the copy), never someone a
+// An app that says its language (`prefs.lang`; the Mac app and iPhone app
+// from when they did) gets each message worded as the Mac app words its own
+// notices, by the rules of its notify_candidates (`chat_words`), calls as
+// calls, and what else the Mac app tells while it runs (news.rs): reactions,
+// tasks assigned, comments, mentions and changes on my tasks, form answers,
+// goal milestones and people joining, each as its choices ask; many at once
+// become one "N new notifications" (`batch_words`). Such a payload also has
+// "kind" and "target" (what a click opens, as the Mac app says it), and
+// "task" for a task. Apps that never said their language get what they got
+// before.
+// Never the author (nor the member whose app sent the copy), never someone a
 // private channel is closed to, never for messages that came back from
 // someone's Trash, and never a device that is connected right now, not even
 // by a watch connection (the app shows those itself). At most MAX_PER_DEVICE notifications go
@@ -59,6 +69,7 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
+use wb_net::notice::{self, Lang};
 use wb_sync::json::{array_at, text_field, u64_field};
 
 use crate::Locked;
@@ -569,13 +580,100 @@ pub fn new_messages(
 #[derive(Clone, Debug, PartialEq)]
 pub struct Note {
     pub member: u64,
+    /// the conversation (0: not about one)
     pub channel: u64,
-    /// the message or reply
+    /// the message or reply (0: not about one)
     pub id: u64,
+    /// in English, for apps that don't say their language (`PushPrefs::lang`)
     pub payload: Value,
     pub why: Why,
     /// the message's text, for keywords
     pub text: String,
+    pub kind: Kind,
+    /// a message's words, written for each device by its choices (`chat_words`)
+    pub chat: Option<Chat>,
+    /// the words of anything else, in English and Korean
+    pub words: Option<Words>,
+    /// what a click opens, as the Mac app says it (src/app/notify.rs
+    /// `open_target`): "chat:CH[:THREAD]", "task:ID", "goal:ID", "people"
+    pub target: String,
+}
+
+/// What a notification is about, as the apps tell them apart
+/// (`Kind` in src/app/notify.rs). Only `Message` reaches an app that sent
+/// no language: the rest are what a quit app is told besides messages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Message,
+    Huddle,
+    Reaction,
+    Assigned,
+    Comment,
+    /// an @mention in a task comment (one in chat is a `Message`)
+    Mention,
+    TaskChange,
+    Member,
+    Form,
+    Goal,
+}
+
+impl Kind {
+    /// The payload's "kind".
+    pub fn code(self) -> &'static str {
+        match self {
+            Kind::Message => "message",
+            Kind::Huddle => "huddle",
+            Kind::Reaction => "reaction",
+            Kind::Assigned => "assigned",
+            Kind::Comment => "comment",
+            Kind::Mention => "mention",
+            Kind::TaskChange => "task_change",
+            Kind::Member => "member",
+            Kind::Form => "form",
+            Kind::Goal => "goal",
+        }
+    }
+}
+
+/// A message, for writing its notification in each device's language and
+/// by its choices: who wrote it where, and what it says.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Chat {
+    /// the author, as the app names people
+    pub who: String,
+    /// the channel's name ("" in a direct message)
+    pub name: String,
+    pub dm: bool,
+    /// the thread it is a reply in
+    pub parent: Option<u64>,
+    /// it started a call or huddle
+    pub call: bool,
+    /// the app's banner text (`preview` in src/app/notify.rs), English and Korean
+    pub preview: [String; 2],
+    /// its text cut to banner length, as the Inbox's notices show it
+    pub raw: String,
+    /// when it was written (seconds)
+    pub ts: i64,
+}
+
+/// A notification's title and body, English then Korean.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Words {
+    pub title: [String; 2],
+    pub body: [String; 2],
+}
+
+impl Words {
+    /// The words of the template `en` with `args` in both languages, and a
+    /// body made the same way.
+    pub fn new(title: (&str, &[&str]), body: (&str, &[&str])) -> Words {
+        let both =
+            |(t, a): (&str, &[&str])| [notice::trf(Lang::En, t, a), notice::trf(Lang::Ko, t, a)];
+        Words {
+            title: both(title),
+            body: both(body),
+        }
+    }
 }
 
 /// Whether a device whose choices are `prefs` (None: an app that never sent
@@ -583,6 +681,10 @@ pub struct Note {
 /// mentions and thread replies) wants `n`, at `now_secs`. The same rules as
 /// the apps' own notifications (notify_candidates in src/app/notify.rs).
 pub fn wanted(n: &Note, prefs: Option<&wb_net::PushPrefs>, now_secs: i64) -> bool {
+    // the rest is for apps that say their language (`device_payload`)
+    if n.kind != Kind::Message {
+        return false;
+    }
     let Some(p) = prefs else {
         return n.why != Why::Channel;
     };
@@ -772,6 +874,7 @@ pub fn notes_in(
             } else {
                 people.iter().map(|p| p.0).collect()
             };
+        let ch_name = text_field(ch, "name");
         let mut add = |author: u64, m: &Value, parent: Option<u64>, mut to: Vec<(u64, Why)>| {
             let Some(id) = u64_field(m, "id") else { return };
             // brought in by an import (Slack history, say): old history, not
@@ -795,6 +898,21 @@ pub fn notes_in(
             p["id"] = json!(id);
             p["ts"] = json!(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
             let text = text_field(m, "text");
+            let ts = secs(m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
+            let chat = Chat {
+                who: name(author),
+                name: ch_name.clone(),
+                dm: direct,
+                parent,
+                call: m.get("call").is_some_and(|c| !c.is_null()),
+                preview: [preview(m, Lang::En), preview(m, Lang::Ko)],
+                raw: cut(&text, 140),
+                ts,
+            };
+            let target = match parent {
+                Some(t) => format!("chat:{}:{}", cid, t),
+                None => format!("chat:{}", cid),
+            };
             for (member, why) in to {
                 if member == author || skip.contains(&member) || wb_sync::closed_to(ch, member) {
                     continue;
@@ -806,6 +924,10 @@ pub fn notes_in(
                     payload: p.clone(),
                     why,
                     text: text.clone(),
+                    kind: Kind::Message,
+                    chat: Some(chat.clone()),
+                    words: None,
+                    target: target.clone(),
                 });
             }
         };
@@ -848,6 +970,268 @@ pub fn notes_in(
                 add(ra, r, Some(mid), to);
             }
         }
+    }
+    out
+}
+
+/// `s` on one line in at most `n` characters and an ellipsis, as the Mac
+/// app cuts notification text (`cut` in src/app/notify.rs).
+pub fn cut(s: &str, n: usize) -> String {
+    let s = s.replace('\n', " ");
+    if s.chars().count() <= n + 1 {
+        s
+    } else {
+        let mut o: String = s.chars().take(n).collect();
+        o.push('\u{2026}');
+        o
+    }
+}
+
+/// What a message with only attachments says, in the Mac app's words
+/// (`sent_what` in src/app/notify.rs; English, for `notice::tr`).
+fn app_sent_what(a: &[Value]) -> &'static str {
+    let has = |k: &str| {
+        a.iter()
+            .any(|x| x.get("kind").and_then(Value::as_str).unwrap_or("Image") == k)
+    };
+    if has("Audio") {
+        "Sent a voice message"
+    } else if has("File") {
+        "Sent a file"
+    } else if has("Video") && has("Image") {
+        "Sent pictures and videos"
+    } else if has("Video") {
+        "Sent a video"
+    } else {
+        "Sent a picture"
+    }
+}
+
+/// A message's banner text in `lang`, as the Mac app writes it (`preview`):
+/// its text without formatting marks, the words the app puts in place of
+/// a call's or a join's, or what its attachments are; cut to 140.
+pub fn preview(m: &Value, lang: Lang) -> String {
+    let text = text_field(m, "text");
+    let calls = m.get("call").is_some_and(|c| !c.is_null());
+    let joined = m.get("event").and_then(Value::as_str) == Some("joined");
+    let shown = match text.as_str() {
+        t @ ("Started a call" | "Started a huddle") if calls => notice::tr(lang, t).to_string(),
+        t @ ("Joined the workspace." | "Hi! I just joined the workspace.") if joined => {
+            notice::tr(lang, t).to_string()
+        }
+        t => unmarked(t),
+    };
+    let shown = shown.trim();
+    let a = array_at(m, "attachments");
+    let shown = if shown.is_empty() && !a.is_empty() {
+        notice::tr(lang, app_sent_what(a)).to_string()
+    } else {
+        shown.to_string()
+    };
+    cut(&shown, 140)
+}
+
+/// How long a call is still worth ringing about (HUDDLE_FRESH_SECS).
+pub const HUDDLE_FRESH_SECS: i64 = 5 * 60;
+
+/// A message's notification for a device whose choices are `p`, by the
+/// Mac app's rules (notify_candidates): (title, body, kind), or None when
+/// it isn't told. The first rule that fits wins, as the app's first key
+/// does: a direct message; a call; a channel set to every message; a
+/// keyword; a mention; a reply in a thread I'm in.
+pub fn chat_words(
+    n: &Note,
+    c: &Chat,
+    p: &wb_net::PushPrefs,
+    lang: Lang,
+    now_secs: i64,
+) -> Option<(String, String, Kind)> {
+    let mentions_me = n.why == Why::Mention;
+    // someone who left, in the device's language
+    let mut c = c.clone();
+    if c.who == "Someone" {
+        c.who = notice::tr(lang, "Someone").to_string();
+    }
+    let c = &c;
+    let hash = format!("#{}", c.name);
+    let place = format!("# {}", c.name);
+    let preview = c.preview[usize::from(lang == Lang::Ko)].clone();
+    let t = |en: &str, a: &[&str]| notice::trf(lang, en, a);
+    // a call rings while it may still be going on
+    let huddles = p.huddles.unwrap_or(false);
+    if c.call && c.parent.is_none() {
+        if !huddles || now_secs - c.ts > HUDDLE_FRESH_SECS {
+            return None;
+        }
+        if c.dm {
+            return Some((
+                t("{} is calling you", &[&c.who]),
+                t("Join from the conversation", &[]),
+                Kind::Huddle,
+            ));
+        }
+        if p.channel_mode(n.channel) == "nothing" {
+            return None;
+        }
+        return Some((
+            t("{} started a huddle in {}", &[&c.who, &place]),
+            t("Join from the conversation", &[]),
+            Kind::Huddle,
+        ));
+    }
+    if c.dm {
+        if p.direct {
+            return Some((c.who.clone(), preview, Kind::Message));
+        }
+        // the Inbox's mention, when direct messages are off
+        return (mentions_me && p.mentions).then(|| {
+            (
+                t("{} mentioned you in {}", &[&c.who, &c.who]),
+                c.raw.clone(),
+                Kind::Message,
+            )
+        });
+    }
+    let mode = p.channel_mode(n.channel);
+    if mode == "nothing" {
+        return None;
+    }
+    let keyword = if p.mentions && !mentions_me {
+        wb_sync::mentions::has_keyword(&n.text, &p.keywords)
+    } else {
+        None
+    };
+    if c.parent.is_none() && mode == "all" {
+        return Some((t("{} in {}", &[&c.who, &place]), preview, Kind::Message));
+    }
+    if let Some(word) = keyword {
+        return Some((
+            t("{} said \"{}\" in {}", &[&c.who, &word, &place]),
+            preview,
+            Kind::Message,
+        ));
+    }
+    if mentions_me {
+        return p.mentions.then(|| {
+            (
+                t("{} mentioned you in {}", &[&c.who, &hash]),
+                c.raw.clone(),
+                Kind::Message,
+            )
+        });
+    }
+    (c.parent.is_some() && n.why == Why::Thread && p.replies).then(|| {
+        (
+            t("{} replied in {}", &[&c.who, &hash]),
+            c.raw.clone(),
+            Kind::Message,
+        )
+    })
+}
+
+/// Whether a device whose choices are `p` asked for notes of `kind` (all
+/// but messages and calls, which `chat_words` decides).
+fn kind_wanted(kind: Kind, p: &wb_net::PushPrefs) -> bool {
+    let on = |o: Option<bool>| o.unwrap_or(false);
+    match kind {
+        Kind::Message | Kind::Huddle => true,
+        Kind::Reaction => on(p.reactions),
+        Kind::Assigned => on(p.assigned),
+        Kind::Comment => on(p.comments),
+        // a task comment's mention needs the app to know of task notes
+        Kind::Mention => p.mentions && p.assigned.is_some(),
+        Kind::TaskChange => on(p.task_changes),
+        Kind::Member => on(p.team),
+        Kind::Form => on(p.forms),
+        Kind::Goal => on(p.goal_milestones),
+    }
+}
+
+/// The notification `n` makes on a device whose app said its language
+/// (`p.lang`), in the Mac app's words, or None when its choices leave it
+/// out: (its kind, the payload).
+pub fn device_payload(n: &Note, p: &wb_net::PushPrefs, now_secs: i64) -> Option<(Kind, Value)> {
+    if p.muted_until > now_secs {
+        return None;
+    }
+    let lang = Lang::of(p.lang.as_deref());
+    let (title, body, kind) = match (&n.chat, &n.words) {
+        (Some(c), _) => chat_words(n, c, p, lang, now_secs)?,
+        (None, Some(w)) => {
+            if !kind_wanted(n.kind, p) {
+                return None;
+            }
+            // a reaction in a channel set to nothing stays quiet, as the app's
+            if n.kind == Kind::Reaction && n.channel != 0 && p.channel_mode(n.channel) == "nothing"
+            {
+                return None;
+            }
+            let i = usize::from(lang == Lang::Ko);
+            (w.title[i].clone(), w.body[i].clone(), n.kind)
+        }
+        (None, None) => return None,
+    };
+    let mut alert = json!({"title": title, "body": body});
+    if body.is_empty() {
+        alert = json!({"title": title});
+    }
+    let mut p = json!({"aps": {"alert": alert, "sound": "default"}, "kind": kind.code(), "target": n.target});
+    if n.channel != 0 {
+        p["aps"]["thread-id"] = json!(format!("ch-{}", n.channel));
+        p["channel"] = json!(n.channel);
+        let mut parts = n.target.split(':').skip(2);
+        if let Some(t) = parts.next().and_then(|t| t.parse::<u64>().ok()) {
+            p["parent"] = json!(t);
+        }
+    }
+    if let Some(c) = &n.chat {
+        // which message, and its time: the phone takes it away once read
+        p["id"] = json!(n.id);
+        p["ts"] = n.payload.get("ts").cloned().unwrap_or(json!(c.ts));
+    }
+    if let Some(task) = n
+        .target
+        .strip_prefix("task:")
+        .and_then(|t| t.parse::<u64>().ok())
+    {
+        p["task"] = json!(task);
+        p["aps"]["thread-id"] = json!(format!("task-{}", task));
+    }
+    Some((kind, p))
+}
+
+/// What one device whose app said its language gets from one merge, as
+/// the Mac app tells a batch (notify_scan): up to BURST as they are; more
+/// become one "N new notifications" with the first lines, and calls still
+/// ring on their own.
+pub fn batch_words(list: Vec<(Kind, Value)>, lang: Lang) -> Vec<Value> {
+    const BURST: usize = 3;
+    if list.len() <= BURST {
+        return list.into_iter().map(|(_, p)| p).collect();
+    }
+    let (calls, rest): (Vec<_>, Vec<_>) = list.into_iter().partition(|(k, _)| *k == Kind::Huddle);
+    let mut out: Vec<Value> = calls.into_iter().map(|(_, p)| p).collect();
+    if !rest.is_empty() {
+        let line = |p: &Value| {
+            let a = &p["aps"]["alert"];
+            let title = a["title"].as_str().unwrap_or("");
+            match a["body"].as_str().filter(|b| !b.is_empty()) {
+                Some(b) => format!("{}: {}", title, cut(b, 60)),
+                None => title.to_string(),
+            }
+        };
+        let body = rest
+            .iter()
+            .take(3)
+            .map(|(_, p)| line(p))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let n = rest.len().to_string();
+        out.push(json!({
+            "aps": {"alert": {"title": notice::trf(lang, "{} new notifications", &[&n]), "body": body}, "sound": "default"},
+            "kind": "summary",
+            "target": "inbox",
+        }));
     }
     out
 }

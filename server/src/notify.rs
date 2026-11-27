@@ -1,6 +1,7 @@
 // Telling iPhones about news through Apple's push service.
 
 use super::*;
+use wb_net::notice::Lang;
 
 impl Hub {
     /// Merge the copy `member` sent from `device` into the team's copy; tell
@@ -30,6 +31,13 @@ impl Hub {
             Some(c) if pushes || outgoing || self.notes.receiver_count() > 0 => {
                 Some(push::message_ids_in(c, Some(&chans)))
             }
+            _ => None,
+        };
+        // what else the change could be news about (reactions, tasks,
+        // people, goals: news.rs), only when a device could be told
+        let scope = news::scope_of(&data);
+        let news_before = match &g.canon {
+            Some(c) if pushes => Some(news::keys(c, &scope)),
             _ => None,
         };
         let fix = match &g.canon {
@@ -88,10 +96,16 @@ impl Hub {
         };
         if changed {
             if let (Some(before), Some(canon)) = (&before, &g.canon) {
-                let notes = push::notes_in(canon, before, Some(&chans), &[member], now_ms() / 1000);
+                let now = now_ms() / 1000;
+                let mut notes = push::notes_in(canon, before, Some(&chans), &[member], now);
                 if !notes.is_empty() {
                     // watch connections (ws.rs) pick out their member's
                     let _ = self.notes.send(Arc::new(notes.clone()));
+                }
+                if let Some(nb) = &news_before {
+                    let saved = &g.saved;
+                    let manages = |m: u64| matches!(saved.role_of(m), Role::Owner | Role::Admin);
+                    notes.extend(news::notes(canon, nb, &scope, &[member], &manages, now));
                 }
                 self.notify(&g.saved, notes);
                 if outgoing {
@@ -133,11 +147,28 @@ impl Hub {
             }
             // what this phone asked to be told about
             let now = now_ms() / 1000;
-            let mine: Vec<&push::Note> = notes
-                .iter()
-                .filter(|n| n.member == d.member && push::wanted(n, tok.prefs.as_ref(), now))
-                .collect();
-            for mut p in push::batch(&mine) {
+            let list = match tok.prefs.as_ref().filter(|p| p.lang.is_some()) {
+                // an app that says its language: the Mac app's own notices,
+                // in its words
+                Some(prefs) => {
+                    let mine: Vec<(push::Kind, Value)> = notes
+                        .iter()
+                        .filter(|n| n.member == d.member)
+                        .filter_map(|n| push::device_payload(n, prefs, now))
+                        .collect();
+                    push::batch_words(mine, Lang::of(prefs.lang.as_deref()))
+                }
+                None => {
+                    let mine: Vec<&push::Note> = notes
+                        .iter()
+                        .filter(|n| {
+                            n.member == d.member && push::wanted(n, tok.prefs.as_ref(), now)
+                        })
+                        .collect();
+                    push::batch(&mine)
+                }
+            };
+            for mut p in list {
                 // the phone's name for this workspace: a tap opens it
                 if let Some(ws) = &tok.workspace {
                     p["ws"] = json!(ws);

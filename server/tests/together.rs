@@ -3916,6 +3916,76 @@ fn iphones_follow_the_choices_sent_with_their_token() {
     assert_eq!(fake.to(&ann).len(), 1, "the plain message stays quiet");
 }
 
+/// An app that says its language and asks for the rest of what the Mac app
+/// tells (huddles, reactions, tasks...) gets those too while it is away,
+/// in the Mac app's words: Bo assigning Ann a task, commenting on it and
+/// reacting to her message reach Ann's quit app in Korean.
+#[test]
+fn away_apps_hear_of_tasks_and_reactions_in_their_language() {
+    let home = TempHome::new("push-news");
+    let fake = Arc::new(FakePush::default());
+    let opts = || workboard_server::Options {
+        push: Some(fake.clone()),
+        ..Default::default()
+    };
+    let server = Server::start_with(&home, 0, opts());
+    let port = server.port;
+    let (mut a, mut b) = two_apps(port);
+    let ann = "a1".repeat(32);
+    let prefs = wb_net::PushPrefs {
+        huddles: Some(true),
+        reactions: Some(true),
+        assigned: Some(true),
+        comments: Some(true),
+        task_changes: Some(true),
+        forms: Some(true),
+        team: Some(true),
+        goal_milestones: Some(true),
+        lang: Some("ko".into()),
+        ..Default::default()
+    };
+    phone_with(&mut a, port, 1, &ann, &home, Some(prefs));
+    let t = now() / 1000;
+    b.change(|d| {
+        d["tasks"][0]["activity"] = json!([
+            {"ts": t, "author": 2, "text": "assigned to Ann", "comment": false, "target": 1, "id": 900},
+        ]);
+        d["tasks"][0]["assignees"] = json!([1]);
+    });
+    wait_for("the assignment pushed to Ann", || fake.to(&ann).len() == 1);
+    let p = fake.to(&ann)[0].clone();
+    assert_eq!(
+        p["aps"]["alert"],
+        json!({"title": "Bo님이 작업을 맡겼습니다", "body": "Plan"})
+    );
+    assert_eq!(p["target"], json!("task:100"));
+    assert_eq!(p["task"], json!(100));
+    // a comment on the task she is on now
+    b.change(|d| {
+        d["tasks"][0]["activity"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"ts": t + 1, "author": 2, "text": "Starting Monday", "comment": true, "id": 901}));
+    });
+    wait_for("the comment pushed to Ann", || fake.to(&ann).len() == 2);
+    assert_eq!(
+        fake.to(&ann)[1]["aps"]["alert"],
+        json!({"title": "Bo님이 Plan에 댓글을 남겼습니다", "body": "Starting Monday"})
+    );
+    // a reaction to her message
+    b.change(|d| {
+        d["channels"][0]["messages"][0]["reactions"] = json!([{"emoji": "👍", "users": [2]}]);
+    });
+    wait_for("the reaction pushed to Ann", || fake.to(&ann).len() == 3);
+    assert_eq!(
+        fake.to(&ann)[2]["aps"]["alert"]["title"],
+        json!("Bo님이 내 메시지에 👍 반응을 남겼습니다")
+    );
+    assert_eq!(fake.to(&ann)[2]["target"], json!("chat:10"));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(fake.to(&ann).len(), 3, "each told once");
+}
+
 #[test]
 fn iphones_get_pushes_for_dms_mentions_and_their_threads_while_away() {
     let home = TempHome::new("push");

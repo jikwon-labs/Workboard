@@ -302,6 +302,8 @@ impl App {
         self.data = d;
         self.data_changed();
         self.ws_file = "data.json".into();
+        // not saved with the fresh workspace (ids repeat)
+        self.forget_drafts();
         if self.persist {
             self.save_now();
             Data::set_last_workspace("data.json");

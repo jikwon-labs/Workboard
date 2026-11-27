@@ -606,3 +606,41 @@ fn the_inbox_points_at_what_came_in_in_the_other_workspaces() {
     assert_eq!(h.app.ws_file, side);
     assert_eq!(h.app.ws_unread(&side), 0);
 }
+
+/// An unsent message stays with its workspace: channel ids repeat between
+/// workspaces, so a draft carried over showed up in the other workspace's
+/// channel with the same id (a stray "\" in a box nobody typed in).
+#[test]
+fn a_draft_stays_in_its_own_workspace() {
+    let _home = own_home("ws-drafts");
+    let mut h = Ui1::new();
+    h.app.persist = true;
+    h.app.data.save();
+    // the other workspace: the same channels, so the same ids
+    let mut copy = h.app.data.clone();
+    copy.extra.chat_drafts.clear();
+    let side = format!("workspace-drafts-{:x}.json", crate::sync::random_u64());
+    copy.save_file(&side);
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.click("Message composer");
+    h.type_text("half a thought");
+    h.app.switch_workspace(&side);
+    h.settle();
+    assert_eq!(h.app.ws_file, side);
+    assert!(
+        h.app.data_to_save().extra.chat_drafts.is_empty(),
+        "the draft isn't saved with the other workspace"
+    );
+    // its conversation with the same id (the page the switch lands on may
+    // show another "general")
+    h.app.chat.open = Some(cid);
+    h.settle();
+    assert_eq!(h.app.chat.channel.text, "", "nothing carried into its box");
+    // back in the first workspace the draft is waiting
+    h.app.switch_workspace("data.json");
+    h.settle();
+    h.app.chat.open = Some(cid);
+    h.settle();
+    assert_eq!(h.app.chat.channel.text, "half a thought");
+}

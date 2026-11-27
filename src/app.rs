@@ -6198,6 +6198,17 @@ impl App {
         out
     }
 
+    /// Another workspace takes the place of this one (already saved with its
+    /// drafts): the message boxes and the drafts put away are emptied, as
+    /// channel and message ids repeat between workspaces and a draft kept
+    /// here would show up, and be saved, in the other one's place with the
+    /// same id. The new workspace's own drafts come back on the next frame.
+    pub(super) fn forget_drafts(&mut self) {
+        self.drafts = Drafts::default();
+        self.chat.channel = Composer::default();
+        self.chat.thread = Composer::default();
+    }
+
     /// Once per workspace opened: its saved drafts back into their boxes.
     fn bring_back_drafts(&mut self) {
         if self.drafts.loaded_for.as_deref() == Some(self.ws_file.as_str()) {

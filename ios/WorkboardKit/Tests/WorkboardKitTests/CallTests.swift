@@ -73,3 +73,46 @@ final class CallTests: FakeServerTestCase {
         XCTAssertNil(CallAPI.huddleChannel("https://meet.jit.si/x"))
     }
 }
+
+/// Hands and reactions read and written the way the Mac app does (Signal in
+/// crates/wb-voice/src/lib.rs).
+final class HuddleSignalTests: XCTestCase {
+    func testMessagesMatchTheMacApp() {
+        XCTAssertEqual(HuddleSignal.topic, "workboard-huddle")
+        XCTAssertEqual(String(data: HuddleSignal.hand(true).data, encoding: .utf8), "hand:1")
+        XCTAssertEqual(String(data: HuddleSignal.hand(false).data, encoding: .utf8), "hand:0")
+        XCTAssertEqual(String(data: HuddleSignal.react("\u{1F44F}").data, encoding: .utf8), "react:\u{1F44F}")
+        XCTAssertEqual(HuddleSignal(data: Data("hand:1".utf8)), .hand(true))
+        XCTAssertEqual(HuddleSignal(data: Data("hand:0".utf8)), .hand(false))
+        XCTAssertEqual(HuddleSignal(data: Data("react:\u{2764}\u{FE0F}".utf8)), .react("\u{2764}\u{FE0F}"))
+        // anything else is ignored
+        for bad in ["hand:2", "react:", "react:this is far too long", "wave", "", "x:y"] {
+            XCTAssertNil(HuddleSignal(data: Data(bad.utf8)), bad)
+        }
+        XCTAssertEqual(HuddleSignal.reactions.count, 8)
+    }
+
+    func testHandsAndReactionsComeAndGo() {
+        var s = HuddleSignals()
+        let t0 = Date(timeIntervalSince1970: 1000)
+        s.take(.hand(true), from: "2-dev")
+        XCTAssertTrue(s.handUp("2-dev"))
+        XCTAssertFalse(s.handUp(HuddleSignals.me))
+        s.take(.hand(false), from: "2-dev")
+        XCTAssertFalse(s.handUp("2-dev"))
+        s.take(.hand(true), from: "2-dev")
+        s.left("2-dev")
+        XCTAssertFalse(s.handUp("2-dev"), "someone who left has no hand up")
+
+        s.take(.react("\u{1F44D}"), from: "2-dev", at: t0)
+        s.take(.react("\u{1F389}"), from: HuddleSignals.me, at: t0)
+        XCTAssertEqual(s.reactions(of: "2-dev").map(\.emoji), ["\u{1F44D}"])
+        XCTAssertEqual(s.reactions(of: HuddleSignals.me).count, 1)
+        // a burst shows six at most
+        for _ in 0..<10 { s.take(.react("\u{1F44D}"), from: "2-dev", at: t0) }
+        XCTAssertEqual(s.reactions(of: "2-dev").count, 6)
+        // and they go after a few seconds
+        s.prune(t0.addingTimeInterval(HuddleSignals.reactionSeconds + 0.1))
+        XCTAssertTrue(s.reactions.isEmpty)
+    }
+}

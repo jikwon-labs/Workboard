@@ -1303,6 +1303,16 @@
         }
       }
     },
+    "Audio output": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오디오 출력"
+          }
+        }
+      }
+    },
     "Automate": {
       "localizations": {
         "ko": {
@@ -3081,6 +3091,16 @@
         }
       }
     },
+    "Hand raised": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "손 듦"
+          }
+        }
+      }
+    },
     "Heading 1": {
       "localizations": {
         "ko": {
@@ -3676,6 +3696,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "낮음"
+          }
+        }
+      }
+    },
+    "Lower hand": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "손 내리기"
           }
         }
       }
@@ -5718,6 +5748,16 @@
         }
       }
     },
+    "Raise hand": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "손 들기"
+          }
+        }
+      }
+    },
     "React": {
       "localizations": {
         "ko": {
@@ -5734,6 +5774,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 반응"
+          }
+        }
+      }
+    },
+    "Reactions": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "반응"
           }
         }
       }
@@ -7056,6 +7106,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "전환"
+          }
+        }
+      }
+    },
+    "Switch camera": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "카메라 전환"
           }
         }
       }

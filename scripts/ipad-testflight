@@ -43,7 +43,7 @@ archive="$out/Desk.xcarchive"
 echo "ipad-testflight: archiving (the iPhone app's project, as $bundle $version)"
 xcodebuild -project ios/Workboard.xcodeproj -scheme Workboard -configuration Release \
     -destination 'generic/platform=iOS' -archivePath "$archive" -derivedDataPath "$out/dd" \
-    -allowProvisioningUpdates PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGN_ENTITLEMENTS=ios/Config/Workboard.entitlements \
+    -allowProvisioningUpdates PRODUCT_BUNDLE_IDENTIFIER="$bundle" CODE_SIGN_ENTITLEMENTS="$PWD/ios/Config/Workboard.entitlements" \
     MARKETING_VERSION="$version" archive >"$out/archive.log" 2>&1 ||
     { grep -E "error" "$out/archive.log" | tail -20 >&2; exit 1; }
 

@@ -161,7 +161,11 @@ fn decode(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
-        let Some(end) = rest[..rest.len().min(12)].find(';') else {
+        // bytes: a Korean letter may sit across the 12th
+        let Some(end) = rest.as_bytes()[..rest.len().min(12)]
+            .iter()
+            .position(|&b| b == b';')
+        else {
             out.push('&');
             rest = &rest[1..];
             continue;
@@ -199,6 +203,7 @@ fn decode(s: &str) -> String {
 
 /// One line, spaces squeezed, at most `max` characters.
 fn clean(s: &str, max: usize) -> String {
+    let s = crate::hangul::compose(s);
     let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() > max {
         format!(
@@ -213,6 +218,21 @@ fn clean(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn korean_in_separate_letters_is_joined() {
+        // an Instagram caption typed on a Mac: "특징", decomposed
+        let html = "<head><meta property=\"og:description\" \
+                    content=\"&#x1110;&#x1173;&#x11a8;\u{110C}\u{1175}\u{11BC}\"></head>";
+        let p = from_html("https://instagram.com/p/x", html).unwrap();
+        assert_eq!(p.description, "특징");
+        // a bare & before Korean text
+        let html = r#"<meta property="og:title" content="B&B 숙소 후기">"#;
+        assert_eq!(
+            from_html("https://a.kr", html).unwrap().title,
+            "B&B 숙소 후기"
+        );
+    }
 
     #[test]
     fn open_graph_tags_win_over_the_title() {

@@ -2678,6 +2678,40 @@ fn a_web_address_gets_a_preview_its_writer_can_remove() {
     assert!(!h.has("Remove preview"));
 }
 
+/// Korean written as separate letters (a caption typed on a Mac, a Finder
+/// file name) shows as whole syllables: in a kept link preview and in
+/// text pasted into the message box.
+#[test]
+fn korean_in_separate_letters_shows_as_syllables() {
+    // "바이브 특징" decomposed
+    let nfd = "\u{1107}\u{1161}\u{110B}\u{1175}\u{1107}\u{1173} \u{1110}\u{1173}\u{11A8}\u{110C}\u{1175}\u{11BC}";
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    h.send_message("see https://example.com/caption");
+    let c = h
+        .app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap();
+    c.messages.last_mut().unwrap().preview = Some(LinkPreview {
+        url: "https://example.com/caption".into(),
+        title: format!("Title {nfd}"),
+        description: format!("Caption {nfd}"),
+        site: "Instagram".into(),
+    });
+    h.settle();
+    assert!(h.has("Title 바이브 특징"));
+    assert!(!h.painted_text("Caption 바이브 특징").is_empty());
+
+    h.click("Message composer");
+    h.frame(vec![egui::Event::Paste(nfd.into())]);
+    h.key(egui::Key::Enter);
+    assert_eq!(last_in(&h, cid).text, "바이브 특징");
+}
+
 /// More actions > Forward message: pick a conversation, add a note; the
 /// message arrives there carrying the original, which opens where it came from.
 #[test]

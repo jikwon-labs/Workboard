@@ -6,6 +6,7 @@ mod app;
 mod emoji;
 mod filters;
 mod find_flash;
+mod hangul;
 mod i18n;
 mod linkpreview;
 mod links;

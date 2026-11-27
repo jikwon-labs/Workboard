@@ -539,7 +539,11 @@ impl App {
                 ui.set_max_width(ui.available_width().min(460.0));
                 ui.horizontal(|ui| {
                     if !p.site.is_empty() {
-                        ui.label(RichText::new(&p.site).small().color(t.text3));
+                        ui.label(
+                            RichText::new(crate::hangul::compose(&p.site))
+                                .small()
+                                .color(t.text3),
+                        );
                     }
                     if mine {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -554,9 +558,10 @@ impl App {
                     }
                 });
                 if !p.title.is_empty() {
+                    // previews kept before letters were joined (see hangul.rs)
                     let title = ui.add(
                         egui::Label::new(
-                            RichText::new(&p.title)
+                            RichText::new(crate::hangul::compose(&p.title))
                                 .font(crate::app::bold_font(ui.ctx(), 14.0))
                                 .color(t.primary),
                         )
@@ -572,7 +577,12 @@ impl App {
                     }
                 }
                 if !p.description.is_empty() {
-                    ui.add(egui::Label::new(RichText::new(&p.description).color(t.text2)).wrap());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(crate::hangul::compose(&p.description)).color(t.text2),
+                        )
+                        .wrap(),
+                    );
                 }
             });
         // the bar down its left side

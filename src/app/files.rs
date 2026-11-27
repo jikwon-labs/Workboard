@@ -495,7 +495,7 @@ impl Files {
         let name = path
             .as_ref()
             .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().to_string())
+            .map(|n| crate::hangul::compose(&n.to_string_lossy()).into_owned())
             .unwrap_or_else(|| "Pasted image.png".into());
         self.add_named(path, png, name, remote)
     }
@@ -2036,6 +2036,15 @@ impl App {
         if !self.ime.woken && raw.focused {
             self.ime.woken = crate::os::wake_input_method();
             self.ime.drop_wake = self.ime.woken;
+        }
+        // text copied from a Mac file name or web page can come as
+        // separate Korean letters (see hangul.rs)
+        for e in &mut raw.events {
+            if let egui::Event::Paste(s) = e {
+                if let std::borrow::Cow::Owned(joined) = crate::hangul::compose(s) {
+                    *s = joined;
+                }
+            }
         }
         self.catch_paste(ctx, raw);
         self.make_room_for_keyboard(ctx, raw);

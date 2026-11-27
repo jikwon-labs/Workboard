@@ -106,6 +106,8 @@ pub(crate) struct Registry {
     options: Options,
     pusher: Option<Arc<dyn push::Sender>>,
     stop: watch::Receiver<bool>,
+    /// who is online in any workspace, shared by all their hubs
+    everyone: Arc<Everyone>,
 }
 
 impl Registry {
@@ -121,6 +123,7 @@ impl Registry {
         if options.ai.is_none() {
             options.ai = crate::ai::from_setup(&root);
         }
+        let everyone = Arc::new(Everyone::default());
         let first = Arc::new(Hub::open(
             root.clone(),
             root.clone(),
@@ -128,6 +131,7 @@ impl Registry {
             &options,
             pusher.clone(),
             stop.clone(),
+            everyone.clone(),
         )?);
         let mut others = BTreeMap::new();
         if let Ok(rd) = std::fs::read_dir(root.join(WORKSPACES_DIR)) {
@@ -145,6 +149,7 @@ impl Registry {
                     &options,
                     pusher.clone(),
                     stop.clone(),
+                    everyone.clone(),
                 ) {
                     Ok(h) => {
                         others.insert(id, Arc::new(h));
@@ -166,6 +171,7 @@ impl Registry {
             options,
             pusher,
             stop,
+            everyone,
         })
     }
 
@@ -236,6 +242,7 @@ impl Registry {
             &self.options,
             self.pusher.clone(),
             self.stop.clone(),
+            self.everyone.clone(),
         )
         .map_err(|e| format!("Couldn't make the workspace: {}", e))?;
         {
@@ -389,6 +396,7 @@ impl Registry {
             &self.options,
             self.pusher.clone(),
             self.stop.clone(),
+            self.everyone.clone(),
         )
         .map_err(|e| format!("Couldn't open the workspace: {}", e))?;
         let name = hub.name();

@@ -484,7 +484,7 @@ fn test_hub(home: &Path, canon: Option<Value>, saved: Saved) -> Hub {
         online: Mutex::new(Default::default()),
         watching: Mutex::new(Default::default()),
         members_online: Mutex::new(Default::default()),
-        presence: watch::channel(vec![]).0,
+        everyone: Default::default(),
         typing: broadcast::channel(64).0,
         mines: broadcast::channel(64).0,
         closed: watch::channel(false).0,
@@ -1766,6 +1766,7 @@ fn reading_state_is_written_on_its_own_and_moved_out_of_an_older_server_json() {
         &Options::default(),
         None,
         stop,
+        Default::default(),
     )
     .unwrap();
     assert_eq!(*hub.state().saved.mine[&1], old_mine);

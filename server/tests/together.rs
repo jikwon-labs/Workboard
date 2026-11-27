@@ -6721,6 +6721,72 @@ fn one_server_keeps_several_workspaces_apart() {
     server.stop();
 }
 
+/// Someone working in another workspace on the same server still shows
+/// green in this one: presence goes by account, across the server.
+#[test]
+fn someone_in_another_workspace_of_the_server_still_shows_online() {
+    let home = TempHome::new("presenceacross");
+    let server = Server::start_at(&home, 0);
+    let port = server.port;
+    let addr = format!("127.0.0.1:{}", port);
+    let mut a = App::start(
+        port,
+        stamped(workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("ann@team.io".into()),
+            new_password: Some("ann-secret-1".into()),
+            ..Default::default()
+        },
+    );
+    a.until("owner in", |a| {
+        a.role == Some(Role::Owner) && a.token.is_some()
+    });
+    let code = a.invite(2, Role::Member);
+    let mut b = App::start(
+        port,
+        Value::Null,
+        SignIn {
+            invite: Some(code),
+            email: Some("bo@team.io".into()),
+            new_password: Some("bo-secret-1".into()),
+            ..Default::default()
+        },
+    );
+    a.until("A sees Bo online", |a| a.online.as_deref() == Some(&[1, 2]));
+    // Ann makes a second workspace; Bo isn't in it
+    let addr2 = wb_net::create_workspace(&addr, &auth(&a)).unwrap();
+    let mut a2 = App::start_at(
+        &addr2,
+        stamped(second_workspace()),
+        SignIn {
+            claim: Some(1),
+            email: Some("ann@team.io".into()),
+            ..Default::default()
+        },
+    );
+    a2.until("owner of the second", |a| a.token.is_some());
+    a2.until("only Ann online there", |a| {
+        a.online.as_deref() == Some(&[1])
+    });
+    // Ann leaves the first workspace for the second: Bo still sees her
+    let before = connections(port);
+    drop(a);
+    wait_for("Ann's first connection gone", || connections(port) < before);
+    // (a presence message would follow the disconnect right away)
+    std::thread::sleep(Duration::from_millis(300));
+    b.pump();
+    assert_eq!(
+        b.online.as_deref(),
+        Some(&[1, 2][..]),
+        "Ann is in the second"
+    );
+    // and once she quits there too, she goes grey
+    drop(a2);
+    b.until("Ann went away", |b| b.online.as_deref() == Some(&[2]));
+    server.stop();
+}
+
 /// The owner of a workspace other than the server's first deletes it: its
 /// apps are told and stop, its address answers 410, its folder waits in
 /// deleted/ and `workboard-server undelete` brings it back.

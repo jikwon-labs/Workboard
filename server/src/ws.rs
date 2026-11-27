@@ -87,14 +87,20 @@ impl Drop for Counted {
 }
 
 /// A signed-in device's connection, counted in Hub::online (and its member
-/// in Hub::members_online) while it lasts.
-pub(crate) struct Online(Arc<Hub>, String, u64);
+/// in Hub::members_online, their account in Everyone) while it lasts.
+pub(crate) struct Online(Arc<Hub>, String, u64, Option<String>);
 
 impl Online {
     pub(crate) fn new(hub: &Arc<Hub>, device: &str, member: u64) -> Online {
         *hub.online.locked().entry(device.to_string()).or_insert(0) += 1;
-        hub.member_seen(member, true);
-        Online(hub.clone(), device.to_string(), member)
+        let email = hub
+            .state()
+            .saved
+            .accounts
+            .get(&member)
+            .map(|a| norm_email(&a.email));
+        hub.member_seen(member, email.as_deref(), true);
+        Online(hub.clone(), device.to_string(), member, email)
     }
 }
 
@@ -109,31 +115,82 @@ impl Drop for Online {
                 }
             }
         }
-        self.0.member_seen(self.2, false);
+        self.0.member_seen(self.2, self.3.as_deref(), false);
+    }
+}
+
+/// Who has the app open in any workspace of one server, by account: the
+/// same person working in another workspace there still shows green here.
+pub(crate) struct Everyone {
+    /// account email (normalized) -> its open connections in any workspace
+    emails: Mutex<BTreeMap<String, usize>>,
+    /// bumped whenever someone comes online or goes away in any workspace
+    changed: watch::Sender<u64>,
+}
+
+impl Default for Everyone {
+    fn default() -> Self {
+        Everyone {
+            emails: Mutex::new(Default::default()),
+            changed: watch::channel(0).0,
+        }
+    }
+}
+
+/// One more (`on`) or one fewer connection under `key`; whether that
+/// changed who is online.
+fn count<K: Ord>(m: &mut BTreeMap<K, usize>, key: K, on: bool) -> bool {
+    if on {
+        let n = m.entry(key).or_insert(0);
+        *n += 1;
+        return *n == 1;
+    }
+    match m.get_mut(&key) {
+        Some(n) if *n > 1 => {
+            *n -= 1;
+            false
+        }
+        Some(_) => {
+            m.remove(&key);
+            true
+        }
+        None => false,
     }
 }
 
 impl Hub {
-    /// A connection of `member` opened (`on`) or closed; tells everyone
+    /// A connection of `member` (signed in with the account `email`, if
+    /// any) opened (`on`) or closed; tells every workspace's connections
     /// when that changes who is online.
-    pub(crate) fn member_seen(&self, member: u64, on: bool) {
-        let mut m = self.members_online.locked();
-        if on {
-            *m.entry(member).or_insert(0) += 1;
-        } else if let Some(n) = m.get_mut(&member) {
-            *n -= 1;
-            if *n == 0 {
-                m.remove(&member);
+    pub(crate) fn member_seen(&self, member: u64, email: Option<&str>, on: bool) {
+        let mut changed = count(&mut self.members_online.locked(), member, on);
+        if let Some(e) = email {
+            changed |= count(&mut self.everyone.emails.locked(), e.to_string(), on);
+        }
+        if changed {
+            self.everyone
+                .changed
+                .send_modify(|n| *n = n.wrapping_add(1));
+        }
+    }
+
+    /// The members of this workspace with the app open somewhere on this
+    /// server, sorted (the green dot by their name): connected here, or
+    /// signed in with their account in another workspace.
+    pub(crate) fn online_members(&self) -> Vec<u64> {
+        let mut v: std::collections::BTreeSet<u64> =
+            self.members_online.locked().keys().copied().collect();
+        // copied out first: a merge can hold the workspace's state a while
+        let emails: std::collections::BTreeSet<String> =
+            self.everyone.emails.locked().keys().cloned().collect();
+        if !emails.is_empty() {
+            for (m, a) in &self.state().saved.accounts {
+                if emails.contains(&norm_email(&a.email)) {
+                    v.insert(*m);
+                }
             }
         }
-        let now: Vec<u64> = m.keys().copied().collect();
-        self.presence.send_if_modified(|v| {
-            let changed = *v != now;
-            if changed {
-                *v = now;
-            }
-            changed
-        });
+        v.into_iter().collect()
     }
 }
 
@@ -668,7 +725,7 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
         return;
     }
     let mut access = hub.access.subscribe();
-    let mut presence = hub.presence.subscribe();
+    let mut presence = hub.everyone.changed.subscribe();
     let mut typing = hub.typing.subscribe();
     let mut mines = hub.mines.subscribe();
     // this connection's requests don't bring it the access broadcast too
@@ -691,7 +748,9 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
     if role.manages() && !send(&mut socket, &hub.access_for(member, false).to_json()).await {
         return;
     }
-    let online = presence.borrow_and_update().clone();
+    presence.borrow_and_update();
+    let mut shown = hub.online_members();
+    let online = shown.clone();
     if !send(&mut socket, &Msg::Presence { online }.to_json()).await {
         return;
     }
@@ -762,7 +821,13 @@ pub(crate) async fn connection(mut socket: WebSocket, hub: Arc<Hub>, host: Optio
                 if p.is_err() {
                     break;
                 }
-                let online = presence.borrow_and_update().clone();
+                presence.borrow_and_update();
+                // someone in another workspace: nothing new to say here
+                let online = hub.online_members();
+                if online == shown {
+                    continue;
+                }
+                shown = online.clone();
                 if !send(&mut socket, &Msg::Presence { online }.to_json()).await {
                     break;
                 }

@@ -625,11 +625,12 @@ struct Hub {
     /// device id -> its open watch connections (no pushes either, but not
     /// counted online)
     watching: Mutex<std::collections::HashMap<String, usize>>,
-    /// member id -> their open connections; `presence` holds its keys
+    /// member id -> their open connections in this workspace
     members_online: Mutex<BTreeMap<u64, usize>>,
-    /// the members with an open connection, sorted: each connection tells
-    /// its app when it changes (the green dot by someone's name)
-    presence: watch::Sender<Vec<u64>>,
+    /// who has the app open in any workspace of this server, shared by
+    /// every hub: each connection tells its app when this workspace's
+    /// green dots change (`Hub::online_members`)
+    everyone: Arc<Everyone>,
     /// someone typing in a conversation: each connection passes it on to
     /// its app when that member can see the conversation (ws.rs)
     typing: broadcast::Sender<Typing>,
@@ -676,6 +677,7 @@ impl Hub {
         options: &Options,
         pusher: Option<Arc<dyn push::Sender>>,
         stop: watch::Receiver<bool>,
+        everyone: Arc<Everyone>,
     ) -> std::io::Result<Hub> {
         std::fs::create_dir_all(&home)?;
         let canon = read_json(&home.join(WORKSPACE_FILE))?;
@@ -728,7 +730,7 @@ impl Hub {
             online: Mutex::new(Default::default()),
             watching: Mutex::new(Default::default()),
             members_online: Mutex::new(Default::default()),
-            presence: watch::channel(vec![]).0,
+            everyone,
             typing: broadcast::channel(64).0,
             mines: broadcast::channel(64).0,
             closed: watch::channel(false).0,

@@ -51,6 +51,61 @@ impl Rgba {
     pub fn to_color_image(&self) -> egui::ColorImage {
         egui::ColorImage::from_rgba_premultiplied([self.w as usize, self.h as usize], &self.px)
     }
+
+    /// The pixels moved as a video's turn says, `[a, b, c, d]` of its
+    /// transform (each -1, 0 or 1): a source pixel (x, y) lands at
+    /// (a·x + c·y, b·x + d·y), shifted back into the picture. A quarter turn
+    /// swaps width and height.
+    pub fn turned(self, [a, b, c, d]: [i8; 4]) -> Rgba {
+        if [a, b, c, d] == [1, 0, 0, 1] {
+            return self;
+        }
+        let (w, h) = (self.w as i64, self.h as i64);
+        let (ow, oh) = if a == 0 { (h, w) } else { (w, h) };
+        let (a, b, c, d) = (a as i64, b as i64, c as i64, d as i64);
+        let ox = if a < 0 { w - 1 } else { 0 } + if c < 0 { h - 1 } else { 0 };
+        let oy = if b < 0 { w - 1 } else { 0 } + if d < 0 { h - 1 } else { 0 };
+        let mut px = vec![0u8; self.px.len()];
+        for y in 0..h {
+            for x in 0..w {
+                let (nx, ny) = (a * x + c * y + ox, b * x + d * y + oy);
+                if !(0..ow).contains(&nx) || !(0..oh).contains(&ny) {
+                    continue;
+                }
+                let s = ((y * w + x) * 4) as usize;
+                let o = ((ny * ow + nx) * 4) as usize;
+                px[o..o + 4].copy_from_slice(&self.px[s..s + 4]);
+            }
+        }
+        Rgba {
+            w: ow as u32,
+            h: oh as u32,
+            px,
+        }
+    }
+}
+
+/// A video track's transform as whole steps, `[a, b, c, d]` each -1, 0 or 1
+/// (what Rgba::turned takes). Anything not a quarter turn or flip is taken
+/// as no turn at all.
+pub fn quarter_turn(a: f64, b: f64, c: f64, d: f64) -> [i8; 4] {
+    let s = |v: f64| {
+        if v > 0.5 {
+            1
+        } else if v < -0.5 {
+            -1
+        } else {
+            0
+        }
+    };
+    let t = [s(a), s(b), s(c), s(d)];
+    let axis = (t[1] == 0 && t[2] == 0 && t[0] != 0 && t[3] != 0)
+        || (t[0] == 0 && t[3] == 0 && t[1] != 0 && t[2] != 0);
+    if axis {
+        t
+    } else {
+        [1, 0, 0, 1]
+    }
 }
 
 /// File name endings taken as pictures, and as videos (the file picker
@@ -1277,11 +1332,15 @@ mod mac {
         item: *mut Object,
         output: *mut Object,
         muted: bool,
+        /// The track's turn: the output hands frames over as they were
+        /// stored, so a phone video filmed turned is turned upright here.
+        turn: [i8; 4],
     }
 
     impl Player {
-        /// `w`×`h` is the size frames are scaled to (keep the video's shape).
-        /// None when there's nothing AVFoundation can play in the file.
+        /// `w`×`h` is the size frames come out at, upright (keep the
+        /// video's shape as shown). None when there's nothing AVFoundation
+        /// can play in the file.
         pub fn new(path: &Path, w: u32, h: u32) -> Option<Player> {
             autoreleasepool(|| unsafe {
                 let asset: *mut Object = msg_send![class!(AVURLAsset), URLAssetWithURL: file_url(path) options: null_mut::<Object>()];
@@ -1297,6 +1356,16 @@ mod mac {
                     return None;
                 }
                 let _: *mut Object = msg_send![item, retain];
+                let track = video_track(asset);
+                let turn = if track.is_null() {
+                    [1, 0, 0, 1]
+                } else {
+                    let t: CGAffineTransform = msg_send![track, preferredTransform];
+                    super::quarter_turn(t.a, t.b, t.c, t.d)
+                };
+                // frames are scaled before they're turned: a quarter turn
+                // asks for the stored shape
+                let (w, h) = if turn[0] == 0 { (h, w) } else { (w, h) };
                 let attrs = dict(&[
                     (kCVPixelBufferPixelFormatTypeKey, number(BGRA as i64)),
                     (kCVPixelBufferWidthKey, number(w.max(2) as i64)),
@@ -1312,6 +1381,7 @@ mod mac {
                     item,
                     output,
                     muted: false,
+                    turn,
                 })
             })
         }
@@ -1350,11 +1420,14 @@ mod mac {
                 }
                 CVPixelBufferUnlockBaseAddress(pb, 1);
                 CVBufferRelease(pb);
-                Some(Rgba {
-                    w: w as u32,
-                    h: h as u32,
-                    px,
-                })
+                Some(
+                    Rgba {
+                        w: w as u32,
+                        h: h as u32,
+                        px,
+                    }
+                    .turned(self.turn),
+                )
             })
         }
 
@@ -1426,6 +1499,48 @@ mod mac {
             }
         }
     }
+}
+
+/// A video frame stored turned comes out upright, for each turn a phone or
+/// an editor writes, and a transform that isn't a whole turn is left alone.
+#[cfg(test)]
+#[test]
+fn video_frames_are_turned_upright() {
+    // 3×2, one value per pixel in the red byte:
+    //   1 2 3
+    //   4 5 6
+    let frame = || Rgba {
+        w: 3,
+        h: 2,
+        px: (1..=6u8).flat_map(|v| [v, 0, 0, 255]).collect(),
+    };
+    let rows = |r: &Rgba| -> Vec<Vec<u8>> {
+        r.px.chunks(4 * r.w as usize)
+            .map(|row| row.chunks(4).map(|p| p[0]).collect())
+            .collect()
+    };
+    // AVFoundation's transforms (a, b, c, d) as phones write them
+    let cases: [((f64, f64, f64, f64), Vec<Vec<u8>>); 5] = [
+        ((1.0, 0.0, 0.0, 1.0), vec![vec![1, 2, 3], vec![4, 5, 6]]),
+        // a quarter turn clockwise: an iPhone held upright
+        (
+            (0.0, 1.0, -1.0, 0.0),
+            vec![vec![4, 1], vec![5, 2], vec![6, 3]],
+        ),
+        ((-1.0, 0.0, 0.0, -1.0), vec![vec![6, 5, 4], vec![3, 2, 1]]),
+        (
+            (0.0, -1.0, 1.0, 0.0),
+            vec![vec![3, 6], vec![2, 5], vec![1, 4]],
+        ),
+        // mirrored left to right
+        ((-1.0, 0.0, 0.0, 1.0), vec![vec![3, 2, 1], vec![6, 5, 4]]),
+    ];
+    for ((a, b, c, d), want) in cases {
+        let out = frame().turned(quarter_turn(a, b, c, d));
+        assert_eq!(rows(&out), want, "transform {:?}", (a, b, c, d));
+        assert_eq!(out.px.len(), 6 * 4);
+    }
+    assert_eq!(quarter_turn(0.7, 0.7, -0.7, 0.7), [1, 0, 0, 1]);
 }
 
 /// A photo from the camera goes as a JPEG of the same size, whatever the

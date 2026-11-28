@@ -140,6 +140,72 @@ fn main() {
     spin(0.3);
     assert!(p.position() < 1.0, "started over at {}", p.position());
     drop(p);
+
+    // a video stored on its side with a turn to show it (as a phone films
+    // upright): frames come out upright, the way the still shows it
+    let plain = dir.join("plain.mp4");
+    let ok = std::process::Command::new(ffmpeg)
+        .args([
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            // red on the left half, blue on the right, as stored
+            "color=c=red:s=320x240:d=2:r=30,drawbox=x=160:y=0:w=160:h=240:color=blue:t=fill",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "libx264",
+        ])
+        .arg(&plain)
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "ffmpeg made the plain clip");
+    let turned = dir.join("turned.mp4");
+    let ok = std::process::Command::new(ffmpeg)
+        .args(["-loglevel", "error", "-display_rotation", "90", "-i"])
+        .arg(&plain)
+        .args(["-c", "copy"])
+        .arg(&turned)
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "ffmpeg turned the clip");
+    let (w, h, _) = media::probe(&turned, media::MediaKind::Video).unwrap();
+    assert_eq!((w, h), (240, 320), "measured as shown");
+    // the colour at the middle of the top and bottom quarters
+    let ends = |f: &media::Rgba| {
+        let at = |y: u32| {
+            let i = ((y * f.w + f.w / 2) * 4) as usize;
+            if f.px[i] > f.px[i + 2] {
+                "red"
+            } else {
+                "blue"
+            }
+        };
+        (at(f.h / 4), at(f.h * 3 / 4))
+    };
+    let still = media::thumbnail(&turned, media::MediaKind::Video, 320).unwrap();
+    assert_eq!((still.w, still.h), (240, 320));
+    let upright = ends(&still);
+    assert_ne!(upright.0, upright.1, "the halves end up top and bottom");
+    let mut p = media::Player::new(&turned, 120, 160).expect("a player");
+    p.set_muted(true);
+    p.play();
+    let until = Instant::now() + Duration::from_secs(10);
+    let mut frame = None;
+    while frame.is_none() && Instant::now() < until {
+        spin(0.05);
+        frame = p.frame();
+    }
+    let f = frame.expect("a frame of the turned clip");
+    assert_eq!((f.w, f.h), (120, 160), "upright at the asked size");
+    assert_eq!(ends(&f), upright, "turned the way the still is");
+    drop(p);
     let _ = std::fs::remove_dir_all(&dir);
     println!("player: ok");
 }

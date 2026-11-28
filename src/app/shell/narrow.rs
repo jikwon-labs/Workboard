@@ -70,7 +70,8 @@ impl App {
     /// Reads the window's width into `self.tier` (start of each frame) and
     /// closes the sheet once something in it has been picked.
     pub(crate) fn update_tier(&mut self, ctx: &egui::Context) {
-        let tier = Tier::of(ctx.screen_rect().width());
+        // beside a page moved out (the iPad's split screen): what is left
+        let tier = Tier::of(ctx.screen_rect().width() - self.pop.split_w);
         self.sheet.seen = self.sheet.seen_now.take();
         if tier != self.tier {
             // back beside the page: the drawer has nothing to cover

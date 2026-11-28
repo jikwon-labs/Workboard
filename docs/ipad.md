@@ -69,6 +69,13 @@ iPhone 앱(`ios/`, SwiftUI)과는 별개다. 맥 앱(Rust + egui) 코드를 iOS 
 - winit 은 iPad 에서 앱 delegate 를 두지 않아, 푸시 토큰을 받는 delegate(`WBPushDelegate`)를 직접 건다.
 - 2026-11-27 iPad mini 시뮬레이터에서 확인: 알림 허용, 토큰 등록, 백그라운드에서 실제 APNs(sandbox) 배너(DM·댓글·멘션), 배너를 누르면 작업 열림, 예약한 리마인더 배너. 실기기는 아직.
 
+## 화면 나눠 보기 (2026-11-29)
+
+- 맥에서 문서·화이트보드·회의·작업·화면 공유를 "새 창에서 열기"로 따로 띄우는 기능(`src/app/popout.rs`)이 iPad 에서는 화면 오른쪽에 붙는다. iPad 에서는 egui 가 창을 하나만 만들기 때문이다(eframe 이 데스크톱이 아니면 새 창을 앱 안에 그린다). 왼쪽에는 채팅 같은 원래 화면이 그대로 남는다.
+- 경계선을 끌어 폭을 바꾼다(손가락은 0.35초 누른 뒤 끈다, `src/app/touch.rs`). 처음 폭은 절반이지만 왼쪽이 600pt(가운데 크기 배치) 아래로 줄지 않게 잡는다. 여러 개를 열면 위쪽 탭으로 고르고, X 로 닫고, "메인 창으로 되돌리기"로 원래 화면에 되돌린다. 폭이 680pt 보다 좁으면 나누지 않고 오른쪽 화면이 전체를 쓴다.
+- `ios/ipad-egui/Info.plist` 의 `UIRequiresFullScreen` 을 false 로 바꿔, iPad 화면 분할·Stage Manager 에서 다른 앱 옆에 둘 수 있다. TestFlight 판에는 다음 iPad 배포부터 들어간다.
+- 2026-11-29 iPad mini 시뮬레이터에서 확인: 문서를 오른쪽에 띄운 채 왼쪽에서 #general 을 열었다. 다른 앱 옆에 두고 창 크기를 바꾸는 것은 시뮬레이터에서 시험하지 못했다.
+
 ## 아직 안 되는 것
 
 - **단축키:** iPad 하드웨어 키보드의 Cmd 는 egui 명령 키로 잡히지 않고 Ctrl 이 그 역할을 한다(egui-winit 이 macOS 에서만 Cmd 를 쓴다). 표기도 "Ctrl+J".

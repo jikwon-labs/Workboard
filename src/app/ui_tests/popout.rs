@@ -1,8 +1,8 @@
 // Pages moved out to windows of their own (popout.rs): a doc, a whiteboard,
 // a meeting, a task and a huddle's shared screen each move out with "Open in
 // new window", work there while the main window shows something else, and
-// go back with "Back to main window". Here the windows are windows inside
-// the app's, as there is only one window in the tests.
+// go back with "Back to main window". There is one window in the tests, as
+// on the iPad: the page goes beside the main page, splitting the screen.
 
 use super::*;
 use crate::app::popout::Pop;
@@ -148,7 +148,8 @@ fn task_moves_to_its_own_window_and_back() {
     assert_eq!(h.app.open_task, None, "the dialog over the page is gone");
     assert!(h.has("Close task"), "the task is in its window");
 
-    // a comment from the window
+    // a comment from the window (half the screen: comments under their tab)
+    h.click("Task tab Comments");
     h.click("Comment box");
     h.type_text("from the window");
     h.cmd_enter();
@@ -223,8 +224,8 @@ fn shared_screen_moves_to_its_own_window() {
     assert!(h.has("Back to main window"));
     let in_window = h.rect(&name);
     assert!(
-        in_window.width() > on_stage.width(),
-        "larger in its window: {:?} {:?}",
+        in_window.left() > h.size.x / 2.0 - 20.0 && in_window != on_stage,
+        "on the right of the split: {:?} {:?}",
         in_window,
         on_stage
     );
@@ -249,4 +250,121 @@ fn shared_screen_moves_to_its_own_window() {
     h.settle();
     assert!(!h.app.popped(Pop::Screen));
     assert!(!h.has("Back to main window"));
+}
+
+/// One window (the iPad): the moved page takes the right half and the main
+/// page stays usable on the left, laid out for what it has left.
+#[test]
+fn one_window_splits_the_screen() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Docs;
+    let id = h.new_doc_focused();
+    h.click("Open in new window");
+    let close = h.rect("Close window");
+    assert!(
+        close.left() > h.size.x / 2.0,
+        "the page is on the right: {:?}",
+        close
+    );
+    let w = h.app.pop.split_w;
+    assert!(
+        (w - h.size.x / 2.0).abs() < 80.0,
+        "about half the screen: {} of {}",
+        w,
+        h.size.x
+    );
+    assert_eq!(
+        h.app.tier,
+        crate::app::shell::Tier::of(h.size.x - w),
+        "the main page lays out for the left side"
+    );
+    // a conversation on the left, written in while the doc stays beside it
+    let general = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap()
+        .id;
+    h.app.open_chat_at(general, None);
+    h.settle();
+    h.send_message("about the doc");
+    let ch = h
+        .app
+        .data
+        .channels
+        .iter()
+        .find(|c| c.name == "general")
+        .unwrap();
+    assert_eq!(ch.messages.last().unwrap().text, "about the doc");
+    assert!(h.app.popped(Pop::Doc(id)), "the doc is still beside it");
+    assert!(h.rect("Close window").left() > h.size.x / 2.0);
+
+    // closing it gives the main page the whole screen again
+    h.click("Close window");
+    assert!(!h.app.popped(Pop::Doc(id)));
+    h.settle();
+    assert_eq!(h.app.pop.split_w, 0.0);
+    assert!(!h.has("Close window"));
+}
+
+/// Two pages moved out: tabs on the bar pick the one beside the main page.
+#[test]
+fn split_screen_tabs_switch_between_moved_pages() {
+    let mut h = Ui1::new();
+    h.app.section = Section::Docs;
+    let doc = h.new_doc_focused();
+    h.click("Open in new window");
+    h.app.section = Section::Meetings;
+    h.settle();
+    h.click("Add a meeting");
+    let mid = h.app.meeting_open.unwrap();
+    h.app
+        .data
+        .extra
+        .meetings
+        .iter_mut()
+        .find(|m| m.id == mid)
+        .unwrap()
+        .title = "Sync".into();
+    h.settle();
+    // the meeting's own button, on the left (the doc's bar has none)
+    h.click("Open in new window");
+    assert!(h.app.popped(Pop::Doc(doc)) && h.app.popped(Pop::Meeting(mid)));
+    assert_eq!(
+        h.app.pop.active,
+        Some(Pop::Meeting(mid)),
+        "the newest shows"
+    );
+    assert!(h.has("Meeting name"));
+    assert!(h.has("Split tab Sync"));
+
+    h.click("Split tab Untitled");
+    assert_eq!(h.app.pop.active, Some(Pop::Doc(doc)));
+    assert!(!h.has("Meeting name"));
+
+    // closing the doc shows the meeting again
+    h.click("Close window");
+    assert!(!h.app.popped(Pop::Doc(doc)));
+    h.settle();
+    assert_eq!(h.app.pop.active, Some(Pop::Meeting(mid)));
+    assert!(h.has("Meeting name"));
+}
+
+/// Too narrow for two sides (an iPad beside another app): the moved page
+/// takes the whole width until it is closed or put back.
+#[test]
+fn narrow_window_gives_the_moved_page_all_of_it() {
+    let mut h = Ui1::sized(600.0, 800.0);
+    h.app.section = Section::Docs;
+    let id = h.new_doc_focused();
+    h.click("Open in new window");
+    assert!(h.app.popped(Pop::Doc(id)));
+    let room = h.app.pop.split_w;
+    assert!(room > 520.0, "the whole width: {}", room);
+    h.click("Back to main window");
+    assert_eq!(h.app.doc_open, Some(id));
+    h.settle();
+    assert_eq!(h.app.pop.split_w, 0.0);
 }

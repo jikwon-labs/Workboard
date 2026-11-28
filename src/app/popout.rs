@@ -7,8 +7,13 @@
 // a bar on top whose "Back to main window" puts the page back where it came
 // from; closing the window just closes it. While a page is in its window the
 // main window doesn't show the same one: opening it there brings its window
-// to the front instead. Where there is only one window (the click tests) it
-// is a window inside the app's, as the thread's window is (chat.rs).
+// to the front instead.
+//
+// Where the app has only one window (the iPad, and the click tests) the page
+// goes beside the main page instead, splitting the screen: the main page on
+// the left, the moved page on the right (the line between them drags), tabs
+// on its bar when more than one page moved out, and a close button. A window
+// too narrow for both sides gives the moved page all of it.
 
 use super::icons::icon_button;
 use super::*;
@@ -50,7 +55,15 @@ pub(super) struct PopUi {
     /// Asked from inside a window this frame: put its page back in the
     /// main window.
     pub back: bool,
+    /// The page shown beside the main one where the screen is split.
+    pub active: Option<Pop>,
+    /// How wide the split's right side was last frame (0: no split): the
+    /// main page lays out for what is left.
+    pub split_w: f32,
 }
+
+/// Below this width the screen isn't split: the moved page takes it all.
+const SPLIT_FROM: f32 = 680.0;
 
 /// What a window asked for while it was drawn.
 #[derive(Default)]
@@ -226,6 +239,15 @@ impl App {
 
     /// Once a frame: the pages' windows, and the page asked to move out.
     pub(super) fn popout_windows(&mut self, ctx: &egui::Context) {
+        if ctx.embed_viewports() {
+            // one window: the pages go beside the main page (popout_split)
+            if let Some(what) = self.pop.out.take() {
+                self.pop_out(what, ctx);
+                self.pop.active = Some(what);
+                ctx.request_repaint();
+            }
+            return;
+        }
         let wins = std::mem::take(&mut self.pop.wins);
         let mut keep: Vec<PopWin> = vec![];
         for mut w in wins {
@@ -283,29 +305,13 @@ impl App {
         };
         ctx.show_viewport_immediate(id, builder, |ctx, class| {
             if class == egui::ViewportClass::Embedded {
-                // one window only (the click tests): a window inside it
-                let frame = egui::Frame::new()
-                    .fill(fill)
-                    .stroke(Stroke::new(1.0_f32, t.border))
-                    .corner_radius(10);
-                let room = ctx.screen_rect().shrink(8.0).size();
-                let win = egui::Window::new(format!("popout {:?}", w.what))
-                    .id(egui::Id::new(("popout_window", w.what)))
-                    .title_bar(false)
-                    .collapsible(false)
-                    .default_size(vec2(size[0], size[1]).min(room))
-                    .default_pos(ctx.screen_rect().min + vec2(40.0, 40.0))
-                    .frame(frame);
-                crate::widgets::window_inside(win, ctx, &frame).show(ctx, |ui| {
-                    ui.set_min_size(vec2(size[0], size[1]).min(room - vec2(16.0, 16.0)));
-                    self.popout_body(ui, w, &mut out);
-                });
+                // drawn beside the main page instead (popout_split)
                 return;
             }
             super::ime::fix_window_input(&mut w.ime, ctx);
             egui::CentralPanel::default()
                 .frame(egui::Frame::new().fill(fill))
-                .show(ctx, |ui| self.popout_body(ui, w, &mut out));
+                .show(ctx, |ui| self.popout_body(ui, w, &[], &mut out));
             // pictures and videos dragged in from Finder attach to the task
             if let Pop::Task(tid) = w.what {
                 for f in ctx.input(|i| {
@@ -328,7 +334,15 @@ impl App {
     }
 
     /// Inside a page's window: the bar on top and the page under it.
-    fn popout_body(&mut self, ui: &mut Ui, w: &mut PopWin, out: &mut PopOut) {
+    /// `tabs`: where the screen is split, every page moved out (the bar
+    /// shows them as tabs when there are several, and a close button).
+    fn popout_body(
+        &mut self,
+        ui: &mut Ui,
+        w: &mut PopWin,
+        tabs: &[(Pop, String)],
+        out: &mut PopOut,
+    ) {
         let t = self.t();
         let was_tier = self.tier;
         // laid out for this window's width, not the main one's
@@ -362,8 +376,32 @@ impl App {
                         } else {
                             t.text3
                         };
-                        ui.label(RichText::new(tr(kind)).small().color(fg));
+                        let split = ui.ctx().embed_viewports();
+                        if tabs.len() > 1 {
+                            for (p, name) in tabs {
+                                let shown = fit_text(
+                                    ui.painter(),
+                                    name,
+                                    &FontId::proportional(13.0),
+                                    140.0,
+                                );
+                                let r = ui.selectable_label(*p == what, shown);
+                                name_it(&r, &format!("Split tab {}", name));
+                                if r.clicked() && *p != what {
+                                    self.pop.active = Some(*p);
+                                }
+                            }
+                        } else {
+                            ui.label(RichText::new(tr(kind)).small().color(fg));
+                        }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if split {
+                                let c = icon_button(ui, &t, Icon::Close, "", "Close window", false)
+                                    .on_hover_text(tr("Close"));
+                                if c.clicked() {
+                                    out.close = true;
+                                }
+                            }
                             let b = ui
                                 .add(ghost(egui::Button::new(
                                     RichText::new(tr("Back to main window")).color(fg),
@@ -435,6 +473,77 @@ impl App {
         self.tier = was_tier;
         if std::mem::take(&mut self.pop.back) {
             out.back = true;
+        }
+    }
+
+    /// Where the app has one window (the iPad, the click tests): before the
+    /// main page, the moved-out page on the right of the screen, beside it.
+    pub(super) fn popout_split(&mut self, ctx: &egui::Context) {
+        let gone: Vec<Pop> = self
+            .pop
+            .wins
+            .iter()
+            .map(|w| w.what)
+            .filter(|p| self.pop_title(*p).is_none())
+            .collect();
+        self.pop.wins.retain(|w| !gone.contains(&w.what));
+        if !ctx.embed_viewports() || self.pop.wins.is_empty() {
+            self.pop.split_w = 0.0;
+            self.pop.active = None;
+            return;
+        }
+        let tabs: Vec<(Pop, String)> = self
+            .pop
+            .wins
+            .iter()
+            .filter_map(|w| self.pop_title(w.what).map(|n| (w.what, n)))
+            .collect();
+        let i = self
+            .pop
+            .active
+            .and_then(|a| self.pop.wins.iter().position(|w| w.what == a))
+            .unwrap_or(self.pop.wins.len() - 1);
+        let mut w = self.pop.wins.remove(i);
+        self.pop.active = Some(w.what);
+        let t = self.t();
+        let room = ctx.available_rect().width();
+        let mut panel = egui::SidePanel::right("popout_split")
+            .frame(egui::Frame::new().fill(if w.what == Pop::Screen {
+                super::huddle::PANEL_BG
+            } else {
+                t.bg
+            }))
+            .show_separator_line(true);
+        panel = if room < SPLIT_FROM {
+            panel.resizable(false).exact_width(room)
+        } else {
+            panel
+                .resizable(true)
+                // half, but the main page keeps a medium window's width
+                // where it can (the rail and the page beside each other)
+                .default_width(
+                    (room * 0.5)
+                        .min(room - super::shell::Tier::MEDIUM_FROM)
+                        .max(320.0)
+                        .round(),
+                )
+                .width_range(320.0..=room - 360.0)
+        };
+        let mut out = PopOut::default();
+        let shown = panel.show(ctx, |ui| {
+            self.popout_body(ui, &mut w, &tabs, &mut out);
+        });
+        self.pop.split_w = shown.response.rect.width();
+        if out.back {
+            self.pop_back(&mut w, ctx);
+        } else if !out.close {
+            let at = i.min(self.pop.wins.len());
+            self.pop.wins.insert(at, w);
+        }
+        if out.back || out.close {
+            // the next page moved out, if any, takes its place
+            self.pop.active = None;
+            ctx.request_repaint();
         }
     }
 

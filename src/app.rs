@@ -5825,6 +5825,7 @@ impl App {
             self.top_bar(ctx);
             self.rail(ctx);
             self.popout_guard();
+            self.popout_split(ctx);
             self.content(ctx);
             self.thread_window(ctx);
             self.popout_windows(ctx);

@@ -195,7 +195,12 @@ impl App {
             .x;
         // as wide as the name, but in a narrow window clear of the zoom bar
         // (a long name ran under it)
-        let rest = NAME_REST;
+        // and room for "Open in new window" in the main window
+        let rest = if self.in_popout() {
+            NAME_REST
+        } else {
+            NAME_REST + 2.0 + BTN
+        };
         let room = if zoom_below(rect) {
             rect.width() - 2.0 * EDGE - rest
         } else {
@@ -319,6 +324,25 @@ impl App {
             self.sweep.confirm = None;
         }
         popup(ui, &menu, pop, 230.0, |ui| self.wb_menu(ui, t, wid));
+        if !self.in_popout() {
+            let or = Rect::from_min_size(pos2(mr.right() + 2.0, mr.top()), vec2(BTN, BTN));
+            let out = bar_button(
+                ui,
+                t,
+                or,
+                ui.id().with(("wb_pop_out", wid)),
+                "Open in new window",
+                tr("Open in new window"),
+                false,
+                true,
+                |p, c, fg| {
+                    line_icon(p, Icon::PopOut, c, fg);
+                },
+            );
+            if out.clicked() {
+                self.pop.out = Some(crate::app::popout::Pop::Board(wid));
+            }
+        }
     }
 
     /// The board menu: the view and the two things that take the board away,

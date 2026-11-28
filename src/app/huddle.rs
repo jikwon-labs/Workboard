@@ -13,7 +13,7 @@ use super::*;
 use std::collections::HashMap;
 
 mod panel;
-pub(super) use panel::{panel_frame, Sizes, REACTION_SECS};
+pub(super) use panel::{panel_frame, Sizes, PANEL_BG, REACTION_SECS};
 use wb_voice::{
     screen_key, screen_owner, Audio, Call, Event as VoiceEvent, Join, Person, Picture,
     ScreenTrouble, Share, Source, SourceKind, Video, ME,
@@ -122,6 +122,9 @@ pub struct HuddleRt {
     pub(super) opened_settings: bool,
     /// How wide (physical pixels) each picture was drawn, as last told to the call.
     pub(super) views: HashMap<String, f32>,
+    /// How wide each shared screen was drawn in the screens' own window
+    /// (popout.rs), told to the call with the stage's.
+    pub(super) screen_views: HashMap<String, f32>,
     /// Where the bar goes over the conversation's message box, set by Chat
     /// when it draws one: the pass it was drawn in, and the box's left and
     /// right and the top of its Message / Post / Ask tabs.
@@ -193,6 +196,7 @@ impl Default for HuddleRt {
             },
             opened_settings: false,
             views: HashMap::new(),
+            screen_views: HashMap::new(),
             dock: None,
             hand: false,
             reactions: vec![],
@@ -662,6 +666,38 @@ impl App {
         Some((screens, cameras))
     }
 
+    /// The shared screens the stage shows large: none of the others' while
+    /// they are in a window of their own (popout.rs), only yours.
+    pub(super) fn stage_screens(&self) -> Vec<(String, String)> {
+        let popped = self.popped(super::popout::Pop::Screen);
+        self.huddle_shown_videos()
+            .map(|(screens, _)| screens)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(k, _)| !popped || screen_owner(k) == Some(ME))
+            .collect()
+    }
+
+    /// Someone else in the huddle shares a screen.
+    pub(super) fn huddle_has_others_screen(&self) -> bool {
+        self.huddle_shown_videos()
+            .is_some_and(|(screens, _)| screens.iter().any(|(k, _)| screen_owner(k) != Some(ME)))
+    }
+
+    /// The sizes to tell the call: the stage's, with the screens' window's
+    /// while it is open.
+    pub(super) fn with_screen_views(
+        &self,
+        mut sizes: HashMap<String, f32>,
+    ) -> HashMap<String, f32> {
+        if self.popped(super::popout::Pop::Screen) {
+            for (k, v) in &self.huddle.screen_views {
+                sizes.insert(k.clone(), *v);
+            }
+        }
+        sizes
+    }
+
     /// The words under a shared screen (and its accessibility name).
     pub(super) fn screen_label(id: &str, name: &str) -> String {
         if screen_owner(id) == Some(ME) {
@@ -970,10 +1006,7 @@ impl App {
             ),
         };
         // wider while a screen or a picture shows large
-        let large = self.huddle.focus.is_some()
-            || self
-                .huddle_shown_videos()
-                .is_some_and(|(screens, _)| !screens.is_empty());
+        let large = self.huddle.focus.is_some() || !self.stage_screens().is_empty();
         let margin = 10.0;
         let width = (if large { 960.0 } else { 600.0_f32 }).min(max_w);
         let inner_w = width - 2.0 * margin;
@@ -1021,7 +1054,8 @@ impl App {
                         if stage {
                             self.huddle_stage(ui, inner_w, stage_max, s);
                         } else {
-                            self.tell_view_sizes(HashMap::new());
+                            let sizes = self.with_screen_views(HashMap::new());
+                            self.tell_view_sizes(sizes);
                         }
                         self.huddle_toolbar(ui, inner_w, s, chat, &mut press);
                     });

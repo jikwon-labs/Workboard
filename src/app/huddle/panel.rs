@@ -171,10 +171,7 @@ impl App {
     /// large each picture is drawn.
     pub(in crate::app) fn huddle_stage(&mut self, ui: &mut Ui, width: f32, max_h: f32, s: Sizes) {
         let tiles = self.huddle_tiles();
-        let screens: Vec<(String, String)> = self
-            .huddle_shown_videos()
-            .map(|(screens, _)| screens)
-            .unwrap_or_default();
+        let screens: Vec<(String, String)> = self.stage_screens();
         // a focus on a picture that went away (or no longer has a tile) ends
         if self.huddle.focus.as_ref().is_some_and(|f| {
             !self.huddle.textures.contains_key(f) || !tiles.iter().any(|t| &t.key == f)
@@ -269,6 +266,25 @@ impl App {
                     img.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Image, true, access.clone())
                     });
+                    if !mine {
+                        // the screens in a window of their own, to keep
+                        // them in sight beside the conversation
+                        let br =
+                            Rect::from_min_size(r.right_top() + vec2(-36.0, 6.0), vec2(30.0, 30.0));
+                        let b =
+                            ui.interact(br, ui.id().with(("screen_pop_out", key)), Sense::click());
+                        name_it(&b, "Open screen in new window");
+                        let fill = if b.hovered() {
+                            Color32::from_black_alpha(200)
+                        } else {
+                            Color32::from_black_alpha(140)
+                        };
+                        ui.painter().rect_filled(br, 7.0, fill);
+                        crate::app::shell::line_icon(ui.painter(), Icon::PopOut, br.center(), TEXT);
+                        if b.on_hover_text(tr("Open in new window")).clicked() {
+                            self.pop.out = Some(crate::app::popout::Pop::Screen);
+                        }
+                    }
                     let label = Self::screen_label(key, name);
                     ui.painter().text(
                         pos2(inner.center().x, r.bottom() + 3.0),
@@ -323,7 +339,52 @@ impl App {
         }
         drawn.remove(ME);
         drawn.remove(&screen_key(ME));
+        let drawn = self.with_screen_views(drawn);
         self.tell_view_sizes(drawn);
+    }
+
+    /// The shared screens' window of their own (popout.rs): the others'
+    /// screens as large as the window lets them, each with its sharer's name
+    /// under it.
+    pub(in crate::app) fn screen_window_body(&mut self, ui: &mut Ui) {
+        let screens: Vec<(String, String)> = self
+            .huddle_shown_videos()
+            .map(|(screens, _)| screens)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(k, _)| screen_owner(k) != Some(ME))
+            .collect();
+        let area = ui.available_rect_before_wrap().shrink(10.0);
+        ui.allocate_rect(area, Sense::hover());
+        let ppp = ui.ctx().pixels_per_point();
+        let label_h = 20.0;
+        let gap = 8.0;
+        let n = screens.len().max(1) as f32;
+        let each_h = ((area.height() - gap * (n - 1.0)) / n - label_h).max(40.0);
+        let mut y = area.top();
+        let mut drawn: HashMap<String, f32> = HashMap::new();
+        for (key, name) in &screens {
+            let Some(tex) = self.huddle.textures.get(key) else {
+                continue;
+            };
+            let size = tex.size_vec2();
+            let aspect = size.y / size.x.max(1.0);
+            let w = area.width().min(each_h / aspect.max(0.01));
+            let r = Rect::from_min_size(pos2(area.center().x - w / 2.0, y), vec2(w, w * aspect));
+            let img = ui.put(r, egui::Image::new((tex.id(), r.size())).corner_radius(8));
+            let access = format!("Screen of {}", name);
+            img.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, &access));
+            ui.painter().text(
+                pos2(area.center().x, r.bottom() + 3.0),
+                Align2::CENTER_TOP,
+                Self::screen_label(key, name),
+                FontId::proportional(12.0),
+                TEXT,
+            );
+            drawn.insert(key.clone(), w * ppp);
+            y = r.bottom() + label_h + gap;
+        }
+        self.huddle.screen_views = drawn;
     }
 
     /// How tall the stage is: room around the tiles, or as much as there is

@@ -58,159 +58,8 @@ impl App {
             )
             .show(ctx, |ui| {
                 ui.set_min_size(size);
-                // header
-                if self.task_header(ui, t, tid, &mut task, win_id, level) {
+                if self.task_card(ui, ctx, t, tid, &mut task, win_id, now, &statuses, level) {
                     close = true;
-                }
-                let r = ui.available_rect_before_wrap();
-                ui.painter()
-                    .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
-                let mut body = ui.available_rect_before_wrap();
-                // too narrow for the comments beside the details: one at a
-                // time, picked with two tabs above them
-                let tabs = body.width() < 760.0;
-                let pane_id = win_id.with("comments_tab");
-                let mut comments_tab = tabs && ui.data(|d| d.get_temp(pane_id)).unwrap_or(false);
-                if tabs {
-                    let row = Rect::from_min_size(body.min, vec2(body.width(), 40.0));
-                    let mut row_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(row.shrink2(vec2(18.0, 6.0)))
-                            .layout(Layout::left_to_right(Align::Center)),
-                    );
-                    for (on, label) in [(false, "Details"), (true, "Comments")] {
-                        let r = row_ui.selectable_label(comments_tab == on, tr(label));
-                        name_it(&r, &format!("Task tab {}", label));
-                        if r.clicked() {
-                            comments_tab = on;
-                        }
-                    }
-                    ui.data_mut(|d| d.insert_temp(pane_id, comments_tab));
-                    ui.painter()
-                        .hline(row.x_range(), row.bottom(), Stroke::new(1.0_f32, t.border));
-                    body.min.y = row.bottom();
-                }
-                let right_w = if tabs { body.width() } else { 380.0 };
-                let (left, right) = if !tabs {
-                    (
-                        Rect::from_min_max(body.min, pos2(body.right() - right_w, body.bottom())),
-                        Rect::from_min_max(pos2(body.right() - right_w, body.top()), body.max),
-                    )
-                } else if comments_tab {
-                    (Rect::NOTHING, body)
-                } else {
-                    (body, Rect::NOTHING)
-                };
-                if right.is_positive() {
-                    ui.painter().rect_filled(
-                        right,
-                        egui::CornerRadius {
-                            nw: 0,
-                            ne: 0,
-                            sw: 0,
-                            se: 12,
-                        },
-                        t.column_bg,
-                    );
-                    if !tabs {
-                        ui.painter().vline(
-                            right.left(),
-                            right.y_range(),
-                            Stroke::new(1.0_f32, t.border),
-                        );
-                    }
-                }
-                // ---- left
-                if left.is_positive() {
-                    let mut left_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(left.shrink2(vec2(28.0, 14.0)))
-                            .layout(Layout::top_down(Align::Min)),
-                    );
-                    egui::ScrollArea::vertical()
-                        .id_salt("detail_left")
-                        .auto_shrink([false, false])
-                        .show(&mut left_ui, |ui| {
-                            // shared with me to view or comment: the fields read only
-                            if level < crate::sync::Level::Edit {
-                                ui.disable();
-                            }
-                            // task type label above the title, as in the original
-                            taskfields::task_type_pill(ui, &t, win_id, &mut task.milestone);
-                            ui.add_space(6.0);
-                            // a long name wraps onto more lines instead of
-                            // being cut at the right; Enter still finishes it
-                            // as it did when the title was one line
-                            let title = ui.add(
-                                egui::TextEdit::multiline(&mut task.name)
-                                    .font(FontId::proportional(
-                                        if self.tier == super::shell::Tier::Compact {
-                                            22.0
-                                        } else {
-                                            30.0
-                                        },
-                                    ))
-                                    .frame(false)
-                                    .desired_rows(1)
-                                    .return_key(None)
-                                    .desired_width(f32::INFINITY),
-                            );
-                            if title.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                title.surrender_focus();
-                            }
-                            ui.add_space(10.0);
-                            self.task_fields(ui, ctx, t, tid, &mut task, win_id, now, &statuses);
-                            ui.add_space(14.0);
-                            let r = ui.available_rect_before_wrap();
-                            ui.painter().hline(
-                                r.x_range(),
-                                r.top(),
-                                Stroke::new(1.0_f32, t.border),
-                            );
-                            ui.add_space(10.0);
-                            if self.ai_offered() {
-                                // the AI's writing tools for the description
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(tr("Description")).strong());
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        let b = icon_button_ex(
-                                            ui,
-                                            &t,
-                                            Icon::Sparkle,
-                                            tr("Write with AI"),
-                                            "Description AI",
-                                            false,
-                                            0.0,
-                                            t.text2,
-                                            super::ai::AI_VIOLET,
-                                        );
-                                        let now_says = task.clone();
-                                        popup(
-                                            ui,
-                                            &b,
-                                            ui.id().with(("desc_ai", tid)),
-                                            240.0,
-                                            |ui| {
-                                                self.description_ai_menu(ui, &now_says);
-                                            },
-                                        );
-                                    });
-                                });
-                            }
-                            self.description_field(ui, &t, &mut task);
-                            ui.add_space(16.0);
-                            self.task_subtasks(ui, t, tid, &mut task, win_id, &statuses);
-                            ui.add_space(16.0);
-                            self.relationships_section(ui, &t, win_id, tid);
-                            ui.add_space(16.0);
-                            self.task_checklist(ui, t, tid, &mut task, win_id);
-                            ui.add_space(16.0);
-                            self.attachments_section(ui, &t, &mut task);
-                            ui.add_space(30.0);
-                        });
-                }
-                if right.is_positive() {
-                    self.task_activity(ui, t, tid, &mut task, win_id, level, right);
                 }
             });
         // a dialog opened from the window (picker, Move to) must stay above
@@ -237,6 +86,196 @@ impl App {
         if close {
             self.open_task = None;
         }
+    }
+
+    /// The task in a window of its own (popout.rs): its card filling the
+    /// window. True: closed.
+    pub(super) fn task_popout_body(&mut self, ui: &mut Ui, tid: u64) -> bool {
+        self.swap_comment_draft(tid);
+        if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == tid) {
+            fix_task_activity_ids(t);
+        }
+        let Some(orig) = self.task(tid).cloned() else {
+            return true;
+        };
+        let t = self.t();
+        let win_id = egui::Id::new(("task_popout", tid));
+        let mut task = orig.clone();
+        let now = now_ts();
+        let statuses = self.data.statuses_for_list(task.list_id);
+        let level = self.list_level(task.list_id);
+        let ctx = ui.ctx().clone();
+        let close = self.task_card(ui, &ctx, t, tid, &mut task, win_id, now, &statuses, level);
+        if task_changed(&orig, &task) {
+            self.actions.push(Action::Replace(task));
+        }
+        close
+    }
+
+    /// The task's card: its header, then the fields and the description on
+    /// the left and comments and activity on the right (one at a time under
+    /// two tabs when narrow). In the dialog the task opens in, or in a
+    /// window of its own (popout.rs). True: closed.
+    #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
+    fn task_card(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        t: Theme,
+        tid: u64,
+        task: &mut Task,
+        win_id: egui::Id,
+        now: i64,
+        statuses: &Vec<Status>,
+        level: crate::sync::Level,
+    ) -> bool {
+        let mut close = false;
+        // header
+        if self.task_header(ui, t, tid, task, win_id, level) {
+            close = true;
+        }
+        let r = ui.available_rect_before_wrap();
+        ui.painter()
+            .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
+        let mut body = ui.available_rect_before_wrap();
+        // too narrow for the comments beside the details: one at a
+        // time, picked with two tabs above them
+        let tabs = body.width() < 760.0;
+        let pane_id = win_id.with("comments_tab");
+        let mut comments_tab = tabs && ui.data(|d| d.get_temp(pane_id)).unwrap_or(false);
+        if tabs {
+            let row = Rect::from_min_size(body.min, vec2(body.width(), 40.0));
+            let mut row_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(row.shrink2(vec2(18.0, 6.0)))
+                    .layout(Layout::left_to_right(Align::Center)),
+            );
+            for (on, label) in [(false, "Details"), (true, "Comments")] {
+                let r = row_ui.selectable_label(comments_tab == on, tr(label));
+                name_it(&r, &format!("Task tab {}", label));
+                if r.clicked() {
+                    comments_tab = on;
+                }
+            }
+            ui.data_mut(|d| d.insert_temp(pane_id, comments_tab));
+            ui.painter()
+                .hline(row.x_range(), row.bottom(), Stroke::new(1.0_f32, t.border));
+            body.min.y = row.bottom();
+        }
+        let right_w = if tabs { body.width() } else { 380.0 };
+        let (left, right) = if !tabs {
+            (
+                Rect::from_min_max(body.min, pos2(body.right() - right_w, body.bottom())),
+                Rect::from_min_max(pos2(body.right() - right_w, body.top()), body.max),
+            )
+        } else if comments_tab {
+            (Rect::NOTHING, body)
+        } else {
+            (body, Rect::NOTHING)
+        };
+        if right.is_positive() {
+            ui.painter().rect_filled(
+                right,
+                egui::CornerRadius {
+                    nw: 0,
+                    ne: 0,
+                    sw: 0,
+                    se: 12,
+                },
+                t.column_bg,
+            );
+            if !tabs {
+                ui.painter().vline(
+                    right.left(),
+                    right.y_range(),
+                    Stroke::new(1.0_f32, t.border),
+                );
+            }
+        }
+        // ---- left
+        if left.is_positive() {
+            let mut left_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(left.shrink2(vec2(28.0, 14.0)))
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            egui::ScrollArea::vertical()
+                .id_salt("detail_left")
+                .auto_shrink([false, false])
+                .show(&mut left_ui, |ui| {
+                    // shared with me to view or comment: the fields read only
+                    if level < crate::sync::Level::Edit {
+                        ui.disable();
+                    }
+                    // task type label above the title, as in the original
+                    taskfields::task_type_pill(ui, &t, win_id, &mut task.milestone);
+                    ui.add_space(6.0);
+                    // a long name wraps onto more lines instead of
+                    // being cut at the right; Enter still finishes it
+                    // as it did when the title was one line
+                    let title = ui.add(
+                        egui::TextEdit::multiline(&mut task.name)
+                            .font(FontId::proportional(
+                                if self.tier == super::shell::Tier::Compact {
+                                    22.0
+                                } else {
+                                    30.0
+                                },
+                            ))
+                            .frame(false)
+                            .desired_rows(1)
+                            .return_key(None)
+                            .desired_width(f32::INFINITY),
+                    );
+                    if title.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        title.surrender_focus();
+                    }
+                    ui.add_space(10.0);
+                    self.task_fields(ui, ctx, t, tid, task, win_id, now, statuses);
+                    ui.add_space(14.0);
+                    let r = ui.available_rect_before_wrap();
+                    ui.painter()
+                        .hline(r.x_range(), r.top(), Stroke::new(1.0_f32, t.border));
+                    ui.add_space(10.0);
+                    if self.ai_offered() {
+                        // the AI's writing tools for the description
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(tr("Description")).strong());
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let b = icon_button_ex(
+                                    ui,
+                                    &t,
+                                    Icon::Sparkle,
+                                    tr("Write with AI"),
+                                    "Description AI",
+                                    false,
+                                    0.0,
+                                    t.text2,
+                                    super::ai::AI_VIOLET,
+                                );
+                                let now_says = task.clone();
+                                popup(ui, &b, ui.id().with(("desc_ai", tid)), 240.0, |ui| {
+                                    self.description_ai_menu(ui, &now_says);
+                                });
+                            });
+                        });
+                    }
+                    self.description_field(ui, &t, task);
+                    ui.add_space(16.0);
+                    self.task_subtasks(ui, t, tid, task, win_id, statuses);
+                    ui.add_space(16.0);
+                    self.relationships_section(ui, &t, win_id, tid);
+                    ui.add_space(16.0);
+                    self.task_checklist(ui, t, tid, task, win_id);
+                    ui.add_space(16.0);
+                    self.attachments_section(ui, &t, task);
+                    ui.add_space(30.0);
+                });
+        }
+        if right.is_positive() {
+            self.task_activity(ui, t, tid, task, win_id, level, right);
+        }
+        close
     }
 
     /// The title row: breadcrumb, previous/next, share, menu and close.
@@ -273,6 +312,7 @@ impl App {
                     {
                         close = true;
                     }
+                    self.pop_out_button(ui, super::popout::Pop::Task(tid));
                     // the menu has "Copy ID", so no separate ID button here
                     let r = icons::icon_button(ui, &t, Icon::Dots, "", "Task actions", false)
                         .on_hover_text(tr("More"));
@@ -394,7 +434,12 @@ impl App {
                         .clicked()
                     {
                         if let Some(p) = prev {
-                            self.actions.push(Action::Open(p));
+                            if self.in_popout() {
+                                // a window of its own goes on to it
+                                self.open_task = Some(p);
+                            } else {
+                                self.actions.push(Action::Open(p));
+                            }
                         }
                     }
                     if ui
@@ -408,7 +453,12 @@ impl App {
                         .clicked()
                     {
                         if let Some(n) = next {
-                            self.actions.push(Action::Open(n));
+                            if self.in_popout() {
+                                // a window of its own goes on to it
+                                self.open_task = Some(n);
+                            } else {
+                                self.actions.push(Action::Open(n));
+                            }
                         }
                     }
                     // the path and the parent task share what the buttons

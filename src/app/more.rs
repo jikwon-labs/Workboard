@@ -38,7 +38,7 @@ pub(crate) use wb_shapes::line_path;
 pub use wb_shapes::{WbLineStyle, WbLink, WbSel};
 #[cfg(test)]
 pub use whiteboard::WbUndo;
-pub use whiteboard::{WbNew, WbTool, WbView, WhiteboardUi};
+pub use whiteboard::{WbMoment, WbNew, WbTool, WbView, WhiteboardUi};
 // for tests that place the pointer on the board
 #[cfg(test)]
 pub(crate) use whiteboard::note_fill;
@@ -438,7 +438,7 @@ impl App {
 
     /// The meeting open (or a hint to pick one); `one_column` leads with a
     /// way back to the list, which isn't beside it.
-    fn meeting_body(&mut self, ui: &mut Ui, one_column: bool) {
+    pub(super) fn meeting_body(&mut self, ui: &mut Ui, one_column: bool) {
         let t = self.t();
         let margin = if one_column {
             egui::Margin::symmetric(16, 12)
@@ -453,18 +453,25 @@ impl App {
                 ui.vertical_centered(|ui| ui.label(RichText::new(tr("Pick a meeting or create one to keep the agenda and notes together.")).color(t.text2)));
                 return;
             };
-            if one_column {
+            if one_column || !self.in_popout() {
                 // back to the list, laid out as a form's header (the arrow,
-                // then the hub's name)
+                // then the hub's name), and at the right the button that
+                // moves the meeting to a window of its own
                 let mut back = false;
+                let mid = self.data.extra.meetings[idx].id;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    back |= icon_button(ui, &t, Icon::ChevronLeft, "", "Back to all meetings", false)
-                        .on_hover_text(tr("All meetings"))
-                        .clicked();
-                    let crumb = ui.add(ghost(egui::Button::new(RichText::new(tr("Meetings")).size(13.0).color(t.text2))));
-                    name_it(&crumb, "Meetings crumb");
-                    back |= crumb.clicked();
+                    if one_column {
+                        back |= icon_button(ui, &t, Icon::ChevronLeft, "", "Back to all meetings", false)
+                            .on_hover_text(tr("All meetings"))
+                            .clicked();
+                        let crumb = ui.add(ghost(egui::Button::new(RichText::new(tr("Meetings")).size(13.0).color(t.text2))));
+                        name_it(&crumb, "Meetings crumb");
+                        back |= crumb.clicked();
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        self.pop_out_button(ui, super::popout::Pop::Meeting(mid));
+                    });
                 });
                 if back {
                     self.meeting_open = None;

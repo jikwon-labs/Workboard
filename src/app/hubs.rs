@@ -909,7 +909,7 @@ impl App {
             });
     }
 
-    fn doc_editor(&mut self, ui: &mut Ui) {
+    pub(super) fn doc_editor(&mut self, ui: &mut Ui) {
         let t = self.t();
         let Some(idx) = self
             .doc_open
@@ -934,7 +934,9 @@ impl App {
                 // and Delete and Archive are in the ⋯ menu
                 let compact = self.tier == super::shell::Tier::Compact;
                 ui.horizontal(|ui| {
+                    // in its own window: no list of docs to go back to
                     if !compact
+                        && !self.in_popout()
                         && ui
                             .add(ghost(egui::Button::new(
                                 RichText::new(tr("\u{2190}  All Docs")).color(t.text2),
@@ -989,6 +991,7 @@ impl App {
                         let mr = icon_button(ui, &t, Icon::Dots, "", "Doc options", false)
                             .on_hover_text(tr("More"));
                         click_menu(&mr, |ui| self.doc_menu(ui, id, false));
+                        self.pop_out_button(ui, super::popout::Pop::Doc(id));
                         if !compact
                             && ui
                                 .add(ghost(egui::Button::new(

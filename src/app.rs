@@ -48,6 +48,7 @@ mod pages;
 mod parity;
 mod photo;
 mod polls;
+mod popout;
 mod profile;
 mod push;
 mod schedule;
@@ -649,6 +650,8 @@ pub struct App {
     voice: voice::VoiceRt,
     /// The small window that stays above other apps (mini.rs).
     mini: mini::MiniUi,
+    /// Pages moved out to windows of their own (popout.rs).
+    pop: popout::PopUi,
     notify_rt: notify::NotifyRt,
     /// watchers on the other team workspaces (watch.rs)
     watch_rt: watch::WatchRt,
@@ -1310,6 +1313,7 @@ impl App {
             photo: Default::default(),
             voice: Default::default(),
             mini: Default::default(),
+            pop: Default::default(),
             notify_rt: Default::default(),
             watch_rt: Default::default(),
             push_rt: Default::default(),
@@ -5820,8 +5824,10 @@ impl App {
             self.single_key_shortcuts(ctx);
             self.top_bar(ctx);
             self.rail(ctx);
+            self.popout_guard();
             self.content(ctx);
             self.thread_window(ctx);
+            self.popout_windows(ctx);
             self.task_window(ctx);
             self.dialogs(ctx);
             self.modals(ctx);

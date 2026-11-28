@@ -1,6 +1,11 @@
 // Korean text for src/app.rs, src/widgets.rs and src/startup.rs (see src/i18n.rs).
 
 pub const T: &[(&str, &str)] = &[
+    // a page in a window of its own (src/app/popout.rs)
+    ("Back to main window", "메인 창으로 되돌리기"),
+    ("Show it in the main window again", "메인 창에 다시 보여 줍니다"),
+    ("Meeting", "회의"),
+    ("Shared screen", "공유 화면"),
     // view, group and sort names (ViewKind / GroupBy / SortBy labels)
     ("Overview", "개요"),
     ("Manual", "수동"),

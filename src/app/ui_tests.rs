@@ -37,6 +37,7 @@ mod notify_settings;
 mod overlays;
 mod people;
 mod polls;
+mod popout;
 mod posts;
 mod profile;
 mod quit;

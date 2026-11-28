@@ -160,6 +160,36 @@ impl Default for WhiteboardUi {
     }
 }
 
+/// What a board's page holds only while it is on screen: the board open,
+/// the stroke or drag under way, the pick and the bars' places. Each window
+/// that shows a board (popout.rs) keeps its own, so a pick or a drag in one
+/// stays there; the tool, its colours, Undo and each board's view are shared.
+#[derive(Default)]
+pub struct WbMoment {
+    pub open: Option<u64>,
+    drawing: Option<(u64, u64)>,
+    note_drag: Option<(u64, u64, [f32; 2])>,
+    new: Option<WbNew>,
+    sel: Option<(u64, WbSel)>,
+    edit: Option<(u64, u64, bool)>,
+    link: Option<WbLink>,
+    bars: Vec<egui::Rect>,
+}
+
+impl WhiteboardUi {
+    /// Trades this page's moment for `m` (and back again with a second call).
+    pub fn swap_moment(&mut self, m: &mut WbMoment) {
+        std::mem::swap(&mut self.open, &mut m.open);
+        std::mem::swap(&mut self.drawing, &mut m.drawing);
+        std::mem::swap(&mut self.note_drag, &mut m.note_drag);
+        std::mem::swap(&mut self.new, &mut m.new);
+        std::mem::swap(&mut self.sel, &mut m.sel);
+        std::mem::swap(&mut self.edit, &mut m.edit);
+        std::mem::swap(&mut self.link, &mut m.link);
+        std::mem::swap(&mut self.bars, &mut m.bars);
+    }
+}
+
 /// The Undo steps kept for each whiteboard.
 pub const WB_UNDO_MAX: usize = 200;
 

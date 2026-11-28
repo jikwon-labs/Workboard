@@ -34,7 +34,7 @@ impl App {
     pub(super) fn doc_versions_tick(&mut self, ctx: Option<&egui::Context>) {
         let now = now_ts();
         let open = self
-            .doc_open
+            .doc_being_edited()
             .filter(|d| self.data.docs.iter().any(|x| x.id == *d))
             .filter(|d| self.doc_level(*d) >= crate::sync::Level::Edit);
         if let Some(s) = self.doc_session.take() {

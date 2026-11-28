@@ -696,6 +696,34 @@ fn slash_list(ui: &mut Ui, t: &Theme, choices: &[(String, String)]) -> Option<St
     out
 }
 
+/// The docs offered while a "[[" is typed in a message box (`docs`: none
+/// when no "[[" is being typed), listed under the box as the "/" commands
+/// are. Returns the one clicked.
+fn doc_list(ui: &mut Ui, t: &Theme, docs: Option<&[(u64, String)]>) -> Option<u64> {
+    let docs = docs?;
+    egui::Frame::new()
+        .fill(t.card)
+        .stroke(Stroke::new(1.0_f32, t.border))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(6, 4))
+        .show(ui, |ui| {
+            ui.set_max_width(320.0);
+            super::comments::doc_rows(ui, t, docs)
+        })
+        .inner
+}
+
+/// `text` with the "[[" being typed at its end (and the title typed after
+/// it) replaced by the link of doc `id`.
+fn put_doc_link(text: &mut String, id: u64) {
+    if let Some(w) = super::nav::doc_word(text) {
+        let keep = text.len() - w.len() - 2;
+        text.truncate(keep);
+    }
+    text.push_str(&super::nav::doc_link(id));
+    text.push(' ');
+}
+
 /// The text cursor of box `id` after the last character of `text`.
 fn move_cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
     let n = text.chars().count();
@@ -3451,6 +3479,13 @@ impl App {
                     self.chat.channel.text = format!("/{} ", pick);
                     move_cursor_to_end(ui.ctx(), text_id, &self.chat.channel.text);
                 }
+                // "[[" lists the docs; the one picked goes in as its link
+                let docs =
+                    super::nav::doc_word(&self.chat.channel.text).map(|q| self.doc_choices(q, 8));
+                if let Some(id) = doc_list(ui, &t, docs.as_deref()) {
+                    put_doc_link(&mut self.chat.channel.text, id);
+                    move_cursor_to_end(ui.ctx(), text_id, &self.chat.channel.text);
+                }
                 // typing "@" at the start of a word offers the people to mention
                 let mention_popup = egui::Id::new("chat_mention_popup");
                 if r.changed() && self.chat.channel.text.ends_with('@') {
@@ -3788,6 +3823,10 @@ impl App {
                 let mut lay = |ui: &Ui, s: &str, w: f32| mention_layout(ui, s, w, &names, &t);
                 let mut picked: Option<u64> = None;
                 let mut insert: Option<String> = None;
+                // the docs a "[[" being typed offers (worked out before the
+                // box takes the text: one typed now shows on the next pass)
+                let docs = super::nav::doc_word(&self.chat.composer(thread).text)
+                    .map(|q| self.doc_choices(q, 8));
                 let text = &mut self.chat.composer_mut(thread).text;
                 let enter = take_enter(ui, id);
                 format_keys(ui, id, text);
@@ -3831,6 +3870,13 @@ impl App {
                 };
                 if let Some(pick) = slash_list(ui, &t, &choices) {
                     *text = format!("/{} ", pick);
+                    move_cursor_to_end(ui.ctx(), id, text);
+                }
+                if r.changed() && super::nav::doc_word(text).is_some() {
+                    ui.ctx().request_repaint();
+                }
+                if let Some(pick) = doc_list(ui, &t, docs.as_deref()) {
+                    put_doc_link(text, pick);
                     move_cursor_to_end(ui.ctx(), id, text);
                 }
                 typed = r.changed() && !text.trim().is_empty();

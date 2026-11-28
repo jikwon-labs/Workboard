@@ -40,6 +40,10 @@ pub(super) struct ShownText {
     pub links: Vec<(usize, usize, String)>,
     pub cuts: Vec<usize>,
     pub cut_chars: HashMap<usize, usize>,
+    /// When workboard:// links in it show the names of what they point to:
+    /// the workspace's change counts (`data_gen`, `docs_gen`) those names
+    /// were read at, so a rename shows once it happens.
+    pub named_at: Option<(u64, u64)>,
 }
 
 /// Texts kept at most; past this they're all worked out again.
@@ -274,6 +278,11 @@ impl App {
         names
     }
 
+    /// The workspace's change counts the names links show depend on.
+    fn names_gen(&self) -> (u64, u64) {
+        (self.data_gen.get(), self.docs_gen.get())
+    }
+
     /// A message's text as shown (see `message_text`), worked out once for
     /// the names an @ can stand for.
     pub(super) fn shown_text(&self, src: &str) -> Rc<ShownText> {
@@ -284,17 +293,28 @@ impl App {
                 *kept = (names.clone(), HashMap::new());
             }
             if let Some(s) = kept.1.get(src) {
-                return s.clone();
+                if s.named_at.is_none_or(|g| g == self.names_gen()) {
+                    return s.clone();
+                }
             }
         }
-        let r = super::chatfmt::rich(src);
-        let mentions = chat::mention_spans(&r.text, &names);
+        let mut r = super::chatfmt::rich(src);
         let mut links = r.links.clone();
+        // a workboard:// link typed as is shows the name of what it points to
+        let mut named = vec![];
         for l in super::nav::find_links(&r.text) {
             if !links.iter().any(|x| x.0 < l.1 && l.0 < x.1) {
+                if let Some(name) = super::nav::parse_link(&l.2).and_then(|k| self.link_title(k)) {
+                    named.push((l.0, l.1, name));
+                }
                 links.push(l);
             }
         }
+        links.sort_by_key(|l| l.0);
+        named.sort_by_key(|l| l.0);
+        let named_at = (!named.is_empty()).then(|| self.names_gen());
+        swap_text(&mut r, &mut links, &named);
+        let mentions = chat::mention_spans(&r.text, &names);
         let mut cuts: Vec<usize> = vec![0, r.text.len()];
         for (a, b, _) in &r.runs {
             cuts.extend([*a, *b]);
@@ -317,6 +337,7 @@ impl App {
             links,
             cuts,
             cut_chars,
+            named_at,
         });
         self.kept
             .texts
@@ -370,5 +391,43 @@ impl App {
             *self.kept.search.borrow_mut() = Some((k, q.to_string(), kind, rows.clone(), arch));
         }
         (rows, arch)
+    }
+}
+
+/// Puts the words of `swap` (character ranges of `r`'s text, in order, not
+/// overlapping) in place of what those ranges hold, moving `r`'s runs (byte
+/// ranges) and its links and `links` (character ranges) to match.
+pub(super) fn swap_text(
+    r: &mut super::chatfmt::Rich,
+    links: &mut [(usize, usize, String)],
+    swap: &[(usize, usize, String)],
+) {
+    // the last first, so the places before it stay where they are
+    for (cs, ce, new) in swap.iter().rev() {
+        let byte = |c: usize| r.text.char_indices().nth(c).map_or(r.text.len(), |x| x.0);
+        let (bs, be) = (byte(*cs), byte(*ce));
+        let (nb, nc) = (new.len(), new.chars().count());
+        r.text.replace_range(bs..be, new);
+        // a place before the swapped words stays, one after moves by the
+        // change in length, one inside goes to the near end of the new words
+        let at = |p: usize, a: usize, b: usize, n: usize, end: bool| {
+            if p <= a {
+                p
+            } else if p >= b {
+                p - (b - a) + n
+            } else if end {
+                a + n
+            } else {
+                a
+            }
+        };
+        for run in r.runs.iter_mut() {
+            run.0 = at(run.0, bs, be, nb, false);
+            run.1 = at(run.1, bs, be, nb, true);
+        }
+        for l in r.links.iter_mut().chain(links.iter_mut()) {
+            l.0 = at(l.0, *cs, *ce, nc, false);
+            l.1 = at(l.1, *cs, *ce, nc, true);
+        }
     }
 }

@@ -4825,3 +4825,114 @@ fn the_newest_announcement_shows_over_the_channel_and_all_of_them_on_their_own()
         .iter()
         .any(|(r, _)| banner.contains(r.center())));
 }
+
+/// A doc link in a message shows the doc's title and opens the doc; "[["
+/// in the message box lists the docs and puts the picked one's link in.
+#[test]
+fn doc_links_in_messages_show_the_title_and_can_be_picked() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let doc = h
+        .app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.title == "Project brief")
+        .unwrap()
+        .id;
+    let link = format!("workboard://doc/{}", doc);
+    h.click("Message composer");
+    h.type_text("see [[brief");
+    h.settle();
+    // the list under the box (the sidebar can have the doc too: the row is
+    // the lowest one)
+    let rows: Vec<Pos2> = h
+        .tree
+        .iter()
+        .filter(|(n, _)| n == "Project brief")
+        .map(|(_, r)| r.center())
+        .collect();
+    assert!(!rows.is_empty(), "the doc list shows");
+    h.click_lowest("Project brief");
+    assert_eq!(h.app.chat.channel.text, format!("see {} ", link));
+    h.key(egui::Key::Enter);
+    let cid = h.app.chat.open.unwrap();
+    assert!(general_msg(&h, cid, &format!("see {}", link)).is_some());
+    h.settle();
+    assert!(shown(&h, "see Project brief"), "shown by its title");
+    assert!(!shown(&h, &format!("see {}", link)));
+    // a message that is only the link: its title opens the doc
+    let me = h.app.data.me;
+    let m = crate::app::slack::new_message(h.app.data.new_id(), me, link.clone(), now_ts() + 5);
+    h.app
+        .data
+        .channels
+        .iter_mut()
+        .find(|c| c.id == cid)
+        .unwrap()
+        .messages
+        .push(m);
+    h.app.data_changed();
+    h.settle();
+    let at = h
+        .painted_text("Project brief")
+        .into_iter()
+        .map(|(r, _)| r)
+        .max_by(|a, b| a.center().y.total_cmp(&b.center().y))
+        .expect("the message shows the title");
+    h.click_at(at.center());
+    h.settle();
+    assert_eq!(h.app.section, Section::Docs);
+    assert_eq!(h.app.doc_open, Some(doc));
+}
+
+/// A renamed doc shows its new title in a message that links to it.
+#[test]
+fn a_renamed_doc_shows_its_new_title_in_messages() {
+    let mut h = Ui1::new();
+    h.click("general");
+    let cid = h.app.chat.open.unwrap();
+    let doc = h
+        .app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.title == "Project brief")
+        .unwrap()
+        .id;
+    h.send_message(&format!("read workboard://doc/{} first", doc));
+    assert!(general_msg(&h, cid, "read workboard://doc/").is_some());
+    h.settle();
+    assert!(shown(&h, "read Project brief first"));
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == doc)
+        .unwrap()
+        .title = "Launch plan".into();
+    h.app.data_changed();
+    h.settle();
+    assert!(shown(&h, "read Launch plan first"));
+}
+
+/// "[[" in a thread's reply box lists the docs too.
+#[test]
+fn two_brackets_in_a_reply_list_the_docs() {
+    let mut h = Ui1::new();
+    h.click("general");
+    h.click("1 reply");
+    let doc = h
+        .app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.title == "Project brief")
+        .unwrap()
+        .id;
+    h.click("Reply composer");
+    h.type_text("[[proj");
+    h.settle();
+    h.click_lowest("Project brief");
+    assert_eq!(h.app.chat.thread.text, format!("workboard://doc/{} ", doc));
+}

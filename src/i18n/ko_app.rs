@@ -108,6 +108,8 @@ pub const T: &[(&str, &str)] = &[
     ("Write a comment", "댓글 쓰기"),
     ("Keep notes and updates on this task here.", "이 작업의 메모와 진행 상황을 여기에 남기세요."),
     ("Add a checklist item", "체크리스트 항목 추가"),
+    ("Link a doc", "문서 연결"),
+    ("No docs by that name", "그 이름의 문서가 없습니다"),
     // dialogs
     ("Space \"{}\"", "스페이스 \"{}\""),
     ("Folder \"{}\"", "폴더 \"{}\""),

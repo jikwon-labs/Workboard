@@ -238,3 +238,34 @@ fn a_copy_from_before_comment_ids_merges_without_doubles() {
     assert_eq!(texts, vec!["old", "from the old app"]);
     assert!(t.activity.iter().all(|a| a.id != 0));
 }
+
+#[test]
+fn doc_word_reads_the_title_being_typed_after_two_brackets() {
+    use crate::app::nav::doc_word;
+    assert_eq!(doc_word("see [["), Some(""));
+    assert_eq!(doc_word("see [[Proj"), Some("Proj"));
+    assert_eq!(doc_word("see [[Project brief"), Some("Project brief"));
+    assert_eq!(doc_word("see [[Plan]] done"), None);
+    assert_eq!(doc_word("[[a\nb"), None);
+    assert_eq!(doc_word("see [x](y)"), None);
+}
+
+#[test]
+fn a_link_swapped_for_its_name_moves_what_comes_after() {
+    use crate::app::chatfmt::rich;
+    use crate::app::kept::swap_text;
+    let mut r = rich("**hi** é workboard://doc/2 and **bye**");
+    let mut links = crate::app::nav::find_links(&r.text);
+    let (a, b, _) = links[0].clone();
+    swap_text(&mut r, &mut links, &[(a, b, "Plan".into())]);
+    assert_eq!(r.text, "hi é Plan and bye");
+    assert_eq!(links[0].0, a);
+    assert_eq!(links[0].1, a + 4);
+    let shown: Vec<&str> = r.runs.iter().map(|(x, y, _)| &r.text[*x..*y]).collect();
+    assert_eq!(shown.first(), Some(&"hi"));
+    assert_eq!(shown.last(), Some(&"bye"));
+    assert!(r
+        .runs
+        .iter()
+        .any(|(x, _, l)| l.bold && &r.text[*x..] == "bye"));
+}

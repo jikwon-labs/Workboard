@@ -1347,7 +1347,15 @@ impl App {
         if cr.changed() && typed_at.as_deref() == Some("") {
             right_ui.data_mut(|d| d.insert_temp(mention_id, true));
         }
+        // typing "[[" (or part of a title after it) brings up the docs
+        let doc_open_id = win_id.with("doc_link_open");
+        let typed_doc = super::nav::doc_word(&self.comment.text).map(str::to_string);
+        if cr.changed() && typed_doc.as_deref() == Some("") {
+            right_ui.data_mut(|d| d.insert_temp(doc_open_id, true));
+        }
         let mut insert: Option<String> = None;
+        // a doc picked from the list: its link replaces the "[[" typed
+        let mut doc_pick: Option<u64> = None;
         right_ui.horizontal(|ui| {
             let at = ui.add(ghost(egui::Button::new("@").min_size(vec2(24.0, 24.0))));
             name_it(&at, "Mention someone");
@@ -1406,6 +1414,31 @@ impl App {
                 };
                 insert = Some(format!("{}\u{2610} ", lead));
             }
+            // link a doc: the same as typing "[["
+            let dl = icons::icon_button(ui, &t, Icon::Docs, "", "Link a doc", false)
+                .on_hover_text(tr("Link a doc"));
+            if dl.clicked() && typed_doc.is_none() {
+                let lead = if self.comment.text.is_empty()
+                    || self.comment.text.ends_with(char::is_whitespace)
+                {
+                    ""
+                } else {
+                    " "
+                };
+                insert = Some(format!("{}[[", lead));
+            }
+            let force: bool = ui.data(|d| d.get_temp(doc_open_id)).unwrap_or(false);
+            if force && !ui.input(|i| i.pointer.any_click() || i.pointer.any_released()) {
+                ui.memory_mut(|m| m.open_popup(win_id.with("doc_link_popup")));
+                ui.data_mut(|d| d.remove::<bool>(doc_open_id));
+            }
+            let docs = self.doc_choices(typed_doc.as_deref().unwrap_or(""), 8);
+            popup(ui, &dl, win_id.with("doc_link_popup"), 260.0, |ui| {
+                if let Some(id) = super::comments::doc_rows(ui, &t, &docs) {
+                    doc_pick = Some(id);
+                    close_popup(ui);
+                }
+            });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let label = if post { "Post" } else { "Comment" };
                 let send = primary_button(ui, &t, tr(label));
@@ -1434,6 +1467,13 @@ impl App {
                 }
             });
         });
+        if let Some(id) = doc_pick {
+            if let Some(w) = super::nav::doc_word(&self.comment.text) {
+                let keep = self.comment.text.len() - w.len() - 2;
+                self.comment.text.truncate(keep);
+            }
+            insert = Some(format!("{} ", super::nav::doc_link(id)));
+        }
         if let Some(text) = insert {
             // a picked @name replaces the "@" (and part of a name) already typed
             if text.starts_with('@') {

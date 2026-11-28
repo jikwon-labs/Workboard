@@ -195,6 +195,7 @@ fn comment_checklist_ticks_and_links_open() {
         .find(|t| t.id != id && t.parent.is_none())
         .unwrap()
         .id;
+    let other_name = h.app.task(other).unwrap().name.clone();
     let link = format!("workboard://task/{}", other);
     {
         let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
@@ -211,7 +212,9 @@ fn comment_checklist_ticks_and_links_open() {
     h.click("Tick buy milk");
     assert!(h.comments(id)[0].text.contains("\u{2611} buy milk"));
     assert!(h.comments(id)[0].edited.is_none(), "ticking is no edit");
-    h.click(&link);
+    // the link shows the task's name, not its address
+    assert!(!h.has(&link));
+    h.click(&other_name);
     assert_eq!(h.app.open_task, Some(other));
 }
 
@@ -407,7 +410,11 @@ fn comment_links_to_private_or_archived_places_do_not_open() {
         .find(|s| s.id == sid)
         .unwrap()
         .private_owner = Some(me);
-    h.click(&link);
+    h.settle();
+    let list_name = h.app.data.list_name(lid);
+    assert!(!h.has(&link), "a place I can go to shows its name");
+    let at = comment_link(&h, &list_name);
+    h.click_at(at);
     assert_eq!(h.app.open_task, None);
     assert_eq!(h.app.loc, Location::List(lid));
 }
@@ -478,4 +485,127 @@ fn history_lines_show_before_the_first_comment() {
     // the invitation to comment is still there under it
     assert!(!h.painted_text("Send the first comment").is_empty());
     assert!(h.has("@  Mention a teammate"));
+}
+
+/// Where `name` is drawn in the task window's comments (the same name can
+/// be in the sidebar or the list behind the window): the one in the column
+/// of the comment box, above it.
+fn comment_link(h: &Ui1, name: &str) -> Pos2 {
+    let bx = h.rect("Comment box");
+    h.tree
+        .iter()
+        .filter(|(n, r)| n == name && bx.x_range().contains(r.center().x) && r.bottom() < bx.top())
+        .map(|(_, r)| r.center())
+        .last()
+        .unwrap_or_else(|| panic!("{:?} is not in the comments", name))
+}
+
+/// The doc list's row named `name`: the one nearest the "Link a doc"
+/// button it opens from.
+fn doc_row(h: &Ui1, name: &str) -> Pos2 {
+    let b = h.rect("Link a doc").center();
+    h.tree
+        .iter()
+        .filter(|(n, _)| n == name)
+        .map(|(_, r)| r.center())
+        .min_by(|a, c| a.distance(b).total_cmp(&c.distance(b)))
+        .unwrap_or_else(|| panic!("no row {:?}", name))
+}
+
+/// "[[" in the comment box lists the docs, narrowed by what is typed after
+/// it; the doc picked goes in as its link, and the sent comment shows the
+/// doc's title, which opens the doc.
+#[test]
+fn typing_two_brackets_links_a_doc_that_shows_by_its_title() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    let doc = h
+        .app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.title == "Project brief")
+        .unwrap()
+        .id;
+    let link = format!("workboard://doc/{}", doc);
+    h.click("Comment box");
+    h.type_text("see [[");
+    h.settle();
+    assert!(h.ctx.memory(|m| m.any_popup_open()), "the doc list opens");
+    h.type_text("zzz");
+    h.settle();
+    assert!(h.has("No docs by that name"), "narrowed by what is typed");
+    for _ in 0..3 {
+        h.key(egui::Key::Backspace);
+    }
+    h.type_text("BRIEF");
+    h.settle();
+    h.click_at(doc_row(&h, "Project brief"));
+    assert_eq!(h.app.comment.text, format!("see {} ", link));
+    h.click("Send Comment");
+    assert_eq!(h.comments(id).last().unwrap().text, format!("see {}", link));
+    assert!(
+        !h.has(&link),
+        "the comment shows the title, not the address"
+    );
+    let at = comment_link(&h, "Project brief");
+    h.click_at(at);
+    assert_eq!(h.app.section, Section::Docs);
+    assert_eq!(h.app.doc_open, Some(doc));
+}
+
+/// The doc button under the comment box does what typing "[[" does.
+#[test]
+fn the_doc_button_opens_the_doc_list() {
+    let mut h = Ui1::new();
+    h.open_clean_task();
+    h.click("Comment box");
+    h.type_text("notes");
+    h.click("Link a doc");
+    assert_eq!(h.app.comment.text, "notes [[");
+    assert!(h.ctx.memory(|m| m.any_popup_open()));
+    h.click_at(doc_row(&h, "Project brief"));
+    let doc = h
+        .app
+        .data
+        .docs
+        .iter()
+        .find(|d| d.title == "Project brief")
+        .unwrap()
+        .id;
+    assert_eq!(
+        h.app.comment.text,
+        format!("notes workboard://doc/{} ", doc)
+    );
+}
+
+/// A link to a doc I can't see (someone else's Private doc) keeps showing
+/// its address, so the title doesn't leak.
+#[test]
+fn a_link_to_a_private_doc_shows_no_title() {
+    let mut h = Ui1::new();
+    let id = h.open_clean_task();
+    let me = h.app.data.me;
+    let d = h
+        .app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.title == "Project brief")
+        .unwrap();
+    d.private = true;
+    d.owner = me + 100;
+    let link = format!("workboard://doc/{}", d.id);
+    let t = h.app.data.tasks.iter_mut().find(|t| t.id == id).unwrap();
+    t.activity.push(Activity {
+        ts: now_ts(),
+        author: 2,
+        text: format!("see {}", link),
+        comment: true,
+        id: 77_003,
+        ..Default::default()
+    });
+    h.settle();
+    assert!(h.has(&link));
+    assert!(!h.tree.iter().any(|(n, _)| n == "Project brief"));
 }

@@ -123,6 +123,24 @@ pub(super) fn toggle_reaction(rs: &mut Vec<Reaction>, emoji: &str, me: u64) {
     }
 }
 
+/// The rows of the doc list a "[[" opens (in a comment or a message): the
+/// docs offered (`App::doc_choices`). Returns the one clicked.
+pub(super) fn doc_rows(ui: &mut Ui, t: &Theme, docs: &[(u64, String)]) -> Option<u64> {
+    if docs.is_empty() {
+        ui.label(RichText::new(tr("No docs by that name")).color(t.text3));
+    }
+    let mut out = None;
+    for (id, title) in docs {
+        let row = menu_row(ui, t, title, false, |p, c| {
+            super::icons::line_icon_scaled(p, Icon::Docs, c, t.text2, 0.8)
+        });
+        if row.clicked() {
+            out = Some(*id);
+        }
+    }
+    out
+}
+
 /// What a click in a comment asked for; applied after the comments are drawn.
 enum Act {
     Check { id: u64, line: usize },
@@ -605,7 +623,7 @@ impl App {
     }
 
     /// A comment's text: checklist items tick, @mentions stand out, and
-    /// workboard:// links open what they point to.
+    /// workboard:// links show the name of what they point to and open it.
     fn comment_body(
         &self,
         ui: &mut Ui,
@@ -655,12 +673,21 @@ impl App {
                             ui.label(RichText::new(s).color(fg).background_color(bg).strong());
                         }
                         Seg::Link(s, to) => {
+                            // shown by the name of what it points to; the
+                            // address itself when that isn't here to name
+                            let title = self.link_title(to);
+                            let shown = title.as_deref().unwrap_or(s);
                             let r = ui.add(
-                                egui::Label::new(RichText::new(s).color(link).underline())
+                                egui::Label::new(RichText::new(shown).color(link).underline())
                                     .sense(Sense::click()),
                             );
                             let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
-                            name_it(&r, s);
+                            let r = if title.is_some() {
+                                r.on_hover_text(s)
+                            } else {
+                                r
+                            };
+                            name_it(&r, shown);
                             if r.hovered() {
                                 ui.painter().hline(
                                     r.rect.x_range(),

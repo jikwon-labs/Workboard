@@ -85,6 +85,14 @@ pub(crate) fn doc_link(id: u64) -> String {
     format!("workboard://doc/{}", id)
 }
 
+/// The doc name being typed after a "[[" at the end of `text`: what follows
+/// the last "[[", as long as no "]]" or new line came after it.
+pub(crate) fn doc_word(text: &str) -> Option<&str> {
+    let at = text.rfind("[[")?;
+    let w = &text[at + 2..];
+    (!w.contains("]]") && !w.contains('\n')).then_some(w)
+}
+
 /// The workboard:// links in a text that `parse_link` can read, with the
 /// character range each one takes (start, end), in order.
 pub(crate) fn find_links(text: &str) -> Vec<(usize, usize, String)> {
@@ -728,6 +736,53 @@ impl App {
                 .find(|d| d.id == id)
                 .map(|d| self.doc_shown(d)),
         }
+    }
+
+    /// What a workboard:// link shows as in a comment or message: the name
+    /// of what it points to (a doc's title, a task's name, a place's name).
+    /// None when this workspace doesn't have it or I can't see it: the link
+    /// itself shows then.
+    pub(super) fn link_title(&self, link: Link) -> Option<String> {
+        if self.link_shown(link) != Some(true) {
+            return None;
+        }
+        let name = match link {
+            Link::Task(id) => self.task(id)?.name.clone(),
+            Link::Doc(id) => {
+                let d = self.data.docs.iter().find(|d| d.id == id)?;
+                if d.title.trim().is_empty() {
+                    tr("Untitled").to_string()
+                } else {
+                    d.title.clone()
+                }
+            }
+            // the fixed pages have English names in the code; the others
+            // are names people gave them
+            Link::Loc(l @ (Location::Space(_) | Location::Folder(_) | Location::List(_))) => {
+                self.data.location_name(l)
+            }
+            Link::Loc(l) => tr(&self.data.location_name(l)).to_string(),
+        };
+        let name = name.trim();
+        (!name.is_empty()).then(|| name.to_string())
+    }
+
+    /// The docs a "[[" in a comment or message offers: the ones I can see
+    /// whose title has `query` in it (any case), most recently changed
+    /// first, at most `max`.
+    pub(super) fn doc_choices(&self, query: &str, max: usize) -> Vec<(u64, String)> {
+        let q = query.trim().to_lowercase();
+        let mut docs: Vec<&Doc> = self
+            .data
+            .docs
+            .iter()
+            .filter(|d| self.doc_shown(d) && d.title.to_lowercase().contains(&q))
+            .collect();
+        docs.sort_by_key(|d| std::cmp::Reverse(d.updated));
+        docs.into_iter()
+            .take(max)
+            .filter_map(|d| Some((d.id, self.link_title(Link::Doc(d.id))?)))
+            .collect()
     }
 
     /// Opens a workboard:// link; false when it isn't one this workspace has

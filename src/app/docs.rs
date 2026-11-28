@@ -1034,37 +1034,18 @@ impl App {
                     ui.separator();
                 }
                 LineKind::Table => {
-                    let cells: Vec<&str> = line
-                        .trim()
-                        .trim_matches('|')
-                        .split('|')
-                        .map(|c| c.trim())
-                        .collect();
-                    if cells
-                        .iter()
-                        .all(|c| !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':'))
-                    {
-                        continue; // the | --- | row under the header
+                    // the whole run of table lines is drawn at its first line
+                    if ln > 0 && kinds[ln - 1].0 == LineKind::Table {
+                        continue;
                     }
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        for c in cells {
-                            let (r, _) = ui.allocate_exact_size(vec2(160.0, 30.0), Sense::hover());
-                            ui.painter().rect_stroke(
-                                r,
-                                0.0,
-                                Stroke::new(1.0_f32, t.border),
-                                egui::StrokeKind::Inside,
-                            );
-                            ui.painter().with_clip_rect(r.shrink(2.0)).text(
-                                r.left_center() + vec2(8.0, 0.0),
-                                Align2::LEFT_CENTER,
-                                c,
-                                FontId::proportional(14.0),
-                                t.text,
-                            );
-                        }
-                    });
+                    let run: Vec<&str> = body
+                        .split('\n')
+                        .skip(ln)
+                        .zip(&kinds[ln..])
+                        .take_while(|(_, k)| k.0 == LineKind::Table)
+                        .map(|(l, _)| l)
+                        .collect();
+                    draw_table(ui, &t, &run);
                 }
                 _ if line.trim().is_empty() => {
                     ui.add_space(8.0);
@@ -1583,6 +1564,119 @@ fn append_inline(
         };
         job.append(text, 0.0, f);
     }
+}
+
+/// Draws a run of Markdown table lines: each column as wide as its
+/// widest text (the widest ones give way first when the page is too
+/// narrow, and their text wraps), the header row shaded and bold, and the
+/// rows right against each other.
+fn draw_table(ui: &mut Ui, t: &Theme, lines: &[&str]) {
+    const PAD_X: f32 = 10.0;
+    const PAD_Y: f32 = 7.0;
+    let mut rows: Vec<Vec<String>> = vec![];
+    let mut header = false;
+    for (i, line) in lines.iter().enumerate() {
+        let cells: Vec<&str> = line
+            .trim()
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect();
+        if cells
+            .iter()
+            .all(|c| !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':'))
+        {
+            header |= i == 1; // the | --- | row under the header
+            continue;
+        }
+        let plain = |c: &str| -> String {
+            inline_spans(c)
+                .into_iter()
+                .filter(|(s, _)| *s != Span::Marker)
+                .map(|(_, x)| x)
+                .collect()
+        };
+        rows.push(cells.into_iter().map(plain).collect());
+    }
+    let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
+    if cols == 0 {
+        return;
+    }
+    let body_font = FontId::proportional(14.0);
+    let head_font = crate::app::bold_font(ui.ctx(), 14.0);
+    let font = |r: usize| {
+        if header && r == 0 {
+            head_font.clone()
+        } else {
+            body_font.clone()
+        }
+    };
+    let natural: Vec<f32> = (0..cols)
+        .map(|c| {
+            let widest = rows
+                .iter()
+                .enumerate()
+                .filter_map(|(r, row)| row.get(c).map(|s| (r, s)))
+                .map(|(r, s)| ui.fonts(|f| f.layout_no_wrap(s.clone(), font(r), t.text).size().x))
+                .fold(0.0, f32::max);
+            widest + 2.0 * PAD_X
+        })
+        .collect();
+    let widths = fit_columns(&natural, ui.available_width(), 2.0 * PAD_X + 40.0);
+    let total: f32 = widths.iter().sum();
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.add_space(4.0);
+        for (r, row) in rows.iter().enumerate() {
+            let galleys: Vec<_> = widths
+                .iter()
+                .enumerate()
+                .map(|(c, w)| {
+                    let s = row.get(c).cloned().unwrap_or_default();
+                    ui.fonts(|f| f.layout(s, font(r), t.text, w - 2.0 * PAD_X))
+                })
+                .collect();
+            let h = galleys.iter().map(|g| g.size().y).fold(0.0, f32::max) + 2.0 * PAD_Y;
+            let (rect, _) = ui.allocate_exact_size(vec2(total, h), Sense::hover());
+            if header && r == 0 {
+                ui.painter().rect_filled(rect, 0.0, t.column_bg);
+            }
+            let mut x = rect.left();
+            for (w, g) in widths.iter().zip(galleys) {
+                let cell = Rect::from_min_size(pos2(x, rect.top()), vec2(*w, h));
+                // Middle: neighbours share one line instead of drawing two
+                ui.painter().rect_stroke(
+                    cell,
+                    0.0,
+                    Stroke::new(1.0_f32, t.border),
+                    egui::StrokeKind::Middle,
+                );
+                ui.painter()
+                    .galley(cell.min + vec2(PAD_X, PAD_Y), g, t.text);
+                x += w;
+            }
+        }
+        ui.add_space(4.0);
+    });
+}
+
+/// Column widths for a table whose columns would like `natural` widths in
+/// `avail`: all of them when they fit, else the narrow columns keep theirs
+/// and the rest share what is left evenly (never under `min`).
+pub(super) fn fit_columns(natural: &[f32], avail: f32, min: f32) -> Vec<f32> {
+    if natural.iter().sum::<f32>() <= avail {
+        return natural.to_vec();
+    }
+    let mut order: Vec<usize> = (0..natural.len()).collect();
+    order.sort_by(|a, b| natural[*a].total_cmp(&natural[*b]));
+    let mut out = natural.to_vec();
+    let mut left = avail;
+    for (k, &i) in order.iter().enumerate() {
+        let share = left / (natural.len() - k) as f32;
+        out[i] = natural[i].min(share.max(min));
+        left -= out[i];
+    }
+    out
 }
 
 /// An empty three-column table, inserted by "Add new > Table".

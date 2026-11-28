@@ -1063,3 +1063,73 @@ fn stand_in_titles() {
     assert!(!is_stand_in_title("Plan"));
     assert!(!is_stand_in_title(""));
 }
+
+#[test]
+fn docs_table_columns_fit_their_text_and_long_cells_wrap() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    let id = h.app.doc_open.unwrap();
+    let long = "A teacher who uses the app, like Teacher A and Teacher B, and every \
+                other teacher who signs up later, all written out in one long cell \
+                so that it cannot fit on a single line of the page";
+    h.app
+        .data
+        .docs
+        .iter_mut()
+        .find(|d| d.id == id)
+        .unwrap()
+        .body = format!(
+        "| Kind | Meaning |\n| --- | --- |\n| Teacher | {long} |\n| Place | Where the **money** comes from |"
+    );
+    h.app.doc_preview = true;
+    h.settle();
+    let cell = |s: &str| {
+        let found = h.painted_text(s);
+        assert_eq!(found.len(), 1, "{s:?} is drawn once: {found:?}");
+        found[0].0
+    };
+    let (kind, meaning, teacher, text, place) = (
+        cell("Kind"),
+        cell("Meaning"),
+        cell("Teacher"),
+        cell(long),
+        cell("Where the money comes from"),
+    );
+    assert!(
+        text.height() > 2.0 * kind.height(),
+        "the long cell wraps: {text:?}"
+    );
+    assert!(
+        text.right() <= h.size.x,
+        "the long cell stays in the window: {text:?}"
+    );
+    assert!(h.cut_texts(Rect::EVERYTHING).iter().all(|c| c != long));
+    assert!(
+        (kind.left() - teacher.left()).abs() < 3.0,
+        "first column lines up: {kind:?} {teacher:?}"
+    );
+    assert!(
+        (meaning.left() - text.left()).abs() < 3.0,
+        "second column lines up: {meaning:?} {text:?}"
+    );
+    assert!(
+        meaning.left() - kind.right() < 120.0,
+        "a short column is not stretched: {kind:?} {meaning:?}"
+    );
+    // rows sit against each other: only the cell padding between them
+    assert!(place.top() - text.bottom() < 24.0, "{text:?} {place:?}");
+}
+
+#[test]
+fn docs_table_narrow_columns_keep_their_width() {
+    use crate::app::docs::fit_columns;
+    assert_eq!(fit_columns(&[50.0, 100.0], 500.0, 60.0), vec![50.0, 100.0]);
+    assert_eq!(
+        fit_columns(&[50.0, 100.0, 1000.0], 500.0, 60.0),
+        vec![50.0, 100.0, 350.0]
+    );
+    assert_eq!(
+        fit_columns(&[300.0, 300.0], 200.0, 60.0),
+        vec![100.0, 100.0]
+    );
+}

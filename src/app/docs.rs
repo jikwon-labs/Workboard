@@ -159,9 +159,9 @@ impl App {
                 ui.painter().rect_filled(r, 6.0, t.hover);
             }
             let x = r.left() + 10.0 + depth as f32 * 14.0;
-            ui.painter().with_clip_rect(r.shrink(2.0)).text(
-                pos2(x, r.center().y),
-                Align2::LEFT_CENTER,
+            // a long name ends in "…" before the + on the right
+            let g = elided(
+                ui.painter(),
                 if title.is_empty() {
                     tr("Untitled")
                 } else {
@@ -169,7 +169,10 @@ impl App {
                 },
                 FontId::proportional(13.0),
                 if sel { t.selected_text } else { t.text },
+                (r.right() - 24.0 - x).max(0.0),
             );
+            ui.painter()
+                .galley(pos2(x, r.center().y - g.size().y / 2.0), g, t.text);
             let plus = Rect::from_center_size(r.right_center() - vec2(12.0, 0.0), vec2(18.0, 18.0));
             let pr = ui.interact(plus, ui.id().with(("subpage", id)), Sense::click());
             if resp.hovered() || pr.hovered() {
@@ -312,10 +315,9 @@ impl App {
                 } else if resp.hovered() {
                     ui.painter().rect_filled(r, 6.0, t.hover);
                 }
-                ui.painter().with_clip_rect(r.shrink(2.0)).text(
-                    r.left_center() + vec2(10.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    format!(
+                let g = elided(
+                    ui.painter(),
+                    &format!(
                         "\u{1F4C4} {}",
                         if title.is_empty() {
                             tr("Untitled")
@@ -325,6 +327,12 @@ impl App {
                     ),
                     FontId::proportional(13.0),
                     if sel { t.selected_text } else { t.text },
+                    (r.width() - 18.0).max(0.0),
+                );
+                ui.painter().galley(
+                    pos2(r.left() + 10.0, r.center().y - g.size().y / 2.0),
+                    g,
+                    t.text,
                 );
                 name_it(&resp, &format!("Page {}", title));
                 if resp.clicked() {
@@ -357,18 +365,30 @@ impl App {
                     ui.add_space(12.0);
                     ui.label(RichText::new(tr("On this page")).small().color(t.text3));
                     for (level, text, line) in heads {
-                        ui.horizontal(|ui| {
-                            ui.add_space((level as f32 - 1.0) * 12.0);
-                            let r = ui.add(ghost(egui::Button::new(
-                                RichText::new(&text).size(12.5).color(t.text2),
-                            )));
-                            name_it(&r, &format!("Contents {}", text));
-                            if r.clicked() {
-                                ui.data_mut(|m| {
-                                    m.insert_temp(egui::Id::new(("doc_jump", open)), line)
-                                });
-                            }
-                        });
+                        // one line each: a long heading ends in "…" at the
+                        // panel's edge (it ran over the page) and shows in
+                        // full on hover
+                        let w = ui.available_width();
+                        let (r, resp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::click());
+                        if resp.hovered() {
+                            ui.painter().rect_filled(r, 6.0, t.hover);
+                        }
+                        let x = r.left() + 8.0 + (level as f32 - 1.0) * 12.0;
+                        let max_w = (r.right() - 6.0 - x).max(0.0);
+                        let font = FontId::proportional(12.5);
+                        let cut = ui.fonts(|f| {
+                            f.layout_no_wrap(text.clone(), font.clone(), t.text2)
+                                .size()
+                                .x
+                        }) > max_w;
+                        let g = elided(ui.painter(), &text, font, t.text2, max_w);
+                        ui.painter()
+                            .galley(pos2(x, r.center().y - g.size().y / 2.0), g, t.text2);
+                        name_it(&resp, &format!("Contents {}", text));
+                        let resp = if cut { resp.on_hover_text(&text) } else { resp };
+                        if resp.clicked() {
+                            ui.data_mut(|m| m.insert_temp(egui::Id::new(("doc_jump", open)), line));
+                        }
                     }
                 }
             });
@@ -629,6 +649,17 @@ impl App {
             focused,
             ..
         } = page;
+        // the title is the page's heading already: a "# " typed or pasted
+        // in front of it showed as a "#" even in View, so it comes off
+        let can_edit = self.doc_level(self.data.docs[idx].id) >= crate::sync::Level::Edit;
+        let d = &mut self.data.docs[idx];
+        if can_edit {
+            if let Some(bare) = title_without_heading_mark(&d.title) {
+                d.title = bare;
+                d.updated = now_ts();
+                self.doc_dirty = true;
+            }
+        }
         let d = &mut self.data.docs[idx];
         let title_id = egui::Id::new(("doc_title", d.id));
         let r1 = ui.add(
@@ -1649,6 +1680,39 @@ pub(super) fn apply_link(body: &mut String, cursor: usize, sel_end: usize) -> us
     body.insert_str(bb, "](https://)");
     body.insert(ba, '[');
     b + 1 + 2 + "https://".len()
+}
+
+/// `title` without the Markdown heading mark ("# ", "## " ...) in front of
+/// it, or `None` when it has none. "#1 pick" keeps its "#".
+pub(super) fn title_without_heading_mark(title: &str) -> Option<String> {
+    let t = title.trim_start();
+    let hashes = t.len() - t.trim_start_matches('#').len();
+    if hashes == 0 || hashes > 6 {
+        return None;
+    }
+    let rest = &t[hashes..];
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    Some(rest.trim_start().to_string())
+}
+
+/// `text` on one line, cut with "…" to fit `max_w`.
+fn elided(
+    p: &egui::Painter,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    max_w: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_string(), font, color);
+    job.wrap = egui::text::TextWrapping {
+        max_width: max_w,
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('\u{2026}'),
+    };
+    p.layout_job(job)
 }
 
 /// The page's headings for "On this page": (level, text, line index).

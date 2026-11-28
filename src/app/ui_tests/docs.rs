@@ -631,6 +631,41 @@ fn docs_view_mode_lists_links_and_contents() {
 }
 
 #[test]
+fn docs_long_heading_stays_in_the_pages_panel_and_title_drops_its_hash() {
+    let mut h = Ui1::new();
+    h.app.new_doc(None);
+    let id = h.app.doc_open.unwrap();
+    let long = "1. Real interview reviews (domestic, from a job site, May to June 2026)";
+    {
+        let d = h.app.data.docs.iter_mut().find(|d| d.id == id).unwrap();
+        d.title = "# Interview questions".into();
+        d.body = format!("## {long}\nbody");
+    }
+    h.app.doc_preview = true;
+    h.settle();
+    // a "# " in front of the title is a Markdown mark, not part of the name
+    let d = h.app.data.docs.iter().find(|d| d.id == id).unwrap();
+    assert_eq!(d.title, "Interview questions");
+    // the heading's row ends at the panel's edge instead of running over
+    // the page beside it
+    let row = h.rect(&format!("Contents {long}"));
+    let panel = h.rect("Page Interview questions");
+    assert!(
+        row.right() <= panel.right() + 0.5,
+        "contents row {row:?} runs past the pages panel {panel:?}"
+    );
+    assert!(row.right() < h.rect("Doc title").left());
+    h.click(&format!("Contents {long}"));
+
+    use crate::app::docs::title_without_heading_mark as bare;
+    assert_eq!(bare("## Plan").as_deref(), Some("Plan"));
+    assert_eq!(bare("  #   Plan").as_deref(), Some("Plan"));
+    assert_eq!(bare("#1 pick"), None, "a # that is part of the name stays");
+    assert_eq!(bare("Plan"), None);
+    assert_eq!(bare("####### Plan"), None);
+}
+
+#[test]
 fn docs_editor_text_helpers() {
     use crate::app::docs::{
         apply_link, continue_list, doc_headings, indent_line, inline_spans, line_kinds, LineKind,
